@@ -107,7 +107,13 @@ from .dependencies import (
     var_builder,
 )
 from .loop_body import LoopBody
-from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
+from .ops_handler import (
+    OpCounterCSE,
+    OpCountLimitExceeded,
+    OpCountResult,
+    ReductionType,
+    StoreMode,
+)
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
@@ -1119,24 +1125,31 @@ class Loops(IRNode):
             for n, s in enumerate(ranges)
         ]
 
-    @cache_on_self
-    def inner_fn_opcount(self) -> OpCountResult:
-        opcounter = OpCounterCSE(V.MockHandler())
+    def _collect_inner_fn_opcount(self, max_ops: int | None = None) -> OpCountResult:
+        opcounter = OpCounterCSE(V.MockHandler(), max_ops=max_ops)
         with (
             V.set_ops_handler(opcounter),
             patch.object(FlexibleLayout, "allow_indexing", True),
         ):
-            self.inner_fn(*self.inner_fn_args())
-            return opcounter.getvalue()
-
-    def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
-        return (self._index(self.ranges),)
+            try:
+                self.inner_fn(*self.inner_fn_args())
+            except OpCountLimitExceeded:
+                pass
+            opcount = opcounter.getvalue()
+            if max_ops is not None and not opcount.limit_exceeded:
+                object.__setattr__(self, "__inner_fn_opcount_cache", opcount)
+            return opcount
 
     @cache_on_self
-    def inner_fn_str(self) -> str:
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn, *self.inner_fn_args()
-        )
+    def inner_fn_opcount(self) -> OpCountResult:
+        return self._collect_inner_fn_opcount()
+
+    @cache_on_self_and_args("Loops")
+    def bounded_inner_fn_opcount(self, max_ops: int) -> OpCountResult:
+        exact_opcount = getattr(self, "__inner_fn_opcount_cache", None)
+        if exact_opcount is not None:
+            return exact_opcount
+        return self._collect_inner_fn_opcount(max_ops=max_ops)
 
     def get_realize_opcount_threshold(self, threshold: int | None = None) -> int:
         if threshold is None:
@@ -1154,10 +1167,27 @@ class Loops(IRNode):
                 )
         return max(threshold, realize_opcount_threshold)
 
-    def has_large_inner_fn(self, threshold: int | None = None) -> bool:
-        return self.inner_fn_opcount().num_ops > self.get_realize_opcount_threshold(
-            threshold
+    def bounded_inner_fn_opcount_for_large_check(
+        self, threshold: int | None = None
+    ) -> tuple[int, OpCountResult]:
+        threshold = self.get_realize_opcount_threshold(threshold)
+        exact_opcount = getattr(self, "__inner_fn_opcount_cache", None)
+        if exact_opcount is not None:
+            return threshold, exact_opcount
+        return threshold, self.bounded_inner_fn_opcount(max_ops=threshold)
+
+    def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
+        return (self._index(self.ranges),)
+
+    @cache_on_self
+    def inner_fn_str(self) -> str:
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, *self.inner_fn_args()
         )
+
+    def has_large_inner_fn(self, threshold: int | None = None) -> bool:
+        threshold, opcount = self.bounded_inner_fn_opcount_for_large_check(threshold)
+        return opcount.num_ops > threshold
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
@@ -10670,10 +10700,10 @@ class StorageBox(MutableBox):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if (
-            isinstance(self.data, (Pointwise, Reduction))
-            and self.data.inner_fn_opcount().nontrivial_read_count > 1
-        ):
+        if not isinstance(self.data, (Pointwise, Reduction)):
+            return
+        _threshold, opcount = self.data.bounded_inner_fn_opcount_for_large_check()
+        if opcount.nontrivial_read_count > 1:
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
@@ -10709,9 +10739,12 @@ class StorageBox(MutableBox):
                 raise AssertionError(
                     f"expected int realize_acc_reads_threshold, got {type(realize_acc_reads_threshold)}"
                 )
-        return isinstance(self.data, Pointwise) and (
-            self.num_reads() > realize_acc_reads_threshold
-            or self.has_large_inner_fn()
+        if not isinstance(self.data, Pointwise):
+            return False
+        threshold, opcount = self.data.bounded_inner_fn_opcount_for_large_check()
+        return (
+            opcount.num_ops > threshold
+            or len(opcount.read_buffers) > realize_acc_reads_threshold
             or (
                 config.realize_acc_reads_size_threshold is not None
                 and self.has_accumulated_enough_reads_by_size(
@@ -10726,7 +10759,9 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
-            opcount = self.data.inner_fn_opcount()
+            threshold, opcount = self.data.bounded_inner_fn_opcount_for_large_check()
+            if opcount.num_ops > threshold:
+                return True
             if "inline_asm_elementwise" in opcount.used_ops:
                 return True
             if is_cpu(self.data):
@@ -10742,17 +10777,17 @@ class StorageBox(MutableBox):
                 ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
-                realize_threshold = self.data.get_realize_opcount_threshold()
                 if (
                     isinstance(self.data, Pointwise)
                     and graph_reuse
                     and users > config.realize_opusers_threshold
-                    and opcount.num_ops > max(0, realize_threshold - 2)
+                    and opcount.num_ops > max(0, threshold - 2)
                 ):
                     return True
-            if self.has_large_inner_fn():
-                return True
-            return graph_reuse and self.num_reads() > config.realize_reads_threshold
+            return (
+                graph_reuse
+                and len(opcount.read_buffers) > config.realize_reads_threshold
+            )
         return False
 
     def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:

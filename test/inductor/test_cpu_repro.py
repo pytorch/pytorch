@@ -7470,23 +7470,26 @@ class CPUReproTests(TestCase):
                 value = ops.add(value, ops.constant(0.1, torch.float32))
             return value
 
-        cpu_multi_user_storage = StorageBox(
-            Pointwise(
-                device=torch.device("cpu"),
-                dtype=torch.float32,
-                inner_fn=inner_multi_user_fn,
-                ranges=[10],
+        def make_cpu_multi_user_storage():
+            return StorageBox(
+                Pointwise(
+                    device=torch.device("cpu"),
+                    dtype=torch.float32,
+                    inner_fn=inner_multi_user_fn,
+                    ranges=[10],
+                )
             )
-        )
+
+        cpu_multi_user_storage = make_cpu_multi_user_storage()
         self.assertEqual(cpu_multi_user_storage.data.inner_fn_opcount().num_ops, 49)
         self.assertFalse(cpu_multi_user_storage.has_large_inner_fn())
-        self.assertFalse(cpu_multi_user_storage.should_realize_on_reuse(5))
-        self.assertTrue(cpu_multi_user_storage.should_realize_on_reuse(6))
+        self.assertFalse(make_cpu_multi_user_storage().should_realize_on_reuse(5))
+        self.assertTrue(make_cpu_multi_user_storage().should_realize_on_reuse(6))
         self.assertFalse(
-            cpu_multi_user_storage.should_realize_on_reuse(6, graph_reuse=False)
+            make_cpu_multi_user_storage().should_realize_on_reuse(6, graph_reuse=False)
         )
         with config.patch(realize_opusers_threshold=6):
-            self.assertFalse(cpu_multi_user_storage.should_realize_on_reuse(6))
+            self.assertFalse(make_cpu_multi_user_storage().should_realize_on_reuse(6))
 
         def inner_reads_fn(index):
             value = ops.constant(0.0, torch.float32)
@@ -7518,6 +7521,44 @@ class CPUReproTests(TestCase):
             )
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
+
+        def inner_large_reads_fn(index):
+            value = ops.add(ops.load("in0", index[0]), ops.load("in1", index[0]))
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        large_reads_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_large_reads_fn,
+                ranges=[10],
+            )
+        )
+        with (
+            config.patch(realize_opcount_threshold=30),
+            patch.object(StorageBox, "realize", autospec=True) as realize_mock,
+        ):
+            self.assertTrue(large_reads_storage.has_exceeded_max_reads())
+            large_reads_storage.realize_hint()
+            realize_mock.assert_called_once_with(large_reads_storage)
+
+        large_reads_zero_threshold_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_large_reads_fn,
+                ranges=[10],
+            )
+        )
+        with (
+            config.patch(realize_opcount_threshold=0),
+            patch.object(StorageBox, "realize", autospec=True) as realize_mock,
+        ):
+            self.assertTrue(large_reads_zero_threshold_storage.has_exceeded_max_reads())
+            large_reads_zero_threshold_storage.realize_hint()
+            realize_mock.assert_called_once_with(large_reads_zero_threshold_storage)
 
 
 if __name__ == "__main__":
