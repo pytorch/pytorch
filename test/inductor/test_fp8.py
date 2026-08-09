@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import functools
 import unittest
 from unittest import mock
@@ -125,6 +126,46 @@ def _prepare_blockwise_scale(
     return inverse_scale.t()
 
 
+@contextlib.contextmanager
+def _simulate_float8_e4m3fn_uint8_storage():
+    # Make float8_e4m3fn behave as it does on SM < 89, where triton lacks native
+    # fp8 support and inputs are read through uint8 storage
+    import torch._inductor.codegen.triton as triton_codegen
+    import torch._inductor.codegen.triton_utils as triton_utils
+    import torch._inductor.lowering as inductor_lowering
+
+    real_supported = inductor_lowering.is_triton_fp8_dtype_supported
+
+    def force_uint8_storage(dtype, arg_name=None, *, device=None):
+        return dtype == torch.float8_e4m3fn and (
+            arg_name is None or arg_name.startswith("in_ptr")
+        )
+
+    def force_unsupported(dtype, device=None, **kwargs):
+        if dtype == torch.float8_e4m3fn:
+            return False
+        return real_supported(dtype, device, **kwargs)
+
+    with (
+        mock.patch.object(
+            triton_utils,
+            "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+            force_uint8_storage,
+        ),
+        mock.patch.object(
+            triton_codegen,
+            "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+            force_uint8_storage,
+        ),
+        mock.patch.object(
+            inductor_lowering,
+            "is_triton_fp8_dtype_supported",
+            force_unsupported,
+        ),
+    ):
+        yield
+
+
 class TestFP8Types(TestCase):
     @onlyCUDA
     @skipIfRocm
@@ -134,14 +175,7 @@ class TestFP8Types(TestCase):
         "https://github.com/pytorch/pytorch/issues/189560"
     )
     def test_float8_e4m3fn_uint8_decode_codegen(self, device):
-        import torch._inductor.codegen.triton as triton_codegen
-        import torch._inductor.codegen.triton_utils as triton_utils
         from torch._inductor.graph import GraphLowering
-
-        def force_uint8_storage(dtype, arg_name=None):
-            return dtype == torch.float8_e4m3fn and (
-                arg_name is None or arg_name.startswith("in_ptr")
-            )
 
         def fn(t):
             return t.float()
@@ -155,16 +189,7 @@ class TestFP8Types(TestCase):
             source_codes.append(code)
 
         with (
-            mock.patch.object(
-                triton_utils,
-                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
-                force_uint8_storage,
-            ),
-            mock.patch.object(
-                triton_codegen,
-                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
-                force_uint8_storage,
-            ),
+            _simulate_float8_e4m3fn_uint8_storage(),
             mock.patch.object(GraphLowering, "save_output_code", save_output_code),
         ):
             torch._dynamo.reset()
@@ -178,6 +203,22 @@ class TestFP8Types(TestCase):
         self.assertIn("'in_ptr0': '*u8'", code)
         self.assertIn("triton_helpers.fp8e4m3fn_to_float32", code)
         self.assertNotIn("'in_ptr0': '*fp8e4nv'", code)
+
+    @onlyCUDA
+    @skipIfRocm
+    @config.patch({"force_disable_caches": True})
+    def test_float8_e4m3fn_uint8_storage_arithmetic_falls_back(self, device):
+        bits = torch.arange(256, device=device, dtype=torch.uint8)
+        t = bits.view(torch.float8_e4m3fn)
+
+        def fn(x):
+            return x == x
+
+        with _simulate_float8_e4m3fn_uint8_storage():
+            torch._dynamo.reset()
+            actual = torch.compile(fn, fullgraph=True)(t)
+        expected = fn(t)
+        self.assertEqual(actual, expected)
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
