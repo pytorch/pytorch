@@ -3104,6 +3104,10 @@ _CBID_GRAPHNODE_CREATED = 13  # CUPTI_CBID_RESOURCE_GRAPHNODE_CREATED
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
+# setUp imports the monitor, which hard-imports the build-generated _cupti_stubs, so the
+# whole class has to be gated -- a method-level gate would still let setUp error out where
+# the stubs were not generated (see TEST_CUPTI in common_cuda).
+@unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
 class TestCuptiCallbackRegistry(TestCase):
     """The monitor's shared *subscriber-callback* registry -- a separate axis from activity
     records: handlers fire synchronously on the application thread inside the CUDA call."""
@@ -3126,7 +3130,6 @@ class TestCuptiCallbackRegistry(TestCase):
 
         self.assertTrue(_cupti_monitor.get_config()["supports_callback_handlers"])
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_register_unregister_handler(self):
         monitor = self._monitor()
         key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
@@ -3141,7 +3144,6 @@ class TestCuptiCallbackRegistry(TestCase):
         monitor.unregister_callback_handler(first)
         self.assertEqual(monitor._callback_handlers[key], (second.fn,))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_arm_refcount_disables_only_at_zero(self):
         # Two consumers scoping the same callback to different windows must not disable
         # each other, so cuptiEnableCallback is driven only on the 0->1 and 1->0 edges.
@@ -3172,7 +3174,6 @@ class TestCuptiCallbackRegistry(TestCase):
             monitor.disarm_callback(*key)
             self.assertEqual(calls, [True, False])
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_handler_exception_is_isolated(self):
         # A raise must not reach CUPTI's C dispatch, and one bad handler must not silence
         # the others (order-independent, so check both orderings).
@@ -3191,7 +3192,6 @@ class TestCuptiCallbackRegistry(TestCase):
         monitor._dispatch_callback(0, *key, 0)
         self.assertEqual(seen, ["good"])
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_handler_alone_holds_subscription(self):
         # A callback-only consumer must be able to bring CUPTI up and hold it with no
         # activity observers -- the motivating case captures graphs before any profiling.
@@ -3209,7 +3209,6 @@ class TestCuptiCallbackRegistry(TestCase):
         monitor.unregister_callback_handler(handler)
         self.assertIsNone(monitor._subscriber)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_subscription_survives_activity_session_either_way(self):
         # The subscription is shared, so it must outlive whichever consumer leaves first.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -3236,7 +3235,6 @@ class TestCuptiCallbackRegistry(TestCase):
         monitor.unregister_callback_handler(handler)
         self.assertIsNone(monitor._subscriber)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_noop_cb_swap_does_not_clobber_dispatch(self):
         # An out-of-tree consumer that swaps cupti_python._NOOP_CB (to route its own
         # subscription to its own callback) must not steal the monitor's dispatch, so the
@@ -3253,7 +3251,6 @@ class TestCuptiCallbackRegistry(TestCase):
             self.assertIsNotNone(monitor._callback_trampoline)
             self.assertIsNot(monitor._callback_trampoline, other)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_graph_node_callback_fires_during_capture_only(self):
         # End-to-end proof of the mechanism: GRAPHNODE_CREATED fires once per node while
         # armed during a capture, and not at all once disarmed (so replay pays nothing).
