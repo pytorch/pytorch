@@ -2,6 +2,7 @@
 
 import operator
 import random
+import unittest
 import warnings
 from functools import reduce
 from itertools import product
@@ -11,6 +12,7 @@ import numpy as np
 import torch
 from torch import tensor
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
@@ -47,6 +49,14 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+
+
+class GpuCoverageProbe(TestCase):
+    """gpu-coverage probe. DO NOT LAND."""
+
+    @unittest.skipUnless(SM90OrLater, "probe requires sm90+")
+    def test_gpucov_probe_sm90(self):
+        self.assertTrue(True)
 
 
 class TestIndexing(TestCase):
