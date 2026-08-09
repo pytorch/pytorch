@@ -918,11 +918,16 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     after_move_dims = (*xs_move_dims, *xs_move_dims, *additional_move_dims)
 
     with interpreter.lower():
+        # generic_associative_scan feeds combine_fn outputs back as the left-hand
+        # args on later levels, reusing after_move_dims; that is only valid if the
+        # outputs keep the same batch dims as xs. expected_out_dims makes the wrapper
+        # raise a clear error otherwise instead of silently mismatching downstream.
         wrapper = _VmapCombineFnWrapper(
             combine_fn,
             after_move_dims,
             interpreter.batch_size(),
             interpreter.randomness(),
+            expected_out_dims=xs_move_dims,
         )
         unwrapped_out = associative_scan_op(
             wrapper, unbatched_xs, unbatched_additional_inputs

@@ -2,7 +2,11 @@
 
 import torch.nn.attention as attention
 from torch.nn.attention import _registry
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class FakeHandle:
@@ -11,6 +15,8 @@ class FakeHandle:
 
 
 class TestFlashAttentionRegistry(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._saved_impls = dict(_registry._FLASH_ATTENTION_IMPLS)

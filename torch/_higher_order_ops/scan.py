@@ -1180,6 +1180,8 @@ def scan_batch_rule(
 
     if wrapper.out_dims is None:
         raise AssertionError("out_dims must not be None after scan_op")
+    # wrap_batched matches bdims against the output container; normalize to a
+    # tuple to align with the tuple out_dims (as in associative_scan_batch_rule).
     batched_out = wrap_batched(
         tuple(unwrapped_out), wrapper.out_dims, interpreter.level()
     )

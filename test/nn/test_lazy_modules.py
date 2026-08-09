@@ -7,7 +7,12 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parameter import UninitializedBuffer, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    suppress_warnings,
+    TestCase,
+)
 
 
 class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
@@ -15,6 +20,8 @@ class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
 
 
 class TestLazyModules(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @suppress_warnings
     def test_lazy_module_parameter(self):
         module = LazyModule()
@@ -836,6 +843,8 @@ class TestLazyModules(TestCase):
 
 
 class TestLazyModulesDevice(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @suppress_warnings
     def test_materialize_device(self, device):
         module = LazyModule()
