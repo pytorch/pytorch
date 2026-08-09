@@ -528,6 +528,9 @@ class OverlapScheduler:
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
+            # Zero baselines make projected <= sys.maxsize, so this budget check is vacuous.
+            # The always-configured in-flight limit remains active.
+            self.original_mem_before_compute_index = [0] * len(self.compute_nodes)
             self.memory_tracker = MemoryTracker(self.graph)
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [

@@ -1596,6 +1596,42 @@ class TestOverlapSchedulingNoMemoryLimit(TestCase):
                 max_memory_increase_ratio=None,
             )
 
+    def test_no_memory_limit_prefetches_across_compute_gap(self):
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(a, b, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, 4, group_name
+            )
+            first = b @ w
+            second = first @ w
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return second.sum() + (all_gather @ w).sum()
+
+        gm = make_fx(func, tracing_mode="fake")(
+            torch.randn(8, 16), torch.randn(8, 16), torch.randn(16, 16)
+        )
+
+        with (
+            patch(
+                "torch.utils._runtime_estimation.get_transfer_time", return_value=0.0
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                return_value=lambda fn, *args, **kwargs: 0.01,
+            ),
+        ):
+            schedule_overlap_bucketing(
+                gm,
+                max_memory_increase_gb=None,
+                max_memory_increase_ratio=None,
+                pre_bucketing_fsdp_collectives=False,
+            )
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
