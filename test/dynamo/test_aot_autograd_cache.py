@@ -24,6 +24,7 @@ import torch._functorch._aot_autograd.autograd_cache as autograd_cache
 import torch._functorch.aot_autograd as aot_autograd
 import torch._inductor.compile_fx as compile_fx
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.source import LocalSource
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
@@ -34,8 +35,18 @@ from torch._functorch._aot_autograd.autograd_cache import (
     check_cacheable,
     sanitize_gm_for_cache,
 )
-from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
-from torch._guards import TracingContext
+from torch._functorch._aot_autograd.descriptors import DummyAOTInput
+from torch._functorch._aot_autograd.input_output_analysis import (
+    guard_input_storage_aliasing,
+)
+from torch._functorch._aot_autograd.runtime_wrappers import AOTDedupeWrapper
+from torch._functorch._aot_autograd.schemas import (
+    AOTConfig,
+    CacheableAOTConfig,
+    InputAliasInfo,
+    ViewAndMutationMeta,
+)
+from torch._guards import StorageAliasing, StorageOverlap, TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomGraphPass,
@@ -50,9 +61,14 @@ from torch._inductor.standalone_compile import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache, InputType
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import UnsupportedMutationAliasingException
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatelessSymbolicContext,
+)
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -329,6 +345,470 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
+    def test_cache_hit_storage_overlap_guards_skip_unmutated_pairs(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                LocalSource("c", is_input=True),
+                LocalSource("d", is_input=True),
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        mutated_base = torch.ones(4)
+        unmutated_base = torch.ones(4)
+        args = [
+            mutated_base[:2],
+            mutated_base[1:3],
+            unmutated_base[:2],
+            unmutated_base[1:3],
+        ]
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                args,
+                aot_config,
+                [
+                    input_alias_info(mutates_data=True),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                ],
+            )
+
+        aliasing_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageAliasing)
+        ]
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(aliasing_guards), 1)
+        self.assertEqual(
+            [len(group) for group in aliasing_guards[0].source_groups], [2, 2]
+        )
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(
+            [
+                getattr(source, "local_name", source.name)
+                for source in overlap_guards[0].overlapping_sources
+            ],
+            ["a", "b"],
+        )
+        self.assertEqual(overlap_guards[0].non_overlapping_sources, [])
+
+    def test_cache_hit_many_unaliased_mutated_inputs_use_single_guard(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        num_args = 16
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource(f"arg{i}", is_input=True) for i in range(num_args)
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                [torch.ones(2) + i for i in range(num_args)],
+                aot_config,
+                [input_alias_info(i % 2 == 0) for i in range(num_args)],
+            )
+
+        aliasing_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageAliasing)
+        ]
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 0)
+        self.assertEqual(len(aliasing_guards), 1)
+        self.assertEqual(
+            [len(group) for group in aliasing_guards[0].source_groups],
+            [1] * num_args,
+        )
+
+    def test_cache_hit_storage_overlap_guards_with_synthetic_base_metadata(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                LocalSource("c", is_input=True),
+                LocalSource("d", is_input=True),
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        base = torch.ones(4)
+        args = [base[:2], base[1:3], torch.ones(2), torch.ones(2)]
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                args,
+                aot_config,
+                [
+                    input_alias_info(mutates_data=True),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                ],
+            )
+
+        aliasing_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageAliasing)
+        ]
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(aliasing_guards), 1)
+        self.assertEqual(
+            [len(group) for group in aliasing_guards[0].source_groups], [2, 1, 1]
+        )
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(
+            [
+                getattr(source, "local_name", source.name)
+                for source in overlap_guards[0].overlapping_sources
+            ],
+            ["a", "b"],
+        )
+        self.assertEqual(overlap_guards[0].non_overlapping_sources, [])
+
+    def test_input_alias_collection_is_grouped_by_storage(self):
+        base1 = torch.arange(8)
+        base2 = torch.arange(8)
+        inputs = [
+            base1[:3],
+            base1[2:5],
+            base1[5:7],
+            base2[:4],
+            base2[3:7],
+            torch.ones(2),
+            torch.ones(2),
+        ]
+
+        with (
+            patch.object(
+                autograd_cache,
+                "compute_overlapping_tensors",
+                wraps=autograd_cache.compute_overlapping_tensors,
+            ) as overlap_mock,
+            patch.object(
+                autograd_cache,
+                "input_has_symbolic_metadata",
+                wraps=autograd_cache.input_has_symbolic_metadata,
+            ) as symbolic_mock,
+        ):
+            autograd_cache._collect_input_tensor_alias_info(inputs)
+
+        self.assertEqual(overlap_mock.call_count, 4)
+        self.assertEqual(symbolic_mock.call_count, len(inputs))
+        for call in overlap_mock.call_args_list:
+            tensors = call.args[0]
+            self.assertGreater(len(tensors), 1)
+            storage = tensors[0].untyped_storage()._cdata
+            self.assertTrue(all(t.untyped_storage()._cdata == storage for t in tensors))
+
+    def test_input_alias_collection_handles_no_storage_tensors(self):
+        sparse = torch.sparse_coo_tensor([[0]], [1.0], (2,))
+        self.assertEqual(
+            autograd_cache._collect_input_tensor_alias_info([sparse, sparse]),
+            ([0, 1], ((0, 1),), (), ()),
+        )
+
+    def test_cache_hit_overlap_guards_use_deduped_input_sources(self):
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        sources = [
+            LocalSource(name, is_input=True) for name in ("a", "a_dupe", "b", "b_dupe")
+        ]
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=sources,
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+        base = torch.arange(8)
+        a = base[:2]
+        b = base[4:6]
+        args = [a, a, b, b]
+        dedupe_wrapper = AOTDedupeWrapper(
+            keep_arg_mask=[True, False, True, False],
+            add_dupe_map=[0, 0, 1, 1],
+        )
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                args,
+                aot_config,
+                [input_alias_info(True), input_alias_info(False)],
+                [dedupe_wrapper],
+            )
+
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(overlap_guards[0].overlapping_sources, [])
+        self.assertEqual(
+            [
+                getattr(source, "local_name", source.name)
+                for source in overlap_guards[0].non_overlapping_sources
+            ],
+            ["a", "b"],
+        )
+
+    def test_partial_input_sources_bypass_unguardable_storage_relation(self):
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                None,
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+        base = torch.arange(8)
+        args = [base[:2], base[6:], base[1:7]]
+        input_info = [
+            input_alias_info(True),
+            input_alias_info(False),
+            input_alias_info(False),
+        ]
+
+        cold_context = TracingContext(None)
+        with torch._guards.tracing(cold_context):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException, "source-less AOTAutograd input"
+            ):
+                guard_input_storage_aliasing(aot_config, args, input_info)
+
+        cache_context = TracingContext(None)
+        with torch._guards.tracing(cache_context):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException, "source-less AOTAutograd input"
+            ):
+                AOTAutogradCache._install_cache_hit_guards(args, aot_config, input_info)
+
+    def test_partial_input_sources_bypass_mutated_duplicate_specialization(self):
+        def input_alias_info(mutates_metadata: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=False,
+                mutates_metadata=mutates_metadata,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                None,
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+        input_info = [input_alias_info(False), input_alias_info(True)]
+        fw_metadata = ViewAndMutationMeta(
+            input_info=input_info,
+            output_info=[],
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            traced_tangents=[],
+            traced_tangents_descs=[],
+            subclass_inp_meta=[],
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+        )
+        arg = torch.ones(2)
+
+        with torch._guards.tracing(TracingContext(None)):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException,
+                "mutated duplicate inputs.*source-less AOTAutograd input",
+            ):
+                AOTDedupeWrapper().pre_compile(
+                    lambda *args: (list(args), []),
+                    [arg, arg],
+                    [DummyAOTInput(0), DummyAOTInput(1)],
+                    aot_config,
+                    fw_metadata=fw_metadata,
+                )
+
+        dedupe_wrapper = AOTDedupeWrapper(
+            keep_arg_mask=[True, False], add_dupe_map=[0, 0]
+        )
+        with torch._guards.tracing(TracingContext(None)):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException,
+                "mutated duplicate inputs.*source-less AOTAutograd input",
+            ):
+                AOTAutogradCache._install_cache_hit_guards(
+                    [arg, arg], aot_config, input_info, [dedupe_wrapper]
+                )
+
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
         {
@@ -516,6 +996,43 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_storage_partition_change_misses_cache(self):
+        def fn(t0, t1, t2):
+            t0.add_(10)
+            return t2.clone()
+
+        def false_sharing_args():
+            base = torch.arange(8.0)
+            return base[0:2], base[1:3], base[4:6]
+
+        def split_storage_args():
+            base01 = torch.arange(8.0)
+            base2 = torch.arange(8.0) + 100
+            return base01[0:2], base01[1:3], base2[4:6]
+
+        with fresh_cache():
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            self.assertEqual(
+                fn(*false_sharing_args()),
+                compiled_fn(*false_sharing_args()),
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            self._clear_dynamo_and_codecache()
+            self.assertEqual(
+                fn(*split_storage_args()),
+                compiled_fn(*split_storage_args()),
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
@@ -3622,6 +4139,120 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config, inputs=[torch.ones(3)])
         c2 = self.gen_cache_key(fn, config, inputs=[torch.ones(2)])
         self.assertNotEqual(c1, c2)
+
+    def test_input_alias_cache_key_includes_storage_partition(self):
+        base = torch.arange(8.0)
+        false_sharing_inputs = [base[0:2], base[1:3], base[4:6]]
+
+        base_again = torch.arange(8.0)
+        same_partition_inputs = [base_again[0:2], base_again[1:3], base_again[4:6]]
+
+        split_storage_base = torch.arange(8.0)
+        split_storage_inputs = [
+            split_storage_base[0:2],
+            split_storage_base[1:3],
+            torch.arange(2.0),
+        ]
+
+        false_sharing_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            false_sharing_inputs
+        )
+        same_partition_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            same_partition_inputs
+        )
+        split_storage_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            split_storage_inputs
+        )
+
+        self.assertEqual(false_sharing_key, same_partition_key)
+        self.assertEqual(false_sharing_key[0], split_storage_key[0])
+        self.assertEqual(false_sharing_key[2], split_storage_key[2])
+        self.assertEqual(false_sharing_key[2], ((0, 1),))
+        self.assertEqual(false_sharing_key[1], ((0, 1, 2),))
+        self.assertEqual(split_storage_key[1], ((0, 1), (2,)))
+        self.assertNotEqual(false_sharing_key, split_storage_key)
+
+    def test_input_alias_cache_key_preserves_duplicate_overlap_pairs(self):
+        disjoint_base = torch.arange(8.0)
+        disjoint_a = disjoint_base[:4]
+        disjoint_b = disjoint_base[4:]
+        disjoint_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            [disjoint_a, disjoint_a, disjoint_b, disjoint_b]
+        )
+
+        overlapping_base = torch.arange(6.0)
+        overlapping_a = overlapping_base[:4]
+        overlapping_b = overlapping_base[2:]
+        overlapping_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            [overlapping_a, overlapping_a, overlapping_b, overlapping_b]
+        )
+
+        self.assertEqual(disjoint_key[:2], overlapping_key[:2])
+        self.assertEqual(disjoint_key[2], ((0, 1), (2, 3)))
+        self.assertNotEqual(disjoint_key, overlapping_key)
+
+    def test_input_alias_cache_paths_suppress_shape_env_guards(self):
+        def make_inputs():
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+            fake_base = fake_mode.from_tensor(
+                torch.arange(10.0),
+                source=LocalSource("base"),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC],
+                    constraint_sizes=[None],
+                ),
+            )
+            with fake_mode:
+                inputs = [fake_base[:-1], fake_base[1:]]
+            return shape_env, fake_mode, inputs
+
+        def input_alias_info():
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=True,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        key_shape_env, key_fake_mode, key_inputs = make_inputs()
+        key_guards_before = list(key_shape_env.guards)
+        with torch._guards.tracing(TracingContext(key_fake_mode)):
+            key = autograd_cache._compute_input_tensor_alias_cache_key(key_inputs)
+
+        self.assertEqual(key[1], ((0, 1),))
+        self.assertEqual(key[2], ((0, 1),))
+        self.assertEqual(key_shape_env.guards, key_guards_before)
+
+        hit_shape_env, hit_fake_mode, hit_inputs = make_inputs()
+        hit_guards_before = list(hit_shape_env.guards)
+        tracing_context = TracingContext(hit_fake_mode)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                hit_inputs,
+                dataclasses.replace(
+                    self.default_config(),
+                    aot_autograd_arg_pos_to_source=[
+                        LocalSource("left", is_input=True),
+                        LocalSource("right", is_input=True),
+                    ],
+                ),
+                [input_alias_info() for _ in hit_inputs],
+            )
+
+        self.assertTrue(
+            any(
+                isinstance(guard, (StorageAliasing, StorageOverlap))
+                for guard in tracing_context.guards_context.aotautograd_guards
+            )
+        )
+        self.assertEqual(hit_shape_env.guards, hit_guards_before)
 
     def test_different_global_configs(self):
         def fn(x):

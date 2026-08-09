@@ -490,6 +490,21 @@ class StorageOverlap(GuardEnvExpr):
 
 
 """
+A class representing the exact storage-sharing partition among input tensors.
+
+Sources in the same group must share a StorageImpl, while sources in different
+groups must have different StorageImpls.  This is distinct from StorageOverlap:
+disjoint views can share a storage without overlapping, and that relationship
+still affects AOTAutograd's synthetic-base calling convention.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageAliasing(GuardEnvExpr):
+    source_groups: list[list[Source]]
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that

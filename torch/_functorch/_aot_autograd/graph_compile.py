@@ -186,7 +186,16 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     """
     Wrappers that run on every dispatch function
     """
-    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
+    # The dedupe wrapper updates this shared mapping in place so synthetic-base
+    # guards can translate their post-dedupe positions back to Dynamo sources.
+    arg_pos_to_original_pos: list[int] = []
+    return [
+        AOTDedupeWrapper(arg_pos_to_original_pos=arg_pos_to_original_pos),
+        AOTSyntheticBaseWrapper(
+            trace_joint=needs_autograd,
+            arg_pos_to_original_pos=arg_pos_to_original_pos,
+        ),
+    ]
 
 
 def aot_stage1_graph_capture(

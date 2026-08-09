@@ -22,6 +22,7 @@ from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
+from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
@@ -33,6 +34,7 @@ from torch._dynamo.utils import (
     warn_once,
 )
 from torch._functorch import config
+from torch._guards import DuplicateInputs, StorageOverlap, TracingContext
 from torch._inductor.codecache import (
     _ident,
     add_ephemeral_timeout_increase_for_distributed,
@@ -57,6 +59,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
+from torch._subclasses.fake_tensor import UnsupportedMutationAliasingException
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
@@ -66,6 +69,7 @@ from torch.compiler._cache import (
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.fx.traceback import _get_memory_budget_annotation
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -79,7 +83,12 @@ from .aot_autograd_result import (
     GenericAOTAutogradResult,
     SerializedGraphModule,
 )
+from .input_output_analysis import (
+    add_storage_aliasing_guard,
+    input_has_symbolic_metadata,
+)
 from .runtime_wrappers import (
+    AOTDedupeWrapper,
     CompilerWrapper,
     SerializableCompiledFunction,
     SubclassMeta,
@@ -89,6 +98,7 @@ from .schemas import (
     AOTAutogradCacheInfo,
     AOTConfig,
     CacheableAOTConfig,
+    InputAliasInfo,
     ViewAndMutationMeta,
 )
 
@@ -393,6 +403,107 @@ def _collect_saved_tensors_hooks_fx_wrap_cache_hashes(
     )
 
 
+InputTensorAliasInfo = tuple[
+    list[int],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, int], ...],
+]
+InputTensorAliasCacheKey = tuple[
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, int], ...],
+]
+
+
+def _collect_input_tensor_alias_info(
+    example_inputs: Sequence[Any],
+) -> InputTensorAliasInfo:
+    tensor_input_positions: list[int] = []
+    object_id_to_input_positions: dict[int, list[int]] = {}
+    storage_ref_to_inputs: dict[StorageWeakRef, list[tuple[int, torch.Tensor]]] = {}
+    input_has_symbolic_metadata_by_position: dict[int, bool] = {}
+    for pos, example_input in enumerate(example_inputs):
+        if not isinstance(example_input, torch.Tensor):
+            continue
+        tensor_input_positions.append(pos)
+        object_id_to_input_positions.setdefault(id(example_input), []).append(pos)
+        if not torch._C._has_storage(example_input):
+            continue
+        storage_ref = StorageWeakRef(example_input.untyped_storage())
+        storage_ref_to_inputs.setdefault(storage_ref, []).append((pos, example_input))
+        input_has_symbolic_metadata_by_position[pos] = input_has_symbolic_metadata(
+            example_input
+        )
+
+    duplicate_input_groups = tuple(
+        tuple(input_positions)
+        for input_positions in object_id_to_input_positions.values()
+        if len(input_positions) > 1
+    )
+    storage_alias_groups = tuple(
+        tuple(input_position for input_position, _ in storage_inputs)
+        for storage_inputs in storage_ref_to_inputs.values()
+    )
+
+    tracing_context = TracingContext.try_get()
+    shape_env = (
+        tracing_context.fake_mode.shape_env
+        if tracing_context is not None and tracing_context.fake_mode is not None
+        else None
+    )
+    maybe_suppress_guards = (
+        shape_env.suppress_guards if shape_env is not None else contextlib.nullcontext
+    )
+    storage_overlapping_input_pairs: list[tuple[int, int]] = []
+    with maybe_suppress_guards():
+        for storage_inputs in storage_ref_to_inputs.values():
+            for left_index, (left_pos, left_tensor) in enumerate(storage_inputs):
+                for right_pos, right_tensor in storage_inputs[:left_index]:
+                    symbolic = (
+                        input_has_symbolic_metadata_by_position[left_pos]
+                        or input_has_symbolic_metadata_by_position[right_pos]
+                    )
+                    if compute_overlapping_tensors(
+                        [right_tensor, left_tensor], symbolic=symbolic
+                    ):
+                        storage_overlapping_input_pairs.append((right_pos, left_pos))
+
+    return (
+        tensor_input_positions,
+        duplicate_input_groups,
+        storage_alias_groups,
+        tuple(storage_overlapping_input_pairs),
+    )
+
+
+def _compute_input_tensor_alias_cache_key(
+    example_inputs: Sequence[Any],
+) -> InputTensorAliasCacheKey:
+    _, duplicate_input_groups, storage_alias_groups, storage_overlapping_input_pairs = (
+        _collect_input_tensor_alias_info(example_inputs)
+    )
+    return duplicate_input_groups, storage_alias_groups, storage_overlapping_input_pairs
+
+
+def _get_input_sources(
+    aot_config: AOTConfig,
+    input_positions: Sequence[int],
+) -> list[torch._guards.Source] | None:
+    if not aot_config.aot_autograd_arg_pos_to_source:
+        return None
+
+    input_sources = []
+    for input_position in input_positions:
+        if input_position >= len(aot_config.aot_autograd_arg_pos_to_source):
+            return None
+        input_source = aot_config.aot_autograd_arg_pos_to_source[input_position]
+        if input_source is None:
+            return None
+        input_sources.append(input_source)
+    return input_sources
+
+
 def _get_custom_estimator_solver_uuids(
     autograd_config: Any,
 ) -> tuple[object | None, object | None]:
@@ -513,6 +624,9 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
+        self.input_tensor_alias_cache_key = _compute_input_tensor_alias_cache_key(
+            example_inputs
+        )
 
         # region_activation_memory_budget is graph-wide (the partitioner enforces
         # a single value across the graph) and propagates to every node, so the
@@ -1041,6 +1155,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     FXGraphCache uses those symints and its saved guards to repopulate the ShapeEnv with guards.
     **No new guards are generated into the shape env after inductor finishes compiling**, so the guards
     saved by inductor are sufficient for correctness for both AOTAutograd and Inductor's caches.
+
+    AOTAutograd can also generate Dynamo GuardEnvExpr guards for input aliasing
+    relationships that affect its runtime calling convention. These are not
+    ShapeEnv guards, so AOTAutogradCache includes the alias relationship in its
+    cache key and replays the corresponding guards into Dynamo on cache hits.
     """
 
     @staticmethod
@@ -1083,6 +1202,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 (entry, pickled_content) = result
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
+                AOTAutogradCache._install_cache_hit_guards(
+                    args,
+                    aot_config,
+                    entry.runtime_metadata.input_info,
+                    entry.dispatch_wrappers,
+                )
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content
                 compiled_fn = SerializableCompiledFunction(
@@ -1272,6 +1397,115 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             raise AssertionError("shape_env must not be None")
         result = shape_env.evaluate_guards_expression(guard_expr, hints)
         return result
+
+    @staticmethod
+    def _install_cache_hit_guards(
+        args: Sequence[Any],
+        aot_config: AOTConfig,
+        input_info: Sequence[InputAliasInfo],
+        dispatch_wrappers: Sequence[CompilerWrapper] = (),
+    ) -> None:
+        tracing_context = TracingContext.try_get()
+        if tracing_context is None:
+            return
+
+        (
+            tensor_input_positions,
+            duplicate_input_groups,
+            storage_alias_groups,
+            storage_overlapping_input_pairs,
+        ) = _collect_input_tensor_alias_info(args)
+
+        dedupe_wrapper = next(
+            (
+                wrapper
+                for wrapper in dispatch_wrappers
+                if isinstance(wrapper, AOTDedupeWrapper) and wrapper.needs_post_compile
+            ),
+            None,
+        )
+        for duplicate_input_group in duplicate_input_groups:
+            duplicate_input_sources = _get_input_sources(
+                aot_config, duplicate_input_group
+            )
+            if duplicate_input_sources is None:
+                if (
+                    dedupe_wrapper is not None
+                    and aot_config.aot_autograd_arg_pos_to_source
+                ):
+                    raise UnsupportedMutationAliasingException(
+                        "Encountered mutated duplicate inputs with an unguardable "
+                        "identity relationship from a source-less AOTAutograd input"
+                    )
+                continue
+            kept_arg_source = duplicate_input_sources[0]
+            for dupe_arg_source in duplicate_input_sources[1:]:
+                tracing_context.guards_context.aotautograd_guards.append(
+                    DuplicateInputs(kept_arg_source, dupe_arg_source)
+                )
+
+        if len(tensor_input_positions) <= 1 or not any(
+            info.mutates_data for info in input_info
+        ):
+            return
+
+        add_storage_aliasing_guard(aot_config, storage_alias_groups)
+
+        deduped_input_positions = list(range(len(args)))
+        if dedupe_wrapper is not None:
+            deduped_input_positions = [
+                pos for pos, keep in enumerate(dedupe_wrapper.keep_arg_mask) if keep
+            ]
+        if deduped_input_positions == list(range(len(args))):
+            deduped_args = args
+            deduped_storage_alias_groups = storage_alias_groups
+            deduped_storage_overlapping_input_pairs = storage_overlapping_input_pairs
+        else:
+            deduped_args = [args[pos] for pos in deduped_input_positions]
+            (
+                _,
+                _,
+                deduped_storage_alias_groups,
+                deduped_storage_overlapping_input_pairs,
+            ) = _collect_input_tensor_alias_info(deduped_args)
+        input_info_matches_args = len(input_info) == len(deduped_args)
+        overlapping_input_positions = {
+            input_position
+            for input_pair in deduped_storage_overlapping_input_pairs
+            for input_position in input_pair
+        }
+        for deduped_storage_alias_group in deduped_storage_alias_groups:
+            if len(deduped_storage_alias_group) <= 1:
+                continue
+            if input_info_matches_args and not any(
+                input_info[pos].mutates_data for pos in deduped_storage_alias_group
+            ):
+                continue
+
+            original_storage_alias_group = tuple(
+                deduped_input_positions[pos] for pos in deduped_storage_alias_group
+            )
+            input_sources = _get_input_sources(aot_config, original_storage_alias_group)
+            if input_sources is None:
+                continue
+
+            source_by_input_position = dict(
+                zip(deduped_storage_alias_group, input_sources)
+            )
+            tracing_context.guards_context.aotautograd_guards.append(
+                StorageOverlap(
+                    [
+                        source_by_input_position[pos]
+                        for pos in deduped_storage_alias_group
+                        if pos in overlapping_input_positions
+                    ],
+                    [
+                        source_by_input_position[pos]
+                        for pos in deduped_storage_alias_group
+                        if pos not in overlapping_input_positions
+                    ],
+                )
+            )
 
     @staticmethod
     def _lookup(

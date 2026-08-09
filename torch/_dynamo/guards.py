@@ -64,6 +64,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -97,6 +98,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageAliasing,
     StorageOverlap,
 )
 from torch._library.fake_class_registry import FakeScriptObject
@@ -520,7 +522,11 @@ class GuardManagerWrapper:
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
-                    if node.has_no_accessors() and not node.has_object_aliasing_guard():
+                    if (
+                        node.has_no_accessors()
+                        and not node.has_object_aliasing_guard()
+                        and not node.has_storage_aliasing_guard()
+                    ):
                         node.mark_tag_safe()
                 elif any(
                     a.repr() == "PythonLambdaGuardAccessor"
@@ -5127,6 +5133,22 @@ class CheckFunctionManager:
                 install_object_aliasing_guard(
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
+                    [code_part],
+                    None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageAliasing):
+                guard_manager_groups = [
+                    [builder.get_guard_manager_from_source(s) for s in source_group]
+                    for source_group in guard.source_groups
+                ]
+                formatted_groups = ", ".join(
+                    f"[{', '.join(s.name for s in source_group)}]"
+                    for source_group in guard.source_groups
+                )
+                code_part = f"check_storage_aliasing([{formatted_groups}])"
+                install_storage_aliasing_guard(
+                    guard_manager_groups,
                     [code_part],
                     None,
                 )

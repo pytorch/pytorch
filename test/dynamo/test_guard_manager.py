@@ -32,6 +32,9 @@ OBJECT_ALIASING = guards.OBJECT_ALIASING
 install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+SAME_STORAGE = guards.SAME_STORAGE
+NO_STORAGE_ALIASING = guards.NO_STORAGE_ALIASING
+install_storage_aliasing_guard = guards.install_storage_aliasing_guard
 
 
 x = torch.tensor(4)
@@ -577,6 +580,66 @@ user_stack=None)
         )
         self.assertFalse(guard_manager.check(f_locals_unaliased))
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
+
+    def test_storage_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        class Foo:
+            def __init__(self, x, y, z):
+                self.x = x
+                self.y = y
+                self.z = z
+
+        base = torch.arange(4)
+        example = Foo(base[:2], base[2:], torch.ones(2))
+        x_guard_mgr = guard_manager.getattr_manager(
+            "x", "", example.x, default_mgr_enum
+        )
+        y_guard_mgr = guard_manager.getattr_manager(
+            "y", "", example.y, default_mgr_enum
+        )
+        z_guard_mgr = guard_manager.getattr_manager(
+            "z", "", example.z, default_mgr_enum
+        )
+        install_storage_aliasing_guard(
+            [[x_guard_mgr, y_guard_mgr], [z_guard_mgr]],
+            ["check_storage_aliasing([[x, y], [z]])"],
+            None,
+        )
+
+        self.assertTrue(x_guard_mgr.has_storage_aliasing_guard())
+        self.assertTrue(y_guard_mgr.has_storage_aliasing_guard())
+        self.assertTrue(z_guard_mgr.has_storage_aliasing_guard())
+        self.assertTrue(
+            any(
+                isinstance(guard, SAME_STORAGE)
+                for guard in x_guard_mgr.get_leaf_guards()
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(guard, NO_STORAGE_ALIASING)
+                for guard in x_guard_mgr.get_leaf_guards()
+            )
+        )
+        self.assertTrue(guard_manager.check(example))
+
+        split = Foo(torch.ones(2), torch.ones(2), torch.ones(2))
+        self.assertFalse(guard_manager.check(split))
+
+        merged_base = torch.arange(6)
+        merged = Foo(merged_base[:2], merged_base[2:4], merged_base[4:])
+        self.assertFalse(guard_manager.check(merged))
+
+        # Relational state must reset after both successful and failed checks.
+        self.assertTrue(guard_manager.check(example))
+        # Runtime Python scalars may have been tensorified while tracing. They
+        # do not participate in the storage partition.
+        self.assertTrue(guard_manager.check(Foo(1, 1, torch.ones(2))))
+        self.assertTrue(guard_manager.check(example))
+
+        sparse = torch.sparse_coo_tensor([[0]], [1.0], (2,))
+        self.assertFalse(guard_manager.check(Foo(sparse, sparse, torch.ones(2))))
 
     def test_weakref_alive_guard(self):
         root = RootGuardManager()

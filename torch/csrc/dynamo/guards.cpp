@@ -1445,9 +1445,8 @@ struct DynamicMeta {
 };
 
 /**
- * Assumption: x and y are known to share a storage, and we are trying to
- * determine if their memory is actually completely disjoint, based on
- * sizes/strides/storage_offset
+ * Determine if x and y are completely disjoint, based on raw storage identity
+ * and sizes/strides/storage_offset.
  *
  * "Meta" should be one of the "*Meta" classes above. They dictate which
  * version of the metadata functions we should be using (symbolic vs.
@@ -1459,6 +1458,10 @@ template <class Meta>
 bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   if (x.is_same(y)) {
     return false;
+  }
+  if (x.storage().unsafeGetStorageImpl() !=
+      y.storage().unsafeGetStorageImpl()) {
+    return true;
   }
   if (Meta::numel(x) == 0 || Meta::numel(y) == 0) {
     return true;
@@ -1628,9 +1631,10 @@ class StorageOverlapChecker {
    * an `overlapping` tensor or not.
    */
   void add(PyObject* obj, bool overlapping) {
-    // Just check that `obj` is actually a tensor, so that we can keep it alive
-    // by incrementing its ref-count.
-    TORCH_CHECK(THPVariable_CheckExact(obj) || THPVariable_Check(obj));
+    if (!(THPVariable_CheckExact(obj) || THPVariable_Check(obj))) {
+      _get_ignored(overlapping)++;
+      return;
+    }
     Py_INCREF(obj);
     _get(overlapping).push_back(obj);
   }
@@ -1641,6 +1645,7 @@ class StorageOverlapChecker {
       Py_DECREF(item);
     }
     vec.clear();
+    _get_ignored(overlapping) = 0;
   }
 
   /**
@@ -1650,15 +1655,16 @@ class StorageOverlapChecker {
    * sure it has collected all expected tensors.
    */
   bool maybe_check() {
-    TORCH_CHECK(_expected_overlapping >= _overlapping.size());
-    TORCH_CHECK(_expected_non_overlapping >= _non_overlapping.size());
-    if (_expected_overlapping == _overlapping.size() &&
-        _expected_non_overlapping == _non_overlapping.size()) {
+    const auto actual_overlapping = _overlapping.size() + _ignored_overlapping;
+    const auto actual_non_overlapping =
+        _non_overlapping.size() + _ignored_non_overlapping;
+    TORCH_CHECK(_expected_overlapping >= actual_overlapping);
+    TORCH_CHECK(_expected_non_overlapping >= actual_non_overlapping);
+    if (_expected_overlapping == actual_overlapping &&
+        _expected_non_overlapping == actual_non_overlapping) {
       // Transform each list of PyObject* into an actual list of Tensors.
-      auto overlapping_tensors =
-          _tensors_from(_overlapping, _expected_overlapping);
-      auto non_overlapping_tensors =
-          _tensors_from(_non_overlapping, _expected_non_overlapping);
+      auto overlapping_tensors = _tensors_from(_overlapping);
+      auto non_overlapping_tensors = _tensors_from(_non_overlapping);
       return check_overlapping(overlapping_tensors, non_overlapping_tensors);
     } else {
       // If we haven't collected them all yet, keep on running.
@@ -1675,14 +1681,16 @@ class StorageOverlapChecker {
     return overlapping ? _overlapping : _non_overlapping;
   }
 
+  size_t& _get_ignored(bool overlapping) {
+    return overlapping ? _ignored_overlapping : _ignored_non_overlapping;
+  }
+
   /**
    * Transforms a given list of PyObject* into a list of Tensor.
    */
-  std::vector<Tensor> _tensors_from(
-      const std::vector<PyObject*>& objects,
-      size_t size) {
+  std::vector<Tensor> _tensors_from(const std::vector<PyObject*>& objects) {
     std::vector<Tensor> tensors;
-    tensors.reserve(size);
+    tensors.reserve(objects.size());
     std::ranges::transform(
         objects, std::back_inserter(tensors), [](PyObject* obj) {
           return THPVariable_Unpack(obj);
@@ -1695,9 +1703,12 @@ class StorageOverlapChecker {
   // Expected number of non-overlapping tensors.
   size_t _expected_non_overlapping;
   // Collected possibly overlapping tensors.
-  std::vector<PyObject*> _overlapping;
+  std::vector<PyObject*> _overlapping{};
   // Collected non-overlapping tensors.
-  std::vector<PyObject*> _non_overlapping;
+  std::vector<PyObject*> _non_overlapping{};
+  // Sources that are not tensors for the current guard run.
+  size_t _ignored_overlapping{0};
+  size_t _ignored_non_overlapping{0};
 };
 
 /**
@@ -2682,6 +2693,113 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
 };
 
+std::optional<c10::StorageImpl*> get_tensor_storage_impl(PyObject* value) {
+  if (!(THPVariable_CheckExact(value) || THPVariable_Check(value))) {
+    return std::nullopt;
+  }
+  const auto& tensor = THPVariable_Unpack(value);
+  if (!tensor.has_storage()) {
+    return std::nullopt;
+  }
+  return tensor.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
+}
+
+/**
+ * Checks that all tensors attached to this guard share the same StorageImpl.
+ */
+class SAME_STORAGE : public RelationalGuard {
+ public:
+  SAME_STORAGE(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Dynamo can tensorify a Python scalar while tracing.  Its runtime guard
+    // source still produces the original non-tensor value, whose storage
+    // relationship is irrelevant.
+    if (!(THPVariable_CheckExact(value) || THPVariable_Check(value))) {
+      return true;
+    }
+    auto storage = get_tensor_storage_impl(value);
+    if (!storage.has_value()) {
+      return false;
+    }
+    if (!_seen_tensor) {
+      _seen_tensor = true;
+      _storage = *storage;
+      _first_tensor = value;
+      Py_INCREF(_first_tensor);
+      return true;
+    }
+    return _storage == *storage;
+  }
+
+  void reset_state() final {
+    _seen_tensor = false;
+    _storage = nullptr;
+    Py_CLEAR(_first_tensor);
+  }
+
+ private:
+  bool _seen_tensor{false};
+  c10::StorageImpl* _storage{nullptr};
+  PyObject* _first_tensor{nullptr};
+};
+
+/**
+ * Checks that all tensors attached to this guard have distinct StorageImpls.
+ */
+class NO_STORAGE_ALIASING : public RelationalGuard {
+ public:
+  NO_STORAGE_ALIASING(
+      RootGuardManager* root_guard_manager,
+      size_t expected_storages,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
+    _unique_storages.reserve(expected_storages);
+    _tensors.reserve(expected_storages);
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // See SAME_STORAGE: tensorified Python scalar sources are non-tensors at
+    // runtime and do not participate in storage aliasing.
+    if (!(THPVariable_CheckExact(value) || THPVariable_Check(value))) {
+      return true;
+    }
+    auto storage = get_tensor_storage_impl(value);
+    if (!storage.has_value()) {
+      return false;
+    }
+    if (!_unique_storages.insert({*storage, nullptr}).second) {
+      return false;
+    }
+    Py_INCREF(value);
+    _tensors.push_back(value);
+    return true;
+  }
+
+  void reset_state() final {
+    _unique_storages.clear();
+    for (auto* tensor : _tensors) {
+      Py_DECREF(tensor);
+    }
+    _tensors.clear();
+  }
+
+ private:
+  ska::flat_hash_map<c10::StorageImpl*, std::nullptr_t> _unique_storages;
+  std::vector<PyObject*> _tensors;
+};
+
 /**
  * Checks the storage overlapping relation of input tensors.
  *
@@ -3428,12 +3546,20 @@ class GuardManager {
     _has_no_tensor_aliasing_guard = true;
   }
 
+  void set_has_storage_aliasing_guard() {
+    _has_storage_aliasing_guard = true;
+  }
+
   bool has_object_aliasing_guard() {
     return _has_object_aliasing_guard;
   }
 
   bool has_no_tensor_aliasing_guard() {
     return _has_no_tensor_aliasing_guard;
+  }
+
+  bool has_storage_aliasing_guard() {
+    return _has_storage_aliasing_guard;
   }
 
  public:
@@ -4174,6 +4300,7 @@ class GuardManager {
   // relational guard helpers
   bool _has_object_aliasing_guard = false;
   bool _has_no_tensor_aliasing_guard = false;
+  bool _has_storage_aliasing_guard = false;
 
   bool _is_dict = false;
   bool _is_immutable = false;
@@ -7293,6 +7420,62 @@ void install_no_tensor_aliasing_guard(
   }
 }
 
+void install_storage_aliasing_guard(
+    const py::list& guard_manager_groups,
+    const py::object& verbose_code_parts,
+    const py::object& user_stack) {
+  py::list representative_guard_managers;
+  RootGuardManager* root_guard_manager = nullptr;
+  for (const py::handle& group_handle : guard_manager_groups) {
+    const py::list group = py::reinterpret_borrow<py::list>(group_handle);
+    if (group.empty()) {
+      continue;
+    }
+
+    representative_guard_managers.append(group[0]);
+    for (const py::handle& guard_manager : group) {
+      auto* manager = py::cast<GuardManager*>(guard_manager);
+      if (root_guard_manager == nullptr) {
+        root_guard_manager = manager->get_root();
+      } else {
+        TORCH_CHECK(
+            root_guard_manager == manager->get_root(),
+            "Storage aliasing guard managers must share a root");
+      }
+    }
+    if (group.size() <= 1) {
+      continue;
+    }
+
+    std::shared_ptr<RelationalGuard> same_storage_guard =
+        std::make_shared<SAME_STORAGE>(
+            root_guard_manager, verbose_code_parts, user_stack);
+    root_guard_manager->add_relational_guard_resetter(same_storage_guard);
+    for (const py::handle& guard_manager : group) {
+      auto* manager = py::cast<GuardManager*>(guard_manager);
+      manager->add_leaf_guard(same_storage_guard);
+      manager->set_has_storage_aliasing_guard();
+    }
+  }
+
+  if (representative_guard_managers.size() <= 1) {
+    return;
+  }
+
+  std::shared_ptr<RelationalGuard> no_storage_aliasing_guard =
+      std::make_shared<NO_STORAGE_ALIASING>(
+          root_guard_manager,
+          representative_guard_managers.size(),
+          verbose_code_parts,
+          user_stack);
+  root_guard_manager->add_relational_guard_resetter(no_storage_aliasing_guard);
+  for (const py::handle& guard_manager : representative_guard_managers) {
+    auto* manager = py::cast<GuardManager*>(guard_manager);
+    manager->add_leaf_guard(no_storage_aliasing_guard);
+    manager->set_has_storage_aliasing_guard();
+  }
+}
+
 void install_symbolic_shape_guard(
     const py::list& guard_managers,
     py::int_ nargs_int,
@@ -7347,7 +7530,9 @@ void install_storage_overlapping_guard_with_checker(
       ->get_root()
       ->add_relational_guard_resetter(guard);
   for (const auto& guard_manager : guard_managers) {
-    py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
+    auto* manager = py::cast<GuardManager*>(guard_manager);
+    manager->add_leaf_guard(guard);
+    manager->set_has_storage_aliasing_guard();
   }
 }
 
@@ -7775,6 +7960,14 @@ PyObject* torch_c_dynamo_guards_init() {
       RelationalGuard,
       std::shared_ptr<NO_TENSOR_ALIASING>>(py_m, "NO_TENSOR_ALIASING");
   // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<SAME_STORAGE, RelationalGuard, std::shared_ptr<SAME_STORAGE>>(
+      py_m, "SAME_STORAGE");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      NO_STORAGE_ALIASING,
+      RelationalGuard,
+      std::shared_ptr<NO_STORAGE_ALIASING>>(py_m, "NO_STORAGE_ALIASING");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       STORAGE_OVERLAPPING,
       RelationalGuard,
@@ -7912,6 +8105,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("fail_count", &GuardManager::fail_count)
       .def(
           "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
+      .def(
+          "has_storage_aliasing_guard",
+          &GuardManager::has_storage_aliasing_guard)
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
@@ -8841,6 +9037,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+  py_m.def("install_storage_aliasing_guard", install_storage_aliasing_guard);
   py_m.def(
       "install_storage_overlapping_guard", install_storage_overlapping_guard);
   py_m.def(
@@ -8848,6 +9045,7 @@ PyObject* torch_c_dynamo_guards_init() {
       [](const std::vector<Tensor> tensors, bool symbolic) {
         // Pick the correct Meta class, depending on whether we are
         // dealing with symbolic values or not.
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         if (symbolic) {
           return compute_overlapping_tensors<DynamicMeta>(tensors);
         } else {
