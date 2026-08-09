@@ -1794,6 +1794,59 @@ class CommonTemplate:
         y = torch.rand((), dtype=torch.complex64, device=self.device)
         self.common(fn, (x, y, 2))
 
+    def test_lt_complex1(self):
+        @torch.compile
+        def fn(a, b):
+            return torch.lt(a, b)
+
+        x = torch.tensor(
+            [1 + 2j, 3 + 1j, 2 + 2j], dtype=torch.complex64, device=self.device
+        )
+        y = torch.tensor(
+            [1 + 1j, 3 + 2j, 2 + 3j], dtype=torch.complex64, device=self.device
+        )
+
+        result = fn(x, y)
+        expected = torch.tensor(
+            [False, True, True], dtype=torch.bool, device=self.device
+        )
+
+        self.assertEqual(result, expected)
+
+    def test_lt_complex2(self):
+        @torch.compile
+        def fn(a, b):
+            return torch.lt(a, b)
+
+        x = torch.tensor(
+            [1 + 1j, 2 + 0j, 0 + 1j], dtype=torch.complex64, device=self.device
+        )
+        y = torch.tensor([1.0, 2.0, 1.0], dtype=torch.complex64, device=self.device)
+
+        result = fn(x, y)
+        expected = torch.tensor(
+            [False, False, True], dtype=torch.bool, device=self.device
+        )
+
+        self.assertEqual(result, expected)
+
+    def test_lt_complex3(self):
+        @torch.compile
+        def fn(a, b):
+            return torch.lt(a, b)
+
+        x = torch.tensor([1.0, 2.0, 1.0], dtype=torch.complex64, device=self.device)
+        y = torch.tensor(
+            [1 + 1j, 2 + 0j, 0 + 1j], dtype=torch.complex64, device=self.device
+        )
+
+        result = fn(x, y)
+        expected = torch.tensor(
+            [True, False, False], dtype=torch.bool, device=self.device
+        )
+
+        self.assertEqual(result, expected)
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)

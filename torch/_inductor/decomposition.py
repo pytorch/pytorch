@@ -711,6 +711,30 @@ def lift(self: torch.Tensor) -> torch.Tensor:
     return self
 
 
+@register_decomposition([aten.lt])
+def lt(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    a_is_complex = torch.is_tensor(a) and a.is_complex()
+    b_is_complex = torch.is_tensor(b) and b.is_complex()
+    if not a_is_complex and not b_is_complex:
+        return NotImplemented
+
+    if a_is_complex:
+        a_real = torch.real(a)
+        a_imag = torch.imag(a)
+    else:
+        a_real = a
+        a_imag = torch.zeros_like(a)
+
+    if b_is_complex:
+        b_real = torch.real(b)
+        b_imag = torch.imag(b)
+    else:
+        b_real = b
+        b_imag = torch.zeros_like(b)
+
+    return (a_real < b_real) | ((a_real == b_real) & (a_imag < b_imag))
+
+
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other > self), self, other)
