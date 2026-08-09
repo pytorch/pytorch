@@ -4194,6 +4194,7 @@ class TestBinaryUfuncsDevice(TestCase):
             actual = op(x, y, alpha=alpha)
             self.assertTrue(not (actual.isnan() or actual.isinf()))
 
+    @skipIfTorchDynamo()
     def test_sub_typing(self, device):
         m1 = torch.tensor(
             [True, False, False, True, False, False], dtype=torch.bool, device=device
@@ -4202,19 +4203,19 @@ class TestBinaryUfuncsDevice(TestCase):
             [True, True, False, False, False, True], dtype=torch.bool, device=device
         )
         self.assertRaisesRegex(
-            RuntimeError,
+            NotImplementedError,
             r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
             r"Use the `\^` or `logical_xor\(\)` operator instead.",
             lambda: m1 - m2,
         )
         self.assertRaisesRegex(
-            RuntimeError,
+            NotImplementedError,
             r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
             r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
             lambda: 1 - m1,
         )
         self.assertRaisesRegex(
-            RuntimeError,
+            NotImplementedError,
             r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
             r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
             lambda: m2 - 1,
