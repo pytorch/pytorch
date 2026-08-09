@@ -1,12 +1,15 @@
 """CuTeDSL geometry helpers shared by NVGEMM reduction kernels."""
 
+import cutlass.cute as cute
+from cutlass import const_expr, Int32
+from cutlass.cutlass_dsl import dsl_user_op
+
+
 __all__ = ["get_lane_warp_layouts", "partition_for_epilogue"]
 
 
 def get_lane_warp_layouts(tiled_copy, reference_src=True):
     """Derive two-dimensional lane and warp layouts for an epilogue copy."""
-    import cutlass.cute as cute
-
     from torch._vendor.quack import layout_utils
 
     layout_tv = (
@@ -34,7 +37,20 @@ def get_lane_warp_layouts(tiled_copy, reference_src=True):
     return lane_layout_mn, warp_layout_mn
 
 
-def partition_for_epilogue(*args, **kwargs):
-    from torch._vendor.quack.sm90_utils import partition_for_epilogue as partition
-
-    return partition(*args, **kwargs)
+@dsl_user_op
+def partition_for_epilogue(
+    cT: cute.Tensor,
+    epi_tile: cute.Tile,
+    tiled_copy: cute.TiledCopy,
+    tidx: Int32,
+    reference_src: bool,
+    *,
+    loc=None,
+    ip=None,
+) -> cute.Tensor:
+    """Partition one epilogue tensor through the selected copy layout."""
+    thread_copy = tiled_copy.get_slice(tidx)
+    tiled_tensor = cute.flat_divide(cT, epi_tile)
+    if const_expr(reference_src):
+        return thread_copy.partition_S(tiled_tensor, loc=loc, ip=ip)
+    return thread_copy.partition_D(tiled_tensor, loc=loc, ip=ip)

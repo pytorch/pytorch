@@ -349,6 +349,15 @@ function install_spmd_types() {
   retry pip_build_and_install "git+https://github.com/meta-pytorch/spmd_types.git@${commit}" dist/spmd_types
 }
 
+function install_flex_gemm_quack() {
+  local quack_checkout repo_root
+  quack_checkout=$(mktemp -d -t quack-flex-gemm-XXXXXX)
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+  trap_add "rm -rf '$quack_checkout'" EXIT
+  "$repo_root/tools/vendoring/quack/prepare_flex_gemm.sh" "$quack_checkout"
+  pip_install "$quack_checkout"
+}
+
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
   # b17 adds aux_scalars; CUDA 13 wheels are behind the cu13 extra.
@@ -357,10 +366,10 @@ function install_flash_attn_cute() {
   else
     pip_install flash-attn-4==4.0.0b17
   fi
-  # flash-attn-4 pulls quack unpinned; newer quack needs cutlass._mlir_helpers,
-  # absent from the gated cutlass-dsl 4.5.2. Pin quack to the SHA torch vendors
-  # (torch/_vendor/quack), which uses cutlass._mlir and works with 4.5.2. See #188477.
-  pip_install "git+https://github.com/Dao-AILab/quack.git@99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
+  # flash-attn-4 pulls quack unpinned. Reconstruct the full external package
+  # used by FlexGEMM from a public upstream base plus the in-tree patch series;
+  # the RMSNorm-only torch._vendor.quack pin remains independent.
+  install_flex_gemm_quack
   echo "FlashAttention 4 installation complete."
 }
 
@@ -377,7 +386,7 @@ function install_cutlass_dsl() {
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install nvidia-cutlass-dsl==4.5.2 apache-tvm-ffi==0.1.11
+  pip_install nvidia-cutlass-dsl==4.6.2 apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
