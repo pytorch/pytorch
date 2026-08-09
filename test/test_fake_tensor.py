@@ -713,6 +713,35 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_native_batch_norm_cpu_strides(self):
+        # batch_norm_cpu chooses the output memory format explicitly instead of
+        # inheriting the input's strides, so FakeTensor has to match it.
+        # https://github.com/pytorch/pytorch/issues/192668
+        def check(x, training):
+            def make_args():
+                c = x.size(1)
+                return (
+                    x,
+                    torch.ones(c),
+                    torch.zeros(c),
+                    torch.zeros(c),
+                    torch.ones(c),
+                    training,
+                    0.1,
+                    1e-5,
+                )
+
+            eager_out = torch.ops.aten.native_batch_norm.default(*make_args())[0]
+            with FakeTensorMode(allow_non_fake_inputs=True):
+                fake_out = torch.ops.aten.native_batch_norm.default(*make_args())[0]
+            self.assertEqual(fake_out.stride(), eager_out.stride())
+
+        for training in (True, False):
+            # A noncontiguous input gets a contiguous output from the kernel.
+            check(torch.randn(2, 3, 4).transpose(1, 2), training)
+            # channels_last inputs must keep their layout, not be made contiguous.
+            check(torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last), training)
+
     def test_private_convolution_symint(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)

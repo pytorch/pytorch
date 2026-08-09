@@ -2074,6 +2074,51 @@ def _fused_rms_norm_backward(
     )
 
 
+def _is_contiguous_in_any_format(t: Tensor) -> bool:
+    # Mirrors is_contiguous_in_any_format in
+    # aten/src/ATen/native/Normalization.cpp
+    return (
+        t.is_contiguous()
+        or t.is_contiguous(memory_format=torch.channels_last)
+        or t.is_contiguous(memory_format=torch.channels_last_3d)
+    )
+
+
+def _suggest_memory_format_contig(t: Tensor) -> torch.memory_format:
+    # Mirrors suggest_memory_format_contig in
+    # aten/src/ATen/native/Normalization.cpp
+    if t.is_contiguous():
+        return torch.contiguous_format
+    elif t.is_contiguous(memory_format=torch.channels_last_3d):
+        return torch.channels_last_3d
+    else:
+        return torch.channels_last
+
+
+def _batch_norm_cpu_output_memory_format(
+    input: Tensor,
+    weight: Tensor | None,
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+) -> torch.memory_format:
+    # batch_norm_cpu picks the output memory format explicitly rather than
+    # inheriting the input's strides, so this decomposition has to do the same
+    # to report the strides the CPU kernel actually produces. Must be computed
+    # from the original arguments, before weight/bias are reshaped and
+    # running_mean/running_var are copied below.
+    all_contiguous = (
+        _is_contiguous_in_any_format(input)
+        and (weight is None or weight.is_contiguous())
+        and (bias is None or bias.is_contiguous())
+        and (running_mean is None or running_mean.is_contiguous())
+        and (running_var is None or running_var.is_contiguous())
+    )
+    if all_contiguous:
+        return _suggest_memory_format_contig(input)
+    return utils.suggest_memory_format(input)
+
+
 def native_batch_norm_helper(
     input: Tensor,
     weight: Tensor | None,
@@ -2085,6 +2130,16 @@ def native_batch_norm_helper(
     eps: float,
     functional: bool,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor | None, Tensor | None]:
+    # batch_norm_cuda uses at::empty_like(self) (MemoryFormat::Preserve), which
+    # already matches the strides the elementwise ops below produce, so only the
+    # CPU output layout needs to be forced.
+    output_memory_format = (
+        _batch_norm_cpu_output_memory_format(
+            input, weight, bias, running_mean, running_var
+        )
+        if input.device.type == "cpu"
+        else None
+    )
     reduction_dims = [0] + list(range(2, input.dim()))
     computation_dtype = utils.get_computation_dtype(input.dtype)
     new_running_mean = running_mean
@@ -2150,6 +2205,10 @@ def native_batch_norm_helper(
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
+    if output_memory_format is not None and not output.is_contiguous(
+        memory_format=output_memory_format
+    ):
+        output = output.contiguous(memory_format=output_memory_format)
     return (
         output.to(dtype=input.dtype),
         save_mean,
