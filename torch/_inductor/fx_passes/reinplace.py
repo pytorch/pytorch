@@ -160,7 +160,10 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter  # noqa: S101
+    if node.target is not _generalized_scatter:
+        raise AssertionError(
+            f"expected node.target to be _generalized_scatter, got {node.target}"
+        )
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -179,9 +182,11 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)  # noqa: S101
+    if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+        raise AssertionError(f"unexpected node.target: {node.target}")
     inp, src, view_ops = node.args
-    assert not node.kwargs  # noqa: S101
+    if node.kwargs:
+        raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
