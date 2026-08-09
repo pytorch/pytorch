@@ -1243,6 +1243,7 @@ def retry_shell(
     timeout=None,
     retries=1,
     was_rerun=False,
+    label="",
 ) -> tuple[int, bool]:
     # Returns exicode + whether it was rerun
     if not (retries >= 0):
@@ -1262,8 +1263,14 @@ def retry_shell(
         )
     except subprocess.TimeoutExpired:
         if retries == 0:
+            # NB: the "Command took >Nmin, returning 124" prefix is load
+            # bearing -- the CI log classifier matches on it, so only ever
+            # append here. The label names what timed out, so that timeouts
+            # group per test file on HUD instead of collapsing into a single
+            # fleet-wide bucket (which makes an uptick in one file invisible).
             print(
-                f"Command took >{timeout // 60}min, returning 124",
+                f"Command took >{timeout // 60}min, returning 124"
+                + (f" ({label})" if label else ""),
                 file=stdout,
                 flush=True,
             )
@@ -1282,6 +1289,7 @@ def retry_shell(
         timeout=timeout,
         retries=retries - 1,
         was_rerun=True,
+        label=label,
     )
 
 
@@ -2541,6 +2549,22 @@ def skipIfRocmVersionLessThan(version=None):
             or rocm_version_tuple < tuple(version)
         )
     return lazy_skip_if(_should_skip, f"ROCm version less than {version} required")
+
+# Skips a test on ROCm if the version is at least the given major.minor tuple.
+# Use for failures introduced in a ROCm release that pass on older versions,
+# e.g. skipIfRocmVersionAtLeast([7, 14]) skips on 7.14+ but runs on 7.2.x.
+# Built on lazy_skip_if so it works on both test methods and test classes.
+def skipIfRocmVersionAtLeast(version=None):
+    def _should_skip():
+        if not TEST_WITH_ROCM:
+            return False
+        rocm_version_tuple = getRocmVersion()
+        return (
+            rocm_version_tuple is not None
+            and version is not None
+            and rocm_version_tuple >= tuple(version)
+        )
+    return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
 
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
@@ -5255,7 +5279,7 @@ def find_free_port():
         return port
 
 # Errors that we can get in c10d initialization for which we should retry tests for.
-ADDRESS_IN_USE = "Address already in use"
+ADDRESS_IN_USE = "address already in use"
 CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
@@ -5273,7 +5297,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if any(connect_error in str(error) for connect_error in connect_errors):
+                if any(ce in str(error) or ce in str(error).lower() for ce in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}") from error
