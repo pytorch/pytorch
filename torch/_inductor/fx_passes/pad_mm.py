@@ -9,6 +9,7 @@ import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor import utils
 from torch._inductor.autoheuristic.autoheuristic import (
     AHContext,
@@ -478,6 +479,8 @@ def should_pad(
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
 ) -> bool:
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
     _can_pad = can_pad(mat1, mat2, op, input)
     # Note that if you're tempted to insert a dynamo_timed call here, this function can
     # be called enough that the dynamo_timed overhead is not negligible.

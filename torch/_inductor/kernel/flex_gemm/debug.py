@@ -98,6 +98,14 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
         "auxiliary",
         (format_fx_tensor(output) for output in outputs.aux_outputs),
     )
+    if outputs.indexed_output is not None:
+        lines.extend(
+            (
+                "indexed:",
+                f"  output: {format_fx_tensor(outputs.indexed_output.node)}",
+                f"  indices: {format_fx_tensor(outputs.indexed_output.indices)}",
+            )
+        )
     lines.append("")
     if outputs.local_reduce is None:
         lines.append("local_reduction: none")
@@ -203,6 +211,7 @@ def format_flex_gemm_lowering_plan(
     output_dtype: torch.dtype,
     capture_kinds: Sequence[tuple[str, str]],
     aux_metas: Sequence[torch.Tensor],
+    indexed_metas: Sequence[torch.Tensor],
     local_reduce_metas: Sequence[torch.Tensor],
     *,
     local_reduce_layout: "FlexGemmOutputLayout | None",
@@ -216,6 +225,11 @@ def format_flex_gemm_lowering_plan(
         lines,
         "auxiliary_storage",
         (f"shape={tuple(meta.shape)}, dtype={meta.dtype}" for meta in aux_metas),
+    )
+    append_items(
+        lines,
+        "indexed_storage",
+        (f"shape={tuple(meta.shape)}, dtype={meta.dtype}" for meta in indexed_metas),
     )
     append_items(
         lines,
