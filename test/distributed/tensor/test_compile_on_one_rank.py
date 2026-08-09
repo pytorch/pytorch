@@ -14,6 +14,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -874,6 +875,8 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         self.assertIn("c10d.allreduce_.default", _call_targets(gm))
         self.assertTrue(_baked_pg_constants(gm))
 
+
+instantiate_device_type_tests(TestCompileOnOneRank, globals())
 
 if __name__ == "__main__":
     run_tests()
