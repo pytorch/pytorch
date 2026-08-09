@@ -230,7 +230,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Backends that support one-sided operations advertise it via supportsWindow
   // and return a concrete c10d::Window from new_window. The optional tensor, if
-  // provided, is registered with the new window.
+  // provided, is registered with the new window. new_window is collective: all
+  // ranks in the backend must call it in the same order.
   virtual bool supportsWindow() const {
     return false;
   }
