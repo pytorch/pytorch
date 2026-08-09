@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import functools
 import itertools
 import pickle
 import sys
@@ -67,6 +68,25 @@ class GlobalNestedModule(torch.nn.Module):
 
 def global_func(x):
     return x + 1
+
+
+def keep_defaults(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if len(func.__defaults__) == 2:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedForwardModule(torch.nn.Module):
+    # forward is the wrapper; the undecorated function it closes over has the
+    # same __qualname__ but is unreachable from the module, which is what makes
+    # it unpicklable by reference.
+    @keep_defaults
+    def forward(self, x, scale=2.0, shift=1.0):
+        return x * scale + shift
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -484,6 +504,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_guard_rooted_at_fqn_mismatched_function(self):
+        mod = DecoratedForwardModule()
+        ref, loaded = self._test_serialization("SEQUENCE_LENGTH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):

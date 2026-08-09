@@ -47,19 +47,24 @@ Know these before relying on an artifact in production:
   library internals: measured on stock models, torchvision resnet18 and
   mobilenet_v3 report none, timm's ViT reports one (a re-exported
   ``torch._assert``) and transformers' Qwen2 reports 33, of which only the
-  attention-implementation registry looks genuinely config-selected. Refusing
+  attention-implementation registry looks genuinely config-selected. Nor is
+  torchvision uniformly clean: efficientnet_b0 reports 2 and timm's swin
+  reports 5, one of which is a real config slot. Refusing
   by default would refuse real models and train users to switch the check off,
   so audit the list once for your model and pass
   ``require_no_risky_drops=True`` to enforce it thereafter.
-* A transformers model does not round trip today. Capture and save work, but
-  ``precompile_load`` dies building guards with ``AttributeError: '_Missing'
-  object has no attribute '__defaults__'``: a SEQUENCE_LENGTH guard on a
-  function's ``__defaults__`` outlives the dropped identity guard on the
-  function itself, which is therefore absent from the reloaded scope. This is
-  not specific to this module -- plain
-  ``torch._dynamo.config.caching_precompile`` reproduces it on the same model
-  -- so it needs fixing in guard serialization, not here. Vision models
-  (torchvision, timm) do round trip.
+* A transformers model does not round trip today. Capture, save and load work,
+  but the first served call recompiles and ``serving()`` therefore raises. The
+  entry frame is a ``functools.wraps`` decorator defined in
+  ``transformers/utils/generic.py`` (``can_return_tuple`` for Qwen2), so its
+  code object lives in that file; ``CompilePackage._add_function`` records
+  the module as the decorated callable's ``__module__``
+  (``...models.qwen2.modeling_qwen2``), so ``_install_codes`` hands the guards a
+  global scope that is not the one the frame runs in and every ``G[...]`` guard
+  misses with a ``KeyError``. This is not specific to this module -- plain
+  ``torch._dynamo.config.caching_precompile`` records the same mapping -- so it
+  needs fixing in the loader, not here. Vision models (torchvision, timm) do
+  round trip.
 * SystemInfo checks Python, PyTorch, CUDA, Triton and GPU name at load, but NOT
   the CPU vector ISA. Inductor bakes the vector width into generated CPU code,
   so an artifact captured on an AVX-512 host and served on an AVX2 host can
@@ -77,11 +82,11 @@ Know these before relying on an artifact in production:
   Two artifacts for DIFFERENT models that merely share an inner frame -- two
   models containing the same library block -- do coexist: entries accumulate
   on the shared code object and guards pick the right one. That holds only as
-  long as the guards can still tell the two apart. Drop the discriminating
-  guard, which is what ``require_no_risky_drops=False`` lets you do, and
-  dispatch becomes ambiguous: the first matching entry wins and one model is
-  silently served the other's graph. Nothing warns, because the eviction
-  warning covers entry frames only.
+  long as the guards can still tell the two apart. Ship an artifact that
+  dropped the discriminating guard -- which the default allows, the risky-drop
+  lint only reporting -- and dispatch becomes ambiguous: the first matching
+  entry wins and one model is silently served the other's graph. Nothing
+  warns, because the eviction warning covers entry frames only.
 * While an artifact is loaded, a plain ``torch.compile`` of anything else in
   the same module can die with ``AssertionError: Name '__builtins_dict___1'
   already exists in scope``. Loading installs that name -- a counter value from
@@ -161,7 +166,9 @@ def default_guard_filter_fn(
     There is no safe alternative default -- keeping these makes serialization
     raise for essentially every function -- so instead every drop is recorded
     with its source name in ``PrecompileSummary.dropped_guards``, and ``save()``
-    refuses by default when a drop looks load-bearing. See ``risky_dropped_guards``.
+    REPORTS the ones that look load-bearing rather than refusing them --
+    enforcement is opt-in via ``require_no_risky_drops=True``. See
+    ``risky_dropped_guards``.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
@@ -655,7 +662,14 @@ class PrecompileSession:
     ) -> PrecompileSummary:
         """
         Write the artifact, refusing by default to write one that cannot serve
-        what it claims. See ``PrecompileSummary.complete``.
+        what it claims: ``require_complete`` gates exactly
+        ``PrecompileSummary.complete``. The two guard rails are separate from
+        it, because a dropped guard is a wrong answer rather than a gap in
+        coverage, and both are off: every capture drops identity guards, and
+        the risky subset REPORTS through ``log.warning`` because real models
+        trip the lint on library internals. Audit
+        ``summary().risky_dropped_guards`` once for your model, then pass
+        ``require_no_risky_drops=True`` to hold it.
 
         ``path`` names a DIRECTORY, created if absent, holding a single file
         called ``entry``: a file-looking ``model.pt`` becomes ``model.pt/entry``.
@@ -670,21 +684,7 @@ class PrecompileSession:
         if self._stack is not None:
             raise RuntimeError("save() must be called after the capture block exits")
         summary = self.summary()
-        if summary.risky_dropped_guards and not require_no_risky_drops:
-            # Advisory, not a gate. Measured on stock models: torchvision
-            # resnet18 and mobilenet_v3 report none, timm's ViT reports one
-            # (a re-exported torch._assert), and transformers' Qwen2 reports
-            # 33, nearly all library internals no deployment swaps. Refusing by
-            # default would refuse real models and teach users to switch the
-            # check off, so it reports and lets you opt in to enforcement.
-            log.warning(
-                "precompile: %d dropped identity guard(s) sit at slots config can "
-                "choose, so nothing checks them at load: %s. Audit them against your "
-                "deployment and pass require_no_risky_drops=True to enforce.",
-                len(summary.risky_dropped_guards),
-                [n for _, n in summary.risky_dropped_guards][:8],
-            )
-        if require_no_risky_drops and summary.risky_dropped_guards:
+        if summary.risky_dropped_guards and require_no_risky_drops:
             raise PackageError(
                 f"Precompilation dropped identity guard(s) on "
                 f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
@@ -696,8 +696,35 @@ class PrecompileSession:
                 f"selects a different object on the serving machine, the artifact "
                 f"serves the graph traced against the capture-time object and returns "
                 f"a wrong answer with no error. Make the value reachable as data the "
-                f"graph can guard, pin it so both machines agree, or pass "
-                f"require_no_risky_drops=False to accept the risk."
+                f"graph can guard, pin it so both machines agree, or drop "
+                f"require_no_risky_drops=True -- reporting is the default -- to "
+                f"accept the risk."
+            )
+        elif summary.risky_dropped_guards:
+            # Advisory, not a gate. Measured on stock models: torchvision
+            # resnet18 and mobilenet_v3 report none, timm's ViT reports one (a
+            # re-exported torch._assert) and transformers' Qwen2 reports 33,
+            # nearly all of them library internals that no deployment swaps.
+            # Refusing by default would refuse real models and teach users to
+            # switch the check off, so it reports and enforcement is opt-in.
+            names = [n for _, n in summary.risky_dropped_guards]
+            # The cut below is in guard-type order and says nothing about
+            # severity: Qwen2's one genuinely config-selected drop sorts past
+            # it, so a truncated report has to say where the rest are.
+            rest = (
+                ""
+                if len(names) <= 8
+                else f" Only the first 8 are shown, cut in guard-type order "
+                f"rather than by severity; summary().risky_dropped_guards has "
+                f"all {len(names)}."
+            )
+            log.warning(
+                "precompile: %d dropped identity guard(s) sit at slots config can "
+                "choose, so nothing checks them at load: %s.%s Audit them against "
+                "your deployment and pass require_no_risky_drops=True to enforce.",
+                len(names),
+                names[:8],
+                rest,
             )
         if require_no_dropped_guards and summary.dropped_guards:
             raise PackageError(

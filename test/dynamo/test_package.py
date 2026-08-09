@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import gc
 import importlib
+import inspect
 import math
 import math as _precompile_stdlib_alias
 import os
@@ -24,6 +25,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
+    _defining_module_name,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
@@ -31,6 +33,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import (
+    _dynamo_alias_module,
     precompile_capture,
     precompile_load,
     serving,
@@ -389,6 +392,30 @@ class PrecompileFullyQualified(torch.nn.Module):
         return torch.nn.functional.gelu(x).sum()
 
 
+class PrecompileFunctionScopedImport(torch.nn.Module):
+    """A function-scoped `import torch`, which transformers is full of. Dynamo
+    reaches it through the `__import_torch` alias and guards the attributes read
+    off that alias, never the alias itself."""
+
+    def forward(self, x):
+        import torch
+
+        if isinstance(x, torch.Tensor):
+            return torch.relu(x).sum()
+        return x
+
+
+class PrecompileFunctionScopedUserImport(torch.nn.Module):
+    """The same shape for a user module, which clears on the other arm of the
+    namespace rule: the namespace owns the def rather than torch owning the
+    namespace."""
+
+    def forward(self, x):
+        import lazy_helper
+
+        return lazy_helper.op(x).sum()
+
+
 class PrecompileModuleInAttribute(torch.nn.Module):
     """self.ns = importlib.import_module(cfg.backend) -- a config-picked module."""
 
@@ -609,6 +636,37 @@ class Model(torch.nn.Module):
     def forward(self, x):
         n = float(isinstance([], _abc.Sized))
         return (relu(x) * sqrt(2.0) * _math.fabs(-1.0) * n).sum()
+"""
+
+_LAZY_HELPER_SRC = """\
+def op(x):
+    return x * 3.0
+"""
+
+# collections.abc, three lines of `from _collections_abc import *`, with the
+# private file spoofing __name__ back to the public name so tracebacks read
+# right. Every model that inlines through such a module hits both traps.
+_SHIM_IMPL_SRC = """\
+# Renamed out of the way for import-time reasons, exactly as _collections_abc.
+__name__ = "shim_abc"
+
+
+def helper(x):
+    return x * 3.0
+"""
+
+_SHIM_SRC = """\
+from _shim_impl import *
+"""
+
+_SHIM_MODEL_SRC = """\
+import shim_abc
+import torch
+
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        return shim_abc.helper(x).sum()
 """
 
 
@@ -871,9 +929,10 @@ _RISKY_DROP_CORPUS = {
     ),
 }
 
-# The other half of the corpus, and the half that keeps the gate usable: if
-# ordinary code trips it, users pass require_no_risky_drops=False once and stop
-# seeing the drops that matter. Each of these pairs with a positive above.
+# The other half of the corpus, and the half that keeps the report worth
+# reading: the lint only warns by default, so if ordinary code trips it the
+# warning is noise nobody audits and nobody ever opts into enforcement. Each of
+# these pairs with a positive above.
 _BENIGN_DROP_CORPUS = {
     "aliased_stdlib_import": lambda t: (PrecompileAliasedStdlibImport(), (_CORPUS_X,)),
     "aliased_torch_import": lambda t: (PrecompileAliasedImport(), (_CORPUS_X,)),
@@ -2059,6 +2118,38 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # The risk is acknowledgeable, not a hard block.
         session.save(self.path(), require_no_risky_drops=False)
 
+    def test_a_risky_drop_is_reported_and_still_saves_by_default(self):
+        # The lint is advisory, so on a default save() the WARNING is the only
+        # thing said about a slot nothing checks at load. Pin the report
+        # itself: a flip back to refusing, or a warning that quietly stops
+        # firing, otherwise shows up on a serving machine rather than here.
+        clean = precompile_capture(
+            PrecompileNoDispatchSlot(), backend="eager", dynamic=False
+        )
+        with clean as compiled, torch.no_grad():
+            compiled(torch.randn(3, 4))
+        with self.assertNoLogs("torch._dynamo.precompile_package", "WARNING"):
+            clean.save(self.path())
+
+        torch._dynamo.reset()
+        session = precompile_capture(
+            staged_with_global_function_ref, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(torch.randn(4, 8))
+        with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as logs:
+            session.save(self.path())
+        reported = [m for m in logs.output if "dropped identity guard" in m]
+        self.assertEqual(len(reported), 1, logs.output)
+        self.assertIn("PRECOMPILE_ACTIVATION", reported[0])
+        self.assertIn("require_no_risky_drops=True", reported[0])
+        # Enforcing raises instead of reporting, rather than doing both.
+        with (
+            self.assertNoLogs("torch._dynamo.precompile_package", "WARNING"),
+            self.assertRaisesRegex(PackageError, "PRECOMPILE_ACTIVATION"),
+        ):
+            session.save(self.path(), require_no_risky_drops=True)
+
     @parametrize("owner", ("user", "torch", "torch_functional", "builtin"))
     def test_risky_drop_detected_through_a_module_attribute(self, owner):
         # self.act is a dispatch slot whatever it holds. Its guard is dropped as
@@ -2090,8 +2181,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # torch internals, on stdlib modules and their attributes, and on a
         # global bound to a def of its own name -- which only a source edit can
         # repoint, and edits are caught by the inlined-source checksum. If those
-        # counted as risky the check would refuse a model like this one and get
-        # switched off.
+        # counted as risky, a model like this one would warn on every save and
+        # the report would stop being read.
         session = precompile_capture(
             PrecompileNoDispatchSlot(), backend="eager", dynamic=False
         )
@@ -2110,7 +2201,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # reached through the builtins dict Dynamo installs, with no binding in
         # front of them for config to repoint, so the exemption has to survive
         # being narrowed to that read -- otherwise every model calling len()
-        # gets refused and the check gets switched off.
+        # warns on every save and the report stops being read.
         cfg = {"alpha": 1, "beta": 2}
         session = precompile_capture(
             staged_with_builtin_calls, backend="eager", dynamic=False
@@ -2217,8 +2308,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # like the module's __name__, so the def-name rule that clears
         # `G['math']` does not clear `G['F']`. What clears it is that torch owns
         # the module: there is one torch.nn.functional and no config picks
-        # another, and a check that refused every model spelling its imports the
-        # ordinary way would be switched off on day one.
+        # another, and a check that flagged every model spelling its imports the
+        # ordinary way would be ignored from day one.
         session = precompile_capture(
             PrecompileAliasedImport(), backend="eager", dynamic=False
         )
@@ -2311,6 +2402,51 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("G['__import_own_helpers']._scale", dropped)
         self.assertEqual(summary.risky_dropped_guards, ())
         session.save(self.path())
+
+    def test_reads_off_an_import_alias_are_anchored_to_its_module(self):
+        # A function-scoped `import torch` is reached through the alias Dynamo
+        # installs for it, and Dynamo guards the attributes read off that alias
+        # but never the bare alias, so nothing in the guards holds the module.
+        # Left unanchored, torch.Tensor reads as a config-swappable slot.
+        session = precompile_capture(
+            PrecompileFunctionScopedImport(), backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.ones(4))
+        summary = session.summary()
+        dropped = [name for _, name in summary.dropped_guards]
+        self.assertIn("G['__import_torch'].Tensor", dropped)
+        self.assertIn("G['__import_torch'].relu", dropped)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        session.save(self.path(), require_no_risky_drops=True)
+
+    def test_reads_off_a_user_module_import_alias_are_anchored(self):
+        # The same shape clearing on the other arm: the alias names a user
+        # module, so nothing about torch or the stdlib waives the read, and
+        # what does is that the namespace it decodes to owns the def.
+        pkg = self._write_module("lazy", "lazy_helper", _LAZY_HELPER_SRC)
+        self._forget_modules("lazy_helper")
+        self._import_module(pkg, "lazy_helper")
+
+        session = precompile_capture(
+            PrecompileFunctionScopedUserImport(), backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.ones(4))
+        summary = session.summary()
+        dropped = [name for _, name in summary.dropped_guards]
+        self.assertIn("G['__import_lazy_helper'].op", dropped)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        session.save(self.path(), require_no_risky_drops=True)
+
+    def test_an_import_alias_decodes_to_the_module_it_names(self):
+        self.assertIs(_dynamo_alias_module("__import_torch"), torch)
+        self.assertIs(
+            _dynamo_alias_module("__import_torch_dot_nn_dot_functional"),
+            torch.nn.functional,
+        )
+        self.assertIsNone(_dynamo_alias_module("__import_not_a_module_at_all"))
+        self.assertIsNone(_dynamo_alias_module("CFG"))
 
     def test_a_module_held_in_an_attribute_is_a_risky_drop(self):
         # A module read off a global is fixed by the import statement, but one
@@ -2768,6 +2904,50 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             torch.no_grad(),
         ):
             self.assertEqual(loaded(x), x + 1.0)
+
+    def test_inlined_code_is_named_by_the_file_that_holds_it(self):
+        # inspect.getmodule maps a file to the name the module knows itself by,
+        # and a private implementation file that spoofs __name__ answers with
+        # the shim re-exporting it. The key is what load-time revalidation
+        # re-imports, and __name__ imports to the shim, so it has to be the key.
+        pkg = self._write_module("shim", "_shim_impl", _SHIM_IMPL_SRC)
+        self._write_module("shim", "shim_abc", _SHIM_SRC)
+        self._forget_modules("_shim_impl", "shim_abc")
+        shim = self._import_module(pkg, "shim_abc")
+        impl = sys.modules["_shim_impl"]
+        self.assertIsNot(inspect.getmodule(shim.helper.__code__), impl)
+        name = _defining_module_name(shim.helper.__code__)
+        self.assertEqual(name, "_shim_impl")
+        self.assertIs(importlib.import_module(name), impl)
+
+    def test_inlining_through_a_re_exporting_shim_round_trips(self):
+        # End to end because the two halves fail at different times: hashing
+        # the inlined line range against the shim raises "Source mismatch"
+        # during capture, and recording the shim's name rather than the key
+        # raises "Source code changes detected" at load, against source that
+        # nothing changed.
+        pkg = self._write_module("shim", "_shim_impl", _SHIM_IMPL_SRC)
+        self._write_module("shim", "shim_abc", _SHIM_SRC)
+        self._write_module("shim", "shim_model", _SHIM_MODEL_SRC)
+        self._forget_modules("_shim_impl", "shim_abc")
+        model = self._import_module(pkg, "shim_model").Model()
+        x = torch.ones(4)
+        expected = model(x)
+
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        sources = session._package.cache_entry().source_info.inlined_sources
+        recorded = {s.module for s in sources}
+        self.assertIn("_shim_impl", recorded)
+        self.assertNotIn("shim_abc", recorded)
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        with precompile_load(
+            model, self.path(), backend="eager", dynamic=False
+        ) as loaded:
+            self.assertEqual(loaded(x), expected)
 
     def test_capture_rejects_a_callable_with_no_code_object(self):
         def scaled(scale, x):
