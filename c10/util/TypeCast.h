@@ -9,6 +9,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
 #include <c10/util/overflows.h>
+#include <c10/util/safe_conv.h>
 
 #include <limits>
 #include <type_traits>
@@ -63,25 +64,26 @@ using scalar_value_type_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
 template <typename T>
 constexpr bool is_saturating_float_to_signed_int_source_v =
-    std::is_floating_point_v<scalar_value_type_t<T>> ||
-    std::is_same_v<scalar_value_type_t<T>, c10::Half> ||
-    std::is_same_v<scalar_value_type_t<T>, c10::BFloat16>;
+    !is_complex<scalar_value_type_t<T>>::value &&
+    std::numeric_limits<scalar_value_type_t<T>>::is_specialized &&
+    !std::numeric_limits<scalar_value_type_t<T>>::is_integer;
 
 template <typename src_t>
 C10_HOST_DEVICE static inline constexpr auto signed_int_compare_value(
     src_t src) {
-  if constexpr (std::is_floating_point_v<scalar_value_type_t<src_t>>) {
-    return src;
-  } else {
-    return static_cast<float>(src);
-  }
+  using source_t = scalar_value_type_t<src_t>;
+  using compare_t = std::conditional_t<
+      (std::numeric_limits<source_t>::digits <=
+       std::numeric_limits<float>::digits),
+      float,
+      source_t>;
+  return static_cast<compare_t>(src);
 }
 
-// Float -> integer is UB on out-of-range/NaN values. For standard floating
-// sources and CPU Half/BFloat16 sources to signed integer destinations on host,
-// out-of-range values saturate and NaN maps to 0 before casting below.
-// Device-compiled paths, unsigned destinations, and other reduced floating
-// source types keep the platform-defined result for compatibility.
+// Float -> integer is UB on out-of-range/NaN values. For scalar floating
+// sources to signed integer destinations on host, out-of-range values saturate
+// and NaN maps to 0 before casting below. Device-compiled paths and unsigned
+// destinations keep the platform-defined result for compatibility.
 // Suppress UBSan only here, so the dispatching template below stays
 // UBSan-clean.
 template <typename dest_t, typename src_t>
@@ -98,17 +100,16 @@ C10_HOST_DEVICE static inline constexpr dest_t saturated_cast_to_signed_int(
   static_assert(std::is_signed_v<dest_t>);
   const auto src_for_compare = signed_int_compare_value(src);
   using compare_t = decltype(src_for_compare);
-  constexpr auto min =
+  constexpr auto lower =
       static_cast<compare_t>(std::numeric_limits<dest_t>::lowest());
-  constexpr auto max =
-      static_cast<compare_t>(std::numeric_limits<dest_t>::max());
+  constexpr auto upper = -lower;
   if (src_for_compare != src_for_compare) {
     return static_cast<dest_t>(0);
   }
-  if (src_for_compare < min) {
+  if (src_for_compare < lower) {
     return std::numeric_limits<dest_t>::lowest();
   }
-  if (src_for_compare >= max) {
+  if (src_for_compare >= upper) {
     return std::numeric_limits<dest_t>::max();
   }
   return unchecked_cast_to_int<dest_t>(src_for_compare);
@@ -385,6 +386,20 @@ C10_HOST_DEVICE To convert(From f) {
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+    report_overflow(name);
+  }
+  return convert<To, From>(f);
+}
+
+// Range-checked conversion that PERMITS signed->unsigned two's-complement
+// wraparound (via overflows() with its default strict_unsigned=false). Retained
+// only to preserve the historical behavior of the few call sites that relied on
+// the wrap. DO NOT use in new code: use c10::safe_conv (strict integer
+// narrowing, c10/util/safe_conv.h) or c10::checked_convert (general, above).
+template <typename To, typename From>
+To unsafe_wrapping_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
   if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
     report_overflow(name);

@@ -5,7 +5,8 @@ from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 from torch._inductor.runtime.runtime_utils import ceildiv
 from cutlass.utils import TensorMapUpdateMode
 {{gen_defines()}}
-# ---- Import GroupedGemm implementation, copied on PyTorch build from Cutlass repository: cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py ----
+# ---- Import GroupedGemm implementation, copied from Cutlass during build. ----
+# Source: examples/python/CuTeDSL/cute/blackwell/kernel/grouped_gemm/grouped_gemm.py
 from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm import (
     GroupedGemmKernel,
 )

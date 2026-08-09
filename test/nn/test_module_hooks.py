@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import _create_basic_net, NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize as parametrize_test,
@@ -186,6 +187,8 @@ class DummyContextManager:
 
 
 class TestModuleHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
         fired_hooks: list[int] = []
@@ -370,7 +373,6 @@ class TestModuleHooks(TestCase):
         out = model(x, bias=bias)
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_remove_kwarg_hooks(self):
         # test forward pre and forward hooks
         fired_hooks: list[int] = []
@@ -414,7 +416,6 @@ class TestModuleHooks(TestCase):
             forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_always_called_forward_hooks(self):
         x: torch.Tensor = torch.ones(10, 10)
         model = FailsInForwardModel()
@@ -551,6 +552,8 @@ def _hook_to_pickle(*args, **kwargs):
 
 
 class TestStateDictHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @swap([True, False])
     def test_load_state_dict_pre_hook(self):
         m = nn.Linear(10, 10)
@@ -945,6 +948,8 @@ class TestStateDictHooks(TestCase):
 
 
 class TestModuleGlobalHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         nn.modules.module._global_backward_hooks = OrderedDict()
         nn.modules.module._global_forward_hooks = OrderedDict()
@@ -1256,6 +1261,7 @@ class TestModuleGlobalHooks(TestCase):
 
 
 class TestModuleHookNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -1386,7 +1392,6 @@ class TestModuleHookNN(NNTestCase):
         module(t).sum().backward()
         self.assertEqual(cnt["backward_cnt"], 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_hook_invalid_outputs(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -1484,6 +1489,17 @@ class TestModuleHookNN(NNTestCase):
         return_val = "invalid"
         with self.assertRaisesRegex(RuntimeError, "where no input requires gradient"):
             mod(inp).sum().backward()
+
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
+    def test_pre_hook_no_requires_grad_no_warning(self):
+        # A full backward pre-hook only receives grad_output, so firing from the
+        # output side when no input requires grad is expected and must not emit
+        # the full-backward-hook warning. See
+        # https://github.com/pytorch/pytorch/issues/189093
+        mod = nn.Linear(2, 3)
+        inp = torch.rand(1, 2)
+        mod.register_full_backward_pre_hook(lambda mod, gO: None)
+        self.assertNotWarn(lambda: mod(inp).sum().backward())
 
     def test_hook_last_arg_requires_grad(self):
         mod = nn.L1Loss()
