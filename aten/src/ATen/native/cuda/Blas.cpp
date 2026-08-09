@@ -279,14 +279,21 @@ static bool canUseAddmmCudaLtWithDistinctCAndD(
     return false;
   }
   const auto scalar_type = mat1.scalar_type();
-  if (scalar_type != at::ScalarType::Double &&
-      scalar_type != at::ScalarType::Float &&
-      scalar_type != at::ScalarType::Half &&
+  // Reduced precision only. Handing cuBLASLt distinct C and D changes which
+  // algorithm its heuristic returns; for fp16/bf16 that was measured to be
+  // bit-identical to copy-then-GEMM, but for fp32 it shifts results by about an
+  // ulp. That is still a legal GEMM result, but it is enough to break tests that
+  // require deterministic output. Reduced precision is also where this path
+  // matters, so fp32/fp64 keep copy-then-GEMM.
+  if (scalar_type != at::ScalarType::Half &&
       scalar_type != at::ScalarType::BFloat16) {
     return false;
   }
-  // Match the existing cuBLASLt shape guard.
-  return mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1;
+  // Match the existing cuBLASLt shape guard (k > 1, n > 1), and additionally
+  // exclude m == 1: on a degenerate row cuBLASLt may pick a kernel that leaves
+  // D unwritten, which is only correct while C has already been copied into D
+  // and the two pointers alias.
+  return mat1.sizes()[0] > 1 && mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1;
 #endif
 }
 

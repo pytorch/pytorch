@@ -6502,7 +6502,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @dtypes(torch.float32, torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.half)
     def test_addmm_out_distinct_c_and_d_is_selected(self, device, dtype):
         # The point of the distinct-C/D path is that C is not copied into the
         # output first, so assert on the kernels actually launched: the fast
@@ -6562,6 +6562,96 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
         self.assertEqual(wide_out[:, n:], untouched)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.bfloat16, torch.half)
+    @parametrize("shape", [(2, 256, 1024), (18, 128, 128), (64, 96, 32), (256, 384, 128)])
+    def test_addmm_out_distinct_c_and_d_matches_copy_then_gemm(self, device, dtype, shape):
+        # Handing cuBLASLt distinct C and D changes which algorithm its heuristic
+        # returns, so the path is only taken for dtypes where that is known not to
+        # perturb the result. Compare against the form it replaces: with `out`
+        # aliasing `input`, C is already in D and the GEMM runs in place, which is
+        # exactly what copy-then-GEMM produced. For fp16/bf16 the two must agree
+        # bit for bit, not merely to a tolerance -- a tolerance would hide the
+        # per-ulp drift that breaks tests requiring deterministic output, which is
+        # why fp32/fp64 do not take this path at all.
+        m, n, k = shape
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+
+        aliased = inp.clone()
+        torch.addmm(aliased, mat1, mat2, beta=1.0, out=aliased)
+
+        out = torch.full((m, n), 7.0, dtype=dtype, device=device)
+        torch.addmm(inp, mat1, mat2, beta=1.0, out=out)
+
+        self.assertEqual(out, aliased, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.bfloat16, torch.half)
+    def test_addmm_out_distinct_c_and_d_float_out_reduced_input(self, device, dtype):
+        # Reduced-precision inputs with an fp32 output (the `out_dtype` overload)
+        # go through a separate cuBLASLt entry point, and the distinct-C/D guard
+        # requires C, D and mat1 to share a dtype. This combination must therefore
+        # keep the pre-existing copy-then-GEMM behavior: correct, and launching
+        # more than the single kernel the fast path does.
+        from torch.profiler import profile, ProfilerActivity
+
+        m, n, k = 64, 96, 32
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+
+        def kernel_count(fn):
+            for _ in range(3):  # warm up autotuning/handle creation
+                fn()
+            torch.cuda.synchronize()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                fn()
+                torch.cuda.synchronize()
+            return sum(1 for e in prof.events()
+                       if e.device_type.name == "CUDA" and e.self_device_time_total > 0)
+
+        same_out = torch.empty((m, n), dtype=dtype, device=device)
+        same_dtype_kernels = kernel_count(
+            lambda: torch.addmm(inp, mat1, mat2, beta=1.0, out=same_out))
+        self.assertEqual(same_dtype_kernels, 1)
+
+        float_out = torch.full((m, n), 7.0, dtype=torch.float32, device=device)
+        mixed_kernels = kernel_count(
+            lambda: torch.addmm(inp, mat1, mat2, torch.float32, beta=1.0, out=float_out))
+        self.assertGreater(mixed_kernels, same_dtype_kernels)
+
+        ref = inp.double() + (mat1.double() @ mat2.double())
+        self.assertEqual(float_out, ref.to(torch.float32), atol=5e-2, rtol=5e-2,
+                         exact_dtype=False)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.double)
+    def test_addmm_out_distinct_c_and_d_not_selected_for_fp32(self, device, dtype):
+        # fp32/fp64 deliberately stay on copy-then-GEMM: distinct C and D changes
+        # the algorithm cuBLASLt picks, which shifts results by about an ulp and
+        # breaks tests requiring deterministic output.
+        from torch.profiler import profile, ProfilerActivity
+
+        m, n, k = 256, 384, 128
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+        out = torch.empty((m, n), dtype=dtype, device=device)
+
+        for _ in range(3):
+            torch.addmm(inp, mat1, mat2, beta=1.0, out=out)
+        torch.cuda.synchronize()
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            torch.addmm(inp, mat1, mat2, beta=1.0, out=out)
+            torch.cuda.synchronize()
+        kernels = sum(1 for e in prof.events()
+                      if e.device_type.name == "CUDA" and e.self_device_time_total > 0)
+        self.assertGreater(kernels, 1)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
