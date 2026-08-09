@@ -28,7 +28,8 @@ from ...ir import (
     Reduction,
 )
 from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
-from ...kernel.gemm_epilogue_ir import (
+from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+from ...kernel.loop_ir_epilogue_lowering import (
     centered_mean_consumer_type_unrolled_ir,
     GemmEpilogueIRAnalysis,
     grouped_reduction_ir,
@@ -138,7 +139,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         node: BaseSchedulerNode, require_epilogue_fusion: bool = False
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
-        assert isinstance(node, SchedulerNode)  # noqa: S101
+        if not isinstance(node, SchedulerNode):
+            raise AssertionError(f"expected SchedulerNode, got {type(node)}")
         ir_node = node.node
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
@@ -269,6 +271,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 store,
                 gemm_node.get_name(),
                 group,
+                gemm_node.get_dtype(),
             )
             if store is not None
             else None
@@ -716,18 +719,21 @@ class NVUniversalGemmScheduling(BaseScheduling):
             [n.get_name() for n in epilogue_nodes] if epilogue_nodes else [],
             [n.get_name() for n in prologue_nodes] if prologue_nodes else [],
         )
-        assert self.is_nv_universal_gemm_template(template_node), (  # noqa: S101
-            "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
-        )
-        assert not prologue_nodes, (  # noqa: S101
-            "NVIDIA Universal GEMM doesn't support prologue fusion yet"
-        )
+        if not self.is_nv_universal_gemm_template(template_node):
+            raise AssertionError(
+                "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
+                "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
+            )
+        if prologue_nodes:
+            raise AssertionError(
+                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+            )
 
         template_node = cast(SchedulerNode, template_node)
 
         original_ir_node = template_node.node
-        assert isinstance(original_ir_node, Buffer)  # noqa: S101
+        if not isinstance(original_ir_node, Buffer):
+            raise AssertionError(f"expected Buffer, got {type(original_ir_node)}")
         original_buffer_name = original_ir_node.get_name()
 
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
@@ -788,16 +794,31 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 ):
                     removed_buffers_with_gemm.add(original_buffer_name)
 
-                if evt_nodes and feed_main is None:
-                    reads, writes, var_renames, evt_code = (
-                        CutlassEVTCodegen.ir_to_evt_python_code(
-                            original_buffer_name,
-                            evt_nodes,
-                            removed_buffers_with_gemm,
-                            fn_name=EPILOGUE_FN_NAME,
-                            as_standalone_function=True,
+                if evt_nodes:
+                    evt_buffers = [
+                        node.node
+                        for node in evt_nodes
+                        if isinstance(node.node, ComputedBuffer)
+                    ]
+                    try:
+                        reads, writes, var_renames, evt_code = (
+                            LoopIRCuteDSLCodegen.from_buffers(
+                                original_buffer_name,
+                                evt_buffers,
+                                removed_buffers_with_gemm,
+                                EPILOGUE_FN_NAME,
+                            )
                         )
-                    )
+                    except NotImplementedError:
+                        reads, writes, var_renames, evt_code = (
+                            CutlassEVTCodegen.ir_to_evt_python_code(
+                                original_buffer_name,
+                                list(evt_nodes),
+                                removed_buffers_with_gemm,
+                                fn_name=EPILOGUE_FN_NAME,
+                                as_standalone_function=True,
+                            )
+                        )
                     epilogue_fn_code = evt_code
                     epilogue_reads = reads
                     epilogue_writes = writes
@@ -836,7 +857,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 log.warning("NVGEMM epilogue codegen failed unexpectedly: %s", e)
                 raise
 
-        assert ctb.make_kernel_render is not None  # noqa: S101 # noqa: S101
+        if ctb.make_kernel_render is None:
+            raise AssertionError("expected ctb.make_kernel_render to be not None")
         kernel, render = ctb.make_kernel_render(
             ctb,
             epilogue_fn_code=epilogue_fn_code,
@@ -965,7 +987,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         output_bufs: list[str] = []
         if epilogue:
             template_sn = cast(SchedulerNode, template)
-            assert isinstance(template_sn.node, Buffer)  # noqa: S101
+            if not isinstance(template_sn.node, Buffer):
+                raise AssertionError(f"expected Buffer, got {type(template_sn.node)}")
             original_buffer_name = template_sn.node.get_name()
             plan = self._epilogue_plan(template_sn.node, epilogue)
             evt_nodes = [] if plan.feed_main is not None else plan.evt_nodes
@@ -1005,7 +1028,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 only_gen_src_code=True,
             )
 
-        assert src_code is not None  # noqa: S101 # noqa: S101
+        if src_code is None:
+            raise AssertionError("expected src_code to be not None")
         src_code = src_code.replace(
             str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
         )

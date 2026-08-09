@@ -1,8 +1,10 @@
 #include <chrono>
 #include <iostream>
+#include <vector>
 
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 #include "c10d/Types.hpp"
@@ -17,6 +19,32 @@
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
+
+TEST(NCCLBootstrapTest, RootIndex) {
+  struct TestCase {
+    int numRanks;
+    int numRoots;
+    std::vector<int> expected;
+  };
+  const std::vector<TestCase> cases = {
+      {4, 1, {0, -1, -1, -1}},
+      {4, 4, {0, 1, 2, 3}},
+      {6, 3, {0, -1, 1, -1, 2, -1}},
+      {10, 3, {0, -1, -1, -1, 1, -1, -1, 2, -1, -1}},
+      {3, 2, {0, -1, 1}},
+  };
+
+  for (const auto& test : cases) {
+    ASSERT_EQ(test.expected.size(), test.numRanks);
+    for (int rank = 0; rank < test.numRanks; ++rank) {
+      EXPECT_EQ(
+          c10d::nccl2::detail::getRootIndex(rank, test.numRanks, test.numRoots),
+          test.expected[rank])
+          << "rank=" << rank << ", numRanks=" << test.numRanks
+          << ", numRoots=" << test.numRoots;
+    }
+  }
+}
 
 class NCCLTestBase {
  public:
