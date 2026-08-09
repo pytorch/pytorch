@@ -1370,31 +1370,16 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
-    # Note: [is_static_input on backward placeholders]
-    #
-    # Whether an input has a static address (params/buffers/
-    # mark_static_address) is tracked positionally, as indices into the flat
-    # forward inputs (fw_metadata.static_input_indices), not as node
-    # metadata. Positional lookup stops working past this point: the
-    # backward graph's input list is (saved symints, saved values in
-    # partitioner-chosen order, tangents, ...), so a forward input index is
-    # meaningless there. Historically the backward compiler guessed from
-    # placeholder names instead ("primals_*" == static, see count_tangents),
-    # which wrongly classifies a saved-for-backward plain user input as
-    # static: its address changes every call, and e.g. baking the example
-    # input's alignment into backward codegen then crashes with a misaligned
-    # address when a later call passes a misaligned tensor.
-    #
-    # So convert the positional info to node metadata here, while primals
-    # are still 1:1 with flat forward inputs. The meta dict is shared by
+    # Stamp is_static_input on primal placeholders for the backward
+    # compiler; see Note: [is_static_input on backward placeholders] in
+    # torch/_inductor/compile_fx.py. This must happen here, while primals
+    # are still 1:1 with flat forward inputs, because staticness is tracked
+    # positionally (static_lifetime_input_nodes derives from
+    # fw_metadata.static_input_indices) and the backward graph's input
+    # ordering destroys that correspondence. The meta dict is shared by
     # reference with the extracted fwd/bwd placeholder nodes
     # (_extract_graph_with_inputs_outputs), so the stamp is visible on
     # bw_module's placeholders regardless of how saving reorders them.
-    # For static inputs the backward compiler may keep baking
-    # address-derived properties into generated code; their address never
-    # changes without a recompile. Saved activations are not stamped: they
-    # are inductor-allocated and handled separately (see
-    # get_static_bw_input_idxs for the partitioned-forward case).
     #
     # TODO: staticness arguably belongs on the AOTInput descriptors
     # (meta["desc"]); today those cannot express it (the dynamo frontend

@@ -2811,20 +2811,35 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
-        # Static backward inputs are the saved tensors, minus two
+        # Note: [is_static_input on backward placeholders]
+        #
+        # A backward placeholder may carry meta["is_static_input"], declaring
+        # whether its runtime tensor is address-stable across calls (a param/
+        # buffer/mark_static_address input, as opposed to e.g. a plain user
+        # input that was saved for backward and gets a fresh tensor every
+        # call). Inductor uses this to decide which inputs may have
+        # address-derived properties (alignment) baked into generated code
+        # versus needing the runtime copy_if_misaligned treatment; a wrong
+        # "static" here is a misaligned-address crash, not a deoptimization.
+        #
+        # Whoever produces the backward graph is responsible for stamping,
+        # because only the producer can map staticness (tracked positionally
+        # over the flat forward inputs, fw_metadata.static_input_indices)
+        # onto its choice and ordering of saved tensors; by the time the
+        # graph reaches us here, that correspondence is gone. AOTAutograd's
+        # partitioner stamps in _extract_fwd_bwd_modules, where primals are
+        # still 1:1 with flat forward inputs. Unstamped placeholders fall
+        # back to the historical name-based classification below (all
+        # "primals_*" static), so producers that do not stamp (custom
+        # partition_fns) keep the old, less safe behavior.
+        #
+        # Static backward inputs are thus the saved tensors, minus two
         # over-approximations of the name-based classification:
         # 1. When the forward was partitioned, saved activations from inline
         #    code between partitions are NOT at fixed addresses; keep only
         #    "primals_*" (get_static_bw_input_idxs).
-        # 2. A saved-for-backward plain user input is a "primals_*" but is
-        #    NOT address-stable (fresh tensor every call), so it must get
-        #    the same runtime copy_if_misaligned treatment as tangents
-        #    rather than having the example input's alignment baked in. The
-        #    partitioner records true staticness on saved primal
-        #    placeholders; see Note: [is_static_input on backward
-        #    placeholders]. Unstamped nodes (saved activations, or graphs
-        #    from custom partitioners) default to static, preserving the
-        #    name-based classification.
+        # 2. Saved-for-backward plain user inputs, demoted via the stamp as
+        #    described above.
         if compiler_config_extra.forward_is_partitioned.value:
             candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
