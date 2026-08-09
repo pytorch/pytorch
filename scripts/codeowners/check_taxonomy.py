@@ -310,8 +310,8 @@ def print_report(report: Report) -> None:
         "(active ownership rules and commented unresolved paths)"
     )
     print(
-        f"  Overlapping paths: {len(report.overridden)} "
-        "(matched by multiple patterns; narrower rules are expected)"
+        f"  Paths matched by multiple patterns: {len(report.overridden)} "
+        "(expected when narrower patterns follow broader ones)"
     )
     print("\nIntegrity checks (all must be zero)")
     print(f"  Uncovered paths: {len(report.uncovered)}")

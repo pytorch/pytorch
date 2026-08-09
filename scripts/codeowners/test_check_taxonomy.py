@@ -144,6 +144,11 @@ class TestCodeownersTaxonomy(TestCase):
         self.assertIn("Edit CODEOWNERS to fix failures", output.getvalue())
         self.assertIn("`/path/ @owner`", output.getvalue())
         self.assertIn("Tracked paths: 2 (committed paths checked)", output.getvalue())
+        self.assertIn(
+            "Paths matched by multiple patterns: 0 "
+            "(expected when narrower patterns follow broader ones)",
+            output.getvalue(),
+        )
         self.assertIn("Integrity checks (all must be zero)", output.getvalue())
         self.assertIn("Uncovered paths (1):", output.getvalue())
         self.assertIn("Under the appropriate `# [surface]`", output.getvalue())
