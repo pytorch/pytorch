@@ -146,7 +146,9 @@ class attributes:
   rather than waiting for the buffers to be cleared at the end of the Node's execution.
   This can reduce peak memory usage in backward passes where saved tensors are only
   needed once. The default is ``False``. Note that ``saved_tensors`` can only be
-  accessed once when this is enabled; a second access will raise an error.
+  accessed once when this is enabled; a second access will raise an error. The same
+  one-access rule applies when compiled autograd is enabled, including across repeated
+  backward calls that retain the graph.
 
 - {attr}`~Function.boxed_grads_call`: When set to ``True`` on the
   {class}`~Function` subclass, backward receives grads as a single mutable list

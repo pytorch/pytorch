@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/library.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -88,14 +89,111 @@ struct RuntimeState {
     return cpp_tensor_pre_hooks[idx](grad);
   }
 
+  void clear_saved_tensors(
+      size_t idx,
+      const at::Tensor& state,
+      at::IntArrayRef input_clear_indices,
+      at::IntArrayRef packed_input_clear_indices) {
+    pybind11::gil_scoped_acquire gil;
+    auto* function = get_function(idx);
+    validate_saved_tensors_dispatch_token(state);
+    THPFunction_compiled_autograd_clear_saved_tensors(function);
+    clear_list_items(inputs, input_clear_indices, /*allow_empty=*/true);
+    clear_list_items(
+        packed_inputs, packed_input_clear_indices, /*allow_empty=*/false);
+  }
+
+  void check_saved_tensors(size_t idx, const at::Tensor& state) {
+    pybind11::gil_scoped_acquire gil;
+    auto* function = get_function(idx);
+    validate_saved_tensors_dispatch_token(state);
+    THPFunction_check_saved_tensors_not_cleared(function);
+  }
+
+ private:
+  THPFunction* get_function(size_t idx) const {
+    TORCH_INTERNAL_ASSERT(hooks != nullptr);
+    TORCH_INTERNAL_ASSERT(PyTuple_Check(hooks));
+    TORCH_INTERNAL_ASSERT(idx < static_cast<size_t>(PyTuple_GET_SIZE(hooks)));
+    PyObject* hook = PyTuple_GET_ITEM(hooks, idx);
+    TORCH_INTERNAL_ASSERT(THPFunction_Check(hook));
+    return reinterpret_cast<THPFunction*>(hook);
+  }
+
+  static void validate_saved_tensors_dispatch_token(const at::Tensor& state) {
+    TORCH_INTERNAL_ASSERT(
+        state.device().is_cpu() && state.scalar_type() == at::kBool &&
+        state.numel() == 0);
+  }
+
+  static void clear_list_items(
+      PyObject* values,
+      at::IntArrayRef indices,
+      bool allow_empty) {
+    if (indices.empty()) {
+      return;
+    }
+    TORCH_INTERNAL_ASSERT(values != nullptr);
+    TORCH_INTERNAL_ASSERT(PyList_Check(values));
+    // Dynamo may steal and clear the original tensor-input list before the
+    // compiled graph runs. Its generated locals then own those tensors and
+    // release them at last use, so there is nothing left to clear here.
+    if (PyList_GET_SIZE(values) == 0) {
+      TORCH_INTERNAL_ASSERT(allow_empty);
+      return;
+    }
+    for (const auto idx : indices) {
+      TORCH_INTERNAL_ASSERT(idx >= 0 && idx < PyList_GET_SIZE(values));
+      TORCH_CHECK(PyList_SetItem(values, idx, Py_NewRef(Py_None)) == 0);
+    }
+  }
+
+ public:
   std::vector<std::function<at::TensorBase(const at::TensorBase&)>>
-      cpp_tensor_pre_hooks;
-  size_t next_id = 0;
+      cpp_tensor_pre_hooks{};
+  // Borrowed from graph_arg_hooks, which outlives the compiled graph call.
+  PyObject* hooks{nullptr};
+  // Borrowed from the graph arguments, which outlive the compiled graph call.
+  PyObject* inputs{nullptr};
+  PyObject* packed_inputs{nullptr};
+  size_t next_id{0};
 };
 
 static RuntimeState* active_rstate;
+
+static void clear_saved_tensors(
+    const at::Tensor& state,
+    const c10::List<c10::IValue>& /*saved_tensors*/,
+    int64_t idx,
+    at::IntArrayRef input_clear_indices,
+    at::IntArrayRef packed_input_clear_indices) {
+  TORCH_INTERNAL_ASSERT(idx >= 0);
+  TORCH_INTERNAL_ASSERT(active_rstate != nullptr);
+  active_rstate->clear_saved_tensors(
+      static_cast<size_t>(idx),
+      state,
+      input_clear_indices,
+      packed_input_clear_indices);
+}
+
+static void check_saved_tensors(const at::Tensor& state, int64_t idx) {
+  TORCH_INTERNAL_ASSERT(idx >= 0);
+  TORCH_INTERNAL_ASSERT(active_rstate != nullptr);
+  active_rstate->check_saved_tensors(static_cast<size_t>(idx), state);
+}
+
+TORCH_LIBRARY_FRAGMENT(_dynamo, m) {
+  m.def(
+      "compiled_autograd_clear_saved_tensors(Tensor state, Any[] saved_tensors, int backward_idx, int[] input_clear_indices, int[] packed_input_clear_indices) -> ()",
+      dispatch(c10::DispatchKey::CPU, clear_saved_tensors));
+  m.def(
+      "compiled_autograd_check_saved_tensors(Tensor state, int backward_idx) -> ()",
+      dispatch(c10::DispatchKey::CPU, check_saved_tensors));
+}
+
 struct RuntimeStateGuard {
-  RuntimeStateGuard() : _state(std::make_unique<RuntimeState>()) {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  RuntimeStateGuard() : _state{std::make_unique<RuntimeState>()} {
     active_rstate = _state.get();
   }
   RuntimeStateGuard(const RuntimeStateGuard&) = delete;
@@ -107,7 +205,7 @@ struct RuntimeStateGuard {
     active_rstate = nullptr;
   }
 
-  std::unique_ptr<RuntimeState> _state;
+  std::unique_ptr<RuntimeState> _state{};
 };
 
 static PyObject* call_cpp_tensor_pre_hooks(PyObject* dummy, PyObject* args) {
@@ -313,11 +411,19 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   return pyinput;
 }
 
-static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
+static PyObject* convert_pyobj_tuple(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyTuple_SET_ITEM(pyinput, i, inputs[i].release());
+  }
+  return pyinput;
+}
+
+static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
+  PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
+  for (const auto i : c10::irange(inputs.size())) {
+    PyList_SET_ITEM(pyinput, i, inputs[i].release());
   }
   return pyinput;
 }
@@ -483,7 +589,7 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : runtime_wrapper(nullptr), compiled_fn(nullptr) {}
+  CacheNode() = default;
   ~CacheNode() {
     if (!Py_IsInitialized()) {
       // leak on shutdown
@@ -507,7 +613,8 @@ struct CacheNode {
       2) Updates expected_sizes to track what is dynamic
       3) Populates call.dyn_size_inputs by filtering call.all_size_inputs
     */
-    bool cache_hit = compiled_fn.get() != nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    bool cache_hit{compiled_fn.get() != nullptr};
     auto len = call.all_size_inputs.size();
     const SizeInput* data = call.all_size_inputs.data();
     if (expected_sizes.empty()) {
@@ -605,13 +712,13 @@ struct CacheNode {
     return result;
   }
 
-  std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
-  std::vector<CacheKeyBuffer> key_storage;
-  std::vector<SizeInput> expected_sizes;
-  std::vector<std::string> compile_reasons;
+  std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next{};
+  std::vector<CacheKeyBuffer> key_storage{};
+  std::vector<SizeInput> expected_sizes{};
+  std::vector<std::string> compile_reasons{};
 
-  THPObjectPtr runtime_wrapper;
-  THPObjectPtr compiled_fn;
+  THPObjectPtr runtime_wrapper{};
+  THPObjectPtr compiled_fn{};
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -787,7 +894,7 @@ static TraceState call_begin_capture(
     CacheNode& cache,
     AutogradCompilerCall& compiler_call,
     size_t num_outputs,
-    std::optional<std::string>&& maybe_compile_reason,
+    std::optional<std::string> maybe_compile_reason,
     bool accumulate_grad,
     bool check_nans) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
@@ -1160,9 +1267,12 @@ static CacheNode* _compiled_autograd_impl(
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
   *graph_arg_ivalue_args =
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
-  *graph_arg_hooks = convert_pyobj_list(compiler_call.hooks);
+  *graph_arg_hooks = convert_pyobj_tuple(compiler_call.hooks);
   *graph_arg_packed_inputs = convert_pyobj_list(compiler_call.packed_inputs);
   rstate->cpp_tensor_pre_hooks = std::move(compiler_call.cpp_tensor_pre_hooks);
+  rstate->hooks = *graph_arg_hooks;
+  rstate->inputs = *graph_arg_inputs;
+  rstate->packed_inputs = *graph_arg_packed_inputs;
   return cache;
 }
 

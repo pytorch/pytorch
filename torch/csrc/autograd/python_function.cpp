@@ -443,6 +443,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
 
   args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
+  args.collect(f->clear_saved_tensors_on_access);
   args.collect(f->is_variable_input);
   THPObjectPtr needs_input_grad(materialize_needs_input_grad(f));
   if (!needs_input_grad) {
@@ -1183,7 +1184,7 @@ torch::jit::Node* _trace_pre_record(
   // Save scalar args and the calling convention
   auto num_args = PyTuple_GET_SIZE(input_objects);
   pyobj_list scalar_args;
-  std::string arg_types;
+  std::string arg_types{};
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
   for (const auto i : c10::irange(num_args)) {
@@ -1998,14 +1999,22 @@ int THPFunction_set_materialize_non_diff_grads(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
-  HANDLE_TH_ERRORS
+static void check_saved_tensors_not_cleared(const THPFunction* self) {
   TORCH_CHECK(
       !self->saved_tensors_accessed_and_cleared,
       "saved_tensors can only be accessed once when "
       "clear_saved_tensors_on_access=True is set on the autograd.Function. "
       "Either access saved_tensors only once, or set "
       "clear_saved_tensors_on_access=False.");
+}
+
+static void clear_saved_tensors_after_access(THPFunction* self) {
+  THPFunction_compiled_autograd_clear_saved_tensors(self);
+}
+
+PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
+  HANDLE_TH_ERRORS
+  check_saved_tensors_not_cleared(self);
   if (self->saved_for_forward) {
     return Py_NewRef(self->saved_for_forward);
   } else {
@@ -2016,8 +2025,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
     }
 
     if (self->clear_saved_tensors_on_access) {
-      self->saved_variables.clear();
-      self->saved_tensors_accessed_and_cleared = true;
+      clear_saved_tensors_after_access(self);
     }
 
     return result;
@@ -2033,12 +2041,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
       0);
   if (r != 0)
     throw_python_error();
-  TORCH_CHECK(
-      !self->saved_tensors_accessed_and_cleared,
-      "saved_tensors can only be accessed once when "
-      "clear_saved_tensors_on_access=True is set on the autograd.Function. "
-      "Either access saved_tensors only once, or set "
-      "clear_saved_tensors_on_access=False.");
+  check_saved_tensors_not_cleared(self);
   PyObject* result = unpack_saved_variables(
       self, [](const Variable& var) { return THPVariable_Wrap(var); });
   if (!result) {
@@ -2046,11 +2049,38 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   }
 
   if (self->clear_saved_tensors_on_access) {
-    self->saved_variables.clear();
-    self->saved_tensors_accessed_and_cleared = true;
+    clear_saved_tensors_after_access(self);
   }
 
   return result;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_get_clear_saved_tensors_on_access(
+    THPFunction* self,
+    void* _unused) {
+  if (self->clear_saved_tensors_on_access) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPFunction_get_compiled_autograd_saved_tensors_cleared(
+    THPFunction* self,
+    void* _unused) {
+  if (self->saved_tensors_accessed_and_cleared) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPFunction_compiled_autograd_clear_saved_tensors_python(
+    PyObject* self,
+    PyObject* _unused) {
+  HANDLE_TH_ERRORS
+  auto* function = reinterpret_cast<THPFunction*>(self);
+  THPFunction_compiled_autograd_clear_saved_tensors(function);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2169,6 +2199,16 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
 }
 } // namespace
 
+void THPFunction_check_saved_tensors_not_cleared(const THPFunction* self) {
+  check_saved_tensors_not_cleared(self);
+}
+
+void THPFunction_compiled_autograd_clear_saved_tensors(THPFunction* self) {
+  THPFunction_check_saved_tensors_not_cleared(self);
+  self->saved_variables.clear();
+  self->saved_tensors_accessed_and_cleared = true;
+}
+
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);
 
@@ -2248,6 +2288,16 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr,
      nullptr},
+    {"_clear_saved_tensors_on_access",
+     (getter)THPFunction_get_clear_saved_tensors_on_access,
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_compiled_autograd_saved_tensors_cleared",
+     (getter)THPFunction_get_compiled_autograd_saved_tensors_cleared,
+     nullptr,
+     nullptr,
+     nullptr},
     {"next_functions",
      (getter)THPFunction_next_functions,
      nullptr,
@@ -2319,6 +2369,10 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
+     METH_NOARGS,
+     nullptr},
+    {(char*)"_compiled_autograd_clear_saved_tensors",
+     THPFunction_compiled_autograd_clear_saved_tensors_python,
      METH_NOARGS,
      nullptr},
     {(char*)"apply",

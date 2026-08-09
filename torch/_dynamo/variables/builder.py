@@ -1441,8 +1441,17 @@ class VariableBuilder:
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             actual_saved_tensors = None
             try:
-                # type: ignore[attr-defined]
-                actual_saved_tensors = value.saved_tensors
+                if (
+                    isinstance(value, torch.autograd.function.BackwardCFunction)
+                    and value._clear_saved_tensors_on_access
+                ):
+                    # Compiled autograd materializes these lazily from its
+                    # input containers. Reading saved_tensors here would run
+                    # unpack hooks and clear the real context during tracing.
+                    pass
+                else:
+                    # type: ignore[attr-defined]
+                    actual_saved_tensors = value.saved_tensors
             except RuntimeError:
                 pass
 

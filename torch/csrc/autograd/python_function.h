@@ -161,3 +161,8 @@ TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);
 }
+
+TORCH_PYTHON_API void THPFunction_compiled_autograd_clear_saved_tensors(
+    THPFunction* self);
+TORCH_PYTHON_API void THPFunction_check_saved_tensors_not_cleared(
+    const THPFunction* self);
