@@ -50,18 +50,19 @@ class UniqueVoidPtr {
       : data_(data), ctx_(nullptr, &deleteNothing) {}
   UniqueVoidPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter)
       : data_(data), ctx_(ctx, ctx_deleter ? ctx_deleter : &deleteNothing) {}
-  void* operator->() const {
+  [[nodiscard]] void* operator->() const {
     return data_;
   }
   void clear() {
     ctx_ = nullptr;
     data_ = nullptr;
   }
-  void* get() const {
+  [[nodiscard]] void* get() const {
     return data_;
   }
 
-  bool /* success */ unsafe_reset_data_and_ctx(void* new_data_and_ctx) {
+  [[nodiscard]] bool /* success */ unsafe_reset_data_and_ctx(
+      void* new_data_and_ctx) {
     if (C10_UNLIKELY(ctx_.get_deleter() != &deleteNothing)) {
       return false;
     }
@@ -73,13 +74,13 @@ class UniqueVoidPtr {
     return true;
   }
 
-  void* get_context() const {
+  [[nodiscard]] void* get_context() const {
     return ctx_.get();
   }
-  void* release_context() {
+  [[nodiscard]] void* release_context() {
     return ctx_.release();
   }
-  std::unique_ptr<void, DeleterFnPtr>&& move_context() {
+  [[nodiscard]] std::unique_ptr<void, DeleterFnPtr>&& move_context() {
     return std::move(ctx_);
   }
   [[nodiscard]] bool compare_exchange_deleter(
@@ -92,15 +93,15 @@ class UniqueVoidPtr {
   }
 
   template <typename T>
-  T* cast_context(DeleterFnPtr expected_deleter) const {
+  [[nodiscard]] T* cast_context(DeleterFnPtr expected_deleter) const {
     if (get_deleter() != expected_deleter)
       return nullptr;
     return static_cast<T*>(get_context());
   }
-  operator bool() const {
+  [[nodiscard]] operator bool() const {
     return data_ || ctx_;
   }
-  DeleterFnPtr get_deleter() const {
+  [[nodiscard]] DeleterFnPtr get_deleter() const {
     return ctx_.get_deleter();
   }
 };
@@ -123,16 +124,24 @@ class UniqueVoidPtr {
 // pointer itself.  In simple cases, the context pointer is just the pointer
 // itself.
 
-inline bool operator==(const UniqueVoidPtr& sp, std::nullptr_t) noexcept {
+[[nodiscard]] inline bool operator==(
+    const UniqueVoidPtr& sp,
+    std::nullptr_t) noexcept {
   return !sp;
 }
-inline bool operator==(std::nullptr_t, const UniqueVoidPtr& sp) noexcept {
+[[nodiscard]] inline bool operator==(
+    std::nullptr_t,
+    const UniqueVoidPtr& sp) noexcept {
   return !sp;
 }
-inline bool operator!=(const UniqueVoidPtr& sp, std::nullptr_t) noexcept {
+[[nodiscard]] inline bool operator!=(
+    const UniqueVoidPtr& sp,
+    std::nullptr_t) noexcept {
   return sp;
 }
-inline bool operator!=(std::nullptr_t, const UniqueVoidPtr& sp) noexcept {
+[[nodiscard]] inline bool operator!=(
+    std::nullptr_t,
+    const UniqueVoidPtr& sp) noexcept {
   return sp;
 }
 
