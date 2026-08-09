@@ -17199,6 +17199,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         """Regression test for https://github.com/pytorch/pytorch/issues/187336."""
         if not self.is_dtype_supported(dtype):
             self.skipTest(f"dtype {dtype} not supported on {self.device}")
+        if self.device == "mps":
+            # aten::special_log_ndtr.out is not currently implemented for the MPS device
+            # See issue: https://github.com/pytorch/pytorch/issues/191339 (or a dedicated follow-up issue)
+            self.skipTest("aten::special_log_ndtr.out not implemented on MPS")
 
         def fn(x):
             return torch.special.log_ndtr(x)
