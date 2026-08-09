@@ -7014,7 +7014,6 @@ class TestCudaAllocator(TestCase):
                 "throw_on_cudamalloc_oom:False,per_process_memory_fraction:1.0"
             )
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_allocator_backend(self):
         def subprocess_env():
             if IS_WINDOWS:
