@@ -602,10 +602,10 @@ struct ConvParams {
     // conv3d/conv1d forward handle 64-bit shapes (long-indexed Metal kernel
     // variant); conv1d reaches here already expanded to (N, C, 1, L).
     if (needs_64bit_indexing_no_split(input, weight)) {
-      const bool conv3d_fwd = input.ndimension() == 5 && !transposed;
-      const bool conv1d_fwd = input.ndimension() == 4 && !transposed && at::symint::size<T>(input, 2) == 1 &&
+      const bool is_conv3d_forward = input.ndimension() == 5 && !transposed;
+      const bool is_conv1d_forward = input.ndimension() == 4 && !transposed && at::symint::size<T>(input, 2) == 1 &&
           at::symint::size<T>(weight, 2) == 1 && padding[0] == 0;
-      if (!conv3d_fwd && !conv1d_fwd) {
+      if (!is_conv3d_forward && !is_conv1d_forward) {
         return false;
       }
     }

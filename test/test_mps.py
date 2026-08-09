@@ -10934,18 +10934,21 @@ class TestLargeTensors(TestCaseMPS):
 
     @largeTensorTest("16GB", device="mps")
     @serialTest()
-    @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
-    def test_conv1d_int32_overflow(self, C, O):
-        L = 182 * 181
-        x = torch.randn(1, C, L, dtype=torch.float16, device='mps')
-        w = torch.randn(O, C, 2, dtype=torch.float16, device='mps') * 0.01
-        y = F.conv1d(x, w)
-        ls = [0, (L - 1) // 2, L - 2]
-        x0 = x[0, :, ls].float().cpu()
-        x1 = x[0, :, [l + 1 for l in ls]].float().cpu()
-        ref = w[:, :, 0].float().cpu() @ x0 + w[:, :, 1].float().cpu() @ x1
-        self.assertEqual(y[0, :, ls].float().cpu(), ref, atol=2e-2, rtol=2e-2)
-        del x, w, y
+    @parametrize("input_channels,output_channels", [(65536, 8), (8, 65536)])
+    def test_conv1d_int32_overflow(self, input_channels, output_channels):
+        input_length = 182 * 181
+        input_tensor = torch.randn(1, input_channels, input_length, dtype=torch.float16, device="mps")
+        weight = torch.randn(output_channels, input_channels, 2, dtype=torch.float16, device="mps") * 0.01
+        output = F.conv1d(input_tensor, weight)
+        positions = [0, (input_length - 1) // 2, input_length - 2]
+        input_at_positions = input_tensor[0, :, positions].float().cpu()
+        input_at_next_positions = input_tensor[0, :, [position + 1 for position in positions]].float().cpu()
+        expected = (
+            weight[:, :, 0].float().cpu() @ input_at_positions
+            + weight[:, :, 1].float().cpu() @ input_at_next_positions
+        )
+        self.assertEqual(output[0, :, positions].float().cpu(), expected, atol=2e-2, rtol=2e-2)
+        del input_tensor, weight, output
         gc.collect()
         torch.mps.empty_cache()
 

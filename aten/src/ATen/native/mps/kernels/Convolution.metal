@@ -276,45 +276,58 @@ INSTANTIATE_NCHW_TO_NHWC_ALL(bfloat)
 // NDHWC transpose the GEMM kernels need would be pure overhead here.
 template <typename T>
 kernel void conv1d_dw(
-    device const T* x [[buffer(0)]],
-    device const T* w [[buffer(1)]],
-    device T* y [[buffer(2)]],
-    constant Conv1dDwParams& p [[buffer(3)]],
+    device const T* input [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant Conv1dDwParams& params [[buffer(3)]],
     device const T* bias [[buffer(4)]],
-    uint3 gid [[thread_position_in_grid]]) {
-  const int lo = int(gid.x);
-  const int c = int(gid.y);
-  const int n = int(gid.z);
-  float acc = p.has_bias ? (float)bias[c] : 0.0f;
-  device const T* xr = x + ((int64_t)n * p.C + c) * p.L;
-  const int base = lo * p.S - p.P;
-  for (int k = 0; k < p.K; ++k) {
-    const int li = base + k * p.D;
-    if (li >= 0 && li < p.L) {
-      acc += (float)xr[li] * (float)w[(int64_t)c * p.K + k];
+    uint3 position [[thread_position_in_grid]]) {
+  const int output_index = int(position.x);
+  const int channel = int(position.y);
+  const int batch = int(position.z);
+  float accumulator = params.has_bias ? (float)bias[channel] : 0.0f;
+  device const T* input_row = input +
+      ((int64_t)batch * params.input_channels + channel) * params.input_length;
+  const int input_start = output_index * params.stride - params.padding;
+  for (int kernel_index = 0; kernel_index < params.kernel_size;
+       ++kernel_index) {
+    const int input_index = input_start + kernel_index * params.dilation;
+    if (input_index >= 0 && input_index < params.input_length) {
+      accumulator += (float)input_row[input_index] *
+          (float)weight[(int64_t)channel * params.kernel_size + kernel_index];
     }
   }
-  y[((int64_t)n * p.C + c) * p.LO + lo] = (T)acc;
+  output
+      [((int64_t)batch * params.input_channels + channel) *
+           params.output_length +
+       output_index] = (T)accumulator;
 }
 
 // DHWIO copy of an OIDHW weight view; ATen's generic permute copy is
 // launch-bound at typical weight sizes, a flat kernel is ~10x faster.
 template <typename T>
 kernel void conv_weight_to_dhwio(
-    device const T* src [[buffer(0)]],
-    device T* dst [[buffer(1)]],
-    constant ConvWeightPermuteParams& p [[buffer(2)]],
-    uint3 gid [[thread_position_in_grid]]) {
-  const int o = int(gid.x);
-  const int cg = int(gid.y);
-  const int k = int(gid.z);
-  const int kw = k % p.KW;
-  const int r = k / p.KW;
-  const int kh = r % p.KH;
-  const int kd = r / p.KH;
-  dst[((int64_t)k * p.CG + cg) * p.O + o] =
-      src[(int64_t)o * p.SO + (int64_t)cg * p.SC + kd * p.SD + kh * p.SH +
-          kw * p.SW];
+    device const T* source [[buffer(0)]],
+    device T* destination [[buffer(1)]],
+    constant ConvWeightPermuteParams& params [[buffer(2)]],
+    uint3 position [[thread_position_in_grid]]) {
+  const int output_channel = int(position.x);
+  const int input_channel = int(position.y);
+  const int kernel_index = int(position.z);
+  const int kernel_width_index = kernel_index % params.kernel_width;
+  const int kernel_plane_index = kernel_index / params.kernel_width;
+  const int kernel_height_index = kernel_plane_index % params.kernel_height;
+  const int kernel_depth_index = kernel_plane_index / params.kernel_height;
+  destination
+      [((int64_t)kernel_index * params.input_channels_per_group +
+        input_channel) *
+           params.output_channels +
+       output_channel] = source
+          [(int64_t)output_channel * params.output_channel_stride +
+           (int64_t)input_channel * params.input_channel_stride +
+           kernel_depth_index * params.depth_stride +
+           kernel_height_index * params.height_stride +
+           kernel_width_index * params.width_stride];
 }
 
 #define INSTANTIATE_CONV1D_DW(DT)                                     \

@@ -154,39 +154,46 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
 
 // DHWIO weight copy; ATen's strided permute copy is launch-bound at typical
 // weight sizes (~0.14 ms for 1 MB), the flat kernel is ~10x faster.
-static Tensor conv3d_weights_to_dhwio(const Tensor& w) {
+static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
   using namespace mps;
-  constexpr int64_t i32max = std::numeric_limits<int32_t>::max();
-  const int64_t O = w.size(0), CG = w.size(1), KD = w.size(2), KH = w.size(3), KW = w.size(4);
-  const auto [mn, mx] = std::minmax_element(w.strides().begin(), w.strides().end());
-  if (w.numel() == 0 || w.numel() > i32max || *mx > i32max || *mn < -i32max) {
-    return w.permute({2, 3, 4, 1, 0}).contiguous();
+  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+  const int64_t output_channels = weight.size(0);
+  const int64_t input_channels_per_group = weight.size(1);
+  const int64_t kernel_depth = weight.size(2);
+  const int64_t kernel_height = weight.size(3);
+  const int64_t kernel_width = weight.size(4);
+  const auto [min_stride, max_stride] = std::minmax_element(weight.strides().begin(), weight.strides().end());
+  if (weight.numel() == 0 || weight.numel() > kInt32Max || *max_stride > kInt32Max || *min_stride < -kInt32Max) {
+    return weight.permute({2, 3, 4, 1, 0}).contiguous();
   }
-  auto out = at::empty({KD, KH, KW, CG, O}, w.options());
-  ConvWeightPermuteParams p;
-  p.O = static_cast<int32_t>(O);
-  p.CG = static_cast<int32_t>(CG);
-  p.KH = static_cast<int32_t>(KH);
-  p.KW = static_cast<int32_t>(KW);
-  p.SO = static_cast<int32_t>(w.stride(0));
-  p.SC = static_cast<int32_t>(w.stride(1));
-  p.SD = static_cast<int32_t>(w.stride(2));
-  p.SH = static_cast<int32_t>(w.stride(3));
-  p.SW = static_cast<int32_t>(w.stride(4));
-  auto pso = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(w)));
+  auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
+                          weight.options());
+  ConvWeightPermuteParams params;
+  params.output_channels = static_cast<int32_t>(output_channels);
+  params.input_channels_per_group = static_cast<int32_t>(input_channels_per_group);
+  params.kernel_height = static_cast<int32_t>(kernel_height);
+  params.kernel_width = static_cast<int32_t>(kernel_width);
+  params.output_channel_stride = static_cast<int32_t>(weight.stride(0));
+  params.input_channel_stride = static_cast<int32_t>(weight.stride(1));
+  params.depth_stride = static_cast<int32_t>(weight.stride(2));
+  params.height_stride = static_cast<int32_t>(weight.stride(3));
+  params.width_stride = static_cast<int32_t>(weight.stride(4));
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(weight)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pso, "conv_weight_to_dhwio", {w});
-      [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, w, out, p);
-      [encoder dispatchThreads:MTLSizeMake(O, CG, KD * KH * KW)
-          threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(O, 256), 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_dhwio", {weight});
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, weight, output, params);
+      [encoder dispatchThreads:MTLSizeMake(output_channels,
+                                           input_channels_per_group,
+                                           kernel_depth * kernel_height * kernel_width)
+          threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(output_channels, 256), 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline);
     }
   });
-  return out;
+  return output;
 }
 
 struct Conv3dMppSpecialization {
@@ -250,53 +257,55 @@ MTLComputePipelineState_t mps::Conv3dSimdTile::pipeline_state(mps::MetalShaderLi
 static bool conv1d_direct_metal_eligible(const Tensor& input_t,
                                          const Tensor& weight_t,
                                          bool has_bias,
-                                         int64_t stride_w,
-                                         int64_t dilation_w,
+                                         int64_t stride,
+                                         int64_t dilation,
                                          int64_t groups,
                                          const Tensor& output_t) {
   using namespace mps;
-  constexpr int64_t i32max = std::numeric_limits<int32_t>::max();
-  const int64_t C = input_t.size(1), L = input_t.size(3);
-  const int64_t O = output_t.size(1), LO = output_t.size(3);
-  if (C == 0 || C * L > i32max || O * LO > i32max) {
+  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+  const int64_t input_channels = input_t.size(1);
+  const int64_t input_length = input_t.size(3);
+  const int64_t output_channels = output_t.size(1);
+  const int64_t output_length = output_t.size(3);
+  if (input_channels == 0 || input_channels * input_length > kInt32Max || output_channels * output_length > kInt32Max) {
     return true;
   }
   if (!is_macos_at_least(MacOSVersion::MACOS_26_0)) {
     return false;
   }
-  const int64_t CG = C / groups;
-  Conv3DParams dims{};
-  dims.conv2d.N = static_cast<int32_t>(input_t.size(0));
-  dims.conv2d.C_in = static_cast<int32_t>(C);
-  dims.conv2d.C_out = static_cast<int32_t>(O);
-  dims.conv2d.H = 1;
-  dims.conv2d.W = static_cast<int32_t>(L);
-  dims.conv2d.outH = 1;
-  dims.conv2d.outW = static_cast<int32_t>(LO);
-  dims.conv2d.kH = 1;
-  dims.conv2d.kW = static_cast<int32_t>(weight_t.size(3));
-  dims.conv2d.sH = 1;
-  dims.conv2d.sW = static_cast<int32_t>(stride_w);
-  dims.conv2d.dH = 1;
-  dims.conv2d.dW = static_cast<int32_t>(dilation_w);
-  dims.conv2d.C_in_per_group = static_cast<int32_t>(CG);
-  dims.conv2d.C_out_per_group = static_cast<int32_t>(O / groups);
-  dims.D = dims.outD = dims.kD = dims.sD = dims.dD = 1;
+  const int64_t input_channels_per_group = input_channels / groups;
+  Conv3DParams params{};
+  params.conv2d.N = static_cast<int32_t>(input_t.size(0));
+  params.conv2d.C_in = static_cast<int32_t>(input_channels);
+  params.conv2d.C_out = static_cast<int32_t>(output_channels);
+  params.conv2d.H = 1;
+  params.conv2d.W = static_cast<int32_t>(input_length);
+  params.conv2d.outH = 1;
+  params.conv2d.outW = static_cast<int32_t>(output_length);
+  params.conv2d.kH = 1;
+  params.conv2d.kW = static_cast<int32_t>(weight_t.size(3));
+  params.conv2d.sH = 1;
+  params.conv2d.sW = static_cast<int32_t>(stride);
+  params.conv2d.dH = 1;
+  params.conv2d.dW = static_cast<int32_t>(dilation);
+  params.conv2d.C_in_per_group = static_cast<int32_t>(input_channels_per_group);
+  params.conv2d.C_out_per_group = static_cast<int32_t>(output_channels / groups);
+  params.D = params.outD = params.kD = params.sD = params.dD = 1;
   Conv3dMppSpecialization specialization;
   specialization.dtype = scalarToMetalTypeString(input_t);
   specialization.kernel_depth = specialization.kernel_height = 1;
-  specialization.kernel_width = dims.conv2d.kW;
+  specialization.kernel_width = params.conv2d.kW;
   specialization.stride_depth = specialization.stride_height = 1;
-  specialization.stride_width = dims.conv2d.sW;
+  specialization.stride_width = params.conv2d.sW;
   specialization.dilation_depth = specialization.dilation_height = 1;
-  specialization.dilation_width = dims.conv2d.dW;
-  specialization.src_channels = CG <= 64 ? static_cast<int>(CG) : -1;
-  specialization.src_width = static_cast<int>(std::max<int64_t>(L, 16384));
+  specialization.dilation_width = params.conv2d.dW;
+  specialization.src_channels = input_channels_per_group <= 64 ? static_cast<int>(input_channels_per_group) : -1;
+  specialization.src_width = static_cast<int>(std::max<int64_t>(input_length, 16384));
   specialization.src_height = 16384;
   specialization.has_bias = has_bias;
   specialization.out_ncdhw = output_t.is_contiguous();
   specialization.grouped = groups > 1;
-  return conv3d_mpp_pipeline(specialization, select_conv3d_mpp_tile(dims, groups)) != nil;
+  return conv3d_mpp_pipeline(specialization, select_conv3d_mpp_tile(params, groups)) != nil;
 }
 
 static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
@@ -545,35 +554,35 @@ static void conv1d_dw_forward(const Tensor& input_t,
                               int64_t dilation,
                               const Tensor& output_t) {
   using namespace mps;
-  const bool bias_defined = bias_opt && bias_opt->defined();
+  const bool has_bias = bias_opt && bias_opt->defined();
   const auto dtype = input_t.scalar_type();
-  const auto x = input_t.contiguous();
-  const auto w = weight_t.contiguous();
+  const auto contiguous_input = input_t.contiguous();
+  const auto contiguous_weight = weight_t.contiguous();
   std::optional<Tensor> bias;
-  if (bias_defined) {
+  if (has_bias) {
     bias = bias_opt->scalar_type() == dtype ? bias_opt->contiguous() : bias_opt->to(dtype).contiguous();
   }
-  Conv1dDwParams p;
-  p.C = static_cast<int32_t>(input_t.size(1));
-  p.L = static_cast<int32_t>(input_t.size(3));
-  p.LO = static_cast<int32_t>(output_t.size(3));
-  p.NB = static_cast<int32_t>(input_t.size(0));
-  p.K = static_cast<int32_t>(weight_t.size(3));
-  p.S = static_cast<int32_t>(stride);
-  p.P = static_cast<int32_t>(padding);
-  p.D = static_cast<int32_t>(dilation);
-  p.has_bias = bias_defined;
-  auto pso = lib.getPipelineStateForFunc(fmt::format("conv1d_dw_{}", scalarToMetalTypeString(input_t)));
+  Conv1dDwParams params;
+  params.input_channels = static_cast<int32_t>(input_t.size(1));
+  params.input_length = static_cast<int32_t>(input_t.size(3));
+  params.output_length = static_cast<int32_t>(output_t.size(3));
+  params.batch_size = static_cast<int32_t>(input_t.size(0));
+  params.kernel_size = static_cast<int32_t>(weight_t.size(3));
+  params.stride = static_cast<int32_t>(stride);
+  params.padding = static_cast<int32_t>(padding);
+  params.dilation = static_cast<int32_t>(dilation);
+  params.has_bias = has_bias;
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv1d_dw_{}", scalarToMetalTypeString(input_t)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pso, "conv1d_dw", {x, w});
-      [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, x, w, output_t, p, bias ? *bias : x);
-      [encoder dispatchThreads:MTLSizeMake(p.LO, p.C, p.NB)
-          threadsPerThreadgroup:MTLSizeMake(std::min(p.LO, 256), 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_dw", {contiguous_input, contiguous_weight});
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, contiguous_input, contiguous_weight, output_t, params, bias ? *bias : contiguous_input);
+      [encoder dispatchThreads:MTLSizeMake(params.output_length, params.input_channels, params.batch_size)
+          threadsPerThreadgroup:MTLSizeMake(std::min(params.output_length, 256), 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline);
     }
   });
 }
@@ -774,29 +783,31 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
 
   if (is1DConv) {
-    constexpr int64_t i32max = std::numeric_limits<int32_t>::max();
-    const bool depthwise = groups > 1 && groups == input_t.size(1) && weight_t.size(0) == groups;
-    const bool dw_metal =
-        depthwise && output_t.is_contiguous() && input_t.size(3) <= i32max && output_t.size(3) <= i32max;
-    if (dw_metal) {
+    constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+    const bool is_depthwise = groups > 1 && groups == input_t.size(1) && weight_t.size(0) == groups;
+    const bool use_depthwise_metal =
+        is_depthwise && output_t.is_contiguous() && input_t.size(3) <= kInt32Max && output_t.size(3) <= kInt32Max;
+    if (use_depthwise_metal) {
       conv1d_dw_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], output_t);
       return output_t;
     }
     // unit depth axis: reuse the conv3d routing (pointwise / im2col / direct)
-    const auto x3 = input_t.unsqueeze(2);
-    const auto w3 = weight_t.unsqueeze(2);
-    const auto o3 = output_t.unsqueeze(2);
-    const std::array<int64_t, 3> pad3{0, 0, padding[1]}, str3{1, 1, stride[1]}, dil3{1, 1, dilation[1]};
-    if (conv3d_is_pointwise(w3, str3, pad3, groups)) {
-      conv3d_pointwise_matmul(x3, w3, bias_opt, o3);
+    const auto input_3d = input_t.unsqueeze(2);
+    const auto weight_3d = weight_t.unsqueeze(2);
+    const auto output_3d = output_t.unsqueeze(2);
+    const std::array<int64_t, 3> padding_3d{0, 0, padding[1]};
+    const std::array<int64_t, 3> stride_3d{1, 1, stride[1]};
+    const std::array<int64_t, 3> dilation_3d{1, 1, dilation[1]};
+    if (conv3d_is_pointwise(weight_3d, stride_3d, padding_3d, groups)) {
+      conv3d_pointwise_matmul(input_3d, weight_3d, bias_opt, output_3d);
       return output_t;
     }
-    if (conv3d_prefer_im2col(x3, w3, str3, pad3, dil3, groups, o3)) {
-      conv3d_im2col_matmul(x3, w3, bias_opt, str3, pad3, o3);
+    if (conv3d_prefer_im2col(input_3d, weight_3d, stride_3d, padding_3d, dilation_3d, groups, output_3d)) {
+      conv3d_im2col_matmul(input_3d, weight_3d, bias_opt, stride_3d, padding_3d, output_3d);
       return output_t;
     }
     if (conv1d_direct_metal_eligible(input_t, weight_t, bias_defined, stride[1], dilation[1], groups, output_t)) {
-      conv3d_metal_forward(x3, w3, bias_opt, pad3, str3, dil3, groups, o3);
+      conv3d_metal_forward(input_3d, weight_3d, bias_opt, padding_3d, stride_3d, dilation_3d, groups, output_3d);
       return output_t;
     }
     // catalog miss: fall through to the MPSGraph 2D conv, restoring the
