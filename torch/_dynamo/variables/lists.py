@@ -1130,7 +1130,12 @@ class RangeVariable(BaseListVariable):
 class ListVariable(BaseListVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
-    _index_not_found_msg = "{!r} is not in list"
+    # CPython 3.14 stopped including the repr of the searched value (gh-121288)
+    _index_not_found_msg = (
+        "list.index(x): x not in list"
+        if sys.version_info >= (3, 14)
+        else "{!r} is not in list"
+    )
 
     def richcompare_impl(
         self,
@@ -1364,7 +1369,11 @@ class DequeVariable(BaseListVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
-    _index_not_found_msg = "{!r} is not in deque"
+    _index_not_found_msg = (
+        "deque.index(x): x not in deque"
+        if sys.version_info >= (3, 14)
+        else "{!r} is not in deque"
+    )
 
     _nonvar_fields = {
         "state",

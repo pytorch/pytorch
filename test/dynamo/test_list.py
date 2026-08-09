@@ -538,9 +538,10 @@ class ListTests(TupleTests):
 
 class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
     # list/tuple/deque share BaseListVariable.list_index, but CPython's
-    # ValueError text does not: list and deque repr the missing value while
-    # tuple ignores it. Each sequence is built twice: from constants (the
-    # inline fast path) and from opaque objects (the polyfills.index path).
+    # ValueError text does not: on <=3.13 list and deque repr the missing
+    # value while tuple ignores it; 3.14 dropped the repr everywhere
+    # (gh-121288). Each sequence is built twice: from constants (the inline
+    # fast path) and from opaque objects (the polyfills.index path).
     def _check(self, fn):
         x = torch.ones(2)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
