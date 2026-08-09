@@ -1150,6 +1150,74 @@ class TestFakeTensorUpdater(TestCase):
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
 
 
+class TestStorageBox(TestCase):
+    @staticmethod
+    def _make_pointwise_storage(device: str, read_names: list[str]):
+        from torch._inductor.ir import Pointwise, StorageBox
+        from torch._inductor.virtualized import ops
+
+        def inner_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for name in read_names:
+                value = ops.add(value, ops.load(name, index[0]))
+            return value
+
+        return StorageBox(
+            Pointwise(
+                device=torch.device(device),
+                dtype=torch.float32,
+                inner_fn=inner_fn,
+                ranges=[10],
+            )
+        )
+
+    def test_should_realize_on_reuse_non_cpu_boundary(self):
+        from torch._inductor.graph import GraphLowering
+
+        boundary_storage = self._make_pointwise_storage(
+            "cuda", ["buf0", "arg0", "buf1", "arg1"]
+        )
+        input_only_storage = self._make_pointwise_storage(
+            "cuda", ["arg0", "arg1", "arg2", "arg3"]
+        )
+        single_computed_storage = self._make_pointwise_storage(
+            "cuda", ["buf0", "arg0", "arg1", "arg2"]
+        )
+        cheap_fanout_storage = self._make_pointwise_storage("cuda", ["arg0"])
+        below_boundary_storage = self._make_pointwise_storage(
+            "cuda", ["buf0", "buf1", "buf2"]
+        )
+
+        graph = GraphLowering(torch.fx.symbolic_trace(lambda x: x))
+        graph.name_to_buffer.update(
+            {"buf0": mock.Mock(), "buf1": mock.Mock(), "buf2": mock.Mock()}
+        )
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch(realize_reads_threshold=4),
+        ):
+            self.assertFalse(boundary_storage.should_realize_on_reuse(1))
+            self.assertTrue(boundary_storage.should_realize_on_reuse(2))
+            self.assertFalse(
+                boundary_storage.should_realize_on_reuse(2, graph_reuse=False)
+            )
+            self.assertFalse(input_only_storage.should_realize_on_reuse(2))
+            self.assertFalse(single_computed_storage.should_realize_on_reuse(2))
+            self.assertFalse(cheap_fanout_storage.should_realize_on_reuse(5))
+            self.assertFalse(below_boundary_storage.should_realize_on_reuse(5))
+
+    def test_should_realize_on_reuse_preserves_cpu_threshold(self):
+        boundary_storage = self._make_pointwise_storage(
+            "cpu", ["buf0", "arg0", "buf1", "arg1"]
+        )
+        above_boundary_storage = self._make_pointwise_storage(
+            "cpu", ["buf0", "buf1", "buf2", "buf3", "buf4"]
+        )
+        with inductor_config.patch(realize_reads_threshold=4):
+            self.assertFalse(boundary_storage.should_realize_on_reuse(2))
+            self.assertTrue(above_boundary_storage.should_realize_on_reuse(2))
+
+
 # Stand-in for any exception that is not TritonUnavailableError and must not
 # escape has_triton() for a sub-capable device. (The real GPUTooOldForTriton
 # is a RuntimeError subclass; this one deliberately is not, so an escape

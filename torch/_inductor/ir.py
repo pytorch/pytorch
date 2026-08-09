@@ -10729,7 +10729,8 @@ class StorageBox(MutableBox):
             opcount = self.data.inner_fn_opcount()
             if "inline_asm_elementwise" in opcount.used_ops:
                 return True
-            if is_cpu(self.data):
+            on_cpu = is_cpu(self.data)
+            if on_cpu:
                 # Heuristic for realizing reused result of heavy ops on cpu
                 heavy_ops = [
                     "exp",
@@ -10752,7 +10753,24 @@ class StorageBox(MutableBox):
                     return True
             if self.has_large_inner_fn():
                 return True
-            return graph_reuse and self.num_reads() > config.realize_reads_threshold
+            num_reads = self.num_reads()
+            if not graph_reuse:
+                return False
+            if num_reads > config.realize_reads_threshold:
+                return True
+            # At the non-CPU boundary, only realize pointwise results when
+            # storing them can let multiple computed inputs die. Input-only
+            # expressions are often cheaper to inline even with high fanout.
+            if (
+                on_cpu
+                or not isinstance(self.data, Pointwise)
+                or num_reads != config.realize_reads_threshold
+            ):
+                return False
+            computed_reads = OrderedSet(
+                name for name in opcount.read_buffers if name in V.graph.name_to_buffer
+            )
+            return len(computed_reads) >= 2
         return False
 
     def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
