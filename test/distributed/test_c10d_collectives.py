@@ -145,6 +145,29 @@ class AbstractCollectivesTest(C10dBackendTest):
             for rank, result in enumerate(output):
                 self.assertEqual(result, self._expected_tensor(count, dtype, rank))
 
+    def _test_gather_single(self, count, dtype, async_op):
+        tensor = self._tensor(count, dtype)
+        expected = [
+            self._expected_tensor(count, dtype, rank) for rank in range(self.world_size)
+        ]
+        for stacked in (False, True):
+            with self.subTest(stacked=stacked):
+                shape = (
+                    (self.world_size, count) if stacked else (self.world_size * count,)
+                )
+                output = (
+                    torch.empty(shape, dtype=dtype, device=self.device)
+                    if self.rank == 0
+                    else None
+                )
+                work = dist.gather_single(tensor, output, dst=0, async_op=async_op)
+                self._wait(work, async_op)
+                if self.rank == 0:
+                    self.assertEqual(
+                        output,
+                        torch.stack(expected) if stacked else torch.cat(expected),
+                    )
+
     def _test_scatter(self, count, dtype, async_op):
         output = torch.empty(count, dtype=dtype, device=self.device)
         inputs = (
@@ -195,6 +218,19 @@ class AbstractCollectivesTest(C10dBackendTest):
                     with self.subTest(count=count, dtype=dtype, async_op=async_op):
                         test(count, dtype, async_op)
 
+    def test_collective_preserves_current_device(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        tensor = torch.ones(4, device=self.device)
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        torch.cuda.set_device(other_device)
+
+        dist.all_reduce(tensor)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
     def test_broadcast(self):
         self._init_pg()
         self._test_transport_matrix(self._test_broadcast)
@@ -202,6 +238,46 @@ class AbstractCollectivesTest(C10dBackendTest):
     def test_all_gather(self):
         self._init_pg()
         self._test_transport_matrix(self._test_all_gather)
+
+    def test_all_gather_uneven(self):
+        if not self.supports_uneven_all_gather:
+            self.skipTest(f"{self.backend_name} does not support uneven all-gather")
+        self._init_pg()
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                input = self._tensor(sizes[self.rank], torch.float32)
+                outputs = [torch.empty(size, device=self.device) for size in sizes]
+                work = dist.all_gather(outputs, input, async_op=async_op)
+                self._wait(work, async_op)
+                for rank, output in enumerate(outputs):
+                    self.assertEqual(
+                        output,
+                        torch.full_like(output, self._value(rank, output.dtype)),
+                    )
+
+    def test_all_gather_mixed_devices(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        tensor = self._tensor(4, torch.float32)
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
+        outputs[-1] = torch.empty(4, device=other_device)
+        torch.cuda.set_device(other_device)
+
+        work = dist.all_gather(outputs, tensor, async_op=True)
+
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        work.wait()
+        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        torch.cuda.synchronize(self.device)
+        torch.cuda.synchronize(other_device)
+        for rank, output in enumerate(outputs):
+            self.assertEqual(
+                output,
+                torch.full_like(output, self._value(rank, output.dtype)),
+            )
 
     def test_all_gather_single(self):
         self._init_pg()
@@ -211,6 +287,44 @@ class AbstractCollectivesTest(C10dBackendTest):
         self._init_pg()
         self._test_transport_matrix(self._test_gather)
 
+    def test_gather_single(self):
+        self._init_pg()
+        if not self.supports_gather_single:
+            with self.assertRaisesRegex(RuntimeError, "does not support gather_single"):
+                self._test_gather_single(4, torch.float32, False)
+            return
+        self._test_transport_matrix(self._test_gather_single)
+
+        # Only the destination rank validates the output size, so only it calls
+        # into the (failing) collective; the size check happens before any
+        # communication is issued.
+        if self.rank == 0:
+            input = torch.ones(4, device=self.device)
+            output = torch.empty(input.numel(), device=self.device)
+            with self.assertRaises((RuntimeError, ValueError)):
+                dist.gather_single(input, output, dst=0)
+
+    def test_gather_into_tensor_deprecated(self):
+        if not self.supports_gather_single:
+            self.skipTest(f"{self.backend_name} does not support gather_single")
+        self._init_pg()
+        tensor = self._tensor(4, torch.float32)
+        output = (
+            torch.empty(self.world_size * 4, device=self.device)
+            if self.rank == 0
+            else None
+        )
+        with self.assertWarnsRegex(FutureWarning, "gather_into_tensor` is deprecated"):
+            dist.gather_into_tensor(tensor, output, dst=0)
+        if self.rank == 0:
+            expected = torch.cat(
+                [
+                    self._expected_tensor(4, torch.float32, rank)
+                    for rank in range(self.world_size)
+                ]
+            )
+            self.assertEqual(output, expected)
+
     def test_scatter(self):
         self._init_pg()
         self._test_transport_matrix(self._test_scatter)
@@ -218,6 +332,23 @@ class AbstractCollectivesTest(C10dBackendTest):
     def test_all_to_all(self):
         self._init_pg()
         self._test_transport_matrix(self._test_all_to_all)
+
+    def test_all_to_all_rejects_mixed_devices(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        inputs = [
+            torch.full((1,), float(self.rank), device=self.device)
+            for _ in range(self.world_size)
+        ]
+        inputs[-1] = torch.full((1,), float(self.rank), device=other_device)
+        outputs = [torch.empty(1, device=self.device) for _ in range(self.world_size)]
+
+        with self.assertRaisesRegex(
+            (RuntimeError, ValueError), "same device|Expected tensor on"
+        ):
+            dist.all_to_all(outputs, inputs)
 
     def test_all_to_all_single(self):
         self._init_pg()
@@ -261,6 +392,108 @@ class AbstractCollectivesTest(C10dBackendTest):
                 ]
             )
             self.assertEqual(output, expected)
+
+    def test_all_to_all_single_independent_empty_split_sizes(self):
+        self._init_pg()
+
+        input_count = self.rank + 1
+        input = torch.full(
+            (self.world_size * input_count,),
+            self.rank,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        output_splits = [rank + 1 for rank in range(self.world_size)]
+        output = torch.empty(sum(output_splits), device=self.device)
+        dist.all_to_all_single(
+            output,
+            input,
+            output_split_sizes=output_splits,
+            input_split_sizes=[],
+        )
+        expected = torch.cat(
+            [
+                torch.full((count,), rank, dtype=torch.float32, device=self.device)
+                for rank, count in enumerate(output_splits)
+            ]
+        )
+        self.assertEqual(output, expected)
+
+        input_splits = [rank + 1 for rank in range(self.world_size)]
+        input = torch.cat(
+            [
+                torch.full((count,), self.rank, dtype=torch.float32, device=self.device)
+                for count in input_splits
+            ]
+        )
+        output_count = self.rank + 1
+        output = torch.empty(
+            self.world_size * output_count, dtype=torch.float32, device=self.device
+        )
+        dist.all_to_all_single(
+            output,
+            input,
+            output_split_sizes=[],
+            input_split_sizes=input_splits,
+        )
+        expected = torch.cat(
+            [
+                torch.full(
+                    (output_count,), rank, dtype=torch.float32, device=self.device
+                )
+                for rank in range(self.world_size)
+            ]
+        )
+        self.assertEqual(output, expected)
+
+    def test_all_to_all_single_invalid_split_sizes(self):
+        self._init_pg()
+        valid_splits = [2] * self.world_size
+        invalid_splits = (
+            [-1, 1],
+            [-1, 5],
+            [4],
+            [1] * self.world_size,
+            [3] * self.world_size,
+        )
+        for invalid_side in ("input", "output"):
+            for splits in invalid_splits:
+                with self.subTest(invalid_side=invalid_side, splits=splits):
+                    input_splits = splits if invalid_side == "input" else valid_splits
+                    output_splits = splits if invalid_side == "output" else valid_splits
+                    with self.assertRaisesRegex(RuntimeError, "[Ss]plit"):
+                        dist.all_to_all_single(
+                            torch.empty(4, device=self.device),
+                            torch.ones(4, device=self.device),
+                            output_split_sizes=output_splits,
+                            input_split_sizes=input_splits,
+                        )
+
+        for invalid_side in ("input", "output"):
+            with self.subTest(invalid_side=invalid_side, splits=[]):
+                input_size = 3 if invalid_side == "input" else 4
+                output_size = 3 if invalid_side == "output" else 4
+                input_splits = [] if invalid_side == "input" else valid_splits
+                output_splits = [] if invalid_side == "output" else valid_splits
+                with self.assertRaisesRegex(
+                    RuntimeError, "does not divide equally across group size"
+                ):
+                    dist.all_to_all_single(
+                        torch.empty(output_size, device=self.device),
+                        torch.ones(input_size, device=self.device),
+                        output_split_sizes=output_splits,
+                        input_split_sizes=input_splits,
+                    )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not divide equally across group size"
+        ):
+            dist.all_to_all_single(
+                torch.empty(3, 2, device=self.device),
+                torch.ones(3, 2, device=self.device),
+                output_split_sizes=[],
+                input_split_sizes=[],
+            )
 
     def test_all_reduce(self):
         self._init_pg()
@@ -317,6 +550,29 @@ class AbstractCollectivesTest(C10dBackendTest):
                                 output, self._expected_reduce(count, dtype, op)
                             )
 
+    def test_reduce_scatter_uneven(self):
+        self._init_pg()
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                inputs = [self._tensor(size, torch.float32) for size in sizes]
+                output = torch.empty(
+                    sizes[self.rank], dtype=torch.float32, device=self.device
+                )
+                work = dist.reduce_scatter(
+                    output,
+                    inputs,
+                    op=dist.ReduceOp.SUM,
+                    async_op=async_op,
+                )
+                self._wait(work, async_op)
+                self.assertEqual(
+                    output,
+                    self._expected_reduce(
+                        sizes[self.rank], torch.float32, dist.ReduceOp.SUM
+                    ),
+                )
+
     def test_reduce_scatter_single(self):
         self._init_pg()
         for count in COUNTS:
@@ -340,6 +596,23 @@ class AbstractCollectivesTest(C10dBackendTest):
                             self.assertEqual(
                                 output, self._expected_reduce(count, dtype, op)
                             )
+
+    def test_premul_sum(self):
+        if not self.premul_sum_dtypes:
+            self.skipTest(f"{self.backend_name} does not support PREMUL_SUM")
+        self._init_pg()
+        expected = sum(range(1, self.world_size + 1)) * 0.5
+        for dtype in self.premul_sum_dtypes:
+            for factor in (
+                0.5,
+                torch.tensor(0.5, dtype=dtype, device=self.device),
+            ):
+                with self.subTest(dtype=dtype, factor_type=type(factor).__name__):
+                    tensor = torch.full(
+                        (4,), float(self.rank + 1), dtype=dtype, device=self.device
+                    )
+                    dist.all_reduce(tensor, op=dist.ReduceOp.PREMUL_SUM(factor))
+                    self.assertEqual(tensor, torch.full_like(tensor, expected))
 
     def test_barrier(self):
         self._init_pg()
