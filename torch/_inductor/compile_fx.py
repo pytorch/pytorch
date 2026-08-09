@@ -268,13 +268,42 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #   address cudagraphs recorded.
 # Codegen itself does NOT consult staticness: triton code assumes the
 # alignment of the example inputs (see Note: [Input Alignment handling in
-# Inductor]). Per input, at compile time:
+# Inductor]), and staticness only decides whether that assumption gets a
+# runtime safety net. What makes an input static:
 #
-#   example input      | generated code      | later misaligned call
-#   -------------------+---------------------+--------------------------
-#   misaligned         | no assumption       | runs fine, no check/copy
-#   aligned, nonstatic | assumes aligned     | runtime check -> clone
-#   aligned, static    | assumes aligned     | (contract: cannot happen)
+#   input                              | static?
+#   -----------------------------------+---------------------------------
+#   nn.Module param/buffer             | yes, unguarded (auto, #130391)
+#   mark_static_address(guard=True)    | yes, guarded (data_ptr guard)
+#   mark_static_address(guard=False)   | yes, unguarded
+#   plain user input                   | no
+#   bw: saved activation               | yes (inductor-allocated)
+#   bw: saved forward input            | same as it was in the forward
+#   bw: tangent                        | no
+#
+# and what each combination does, where "aligned" means statically known
+# 16-byte aligned (tensor_is_aligned; a symbolic storage_offset that cannot
+# be proven aligned counts as misaligned even if the example happens to be):
+#
+#   example input       | codegen         | runtime (no cudagraphs)
+#   --------------------+-----------------+------------------------------
+#   misaligned          | no assumption   | any alignment ok, no check
+#   aligned, nonstatic  | assumes aligned | check -> clone if misaligned
+#   aligned, static     | assumes aligned | no check; contract says the
+#                       |                 | address (hence alignment)
+#                       |                 | never changes
+#
+#   with cudagraphs     | additionally
+#   --------------------+---------------------------------------------
+#   nonstatic           | copied into graph-owned (aligned) buffer
+#                       | every replay
+#   static, aligned     | recorded at its own address; address change
+#                       | -> re-record (unguarded) / recompile (guarded)
+#   static, misaligned  | demoted to nonstatic at record time
+#                       | (remove_unaligned_input_idxs)
+#
+# (config.assume_aligned_inputs, non-default, removes the "misaligned" row:
+# everything is assumed aligned and nonstatics are checked at runtime.)
 #
 # Consequently a misclassified static input is a correctness bug,
 # not a missed optimization: kernels may run with a baked-in alignment the
