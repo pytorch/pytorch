@@ -34,6 +34,7 @@ from torch._dynamo.external_utils import (
     SAVED_TENSOR_SOURCE_INPUT,
     SAVED_TENSOR_SOURCE_NONE,
     SAVED_TENSOR_SOURCE_UNPACK_HOOK,
+    SAVED_TENSORS_ACCESSED_TWICE,
     unwrap_maybe_dynamic_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -48,6 +49,7 @@ from torch._functorch._aot_autograd.runtime_wrappers import (
     CachedAutogradLazyBackwardCompileInfo,
 )
 from torch._guards import compile_context, CompileContext, CompileId, Source
+from torch._library.effects import EffectType
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
@@ -67,6 +69,38 @@ from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import CapturedTraceback
+
+
+# A single immutable CPU Tensor routes internal saved-tensor effects through
+# fake/CPU dispatch without allocating bookkeeping state per autograd context.
+_saved_tensors_dispatch_token = torch.empty(0, dtype=torch.bool)
+
+
+@torch.library.register_fake("_dynamo::compiled_autograd_clear_saved_tensors")
+def _compiled_autograd_clear_saved_tensors_fake(
+    dispatch_token: torch.Tensor,
+    saved_tensors: list[Any],
+    backward_idx: int,
+    input_clear_indices: list[int],
+    packed_input_clear_indices: list[int],
+) -> None:
+    return None
+
+
+@torch.library.register_fake("_dynamo::compiled_autograd_check_saved_tensors")
+def _compiled_autograd_check_saved_tensors_fake(
+    dispatch_token: torch.Tensor,
+    backward_idx: int,
+) -> None:
+    return None
+
+
+torch.library._register_effectful_op(  # type: ignore[attr-defined]
+    "_dynamo::compiled_autograd_clear_saved_tensors", EffectType.ORDERED
+)
+torch.library._register_effectful_op(  # type: ignore[attr-defined]
+    "_dynamo::compiled_autograd_check_saved_tensors", EffectType.ORDERED
+)
 
 
 if TYPE_CHECKING:
@@ -815,6 +849,7 @@ class AutogradCompilerInstance:
     def _clear_saved_tensor_call_args(
         self,
         psaved_tensors: Sequence[Any],
+        backward_idx: int,
     ) -> tuple[
         Any,
         dict[str, Any],
@@ -824,6 +859,7 @@ class AutogradCompilerInstance:
     ]:
         call_backward_kwargs: dict[str, Any] = {
             "clear_saved_tensors_on_access": True,
+            "backward_idx": backward_idx,
         }
         (
             saved_tensor_sources,
@@ -948,7 +984,7 @@ class AutogradCompilerInstance:
                     saved_tensor_input_clear_indices,
                     saved_tensor_packed_data_clear_indices,
                     saved_tensor_unpack_hook_nodes,
-                ) = self._clear_saved_tensor_call_args(psaved_tensors)
+                ) = self._clear_saved_tensor_call_args(psaved_tensors, backward_idx)
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
                 target=call_backward,
@@ -1482,26 +1518,34 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                with _disable(), make_compile_context(self.id):
-                    try:
+                try:
+                    with _disable(), make_compile_context(self.id):
                         out = compiled_fn(
                             inputs, filtered_sizes, scalars, hooks, packed_inputs
                         )
                         if self.nan_checker:
                             self.nan_checker.check(out)
                         return out
-                    finally:
-                        for hook in hooks:
-                            if (
-                                isinstance(
-                                    hook,
-                                    torch.autograd.function.BackwardCFunction,
-                                )
-                                and hook._clear_saved_tensors_on_access
-                                and hook._compiled_autograd_saved_tensors_state.item()
-                                and not hook._saved_tensors_accessed_and_cleared
-                            ):
-                                hook._compiled_autograd_clear_saved_tensors()
+                except torch._dynamo.exc.Unsupported as error:
+                    # On the first eager-to-compiled trace, Dynamo can wrap this
+                    # one-shot property error directly or as an observed error.
+                    # Normalize only those exact forms to preserve eager semantics.
+                    context = error.__context__
+                    if (
+                        isinstance(context, RuntimeError)
+                        and str(context) == SAVED_TENSORS_ACCESSED_TWICE
+                    ):
+                        raise context from None
+                    observed_message = (
+                        "raised exception "
+                        f"RuntimeError({SAVED_TENSORS_ACCESSED_TWICE!r})"
+                    )
+                    if (
+                        isinstance(context, torch._dynamo.exc.ObservedRuntimeError)
+                        and str(context) == observed_message
+                    ):
+                        raise RuntimeError(SAVED_TENSORS_ACCESSED_TWICE) from None
+                    raise
             finally:
                 in_compiled_autograd_region = False
 

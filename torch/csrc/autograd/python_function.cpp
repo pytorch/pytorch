@@ -14,6 +14,7 @@
 
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/functorch/DynamicLayer.h>
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -34,7 +35,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
-#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -590,6 +590,7 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   Py_VISIT(self->dirty_tensors);
   Py_VISIT(self->compiled_autograd_backward_state);
   Py_VISIT(self->saved_for_forward);
+  Py_VISIT(self->output_grad_dtypes);
   return traverse_node(self->cdata, visit, arg);
 }
 
@@ -600,6 +601,7 @@ static int THPFunction_clear(THPFunction* self) {
   Py_CLEAR(self->dirty_tensors);
   Py_CLEAR(self->compiled_autograd_backward_state);
   Py_CLEAR(self->saved_for_forward);
+  Py_CLEAR(self->output_grad_dtypes);
   return 0;
 }
 
@@ -610,7 +612,6 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->input_info.~vector();
   self->saved_variables.~vector();
   self->is_variable_input.~vector();
-  self->compiled_autograd_saved_tensors_state.~Tensor();
   std::destroy_at(&self->needs_input_grad_bits);
   if (self->cdata) {
     auto* slot = self->cdata->pyobj_slot();
@@ -637,7 +638,6 @@ static PyObject* THPFunction_new(
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
-  new (&self->compiled_autograd_saved_tensors_state) at::Tensor();
   new (&self->needs_input_grad_bits)
       std::optional<c10::SmallVector<bool, 24>>();
   self->materialize_grads = true;
@@ -645,6 +645,7 @@ static PyObject* THPFunction_new(
   self->materialize_non_diff_grads = true;
   self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
+  self->output_grad_dtypes = nullptr;
   torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
   return obj;
 }
@@ -663,9 +664,8 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
 
   THPFunction_assert(
       PyTuple_Check(self->dirty_tensors),
-      "autograd "
-      "internal error: dirty_tensors attribute is expected to be a tuple "
-      "but is ",
+      "autograd internal error: dirty_tensors attribute is expected to be a "
+      "tuple but is %s",
       THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
@@ -673,10 +673,8 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
     PyObject* obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(
         THPVariable_Check(obj),
-        "mark_dirty can "
-        "only accept variables, but argument ",
+        "mark_dirty can only accept variables, but argument %zd is of type %s",
         i,
-        " is of type ",
         THPUtils_typename(obj));
 
     const auto& tensor = THPVariable_Unpack(obj);
@@ -690,6 +688,60 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
 
 static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     THPFunction* self);
+
+// Parse and consume positional grad-dtype declarations.
+static std::optional<std::vector<std::optional<at::ScalarType>>>
+_parse_output_grad_dtypes(
+    THPFunction* self,
+    Py_ssize_t num_outputs,
+    const std::vector<std::optional<Variable>>& raw_output_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable) {
+  PyObject* dtypes = self->output_grad_dtypes;
+  if (dtypes == nullptr) {
+    return std::nullopt;
+  }
+  THPFunction_assert(
+      PyTuple_Check(dtypes),
+      "set_output_grad_dtype expects the declarations to be a tuple, but got: "
+      "%s",
+      THPUtils_typename(dtypes));
+  THPFunction_assert(
+      PyTuple_GET_SIZE(dtypes) == num_outputs,
+      "set_output_grad_dtype expected the number of declarations to match the "
+      "number of outputs: the Function returned %zd values but %zd "
+      "declarations were provided",
+      num_outputs,
+      PyTuple_GET_SIZE(dtypes));
+  std::vector<std::optional<at::ScalarType>> result;
+  result.reserve(num_outputs);
+  for (const auto i : c10::irange(num_outputs)) {
+    PyObject* d = PyTuple_GET_ITEM(dtypes, i);
+    if (d == Py_None) {
+      result.emplace_back(std::nullopt);
+      continue;
+    }
+    THPFunction_assert(
+        THPDtype_Check(d),
+        "set_output_grad_dtype expects each declaration to be a torch.dtype or "
+        "None, but got %s",
+        THPUtils_typename(d));
+    const auto& raw_output_var = raw_output_vars[i];
+    THPFunction_assert(
+        raw_output_var.has_value() &&
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type()),
+        "set_output_grad_dtype: got a concrete dtype for output %zd, but that "
+        "output is not a differentiable tensor (it is a non-tensor, was marked "
+        "non-differentiable, or has a non-differentiable dtype). Pass None for "
+        "output %zd instead.",
+        i,
+        i);
+    result.emplace_back(reinterpret_cast<THPDtype*>(d)->scalar_type);
+  }
+  Py_CLEAR(self->output_grad_dtypes);
+  return result;
+}
 
 // Given a Python tuple of raw output tensors (raw_output), set each of
 // the corresponding entries in a different Python tuple (outputs) with
@@ -731,6 +783,9 @@ static void _wrap_outputs(
       raw_output_vars.emplace_back();
     }
   }
+
+  auto output_grad_dtypes = _parse_output_grad_dtypes(
+      self, num_outputs, raw_output_vars, non_differentiable);
 
   _jvp_fn_t jvp_user_function = [self](
                                     variable_list inputs,
@@ -840,13 +895,26 @@ static void _wrap_outputs(
         // If one of the grad outputs is undefined, a correctly-shaped zeros
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
+        //
+        // Match differentiability to what mark_non_differentiable recorded,
+        // which is keyed on the raw output's TensorImpl.
+        const auto& raw_output_var = raw_output_vars[i];
+        TORCH_INTERNAL_ASSERT(raw_output_var.has_value());
         bool is_differentiable =
-            (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
-                 0 &&
-             isDifferentiableType(wrapped_output->scalar_type()));
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type());
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
+        // Set each differentiable output's grad_dtype, defaulting to its dtype.
+        if (is_differentiable) {
+          const auto grad_dtype = output_grad_dtypes.has_value()
+              ? (*output_grad_dtypes)[i]
+              : std::optional<at::ScalarType>(raw_output_var->scalar_type());
+          cdata_if_executable->mutable_input_metadata(i).set_grad_dtype(
+              grad_dtype);
+        }
       }
       PyTuple_SetItem(
           outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
@@ -865,8 +933,8 @@ static void _get_tensors_to_save(
     // to_save_if_setup_context, the actual saving is not done here.
     THPFunction_assert(
         PyTuple_Check(self->saved_for_forward),
-        "autograd internal "
-        "error: saved_for_forward attribute is expected to be a tuple but is ",
+        "autograd internal error: saved_for_forward attribute is expected to "
+        "be a tuple but is %s",
         THPUtils_typename(self->saved_for_forward));
     Py_ssize_t num_saved_for_forward =
         PyTuple_GET_SIZE(self->saved_for_forward);
@@ -881,8 +949,8 @@ static void _get_tensors_to_save(
   if (self->to_save) {
     THPFunction_assert(
         PyTuple_Check(self->to_save),
-        "autograd internal "
-        "error: to_save attribute is expected to be a tuple but is ",
+        "autograd internal error: to_save attribute is expected to be a tuple "
+        "but is %s",
         THPUtils_typename(self->to_save));
 
     Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
@@ -959,9 +1027,8 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 
   THPFunction_assert(
       PyTuple_Check(self->non_differentiable),
-      "autograd "
-      "internal error: non_differentiable attribute is expected to be a "
-      "tuple but is ",
+      "autograd internal error: non_differentiable attribute is expected to be "
+      "a tuple but is %s",
       THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
@@ -969,8 +1036,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     PyObject* t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(
         THPVariable_Check(t),
-        "mark_non_differentiable "
-        "only accepts variable arguments, but got ",
+        "mark_non_differentiable only accepts variable arguments, but got %s",
         THPUtils_typename(t));
     set.insert(THPVariable_Unpack(t).unsafeGetTensorImpl());
   }
@@ -1780,11 +1846,6 @@ PyObject* THPFunction_apply(
       "clear_saved_tensors_on_access must be a bool, got ",
       Py_TYPE(clear_attr.get())->tp_name);
   ctx->clear_saved_tensors_on_access = Py_IsTrue(clear_attr.get());
-  if (ctx->clear_saved_tensors_on_access) {
-    torch::DisableTorchDispatch guard;
-    ctx->compiled_autograd_saved_tensors_state =
-        at::zeros({}, at::TensorOptions().dtype(at::ScalarType::Bool));
-  }
 
   // Get boxed_grads_call from the Function class
   THPObjectPtr boxed_attr(PyObject_GetAttr(cls, boxed_grads_call_name));
@@ -1820,8 +1881,8 @@ PyObject* THPFunction_apply(
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
-      auto result =
-          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
+      THPObjectPtr result(
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple));
       if (!result) {
         return nullptr;
       }
@@ -1948,10 +2009,7 @@ static void check_saved_tensors_not_cleared(const THPFunction* self) {
 }
 
 static void clear_saved_tensors_after_access(THPFunction* self) {
-  self->saved_variables.clear();
-  torch::DisableTorchDispatch guard;
-  self->compiled_autograd_saved_tensors_state.fill_(true);
-  self->saved_tensors_accessed_and_cleared = true;
+  THPFunction_compiled_autograd_clear_saved_tensors(self);
 }
 
 PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
@@ -1998,15 +2056,6 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_get_saved_tensors_accessed_and_cleared(
-    THPFunction* self,
-    void* _unused) {
-  if (self->saved_tensors_accessed_and_cleared) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
-}
-
 PyObject* THPFunction_get_clear_saved_tensors_on_access(
     THPFunction* self,
     void* _unused) {
@@ -2016,19 +2065,21 @@ PyObject* THPFunction_get_clear_saved_tensors_on_access(
   Py_RETURN_FALSE;
 }
 
-PyObject* THPFunction_get_compiled_autograd_saved_tensors_state(
+PyObject* THPFunction_get_compiled_autograd_saved_tensors_cleared(
     THPFunction* self,
     void* _unused) {
-  return THPVariable_Wrap(self->compiled_autograd_saved_tensors_state);
+  if (self->saved_tensors_accessed_and_cleared) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
 
-PyObject* THPFunction_compiled_autograd_clear_saved_tensors(
+PyObject* THPFunction_compiled_autograd_clear_saved_tensors_python(
     PyObject* self,
     PyObject* _unused) {
   HANDLE_TH_ERRORS
   auto* function = reinterpret_cast<THPFunction*>(self);
-  check_saved_tensors_not_cleared(function);
-  clear_saved_tensors_after_access(function);
+  THPFunction_compiled_autograd_clear_saved_tensors(function);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -2148,6 +2199,16 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
 }
 } // namespace
 
+void THPFunction_check_saved_tensors_not_cleared(const THPFunction* self) {
+  check_saved_tensors_not_cleared(self);
+}
+
+void THPFunction_compiled_autograd_clear_saved_tensors(THPFunction* self) {
+  THPFunction_check_saved_tensors_not_cleared(self);
+  self->saved_variables.clear();
+  self->saved_tensors_accessed_and_cleared = true;
+}
+
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);
 
@@ -2227,18 +2288,13 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr,
      nullptr},
-    {"_saved_tensors_accessed_and_cleared",
-     (getter)THPFunction_get_saved_tensors_accessed_and_cleared,
-     nullptr,
-     nullptr,
-     nullptr},
     {"_clear_saved_tensors_on_access",
      (getter)THPFunction_get_clear_saved_tensors_on_access,
      nullptr,
      nullptr,
      nullptr},
-    {"_compiled_autograd_saved_tensors_state",
-     (getter)THPFunction_get_compiled_autograd_saved_tensors_state,
+    {"_compiled_autograd_saved_tensors_cleared",
+     (getter)THPFunction_get_compiled_autograd_saved_tensors_cleared,
      nullptr,
      nullptr,
      nullptr},
@@ -2260,6 +2316,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"dirty_tensors",
      &getObject<&THPFunction::dirty_tensors>,
      &setObject<&THPFunction::dirty_tensors>,
+     nullptr,
+     nullptr},
+    {"output_grad_dtypes",
+     &getObject<&THPFunction::output_grad_dtypes>,
+     &setObject<&THPFunction::output_grad_dtypes>,
      nullptr,
      nullptr},
     {"saved_for_forward",
@@ -2311,7 +2372,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      METH_NOARGS,
      nullptr},
     {(char*)"_compiled_autograd_clear_saved_tensors",
-     THPFunction_compiled_autograd_clear_saved_tensors,
+     THPFunction_compiled_autograd_clear_saved_tensors_python,
      METH_NOARGS,
      nullptr},
     {(char*)"apply",

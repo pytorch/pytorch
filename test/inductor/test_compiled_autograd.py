@@ -1823,7 +1823,10 @@ main()
                     if backend == "ca_eager":
                         ref = weakref.ref(x)
                         del x
-                        assert ref() is None  # noqa: S101
+                        if ref() is not None:
+                            raise AssertionError(
+                                "saved tensor reference was not released"
+                            )
                     return grad_output
 
             x = torch.randn(3, requires_grad=True)
@@ -1849,8 +1852,8 @@ main()
 
             @staticmethod
             def backward(ctx, grad_output):
-                _ = ctx.saved_tensors
-                return grad_output
+                (saved,) = ctx.saved_tensors
+                return grad_output + saved * 0
 
         x = torch.randn(3, requires_grad=True)
         y = MyFn.apply(x.clone())
@@ -1859,13 +1862,184 @@ main()
             compiled_autograd._enable(make_compiler_fn(backend=backend)),
         ):
             y.sum().backward(retain_graph=True)
-            error_context = (
-                self.assertRaisesRegex(RuntimeError, "can only be accessed once")
-                if backend == "ca_eager"
-                else self.assertRaises(RuntimeError)
-            )
-            with error_context:
+
+        # The native state must observe cleanup performed by either compiled
+        # backend when execution returns to eager autograd.
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            y.sum().backward(retain_graph=True)
+
+    def test_custom_fn_clear_saved_tensors_eager_then_compiled(self):
+        class MyFn(torch.autograd.Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                return grad_output + saved * 0
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x.clone())
+        y.sum().backward(retain_graph=True)
+
+        # The compiled graph must observe the one-shot state set by eager.
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            with (
+                torch.autograd.set_multithreading_enabled(False),
+                compiled_autograd._enable(make_compiler_fn(backend="eager")),
+            ):
                 y.sum().backward(retain_graph=True)
+
+    def test_custom_fn_clear_saved_tensors_cleanup_before_error(self):
+        contexts = []
+        saved_tensor_refs = []
+
+        class MyFn(torch.autograd.Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                contexts.append(ctx)
+                saved = x.sin()
+                saved_tensor_refs.append(torch._C._WeakTensorRef(saved))
+                ctx.save_for_backward(saved)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                del saved
+                torch._assert_async(
+                    grad_output.sum() < 0,
+                    "error after saved-tensor access",
+                )
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x)
+        try:
+            with (
+                torch.autograd.set_multithreading_enabled(False),
+                compiled_autograd._enable(make_compiler_fn(backend="eager")),
+            ):
+                y.sum().backward()
+        except RuntimeError as error:
+            error_messages = []
+            current_error = error
+            while current_error is not None:
+                error_messages.append(str(current_error))
+                current_error = current_error.__context__
+        else:
+            self.fail("expected user backward error")
+        self.assertTrue(
+            any("error after saved-tensor access" in msg for msg in error_messages),
+            error_messages,
+        )
+
+        self.assertTrue(saved_tensor_refs[0].expired())
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            _ = contexts[0].saved_tensors
+
+    def test_custom_fn_clear_saved_tensors_hides_dispatch_bookkeeping(self):
+        seen_ops = []
+
+        class RecordMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                seen_ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        class MyFn(torch.autograd.Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                _ = ctx.saved_tensors
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x.clone())
+        with (
+            RecordMode(),
+            torch.autograd.set_multithreading_enabled(False),
+            compiled_autograd._enable(make_compiler_fn(backend="ca_eager")),
+        ):
+            y.sum().backward()
+
+        self.assertIn(torch.ops.aten.sum.default, seen_ops)
+        self.assertNotIn(torch.ops.aten._local_scalar_dense.default, seen_ops)
+        self.assertNotIn(torch.ops.aten.fill_.Scalar, seen_ops)
+        self.assertNotIn(
+            torch.ops._dynamo.compiled_autograd_check_saved_tensors.default,
+            seen_ops,
+        )
+        self.assertNotIn(
+            torch.ops._dynamo.compiled_autograd_clear_saved_tensors.default,
+            seen_ops,
+        )
+
+    def test_custom_fn_clear_saved_tensors_access_then_no_access(self):
+        access_saved_tensors = True
+
+        class MyFn(torch.autograd.Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                if access_saved_tensors:
+                    _ = ctx.saved_tensors
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x.clone())
+        with (
+            torch.autograd.set_multithreading_enabled(False),
+            compiled_autograd._enable(make_compiler_fn(backend="eager")),
+        ):
+            y.sum().backward(retain_graph=True)
+            access_saved_tensors = False
+            y.sum().backward(retain_graph=True)
+
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    def test_custom_fn_clear_saved_tensors_tensor_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class MyFn(torch.autograd.Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(TwoTensor(x.sin(), x.cos()))
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                _ = ctx.saved_tensors
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x)
+        with (
+            torch.autograd.set_multithreading_enabled(False),
+            compiled_autograd._enable(make_compiler_fn(backend="eager")),
+        ):
+            y.sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x))
 
     @parametrize("backend", ("ca_eager", "eager"))
     def test_custom_fn_clear_saved_tensors_clear_only_on_access(self, backend):
@@ -1894,12 +2068,12 @@ main()
             y.sum().backward(retain_graph=True)
             access_saved_tensors = True
             y.sum().backward(retain_graph=True)
-            error_context = (
-                self.assertRaisesRegex(RuntimeError, "can only be accessed once")
-                if backend == "ca_eager"
-                else self.assertRaises(RuntimeError)
-            )
-            with error_context:
+
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            with (
+                torch.autograd.set_multithreading_enabled(False),
+                compiled_autograd._enable(make_compiler_fn(backend=backend)),
+            ):
                 y.sum().backward(retain_graph=True)
         self.assertEqual(x.grad, torch.full_like(x, 2))
 
@@ -1926,10 +2100,19 @@ main()
             compiled_autograd._enable(make_compiler_fn(backend="eager")),
         ):
             y.sum().backward(retain_graph=True)
-            if clear_at_forward:
-                with self.assertRaises(RuntimeError):
+
+        if clear_at_forward:
+            with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+                with (
+                    torch.autograd.set_multithreading_enabled(False),
+                    compiled_autograd._enable(make_compiler_fn(backend="eager")),
+                ):
                     y.sum().backward(retain_graph=True)
-            else:
+        else:
+            with (
+                torch.autograd.set_multithreading_enabled(False),
+                compiled_autograd._enable(make_compiler_fn(backend="eager")),
+            ):
                 y.sum().backward(retain_graph=True)
 
         expected_grad = 1 if clear_at_forward else 2
@@ -1986,10 +2169,12 @@ main()
                 @staticmethod
                 def backward(ctx, grad_output):
                     x, none = ctx.saved_tensors
-                    assert none is None  # noqa: S101
+                    if none is not None:
+                        raise AssertionError("expected a None saved tensor")
                     ref = weakref.ref(x)
                     del x
-                    assert ref() is None  # noqa: S101
+                    if ref() is not None:
+                        raise AssertionError("saved tensor reference was not released")
                     return grad_output
 
             x = torch.randn(3, requires_grad=True)
@@ -5923,6 +6108,14 @@ skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
+
+# grad_dtype is not supported in compile (every eager test here is already
+# skipIfTorchDynamo). Most of them also report the dtype they observed by
+# setattr-ing on the Function class, which dynamo cannot trace once compiled
+# autograd inlines the backward.
+for name in dir(test_autograd.TestAutograd):
+    if name.startswith("test_ctx_output_grad_dtype"):
+        skipped_tests.add(name)
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestNestedCheckpointWithCompiledAutograd = wrap_test_class(

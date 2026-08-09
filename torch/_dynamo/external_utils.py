@@ -41,6 +41,12 @@ _R = TypeVar("_R")
 SAVED_TENSOR_SOURCE_INPUT = "input"
 SAVED_TENSOR_SOURCE_NONE = "none"
 SAVED_TENSOR_SOURCE_UNPACK_HOOK = "unpack_hook"
+SAVED_TENSORS_ACCESSED_TWICE = (
+    "saved_tensors can only be accessed once when "
+    "clear_saved_tensors_on_access=True is set on the autograd.Function. "
+    "Either access saved_tensors only once, or set "
+    "clear_saved_tensors_on_access=False."
+)
 
 if TYPE_CHECKING:
     # TorchScript does not support `@deprecated`
@@ -108,18 +114,6 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrap
 
 
-_SAVED_TENSORS_ACCESSED_TWICE = (
-    "saved_tensors can only be accessed once when "
-    "clear_saved_tensors_on_access=True is set on the autograd.Function. "
-    "Either access saved_tensors only once, or set "
-    "clear_saved_tensors_on_access=False."
-)
-
-
-def _raise_saved_tensors_accessed_twice() -> None:
-    raise RuntimeError(_SAVED_TENSORS_ACCESSED_TWICE)
-
-
 class FakeBackwardCFunction:
     def __init__(
         self,
@@ -134,11 +128,19 @@ class FakeBackwardCFunction:
         saved_tensor_unpack_hook_indices: tuple[tuple[int, int], ...] | None = None,
         saved_tensor_packed_data_clear_indices: tuple[int, ...] | None = None,
         saved_tensor_sources: tuple[tuple[str, int | None], ...] | None = None,
+        backward_idx: int | None = None,
     ) -> None:
         self.real = real
+        self._clear_saved_tensors_on_access = clear_saved_tensors_on_access
+        self._saved_tensors: (
+            list[torch.Tensor | None] | tuple[torch.Tensor | None, ...]
+        ) = saved_tensors
+        if not clear_saved_tensors_on_access:
+            # Keep the ordinary compiled-autograd path allocation-free.
+            return
+
         self._saved_tensors_list = saved_tensors
         self._saved_tensors = tuple(saved_tensors)
-        self._clear_saved_tensors_on_access = clear_saved_tensors_on_access
         self._saved_tensors_accessed_and_cleared = False
         self._saved_tensor_inputs = saved_tensor_inputs
         self._saved_tensor_indices = saved_tensor_indices
@@ -150,24 +152,31 @@ class FakeBackwardCFunction:
             saved_tensor_packed_data_clear_indices
         )
         self._saved_tensor_sources = saved_tensor_sources
+        self._backward_idx = backward_idx
 
     @property
-    def saved_tensors(self) -> tuple[torch.Tensor | None, ...]:
-        saved_tensors_state = None
+    def saved_tensors(
+        self,
+    ) -> list[torch.Tensor | None] | tuple[torch.Tensor | None, ...]:
+        if not self._clear_saved_tensors_on_access:
+            return self._saved_tensors
+
+        compiling = is_compiling()
         if self._clear_saved_tensors_on_access:
-            saved_tensors_state = self.real._compiled_autograd_saved_tensors_state
-            if is_compiling():
-                torch._assert_async(
-                    torch.logical_not(saved_tensors_state),
-                    _SAVED_TENSORS_ACCESSED_TWICE,
-                )
-            elif (
-                saved_tensors_state.item()
-                or self.real._saved_tensors_accessed_and_cleared
+            if (
+                self._saved_tensors_accessed_and_cleared
+                or self.real._compiled_autograd_saved_tensors_cleared
             ):
-                _raise_saved_tensors_accessed_twice()
-        if self._saved_tensors_accessed_and_cleared:
-            _raise_saved_tensors_accessed_twice()
+                raise RuntimeError(SAVED_TENSORS_ACCESSED_TWICE)
+            if compiling:
+                if self._backward_idx is None:
+                    raise AssertionError(
+                        "backward_idx must be set for compiled saved-tensor cleanup"
+                    )
+                torch.ops._dynamo.compiled_autograd_check_saved_tensors.default(
+                    torch._dynamo.compiled_autograd._saved_tensors_dispatch_token,
+                    self._backward_idx,
+                )
 
         if self._saved_tensor_sources is not None:
             input_tensors = _materialize_saved_tensor_inputs(
@@ -190,10 +199,27 @@ class FakeBackwardCFunction:
             saved_tensors = self._saved_tensors
 
         if self._clear_saved_tensors_on_access:
-            if saved_tensors_state is None:
-                raise AssertionError("saved_tensors_state must be set")
-            saved_tensors_state.fill_(True)
-            if not is_compiling():
+            if compiling:
+                if self._backward_idx is None:
+                    raise AssertionError(
+                        "backward_idx must be set for compiled saved-tensor cleanup"
+                    )
+                # These are lifetime-only operands. They make the cleanup the
+                # last graph use when user backward code drops a materialized
+                # saved tensor without otherwise using it, so compiled wrappers
+                # can release flattened input locals at the same point as eager.
+                saved_tensor_lifetime_args = []
+                for saved_tensor in saved_tensors:
+                    if saved_tensor is not None:
+                        saved_tensor_lifetime_args.append(saved_tensor)
+                torch.ops._dynamo.compiled_autograd_clear_saved_tensors.default(
+                    torch._dynamo.compiled_autograd._saved_tensors_dispatch_token,
+                    saved_tensor_lifetime_args,
+                    self._backward_idx,
+                    self._saved_tensor_clear_indices or (),
+                    self._saved_tensor_packed_data_clear_indices or (),
+                )
+            else:
                 self.real._compiled_autograd_clear_saved_tensors()
                 _clear_saved_tensor_refs(
                     self._saved_tensor_inputs,
@@ -322,21 +348,30 @@ def call_backward(
     saved_tensor_unpack_hook_indices: tuple[tuple[int, int], ...] | None = None,
     saved_tensor_packed_data_clear_indices: tuple[int, ...] | None = None,
     saved_tensor_sources: tuple[tuple[str, int | None], ...] | None = None,
+    backward_idx: int | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, ...]:
-    fake = FakeBackwardCFunction(
-        backward_c_function,
-        saved_tensors,
-        clear_saved_tensors_on_access=clear_saved_tensors_on_access,
-        saved_tensor_inputs=saved_tensor_inputs,
-        saved_tensor_indices=saved_tensor_indices,
-        saved_tensor_clear_indices=saved_tensor_clear_indices,
-        saved_tensor_hooks=saved_tensor_hooks,
-        saved_tensor_packed_data=saved_tensor_packed_data,
-        saved_tensor_unpack_hook_indices=saved_tensor_unpack_hook_indices,
-        saved_tensor_packed_data_clear_indices=(saved_tensor_packed_data_clear_indices),
-        saved_tensor_sources=saved_tensor_sources,
-    )
-    del saved_tensors
+    if clear_saved_tensors_on_access:
+        fake = FakeBackwardCFunction(
+            backward_c_function,
+            saved_tensors,
+            clear_saved_tensors_on_access=True,
+            saved_tensor_inputs=saved_tensor_inputs,
+            saved_tensor_indices=saved_tensor_indices,
+            saved_tensor_clear_indices=saved_tensor_clear_indices,
+            saved_tensor_hooks=saved_tensor_hooks,
+            saved_tensor_packed_data=saved_tensor_packed_data,
+            saved_tensor_unpack_hook_indices=saved_tensor_unpack_hook_indices,
+            saved_tensor_packed_data_clear_indices=(
+                saved_tensor_packed_data_clear_indices
+            ),
+            saved_tensor_sources=saved_tensor_sources,
+            backward_idx=backward_idx,
+        )
+        del saved_tensors
+    else:
+        # Preserve the existing allocation-free default path for Functions that
+        # do not opt into clearing saved tensors on access.
+        fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
     grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
     if not isinstance(grads, tuple):

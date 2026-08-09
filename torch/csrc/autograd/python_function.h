@@ -139,7 +139,11 @@ struct THPFunction {
   // Flag for clear_saved_tensors_on_access feature
   bool clear_saved_tensors_on_access;
   bool saved_tensors_accessed_and_cleared;
-  at::Tensor compiled_autograd_saved_tensors_state;
+
+  // Owned tuple of per-output grad dtype declarations recorded by
+  // set_output_grad_dtype; consumed while wrapping outputs. nullptr when the
+  // API was not called.
+  PyObject* output_grad_dtypes = nullptr;
 
   PyObject* saved_for_forward;
   // The C++ PyNode for this THPFunction. Ownership follows the same
@@ -157,3 +161,8 @@ TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);
 }
+
+TORCH_PYTHON_API void THPFunction_compiled_autograd_clear_saved_tensors(
+    THPFunction* self);
+TORCH_PYTHON_API void THPFunction_check_saved_tensors_not_cleared(
+    const THPFunction* self);
