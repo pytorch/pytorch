@@ -271,7 +271,7 @@ def main() -> int:
             for n in sorted(names):
                 print(f"    {n}  -- runs on {runner}, not on a10g")
             print(f"  not selected by {function}() in .ci/pytorch/test.sh")
-            print(f"\n  Add to .ci/pytorch/test.sh:\n{line}")
+            print(f"\n  Add to {function}() in .ci/pytorch/test.sh:\n{line}")
             print(f"  Or run:  python tools/testing/gpu_coverage.py --write {rel}\n")
 
     for rel, err in sorted(errors.items()):
