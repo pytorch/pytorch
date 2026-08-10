@@ -11816,6 +11816,9 @@ class TestNNDeviceType(NNTestCase):
         self._test_gumbel_softmax_straight_through(device, dtype)
         self._test_gumbel_softmax_grad(device, dtype)
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @dtypes(torch.float, torch.double)
     def test_gumbel_softmax_tau_zero_raises(self, device, dtype):
         # tau <= 0 must raise ValueError; tau=0 previously produced NaN silently
         logits = torch.randn(4, 8, device=device, dtype=dtype)
