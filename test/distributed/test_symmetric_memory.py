@@ -1372,11 +1372,14 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
         # An out-of-range rank indexes a wild signal pad pointer (put_signal)
         # or a slot past the signal pad, in the tensor data (wait_signal).
+        # get_signal_pad wraps the wild pointer in a tensor handed to the user.
         for bad_rank in (-1, self.world_size):
             with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
                 symm_mem_hdl.put_signal(dst_rank=bad_rank)
             with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
                 symm_mem_hdl.wait_signal(src_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.get_signal_pad(bad_rank)
 
 
 @instantiate_parametrized_tests

@@ -384,10 +384,7 @@ static at::Tensor get_buffer_at_byte_offset(
     c10::IntArrayRef sizes,
     c10::ScalarType dtype,
     size_t offset_bytes) {
-  TORCH_CHECK(
-      peer >= 0 && peer < handle->get_world_size(),
-      "Invalid peer rank: ",
-      peer);
+  check_rank(peer, handle->get_world_size());
   auto peer_ptr = handle->get_buffer_ptrs()[peer];
   TORCH_CHECK(
       peer_ptr != nullptr,
@@ -442,6 +439,8 @@ at::Tensor SymmetricMemory::get_signal_pad(
     c10::IntArrayRef sizes,
     std::optional<c10::ScalarType> dtype,
     int64_t storage_offset) {
+  check_rank(rank, get_world_size());
+
   // If the dtype is unspecified, default it to UInt32, as it
   // is the most common type for signaling purposes.
   if (!dtype.has_value()) {

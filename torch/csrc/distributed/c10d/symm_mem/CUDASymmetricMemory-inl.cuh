@@ -130,20 +130,6 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
       ")");
 }
 
-// Validates the peer rank argument for put_signal() and wait_signal(). The
-// rank indexes the device array of signal pad pointers and the per-channel
-// slot row, so an out-of-range value reads a wild pointer or lands past the
-// signal pad, in the peer's tensor data.
-inline void check_rank(int rank, int world_size) {
-  TORCH_CHECK(
-      rank >= 0 && rank < world_size,
-      "rank for put_signal() and wait_signal() must be in [0, ",
-      world_size,
-      ") (got ",
-      rank,
-      ")");
-}
-
 // All-to-all signal barrier over the symmetric-memory signal pads, shared by
 // the CUDA and NCCL backends. Each rank sets a flag in every peer's signal pad
 // (at its own slot) and waits for every peer to set the matching flag in its
