@@ -489,6 +489,42 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_nested_invoke_subgraph(self):
+        """
+        A subgraph HOP nested inside another subgraph must not defeat the cache.
+
+        Loading a cached GraphModule re-traces it symbolically, which calls
+        invoke_subgraph with Proxy operands; rejecting those makes every load
+        fail, so the entry is saved on every run and never hit.
+        """
+        from torch.compiler import nested_compile_region
+
+        @nested_compile_region
+        def inner(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        @nested_compile_region
+        def outer(x, y):
+            return inner(x, y) + inner(y, x)
+
+        def fn(x, y):
+            return outer(x, y) + outer(y, x)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        compiled_fn(x, y).sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+        compiled_fn(x, y).sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
