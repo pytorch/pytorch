@@ -266,6 +266,210 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f(inp), f_replaced(inp))
         self.assertEqual(count, 2)
 
+    def test_register_replacement_matches_view_to_reshape(self):
+        from torch._inductor.compile_fx import fake_tensor_prop
+
+        def pattern(x, y):
+            c = torch.mm(x, y)
+            d = aten.reshape.default(c, [-1, 4, 4])
+            return d.relu()
+
+        def replacement(x, y):
+            c = torch.mm(x, y)
+            return aten.reshape.default(c.relu(), [-1, 4, 4])
+
+        inputs = [
+            torch.empty(5, 16, device=GPU_TYPE),
+            torch.empty(16, 16, device=GPU_TYPE),
+        ]
+
+        patterns = PatternMatcherPass()
+        register_replacement(pattern, replacement, inputs, fwd_only, patterns)
+
+        gm = fwd_only(pattern, inputs)
+        self.assertEqual(
+            [node.target for node in gm.graph.nodes if node.op == "call_function"],
+            [aten.mm.default, aten.view.default, aten.relu.default],
+        )
+
+        torch._inductor.fx_passes.post_grad.view_to_reshape(gm)
+        fake_mode = fake_tensor_prop(gm, inputs)
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(patterns.apply(gm), 1)
+
+        call_targets = [
+            node.target for node in gm.graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual(call_targets.count(aten.reshape.default), 1)
+        self.assertNotIn(aten.view.default, call_targets)
+
+        def output_pattern(x):
+            return aten.reshape.default(x, [4, 4])
+
+        def output_replacement(x):
+            return aten.reshape.default(x + 1, [4, 4])
+
+        output_inputs = [torch.empty(2, 8, device=GPU_TYPE)]
+        output_patterns = PatternMatcherPass()
+        register_replacement(
+            output_pattern,
+            output_replacement,
+            output_inputs,
+            fwd_only,
+            output_patterns,
+        )
+
+        output_gm = fwd_only(output_pattern, output_inputs)
+        torch._inductor.fx_passes.post_grad.view_to_reshape(output_gm)
+        fake_mode = fake_tensor_prop(output_gm, output_inputs)
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(output_patterns.apply(output_gm), 1)
+
+        call_targets = [
+            node.target for node in output_gm.graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual(call_targets.count(aten.reshape.default), 1)
+        self.assertNotIn(aten.view.default, call_targets)
+
+    def test_register_replacement_normalizes_view_in_subgraphs(self):
+        from torch._inductor.compile_fx import fake_tensor_prop
+
+        def pattern(pred, x):
+            return aten.reshape.default(x, [4, 4]) + pred
+
+        def replacement(pred, x):
+            def true_fn(value):
+                return aten.reshape.default(value, [4, 4])
+
+            def false_fn(value):
+                return aten.reshape.default(value, [4, 4])
+
+            return torch.cond(pred, true_fn, false_fn, [x]) + pred
+
+        inputs = [
+            torch.tensor(True, device=GPU_TYPE),
+            torch.empty(2, 8, device=GPU_TYPE),
+        ]
+        patterns = PatternMatcherPass()
+        register_replacement(pattern, replacement, inputs, fwd_only, patterns)
+
+        gm = fwd_only(pattern, inputs)
+        torch._inductor.fx_passes.post_grad.view_to_reshape(gm)
+        fake_mode = fake_tensor_prop(gm, inputs)
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(patterns.apply(gm), 1)
+
+        subgraphs = [
+            module
+            for name, module in gm.named_modules()
+            if name and isinstance(module, torch.fx.GraphModule)
+        ]
+        self.assertEqual(len(subgraphs), 2)
+        for subgraph in subgraphs:
+            call_targets = [
+                node.target
+                for node in subgraph.graph.nodes
+                if node.op == "call_function"
+            ]
+            self.assertEqual(call_targets, [aten.reshape.default])
+            self.assertNotIn("aten.view.default", subgraph.code)
+            self.assertIn("aten.reshape.default", subgraph.code)
+
+    def test_register_replacement_checks_view_reshape_strides(self):
+        from torch._inductor.compile_fx import fake_tensor_prop
+
+        def pattern(x):
+            return aten.view.default(x, [6])
+
+        def replacement(x):
+            return aten.reshape.default(x, [6]) + 1
+
+        example_inputs = [torch.empty(3, 2, device=GPU_TYPE)]
+        precompiled_pattern = gen_pattern(pattern, example_inputs, fwd_only)
+
+        def target_graph(*, viewable):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            if viewable:
+                reshape_input = x
+                inputs = example_inputs
+            else:
+                reshape_input = graph.call_function(aten.permute.default, (x, [1, 0]))
+                inputs = [torch.empty(2, 3, device=GPU_TYPE)]
+            reshape = graph.call_function(aten.reshape.default, (reshape_input, [6]))
+            graph.output(reshape)
+            gm = torch.fx.GraphModule({}, graph)
+            return gm, fake_tensor_prop(gm, inputs)
+
+        for precompiled in (False, True):
+            with self.subTest(precompiled=precompiled):
+                patterns = PatternMatcherPass()
+                register_replacement(
+                    pattern,
+                    replacement,
+                    example_inputs,
+                    fwd_only,
+                    patterns,
+                    search_fn_pattern=precompiled_pattern if precompiled else None,
+                )
+
+                gm, fake_mode = target_graph(viewable=False)
+                with V.set_fake_mode(fake_mode):
+                    self.assertEqual(patterns.apply(gm), 0)
+                call_targets = [
+                    node.target for node in gm.graph.nodes if node.op == "call_function"
+                ]
+                self.assertNotIn(aten.add.Tensor, call_targets)
+
+                gm, fake_mode = target_graph(viewable=True)
+                with V.set_fake_mode(fake_mode):
+                    self.assertEqual(patterns.apply(gm), 1)
+                call_targets = [
+                    node.target for node in gm.graph.nodes if node.op == "call_function"
+                ]
+                self.assertIn(aten.add.Tensor, call_targets)
+
+    def test_manual_view_pattern_does_not_match_reshape(self):
+        from torch._inductor.compile_fx import fake_tensor_prop
+
+        patterns = PatternMatcherPass()
+        rewrite_count = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.relu.default,
+                CallFunction(
+                    aten.view.default,
+                    KeywordArg("arg"),
+                    KeywordArg("size"),
+                ),
+            ),
+            pass_dict=patterns,
+        )
+        def view_only_pattern(match, arg, size):
+            nonlocal rewrite_count
+            rewrite_count += 1
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        permute = graph.call_function(aten.permute.default, (x, [1, 0]))
+        reshape = graph.call_function(aten.reshape.default, (permute, [6]))
+        relu = graph.call_function(aten.relu.default, (reshape,))
+        graph.output(relu)
+        gm = torch.fx.GraphModule({}, graph)
+
+        inputs = [torch.empty(2, 3, device=GPU_TYPE)]
+        fake_mode = fake_tensor_prop(gm, inputs)
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(patterns.apply(gm), 0)
+
+        self.assertEqual(rewrite_count, 0)
+        call_targets = [
+            node.target for node in gm.graph.nodes if node.op == "call_function"
+        ]
+        self.assertIn(aten.reshape.default, call_targets)
+        self.assertNotIn(aten.view.default, call_targets)
+
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {

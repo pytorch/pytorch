@@ -147,6 +147,23 @@ T = TypeVar("T")
 FnsType = torch.fx.node.Target | str
 
 
+# Only ReplacementPatternEntry opts into this; manual graph/lowering patterns
+# must keep exact target matching.
+_VIEW_RESHAPE_EQUIVALENT_TARGETS: dict[FnsType, tuple[FnsType, ...]] = {
+    aten.view.default: (aten.view.default, aten.reshape.default),
+    aten.reshape.default: (aten.view.default, aten.reshape.default),
+}
+
+
+def _equivalent_targets(
+    fn: FnsType,
+    target_equivalences: Mapping[FnsType, tuple[FnsType, ...]] | None,
+) -> tuple[FnsType, ...]:
+    if target_equivalences is None:
+        return (fn,)
+    return target_equivalences.get(fn, (fn,))
+
+
 class Multiple:
     def __init__(self) -> None:
         # Ensure we're really a singleton.
@@ -441,6 +458,20 @@ class Match:
             )
 
 
+def _match_used_target_equivalence(
+    match: Match,
+    target_equivalences: Mapping[FnsType, tuple[FnsType, ...]],
+) -> bool:
+    """Return true when any target matched through an equivalence rather than exactly."""
+    return any(
+        target not in pattern.fns_set
+        and any(
+            target in _equivalent_targets(fn, target_equivalences) for fn in pattern.fns
+        )
+        for pattern, target in match.targets.items()
+    )
+
+
 class FailedMatch(RuntimeError):
     """
     Represents a unsuccessful match.
@@ -489,6 +520,7 @@ class MatchContext:
     pattern_to_node: dict[PatternExpr, torch.fx.Node | None]
     graph: torch.fx.Graph
     exclusive_node_set: list[NodeOrConstant]
+    target_equivalences: Mapping[FnsType, tuple[FnsType, ...]] | None
 
     def __init__(
         self,
@@ -496,11 +528,13 @@ class MatchContext:
         pattern_to_node: dict[PatternExpr, torch.fx.Node] | None = None,
         *,
         graph: torch.fx.Graph,
+        target_equivalences: Mapping[FnsType, tuple[FnsType, ...]] | None = None,
     ) -> None:
         self.outputs = outputs
         self.pattern_to_node = {} if pattern_to_node is None else dict(pattern_to_node)
         self.graph = graph
         self.exclusive_node_set = []
+        self.target_equivalences = target_equivalences
 
     def match(self, pattern: PatternExpr, node: NodeOrConstant) -> MatchResult:
         """wrapper to check reused nodes in patterns"""
@@ -531,9 +565,15 @@ class PatternExpr(ABC):
     @abstractmethod
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult: ...
 
-    def match(self, node: torch.fx.Node) -> MatchResult:
+    def match(
+        self,
+        node: torch.fx.Node,
+        target_equivalences: Mapping[FnsType, tuple[FnsType, ...]] | None = None,
+    ) -> MatchResult:
         try:
-            return MatchContext([self], graph=node.graph).match(self, node)
+            return MatchContext(
+                [self], graph=node.graph, target_equivalences=target_equivalences
+            ).match(self, node)
         except FailedMatch as e:
             return e
 
@@ -846,11 +886,17 @@ class _TargetExpr(PatternExpr):
     ) -> Generator[torch.fx.Node | None, None, None]:
         raise NotImplementedError
 
-    def _match_fns(self, node: torch.fx.Node) -> bool:
-        return (
-            isinstance(node, torch.fx.Node)
-            and node.op == self.op
-            and extract_target(node) in self.fns_set
+    def _match_fns(self, node: torch.fx.Node, ctx: MatchContext | None = None) -> bool:
+        if not isinstance(node, torch.fx.Node) or node.op != self.op:
+            return False
+        target = extract_target(node)
+        if target in self.fns_set:
+            return True
+        if ctx is None or ctx.target_equivalences is None:
+            return False
+        return any(
+            target in _equivalent_targets(fn, ctx.target_equivalences)
+            for fn in self.fns
         )
 
     def _match_users(self, node: torch.fx.Node, ctx: MatchContext) -> bool:
@@ -961,7 +1007,7 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        if not self._match_fns(node) or len(node.args) != len(self.args):
+        if not self._match_fns(node, ctx) or len(node.args) != len(self.args):
             return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
@@ -1039,7 +1085,7 @@ class _TargetArgsExpr(_TargetExpr):
                         continue
                     for node in other_node.users:
                         if node not in searched:
-                            if self._match_fns(node):
+                            if self._match_fns(node, ctx):
                                 yield node
                                 searched.add(node)
 
@@ -1085,7 +1131,7 @@ class _TargetExprVarArgs(_TargetExpr):
     """
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        if not self._match_fns(node):
+        if not self._match_fns(node, ctx):
             return FailedMatch("function_mismatch")
 
         if not self._match_users(node, ctx):
@@ -1136,7 +1182,10 @@ class ListOf(PatternExpr):
         matched = False
         for i, child_node in enumerate(node):
             child_ctx = MatchContext(
-                ctx.outputs, pattern_to_node, graph=child_node.graph
+                ctx.outputs,
+                pattern_to_node,
+                graph=child_node.graph,
+                target_equivalences=ctx.target_equivalences,
             )
             child_match = child_ctx.match(self.pattern, child_node)
             pattern_to_node = child_ctx.filter_multi_user_patterns()
@@ -1216,9 +1265,17 @@ class MultiOutputPattern(PatternExpr):
             ctx.pattern_to_node = dict(prior)
         return m
 
-    def match(self, node: torch.fx.Node) -> MatchResult:
+    def match(
+        self,
+        node: torch.fx.Node,
+        target_equivalences: Mapping[FnsType, tuple[FnsType, ...]] | None = None,
+    ) -> MatchResult:
         try:
-            return MatchContext(self.outputs, graph=node.graph).match(self, node)
+            return MatchContext(
+                self.outputs,
+                graph=node.graph,
+                target_equivalences=target_equivalences,
+            ).match(self, node)
         except FailedMatch as e:
             return e
 
@@ -1259,9 +1316,11 @@ class RepeatedExpr(PatternExpr):
         for anchor_node in self.inner_pattern.find_anchor_nodes(
             ctx, OrderedSet([node])
         ):
-            anchor_m = MatchContext([self], graph=node.graph).match(
-                self.inner_pattern, anchor_node
-            )
+            anchor_m = MatchContext(
+                [self],
+                graph=node.graph,
+                target_equivalences=ctx.target_equivalences,
+            ).match(self.inner_pattern, anchor_node)
             if not is_match(anchor_m):
                 return anchor_m
             m.extend(anchor_m)
@@ -1346,6 +1405,9 @@ class PatternEntry:
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         raise NotImplementedError
 
+    def match(self, node: torch.fx.Node) -> MatchResult:
+        return self.pattern.match(node)
+
     def register(
         self,
         pass_dicts: _PassDictsType | Sequence[_PassDictsType],
@@ -1405,7 +1467,33 @@ class ReplacementPatternEntry(PatternEntry):
     """
 
     normalize_args: Callable[..., list[Any]]
+    target_equivalences: Mapping[FnsType, tuple[FnsType, ...]] | None = None
     pattern_name: str | None = None  # Unique identifier for per-pattern telemetry
+
+    def match(self, node: torch.fx.Node) -> MatchResult:
+        return self.pattern.match(node, target_equivalences=self.target_equivalences)
+
+    def register(
+        self,
+        pass_dicts: _PassDictsType | Sequence[_PassDictsType],
+        target: torch.fx.node.Target | None = None,
+        prepend: bool = False,
+    ) -> None:
+        if target is None and self.target_equivalences is not None:
+            if not hasattr(self.pattern, "fns"):
+                raise AssertionError("pattern has no fns attribute")
+            seen_targets: OrderedSet[torch.fx.node.Target] = OrderedSet()
+            for fn in self.pattern.fns:
+                for equivalent_target in _equivalent_targets(
+                    fn, self.target_equivalences
+                ):
+                    if equivalent_target in seen_targets:
+                        continue
+                    seen_targets.add(equivalent_target)
+                    self.register(pass_dicts, equivalent_target, prepend=prepend)
+            return
+
+        super().register(pass_dicts, target, prepend)
 
     @staticmethod
     def replace_with_graph(
@@ -1667,7 +1755,9 @@ def _return_true(match: Match) -> bool:
     return True
 
 
-def log_trace_failure(search_fn: Callable[..., Any], e: RuntimeError) -> None:
+def log_trace_failure(
+    search_fn: Callable[..., Any], e: RuntimeError | ValueError
+) -> None:
     log.info(
         "Replacement pattern %s failed to apply due to shape mismatch: %s",
         search_fn.__name__,
@@ -1933,6 +2023,13 @@ def register_replacement(
             # retracing. Note that this means the pattern has to be independent
             # of its args.
             specific_pattern = search_fn_pattern
+            if specific_pattern is not None and _match_used_target_equivalence(
+                match, _VIEW_RESHAPE_EQUIVALENT_TARGETS
+            ):
+                # Serialized patterns skip the shape-specific trace below. If
+                # matching needed an equivalent target, retrace to verify that
+                # the search function is valid for the matched strides.
+                specific_pattern = None
             specific_arg_info = _trace_arg_info(argnames_static, args)
             specific_argnames = specific_arg_info.flat_argnames
 
@@ -1954,7 +2051,7 @@ def register_replacement(
                             sym_args + args,
                             get_decomp_fn=get_decomp_fn,
                         )
-                    except RuntimeError as e:
+                    except (RuntimeError, ValueError) as e:
                         log_trace_failure(search_fn, e)
                         return False
 
@@ -1984,7 +2081,7 @@ def register_replacement(
                         specific_graph = trace_fn(
                             search_fn, args, get_decomp_fn=get_decomp_fn
                         )
-                    except RuntimeError as e:
+                    except (RuntimeError, ValueError) as e:
                         log_trace_failure(search_fn, e)
                         return False
 
@@ -1998,7 +2095,9 @@ def register_replacement(
             node = match.output_nodes()[0]
             if node is None:
                 raise AssertionError("output node is None")
-            specific_pattern_match = specific_pattern.match(node)
+            specific_pattern_match = specific_pattern.match(
+                node, target_equivalences=_VIEW_RESHAPE_EQUIVALENT_TARGETS
+            )
 
             if _should_debug_node(node.name):
                 log.warning(
@@ -2021,6 +2120,12 @@ def register_replacement(
                 match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
+                if aten.reshape.default in specific_pattern_match.targets.values():
+                    # Import lazily to avoid a pattern_matcher/post_grad cycle.
+                    from .fx_passes.post_grad import view_to_reshape
+
+                    view_to_reshape(match.replacement_graph)
+                    match.replacement_graph.recompile()
                 match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
@@ -2086,6 +2191,7 @@ def register_replacement(
             pattern=pattern,
             extra_check=check_fn,
             normalize_args=normalize_args,
+            target_equivalences=_VIEW_RESHAPE_EQUIVALENT_TARGETS,
             pattern_name=pattern_name,
         )
         pattern.register(pass_dicts)
@@ -2653,7 +2759,7 @@ class PatternMatcherPass:
                 for entry in self.patterns[(node.op, target)]:
                     if node._erased:
                         break
-                    m = entry.pattern.match(node)
+                    m = entry.match(node)
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)
