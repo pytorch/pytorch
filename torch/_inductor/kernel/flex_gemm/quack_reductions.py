@@ -15,12 +15,12 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     local_reduce_needs_physical_combine,
 )
 from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_cutedsl_op_name
 from torch._inductor.kernel.gemm_epilogue_utils import (
     normalize_shape,
     statically_known_equal,
 )
 from torch._inductor.shape_propagation import get_broadcasted_shape
-from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     guard_int,
     has_guarding_hint,
@@ -211,18 +211,6 @@ def grouped_tensor_layout(
     return _syntactic_grouped_tensor_layout(shape)
 
 
-def _cute_op_name(target: Any) -> str | None:
-    if isinstance(target, torch._ops.OpOverload):
-        op_name = target.overloadpacket.__name__
-    elif isinstance(target, str):
-        op_name = target
-    else:
-        op_name = target.__name__ if callable(target) else None
-    if op_name is not None:
-        op_name = op_name.rsplit(".", 1)[-1]
-    return "truediv" if op_name == "div" else op_name
-
-
 FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
     (
         "_to_copy",
@@ -233,43 +221,6 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "inline_asm_elementwise",
     )
 )
-
-
-def _cute_call(
-    node: torch.fx.Node, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> Any:
-    """Lower one FX call through the active CuTeDSL operations handler."""
-    target = node.target
-    op_name = _cute_op_name(target)
-    if op_name is None:
-        raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
-    if op_name == "inline_asm_elementwise":
-        kwargs = dict(kwargs)
-        kwargs["asm"] = kwargs.pop("asm_str")
-        input_values = []
-        for input_node in node.args[: len(args)]:
-            value = (
-                input_node.meta.get("val")
-                if isinstance(input_node, torch.fx.Node)
-                else None
-            )
-            if not isinstance(value, torch.Tensor):
-                raise NotImplementedError(
-                    "FlexGEMM inline asm inputs require tensor metadata"
-                )
-            input_values.append(value)
-        kwargs["input_dtypes"] = tuple(value.dtype for value in input_values)
-        kwargs["scalar_sources"] = tuple(
-            all(isinstance(dim, int) and dim == 1 for dim in value.shape)
-            for value in input_values
-        )
-    try:
-        op = getattr(V.get_ops_handler(), op_name)
-    except AttributeError:
-        raise NotImplementedError(
-            f"unsupported FlexGEMM epilogue op: {target}"
-        ) from None
-    return op(*args, **kwargs)
 
 
 def tensor_meta_shape(node: torch.fx.Node) -> tuple[Any, ...] | None:
@@ -310,7 +261,7 @@ def is_pointwise_node(node: torch.fx.Node) -> bool:
     return (
         isinstance(node.target, torch._ops.OpOverload)
         and torch.Tag.pointwise in node.target.tags
-    ) or _cute_op_name(node.target) in FLEX_GEMM_POINTWISE_OP_NAMES
+    ) or gemm_epilogue_cutedsl_op_name(node.target) in FLEX_GEMM_POINTWISE_OP_NAMES
 
 
 def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
@@ -340,13 +291,3 @@ def squeeze_source_node(node: torch.fx.Node) -> torch.fx.Node | None:
         return None
     source_node = node.args[0]
     return source_node if isinstance(source_node, torch.fx.Node) else None
-
-
-def lower_full_scalar(node: torch.fx.Node) -> Any | None:
-    if node.op != "call_function" or node.target is not torch.ops.aten.full.default:
-        return None
-    shape = normalize_shape(node.args[0])
-    if shape != ():
-        return None
-    value = node.args[1]
-    return value if isinstance(value, (bool, int, float)) else None

@@ -1,5 +1,5 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 9886bf3306e0a359a416b1acb9cf8c6e057135f7..6a06a293b936609fa053231294e9205177c92f2f 100644
+index 6d8b509013d62608ef71834e7e4ab74f7b5949b5..9a69602f7bdca595623467a8501d785e04788be1 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -61,2 +61,3 @@ guesses about vectorization.
@@ -8,7 +8,7 @@ index 9886bf3306e0a359a416b1acb9cf8c6e057135f7..6a06a293b936609fa053231294e92051
 +  ``outs={name: sink_op}`` is the general form for any sink op. A sink declares
 +  ``sink_arity``; arity greater than one means the fn returns a tuple of
 +  independently collected value planes for the sink to combine.
-@@ -349,4 +350,6 @@ class _TensorEpiModMixin(_EpiModMixinBase):
+@@ -354,4 +355,6 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
 -            value = result[name]
 -            sink_tmp = cute.make_rmem_tensor(value.shape, value.element_type)
 -            sink_tmp.store(value)
@@ -19,15 +19,15 @@ index 9886bf3306e0a359a416b1acb9cf8c6e057135f7..6a06a293b936609fa053231294e92051
 +                plane.store(value)
 +                planes.append(plane)
 +            sink_tmps.append(tuple(planes))
-@@ -447 +450,3 @@ class EpiMod:
+@@ -450 +453,3 @@ class EpiMod:
 -            if getattr(op, "scaled", False) and self.mode == "acc_pair":
 +            if not isinstance(op.sink_arity, int) or op.sink_arity < 1:
 +                raise ValueError(f"sink {name!r}: sink_arity must be a positive integer")
 +            if op.sink_arity > 1 and self.mode == "acc_pair":
-@@ -449 +454 @@ class EpiMod:
+@@ -452 +457 @@ class EpiMod:
 -                    f"sink {name!r}: scaled reduces are not supported in acc_pair mode yet "
 +                    f"sink {name!r}: multi-plane sinks are not supported in acc_pair mode "
-@@ -451,0 +457,8 @@ class EpiMod:
+@@ -454,0 +460,8 @@ class EpiMod:
 +        for name in self.prepass_outs:
 +            op = self.ops.get(name)
 +            if op is None:
@@ -36,7 +36,7 @@ index 9886bf3306e0a359a416b1acb9cf8c6e057135f7..6a06a293b936609fa053231294e92051
 +                raise ValueError(
 +                    f"sink {name!r}: multi-plane sinks are not supported in prepass_outs"
 +                )
-@@ -792 +805 @@ class EpiMod:
+@@ -795 +808 @@ class EpiMod:
 -                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
 +                raise ValueError("swap_ab requires element-mode and orientation-aware epilogue ops")
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
@@ -243,7 +243,7 @@ index 6427d45c45c88b4d926f5a05f56c71c82c48198e..39a23cb67a6705dd727093690e7eb64e
 +                f"cannot fingerprint callable dataclass {value!r}; implement __quack_semantic_key__"
 +            )
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b60e4964dc 100644
+index 63282b4092a863a0395946a3bfebac82c8b0a9a1..a2847ca79231334f49aebf7deedb931412f695b7 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -514,0 +515,5 @@ class GroupedReduceBase(EpiOp):
@@ -324,21 +324,21 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +            return self.finalize_value(values[0])
 +        return self.finalize(values)
 +
-@@ -752 +809,3 @@ class GroupedReduceBase(EpiOp):
+@@ -761 +818,3 @@ class GroupedReduceBase(EpiOp):
 -        return EpiSmemBytes(unstaged=cta_tile_shape_mnk[1] * planes * (Float32.width // 8))
 +        return EpiSmemBytes(
 +            unstaged=cta_tile_shape_mnk[1] * planes * self.reduce_planes * (Float32.width // 8)
 +        )
-@@ -756 +815,4 @@ class GroupedReduceBase(EpiOp):
+@@ -765 +824,4 @@ class GroupedReduceBase(EpiOp):
 -        return (gemm.cta_tile_shape_mnk[1], planes) if planes else None
 +        if not planes:
 +            return None
 +        shape = (gemm.cta_tile_shape_mnk[1], planes)
 +        return shape if self.reduce_planes == 1 else (*shape, self.reduce_planes)
-@@ -762 +824 @@ class GroupedReduceBase(EpiOp):
+@@ -771 +833 @@ class GroupedReduceBase(EpiOp):
 -        size = shape[0] * shape[1]
 +        size = math.prod(shape)
-@@ -798 +860,8 @@ class GroupedReduceBase(EpiOp):
+@@ -807 +869,8 @@ class GroupedReduceBase(EpiOp):
 -            frag = cute.make_rmem_tensor(shape if keep_subtiles else shape[:3], Float32)
 +            frag_shape = shape if keep_subtiles else shape[:3]
 +            frag = (
@@ -348,35 +348,35 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +                    cute.make_rmem_tensor(frag_shape, Float32) for _ in range(self.reduce_planes)
 +                )
 +            )
-@@ -809 +878 @@ class GroupedReduceBase(EpiOp):
+@@ -818 +887 @@ class GroupedReduceBase(EpiOp):
 -        """This subtile's slice of the register accumulator."""
 +        """This subtile's slice of each register-state plane."""
-@@ -812 +881,5 @@ class GroupedReduceBase(EpiOp):
+@@ -821 +890,5 @@ class GroupedReduceBase(EpiOp):
 -        if const_expr(cute.rank(state.frag) == 3):
 +        if const_expr(self.reduce_planes == 1):
 +            if const_expr(cute.rank(state.frag) == 3):
 +                return state.frag
 +            return state.frag[None, None, None, epi_coord[0], epi_coord[1]]
 +        if const_expr(cute.rank(state.frag[0]) == 3):
-@@ -814 +887 @@ class GroupedReduceBase(EpiOp):
+@@ -823 +896 @@ class GroupedReduceBase(EpiOp):
 -        return state.frag[None, None, None, epi_coord[0], epi_coord[1]]
 +        return tuple(plane[None, None, None, epi_coord[0], epi_coord[1]] for plane in state.frag)
-@@ -919,0 +993 @@ class GroupedReduceBase(EpiOp):
+@@ -928,0 +1002 @@ class GroupedReduceBase(EpiOp):
 +        value_planes = self._state_planes(values)
-@@ -930 +1004,4 @@ class GroupedReduceBase(EpiOp):
+@@ -939 +1013,4 @@ class GroupedReduceBase(EpiOp):
 -                value = self.finalize_value(values[i]) if const_expr(finalize) else values[i]
 +                state_value = tuple(plane[i] for plane in value_planes)
 +                value = (
 +                    self._finalize_state(state_value) if const_expr(finalize) else state_value[0]
 +                )
-@@ -945,3 +1022,3 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -954,3 +1031,3 @@ class GroupedLocalReduce(GroupedReduceBase):
 -    ``combine=None`` skips the fold: the values are expected to be group-reduced
 -    and broadcast already (what FlexGEMM's generated TensorSSA does for N groups
 -    inside one fragment, and what :class:`GroupedLocalReduceFeed` produces).
 +    ``combine=None`` skips every fold because values are fully group-reduced.
 +    ``fragment_reduced=True`` skips only the in-fragment fold because TensorSSA
 +    or another producer already reduced and broadcast each fragment partial.
-@@ -954,4 +1031,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -963,4 +1040,6 @@ class GroupedLocalReduce(GroupedReduceBase):
 -    def fn_sink_flush(self, gemm, state, frag):
 -        """Collect the fn's values for this subtile; the fold runs in end_loop
 -        (one reduction site, with the coordinates the store needs)."""
@@ -387,7 +387,7 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +        destinations = self._state_planes(state.frag)
 +        for source, destination in zip(fragments, destinations):
 +            cute.autovec_copy(source, destination)
-@@ -960,7 +1039,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -969,7 +1048,6 @@ class GroupedLocalReduce(GroupedReduceBase):
 -    def _fold_fragment(self, frag, geom):
 -        """Fold each aligned column run in place, broadcast within the run.
 -        Left-to-right so the tree is fixed and reproducible."""
@@ -401,10 +401,10 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +        for chunk in cutlass.range_constexpr(len(chunks)):
 +            slots = const_expr(chunks[chunk])
 +            values = tuple(plane[slots[0]] for plane in planes)
-@@ -968 +1046 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -977 +1055 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                value = combine_fn(value, frag[slots[j]])
 +                values = self._combine_state(values, tuple(plane[slots[j]] for plane in planes))
-@@ -970,13 +1048,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -979,13 +1057,2 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                frag[slots[j]] = value
 -
 -    @cute.jit
@@ -420,17 +420,17 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 -                frag[slots[j]] = value
 +                for plane, value in zip(planes, values):
 +                    plane[slots[j]] = value
-@@ -986,3 +1053,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -995,3 +1062,2 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        """Reduce across the group's row lanes (halving butterfly), leaving the
 -        group value in every participating lane."""
 -        combine_fn = const_expr(self.combine_fn)
 +        """Reduce across the group's row lanes and broadcast each state plane."""
 +        planes = self._state_planes(frag)
-@@ -990 +1056,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -999 +1065,2 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        for i in cutlass.range(cute.size(frag), unroll_full=True):
 +        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
 +            values = tuple(plane[i] for plane in planes)
-@@ -993,5 +1060,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1002,5 +1069,4 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                frag[i] = combine_fn(
 -                    frag[i],
 -                    cute.arch.shuffle_sync_bfly(
@@ -440,28 +440,28 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +                values = self._combine_state(
 +                    values,
 +                    tuple(cute.arch.shuffle_sync_bfly(value, offset=offset) for value in values),
-@@ -999,0 +1066,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1008,0 +1075,2 @@ class GroupedLocalReduce(GroupedReduceBase):
 +            for plane, value in zip(planes, values):
 +                plane[i] = value
-@@ -1003,3 +1071 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1012,3 +1080 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        """Combine the ``fragments_per_group`` epi-N subtiles of one group in
 -        ascending order (called at the group's last subtile)."""
 -        combine_fn = const_expr(self.combine_fn)
 +        """Combine consecutive epi-N subtiles into one grouped state."""
-@@ -1007,2 +1073,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1016,2 +1082,4 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        merged = cute.make_rmem_tensor_like(
 -            state.frag[None, None, None, epi_coord[0], first], Float32
 +        state_planes = self._state_planes(state.frag)
 +        merged_planes = tuple(
 +            cute.make_rmem_tensor_like(plane[None, None, None, epi_coord[0], first], Float32)
 +            for plane in state_planes
-@@ -1010,2 +1078,3 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1019,2 +1087,3 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        cute.autovec_copy(state.frag[None, None, None, epi_coord[0], first], merged)
 -        merged_flt = cute.filter_zeros(merged)
 +        for source, merged in zip(state_planes, merged_planes):
 +            cute.autovec_copy(source[None, None, None, epi_coord[0], first], merged)
 +        merged_planes = tuple(cute.filter_zeros(plane) for plane in merged_planes)
-@@ -1013,4 +1082,12 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1022,4 +1091,12 @@ class GroupedLocalReduce(GroupedReduceBase):
 -            other = cute.filter_zeros(state.frag[None, None, None, epi_coord[0], first + offset])
 -            for i in cutlass.range(cute.size(merged_flt), unroll_full=True):
 -                merged_flt[i] = combine_fn(merged_flt[i], other[i])
@@ -478,13 +478,13 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +                for plane, value in zip(merged_planes, values):
 +                    plane[i] = value
 +        return merged_planes[0] if const_expr(self.reduce_planes == 1) else merged_planes
-@@ -1025 +1102 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1034 +1111 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        combine_fn = const_expr(self.combine_fn)
 +        planes = self._state_planes(frag)
-@@ -1027 +1104 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1036 +1113 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        for i in cutlass.range(cute.size(frag), unroll_full=True):
 +        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
-@@ -1032 +1109,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1041 +1118,6 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                sReduce[n_idx, state.warp_m_idx - group_idx - 1] = frag[i]
 +                smem_warp = state.warp_m_idx - group_idx - 1
 +                for plane_idx, plane in enumerate(planes):
@@ -492,12 +492,12 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +                        sReduce[n_idx, smem_warp] = plane[i]
 +                    else:
 +                        sReduce[n_idx, smem_warp, plane_idx] = plane[i]
-@@ -1034 +1116 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1043 +1125 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        for i in cutlass.range(cute.size(frag), unroll_full=True):
 +        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
-@@ -1037,0 +1120 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1046,0 +1129 @@ class GroupedLocalReduce(GroupedReduceBase):
 +                values = tuple(plane[i] for plane in planes)
-@@ -1039,3 +1122,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1048,3 +1131,6 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                    frag[i] = combine_fn(
 -                        frag[i],
 -                        sReduce[n_idx, group_idx * geom.group_warps + offset - group_idx - 1],
@@ -507,11 +507,11 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +                        if const_expr(self.reduce_planes == 1)
 +                        else sReduce[n_idx, smem_warp, plane_idx]
 +                        for plane_idx in range(self.reduce_planes)
-@@ -1042,0 +1129,3 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1051,0 +1138,3 @@ class GroupedLocalReduce(GroupedReduceBase):
 +                    values = self._combine_state(values, others)
 +                for plane, value in zip(planes, values):
 +                    plane[i] = value
-@@ -1062 +1151,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1071 +1160,6 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
 +        frag = self._frag_slice(state, epi_coord)
 +        frag = (
@@ -519,22 +519,22 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +            if const_expr(self.reduce_planes == 1)
 +            else tuple(cute.filter_zeros(plane) for plane in frag)
 +        )
-@@ -1065,2 +1159,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1074,2 +1168,2 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                if const_expr(geom.chunk > 1):
 -                    self._fold_fragment(frag, geom)
 +                if const_expr(not self.fragment_reduced and geom.chunk > 1):
 +                    self._fold_chunks(frag, geom.chunks)
-@@ -1073,2 +1167,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1082,2 +1176,4 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
 -                    self._fold_rows(frag, geom)
 +                if const_expr(
 +                    not self.fragment_reduced and any(len(chunk) > 1 for chunk in geom.row_chunks)
 +                ):
 +                    self._fold_chunks(frag, geom.row_chunks)
-@@ -1199 +1295 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+@@ -1208 +1304 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
 -    scaled = True
 +    sink_arity = 2
-@@ -1246,5 +1342,5 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+@@ -1256,5 +1352,5 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
 -    def fn_sink_flush(self, gemm, state, frag, scale=None):
 -        """Capture the sum source and prepass value emitted as a sink pair."""
 -        assert scale is not None
@@ -545,6 +545,6 @@ index 7fc4d93bc6054e1795b6e11579af19d7aeb43aac..4f3fa4ebae695e19c6a2d1c9c26f02b6
 +        assert len(fragments) == 2
 +        cute.autovec_copy(fragments[0], state.frag)
 +        cute.autovec_copy(fragments[1], state.finalize_arg)
-@@ -1280 +1376 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+@@ -1290 +1386 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
 -            self._fold_fragment(frag, geom)
 +            self._fold_chunks(frag, geom.chunks)
