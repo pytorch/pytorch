@@ -359,9 +359,9 @@ void cpu_flash_attention(
   //    -> (Batch x KV_seq_len   x KV_num_heads x Dim_per_head)
   // Value (Batch x KV_num_heads x KV_seq_len   x Dim_per_head)
   //    -> (Batch x KV_seq_len   x KV_num_heads x Dim_per_head)
-  at::Tensor query = q.transpose(1, 2);
-  at::Tensor key = k.transpose(1, 2);
-  at::Tensor value = v.transpose(1, 2);
+  const at::Tensor query = q.stride(-1) == 1 ? q.transpose(1, 2) : q.transpose(1, 2).contiguous();
+  const at::Tensor key = k.stride(-1) == 1 ? k.transpose(1, 2) : k.transpose(1, 2).contiguous();
+  const at::Tensor value = v.stride(-1) == 1 ? v.transpose(1, 2) : v.transpose(1, 2).contiguous();
 
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
@@ -798,9 +798,9 @@ void cpu_flash_attention_backward(
     const at::Tensor& grad_k,
     const at::Tensor& grad_v,
     const at::Tensor& grad_out,
-    const at::Tensor& query,
-    const at::Tensor& key,
-    const at::Tensor& value,
+    const at::Tensor& q,
+    const at::Tensor& k,
+    const at::Tensor& v,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     double dropout_p,
@@ -810,15 +810,20 @@ void cpu_flash_attention_backward(
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
+
+  // Query (Batch x Q_seq_len  x Num_heads    x Dim_per_head)
+  // Key   (Batch x KV_seq_len x KV_num_heads x Dim_per_head)
+  // Value (Batch x KV_seq_len x KV_num_heads x Dim_per_head)
+  const at::Tensor query = q.stride(-1) == 1 ? q : q.contiguous();
+  const at::Tensor key = k.stride(-1) == 1 ? k : k.contiguous();
+  const at::Tensor value = v.stride(-1) == 1 ? v : v.contiguous();
+
   accum_t scaling_factor =
       sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
         "scaled_dot_product_attention_flash_attention_backward: Q/K/V should have the same head size");
-  // Query (Batch x Q_seq_len  x Num_heads    x Dim_per_head)
-  // Key   (Batch x KV_seq_len x KV_num_heads x Dim_per_head)
-  // Value (Batch x KV_seq_len x KV_num_heads x Dim_per_head)
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(1);
   int64_t kvSize = value.size(1);
