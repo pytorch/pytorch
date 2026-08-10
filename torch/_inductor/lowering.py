@@ -1589,9 +1589,8 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
             b_size = ir.DynamicSliceSize(sym_size, start, end, step, size)
             b_size.name = V.graph.register_buffer(b_size)
             V.graph.register_operation(b_size)
-        # NOTE: storage_offset registration is not handled here — it is only
-        # needed in the ambiguous (unbacked start/end) path, where it is
-        # handled via DynamicSelectStorageOffset after this helper returns.
+        # storage_offset bindings are registered by the slice path that knows
+        # which index expression should define the offset.
     return sym_size, sym_storage
 
 
@@ -1627,6 +1626,27 @@ def _clamp_slice_end_to_start(end, start):
     return Max(end, start)
 
 
+def _register_unbacked_slice_storage_binding(x, dim, start, sym_storage, *, clamp):
+    if sym_storage is None:
+        return None
+    if x.maybe_get_layout() is None:
+        x.realize()
+    stride = x.maybe_get_stride()
+    if stride is None:
+        raise AssertionError("expected: stride is not None")
+    b_storage = ir.DynamicSelectStorageOffset(
+        sym_storage,
+        start,
+        x.get_layout().offset,
+        stride[dim],
+        x.get_size()[dim],
+        clamp=clamp,
+    )
+    b_storage.name = V.graph.register_buffer(b_storage)
+    V.graph.register_operation(b_storage)
+    return sym_storage
+
+
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1653,10 +1673,11 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             _, sym_storage = _register_unbacked_slice_size_bindings(
                 dim, start, end, step, size
             )
-            if sym_storage is not None:
-                raise AssertionError(
-                    "Unexpected storage_offset unbacked binding for no-op slice"
-                )
+            _register_unbacked_slice_storage_binding(
+                x, dim, start, sym_storage, clamp=clamp
+            )
+            # The view is unchanged, but any storage_offset binding allocated
+            # during tracing still has to be defined for run_node bookkeeping.
             return x
     except TypeError:
         pass
@@ -1685,11 +1706,9 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         _, sym_storage = _register_unbacked_slice_size_bindings(
             dim, start, end, step, size
         )
-        if sym_storage is not None:
-            raise AssertionError(
-                "Unexpected storage_offset unbacked binding when both "
-                "start and end indices are resolved"
-            )
+        _register_unbacked_slice_storage_binding(
+            x, dim, start, sym_storage, clamp=clamp
+        )
 
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
@@ -1712,28 +1731,23 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     stride = x.maybe_get_stride()
 
     if start_index is not None:
-        # we shouldn't have allocated storage offset symbol if start index was determinable
-        if sym_storage is not None:
-            raise AssertionError("expected: sym_storage is None")
+        new_storage_offset = _register_unbacked_slice_storage_binding(
+            x, dim, start, sym_storage, clamp=clamp
+        )
         if stride is None:
             return TensorBox(
                 ir.SliceView.create_with_size(x.data, dim, start_index, sym_size, step)
             )
-        new_storage_offset = x.get_layout().offset + start_index * stride[dim]
+        if new_storage_offset is None:
+            new_storage_offset = x.get_layout().offset + start_index * stride[dim]
     else:
         if stride is None:
             raise AssertionError("expected: stride is not None")
-        b_storage = ir.DynamicSelectStorageOffset(
-            sym_storage,
-            start,
-            x.get_layout().offset,
-            stride[dim],
-            x.get_size()[dim],
-            clamp=True,
+        new_storage_offset = _register_unbacked_slice_storage_binding(
+            x, dim, start, sym_storage, clamp=clamp
         )
-        b_storage.name = V.graph.register_buffer(b_storage)
-        V.graph.register_operation(b_storage)
-        new_storage_offset = sym_storage
+        if new_storage_offset is None:
+            raise AssertionError("expected: new_storage_offset is not None")
 
     new_sizes = list(x.get_size())
     new_strides = list(stride)
@@ -8956,6 +8970,15 @@ def sym_stride(a, dim):
         expr = val.node.expr
         _record_symbolic_input_source(a, dim, expr, "stride")
         return expr
+    else:
+        return int(val)
+
+
+@register_lowering(aten.sym_storage_offset.default)
+def sym_storage_offset(a):
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
     else:
         return int(val)
 

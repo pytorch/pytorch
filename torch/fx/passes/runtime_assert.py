@@ -349,6 +349,11 @@ def insert_deferred_runtime_asserts(
                 if assert_expr is not None:
                     user_assert_exprs.add(assert_expr)
 
+    def retry_runtime_asserts_for_symbol(s: sympy.Expr) -> None:
+        if isinstance(s, sympy.Symbol) and shape_env.is_unbacked_symint(s):
+            return
+        add_runtime_asserts(ras_by_symbol.pop(s, []))
+
     def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
         for ra in ras:
             if ra.expr in user_assert_exprs:
@@ -445,6 +450,7 @@ def insert_deferred_runtime_asserts(
                             expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
 
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
+                        retry_runtime_asserts_for_symbol(s)
 
                 match_symbol(example_value, lambda: node)
 
@@ -574,6 +580,7 @@ def insert_deferred_runtime_asserts(
                     (sympy.Number, sympy.logic.boolalg.BooleanAtom),
                 ):  # don't hash cons primitives
                     expr_to_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)  # type: ignore[arg-type]
+                    retry_runtime_asserts_for_symbol(sym_expr)
 
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.

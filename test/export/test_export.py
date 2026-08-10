@@ -468,7 +468,27 @@ graph():
 
         getattr_1 = torch.randn(1, 8)
         values_1 = torch.randn(1, 4096)
-        B = Dim("B", min=0, max=1024)
+
+        # This view is invalid for B == 0 because the inferred dimension is
+        # ambiguous, so a zero-inclusive Dim must report the nonzero guard.
+        zero_inclusive_B = Dim("B", min=0, max=1024)
+        zero_inclusive_ds = {
+            "getattr_1": {0: zero_inclusive_B},
+            "values_1": {0: zero_inclusive_B},
+        }
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                r"generated guard .* != 0",
+            ):
+                export(
+                    M(),
+                    (getattr_1, values_1),
+                    dynamic_shapes=zero_inclusive_ds,
+                    strict=False,
+                )
+
+        B = Dim("B", min=1, max=1024)
         ds = {"getattr_1": {0: B}, "values_1": {0: B}}
 
         # Without the flag → must FAIL with ConstraintViolationError.
@@ -482,6 +502,25 @@ graph():
         with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
             ep = export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
             self.assertIsNotNone(ep)
+
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_view_with_zero_inclusive_dim(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.view(-1, 256)
+
+        B = Dim("B", min=0, max=1024)
+        ep = export(
+            M(),
+            (torch.randn(0, 256),),
+            dynamic_shapes={"x": {0: B}},
+            strict=False,
+        )
+        for size in (0, 3):
+            self.assertEqual(
+                ep.module()(torch.randn(size, 256)).shape,
+                (size, 256),
+            )
 
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
@@ -6460,9 +6499,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Constraints violated.*"
-            r"\n.*You marked 2\*dx as dynamic but your code specialized it to be a constant \(2\).*"
-            r"\n.*You marked dx \+ 1 as dynamic but your code specialized it to be a constant \(2\).*",
+            r"Expected input.*to be equal to dx \+ 1, but this equality "
+            r"would specialize dx to the example value",
         ):
             export(m, (x, y), dynamic_shapes=conflicting)
 
@@ -7688,6 +7726,204 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
+
+    def test_named_dim_with_one_example_does_not_specialize(self):
+        class Foo(torch.nn.Module):
+            def forward(self, img, points, labels):
+                return img + 1
+
+        img = torch.randn(1, 3, 8, 8)
+        points = torch.randn(1, 1, 2)
+        labels = torch.randn(1, 1, 1)
+        n_labels = Dim("n_labels", min=1, max=12)
+        dynamic_shapes = {
+            "img": {},
+            "points": {1: n_labels},
+            "labels": {1: n_labels},
+        }
+
+        ep = export(Foo(), (img, points, labels), dynamic_shapes=dynamic_shapes)
+        new_img = torch.randn(1, 3, 8, 8)
+        self.assertEqual(
+            ep.module()(new_img, torch.randn(1, 7, 2), torch.randn(1, 7, 1)),
+            new_img + 1,
+        )
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Guard failed: labels\.size\(\)\[1\] == points\.size\(\)\[1\]",
+        ):
+            ep.module()(new_img, torch.randn(1, 2, 2), torch.randn(1, 3, 1))
+
+    def test_named_dim_with_one_example_unbounded_max(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(1)
+        for dim in (Dim("n"), Dim("n", min=1)):
+            ep = export(
+                Foo(),
+                (x,),
+                dynamic_shapes={"x": {0: dim}},
+            )
+
+            new_x = torch.randn(16)
+            self.assertEqual(ep.module()(new_x), new_x + 1)
+
+    def test_named_dim_with_one_example_program_specialization_fails(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == 1:
+                    return x + 1
+                return x - 1
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"specialized it to be a constant \(1\)",
+        ):
+            export(
+                Foo(),
+                (torch.randn(1),),
+                dynamic_shapes={"x": {0: Dim("n", min=1, max=5)}},
+            )
+
+    def test_named_dim_with_zero_example_does_not_specialize(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        for strict in (True, False):
+            n = Dim("n", min=0, max=5)
+            ep = export(
+                Foo(),
+                (torch.randn(0),),
+                dynamic_shapes={"x": {0: n}},
+                strict=strict,
+            )
+
+            new_x = torch.randn(3)
+            self.assertEqual(ep.module()(new_x), new_x + 1)
+
+    def test_repeated_named_dim_invalid_zero_one_examples_fail(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sum() + y.sum()
+
+        for x_size, y_size in ((0, 1), (1, 2)):
+            for strict in (True, False):
+                n = Dim("n", min=0, max=5)
+                with self.assertRaisesRegex(
+                    (
+                        torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                        torch._dynamo.exc.UserError,
+                    ),
+                    "is not equal to",
+                ):
+                    export(
+                        Foo(),
+                        (torch.randn(x_size), torch.randn(y_size)),
+                        dynamic_shapes=({0: n}, {0: n}),
+                        strict=strict,
+                    )
+
+    def test_derived_dim_with_one_example_does_not_specialize(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(1)
+        n = Dim("n", min=1, max=5)
+        ep = export(Foo(), (x,), dynamic_shapes={"x": {0: 2 * n - 1}})
+
+        new_x = torch.randn(3)
+        self.assertEqual(ep.module()(new_x), new_x + 1)
+
+        for dim in (2 * n, n + 1):
+            ep = export(Foo(), (torch.randn(2),), dynamic_shapes={"x": {0: dim}})
+            new_x = torch.randn(4)
+            self.assertEqual(ep.module()(new_x), new_x + 1)
+
+    def test_derived_dim_root_unbacked_before_derived_runtime_assert(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sum() + y.sum()
+
+        n = Dim("n", min=1, max=5)
+        ep = export(
+            Foo(),
+            (torch.randn(1), torch.randn(2)),
+            dynamic_shapes=({0: n}, {0: n + 1}),
+        )
+
+        ep.module()(torch.randn(2), torch.randn(3))
+        for x, y in (
+            (torch.randn(2), torch.randn(2)),
+            (torch.randn(5), torch.randn(5)),
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                r"Guard failed: y\.size\(\)\[0\] == 1 \+ x\.size\(\)\[0\]",
+            ):
+                ep.module()(x, y)
+
+    def test_derived_dim_root_unbacked_invalid_example_fails(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sum() + y.sum()
+
+        n = Dim("n", min=1, max=5)
+        for strict in (True, False):
+            with self.assertRaisesRegex(
+                (
+                    torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                    torch._dynamo.exc.UserError,
+                ),
+                "Expected input.*to be equal.*but got",
+            ):
+                export(
+                    Foo(),
+                    (torch.randn(1), torch.randn(4)),
+                    dynamic_shapes=({0: n}, {0: n + 1}),
+                    strict=strict,
+                )
+
+    def test_named_dim_with_one_example_new_tracer(self):
+        class Foo(torch.nn.Module):
+            def forward(self, img, points, labels):
+                return img + 1
+
+        img = torch.randn(1, 3, 8, 8)
+        points = torch.randn(1, 1, 2)
+        labels = torch.randn(1, 1, 1)
+        n_labels = Dim("n_labels", min=1, max=12)
+
+        with config.patch(use_new_tracer_experimental=True):
+            _export_to_torch_ir(
+                Foo(),
+                (img, points, labels),
+                {},
+                {
+                    "img": {},
+                    "points": {1: n_labels},
+                    "labels": {1: n_labels},
+                },
+                restore_fqn=False,
+            )
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        n = Dim("n", min=1, max=5)
+        with config.patch(use_new_tracer_experimental=True):
+            _export_to_torch_ir(
+                Bar(),
+                (torch.randn(1),),
+                {},
+                {"x": {0: 2 * n - 1}},
+                restore_fqn=False,
+            )
 
     def test_map(self):
         if "cpp_runtime_nonstrict" in self.id():
