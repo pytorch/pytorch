@@ -1224,32 +1224,30 @@ def _coor_current_device_fake() -> torch.device:
     return _coor_current_device()
 
 
-def _coor_match_current_accelerator(
+def _coor_check_current_accelerator(
     device: torch.device, cur: torch.device | None
-) -> bool:
-    """Whether ``device`` should be replaced by the current-device node under CooR.
+) -> None:
+    """Raise if ``device`` is an accelerator other than ``cur`` (``cpu``/``meta`` pass).
 
-    True for the current accelerator (matching type, index None or the current index, so
-    both bare ``cuda`` and ``cuda:0`` qualify); False for portable ``cpu``/``meta``.
-    Raises for a different accelerator type or a non-current index -- such a device is
-    rank-specific and cannot be made device-agnostic, so the graph is refused rather than
-    left silently non-portable.
+    A different accelerator type or a non-current index is rank-specific and cannot be made
+    device-agnostic for compile-on-one-rank, so the graph is refused rather than left
+    silently non-portable. Callers supply ``cur`` from their own per-scope cache of the
+    current accelerator (the tracer while tracing, the wrapper during codegen).
     """
     if device.type in ("cpu", "meta"):
-        return False
+        return
     if cur is None or device.type != cur.type:
         raise RuntimeError(
-            f"device_as_parameter: an op targets {device}, which is not the current "
-            f"accelerator ({cur}); the traced graph cannot be made device-agnostic for "
-            f"compile-on-one-rank."
-        )
-    if device.index is not None and device.index != cur.index:
-        raise RuntimeError(
-            f"device_as_parameter: an op targets {device}, whose index differs from the "
+            f"device_as_parameter: the graph references {device}, which is not the "
             f"current accelerator ({cur}); the traced graph cannot be made "
             f"device-agnostic for compile-on-one-rank."
         )
-    return True
+    if device.index is not None and device.index != cur.index:
+        raise RuntimeError(
+            f"device_as_parameter: the graph references {device}, whose index differs "
+            f"from the current accelerator ({cur}); the traced graph cannot be made "
+            f"device-agnostic for compile-on-one-rank."
+        )
 
 
 def _current_device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
@@ -1273,6 +1271,27 @@ def _current_device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
     edge.node.meta["val"] = _coor_current_device()
     tracer._current_device_node = edge
     return edge
+
+
+def _coor_traced_current_accelerator(tracer: _ProxyTracer) -> torch.device | None:
+    """The current accelerator for this trace, read once (a cudaGetDevice) and cached on the
+    tracer beside the current_device node, so the input check and the per-op device-operand
+    rewrite together pay a single lookup per trace."""
+    if tracer._coor_current_accelerator is None:
+        tracer._coor_current_accelerator = _coor_current_accelerator()
+    return tracer._coor_current_accelerator
+
+
+def _coor_match_current_accelerator(tracer: _ProxyTracer, device: torch.device) -> bool:
+    """Whether ``device`` should be replaced by the current-device node under CooR.
+
+    True for the current accelerator (bare ``cuda`` or its current index); False for portable
+    ``cpu``/``meta``; raises for a rank-specific device.
+    """
+    if device.type in ("cpu", "meta"):
+        return False
+    _coor_check_current_accelerator(device, _coor_traced_current_accelerator(tracer))
+    return True
 
 
 def proxy_call(
@@ -1368,10 +1387,10 @@ def proxy_call(
     if _coor_enabled() and any(
         isinstance(e, torch.device) for e in proxy_flat_args_kwargs
     ):
-        cur = _coor_current_accelerator()
         proxy_flat_args_kwargs = [
             _current_device_edge(tracer, e)
-            if isinstance(e, torch.device) and _coor_match_current_accelerator(e, cur)
+            if isinstance(e, torch.device)
+            and _coor_match_current_accelerator(tracer, e)
             else e
             for e in proxy_flat_args_kwargs
         ]
@@ -1546,6 +1565,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
     tracer._current_device_node = None
+    tracer._coor_current_accelerator = None
     # Stores the torch function that was called during tracing
     tracer.torch_fn_metadata = None
     # Stores the counts for every torch function called. This is to help
@@ -1569,6 +1589,8 @@ class PythonKeyTracer(Tracer):
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
+    # [device-as-parameter] current accelerator for this graph, read once (None = not yet)
+    _coor_current_accelerator: torch.device | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -1902,6 +1924,17 @@ def wrap_key(
                     proxy, fx.Proxy
                 ):
                     set_meta(proxy, input_value)
+
+        # [device-as-parameter] Under compile-on-one-rank a graph input on a non-current
+        # accelerator is rank-specific and can't be made device-agnostic (the wrapper
+        # resolves a single current device at runtime, so the whole graph must live on it).
+        # Inductor's pattern-matcher templates are traced with CooR off, so this only sees
+        # real user graphs, not internal fixed-device template traces.
+        if _coor_enabled():
+            cur = _coor_traced_current_accelerator(tracer)
+            for input_value in flat_tensors:
+                if isinstance(input_value, torch.Tensor):
+                    _coor_check_current_accelerator(input_value.device, cur)
 
         if getattr(tracer, "proxy_module_inputs", False):
             tensors = [  # type: ignore[assignment, var-annotated]
@@ -2282,6 +2315,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
+    # [device-as-parameter] current accelerator for this graph, read once (None = not yet)
+    _coor_current_accelerator: torch.device | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False

@@ -3601,7 +3601,8 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
         # ((0, 8, 8), (5,)),
         # 0 batch size doesn't work,  cannot reshape tensor of 0 elements into shape [0, 8, -1]
         ((3, 4, 4), 3),
-        ((3, 4, 4), 1)
+        ((3, 4, 4), 1),
+        ((2, 3, 7), 4),
     )
 
     for shapes, return_idx in product(cases, (True, False)):
@@ -3635,6 +3636,8 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         ((1, 4, 4, 3), (3, None)),
         ((1, 4, 4, 3), (None, None)),
         ((1, 4, 4, 3), (3)),
+        ((2, 3, 7, 11), (4, 5)),
+        ((2, 3, 4, 10), (8, 5)),
     )
 
     for shapes, return_idx in product(cases, (True, False)):
@@ -3642,6 +3645,12 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+
+    for return_idx in (True, False):
+        yield SampleInput(
+            make_arg((2, 3, 7, 7), memory_format=torch.channels_last),
+            args=((4, 4), return_idx),
+        )
 
 def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -15873,7 +15882,11 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               # OneDNN deterministic issue, https://github.com/intel/torch-xpu-ops/issues/3650
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-05, rtol=3e-06), }),
+                   'TestCompositeCompliance', 'test_backward', device_type='xpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -16365,8 +16378,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/147057
-               DecorateInfo(skipIfRocm, "TestInductorOpInfo", "test_comprehensive", dtypes=(torch.float64,)),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -16673,8 +16684,6 @@ op_db: list[OpInfo] = [
            aten_name='max_pool2d',
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
-           # Vmap is not happy with non-contiguous (channels_last) inputs
-           check_batched_gradgrad=False,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18518,9 +18527,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # TODO: FIXME tolerance is too high
-                        # https://github.com/pytorch/pytorch/issues/165296
-                        DecorateInfo(skipIfRocm, "TestInductorOpInfo", "test_comprehensive", dtypes=(torch.float32,)),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::pow'],),
@@ -19116,8 +19122,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     BinaryUfuncInfo('polar',
-                    dtypes=floating_types(),
-                    dtypesIfMPS=floating_types_and(torch.float16),
+                    dtypes=floating_types_and(torch.half),
                     # this function is undefined if 'abs' values are <0
                     supports_forward_ad=True,
                     lhs_make_tensor_kwargs=dict(low=0),
@@ -19422,6 +19427,9 @@ op_db: list[OpInfo] = [
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
+                 # Exception: Backward is not reentrant, #2359
+                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad', device_type='xpu'),
+                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_inplace_gradgrad', device_type='xpu'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
@@ -20995,7 +21003,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_inner,
-           ),
+           skips=(
+               # "dot_xpu_mkl" not implemented for 'Long', torch-xpu-ops: #3247
+               DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive",
+                            device_type="xpu", dtypes=(torch.int64,)),
+           )),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -26601,8 +26613,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                device_type='mps', dtypes=(torch.float16,)
-            ),
+                device_type='mps', dtypes=(torch.float16,)),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.float16,)

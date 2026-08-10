@@ -41,6 +41,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -188,6 +189,20 @@ class TestOptimRenewed(TestCase):
                         optim.step()
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
+
+    @onlyCPU
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_with_empty_param_group(self, device, dtype, optim_info):
+        # An empty param group means there is nothing to optimize, so step() should
+        # be a no-op rather than raising. See https://github.com/pytorch/pytorch/issues/70352
+        optim_cls = optim_info.optim_cls
+        optimizer = optim_cls([{"params": []}])
+
+        if optim_info.step_requires_closure:
+            loss = torch.tensor(3.0, device=device, dtype=dtype)
+            self.assertEqual(optimizer.step(lambda: loss), loss)
+        else:
+            self.assertIsNone(optimizer.step())
 
     @parametrize("contiguous", [True, False])
     @parametrize("with_lrsched", [True, False])
@@ -438,6 +453,19 @@ class TestOptimRenewed(TestCase):
     )
     def test_rosenbrock_sparse(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
+
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and optim_cls.__name__ == "SGD"
+            and not with_lrsched
+            and torch.device(device).type == "cuda"
+            and dtype == torch.float64
+        ):
+            self.skipTest(
+                "order/state-dependent sparse SGD step timeout on ROCm 7.14+ "
+                "(with_lrsched=False, SGD, cuda, float64)"
+            )
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         # Fused impls do not support sparse gradients

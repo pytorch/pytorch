@@ -2,22 +2,45 @@
 
 set -ex
 
+# Build sccache from source at v0.16.0 with the nvcc 13.3 dryrun-parsing fix
+# backported from mozilla/sccache#2722 (see
+# patches/sccache-nvcc-13.3-dryrun-parsing.patch). The prebuilt release binary
+# mis-parses nvcc 13.3+ --dryrun output (it skips the device compile, leaving
+# "fatbinary: Could not open input file '*.cubin'"), so build from source until
+# a fixed sccache release ships. Reverts #189365 (prebuilt-binary download).
+build_sccache_from_source() {
+  local VERSION=0.16.0
+  echo "Building sccache ${VERSION} from source with the nvcc 13.3 dryrun fix"
+  # The builder images pre-install a pinned rust at CARGO_HOME=/opt/rust with its
+  # bin on PATH (see #186302), so build with that toolchain directly instead of
+  # (re)installing rustup and sourcing its env.
+  apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev curl git ca-certificates
+  git clone --depth 1 --branch "v${VERSION}" https://github.com/mozilla/sccache /tmp/sccache
+  local patch=/opt/cache/patches/sccache-nvcc-13.3-dryrun-parsing.patch
+  [ -f "$patch" ] || { echo "ERROR: $patch missing; the Dockerfile must 'COPY ./common/patches /opt/cache/patches'"; exit 1; }
+  git -C /tmp/sccache apply "$patch"
+  cargo build --manifest-path /tmp/sccache/Cargo.toml --release --features="dist-client dist-server"
+  cp /tmp/sccache/target/release/sccache /opt/cache/bin
+  cp /tmp/sccache/target/release/sccache-dist /opt/cache/bin
+  chmod a+x /opt/cache/bin/sccache /opt/cache/bin/sccache-dist
+  rm -rf /tmp/sccache
+}
+
 install_ubuntu() {
-  ARCH=$(uname -m)
-  VERSION=0.16.0
-  FEATURES="sccache sccache-dist"
-  if [[ "${ARCH}" == "riscv64" ]]; then
-    # Rust's riscv64 arch is riscv64gc
-    ARCH=riscv64gc
-    # sccache-dist is not available on riscv64, so we only install sccache
-    FEATURES="sccache"
+  # riscv64 (built under QEMU emulation) has no nvcc, so it is unaffected by the
+  # --simt-only bug; it also has no sccache-dist, and a from-source build under
+  # emulation would be impractically slow. Use the prebuilt binary there and
+  # build from source everywhere else.
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    local VERSION=0.16.0
+    # Rust's riscv64 arch is riscv64gc; sccache-dist is not available on riscv64.
+    echo "Downloading prebuilt sccache ${VERSION} for riscv64"
+    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/sccache-v${VERSION}-riscv64gc-unknown-linux-musl.tar.gz | \
+      tar -xz -C /opt/cache/bin --strip-components=1 sccache-v${VERSION}-riscv64gc-unknown-linux-musl/sccache
+    chmod a+x /opt/cache/bin/sccache
+  else
+    build_sccache_from_source
   fi
-  echo "Downloading sccache binaries from GitHub mozilla/sccache release"
-  for feature in $FEATURES; do
-    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/${feature}-v${VERSION}-${ARCH}-unknown-linux-musl.tar.gz | \
-      tar -xz -C /opt/cache/bin --strip-components=1 ${feature}-v${VERSION}-${ARCH}-unknown-linux-musl/${feature}
-    chmod a+x /opt/cache/bin/${feature}
-  done
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a

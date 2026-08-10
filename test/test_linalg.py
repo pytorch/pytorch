@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
-     skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
+     skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
@@ -3077,6 +3077,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @skipIfRocmVersionAtLeast([7, 14])
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4227,6 +4228,19 @@ class TestLinalg(TestCase):
         # batched
         for shape in [(3, 7, 5), (2, 4, 4, 4)]:
             run_test(shape)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
+    def test_polar_autograd(self, device, dtype, shape):
+        # Full column rank (distinct singular values) keeps A^H A positive-definite,
+        # the regime where the decomposition is differentiable.
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        A = make_fullrank(*shape, device=device, dtype=dtype).requires_grad_(True)
+        # check_undefined_grad=False: dynamo_wrapped traces backward with grad defined.
+        self.assertTrue(torch.autograd.gradcheck(torch.linalg.polar, (A,), check_undefined_grad=False, check_forward_ad=True))
+        self.assertTrue(torch.autograd.gradgradcheck(torch.linalg.polar, (A,), check_undefined_grad=False))
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
