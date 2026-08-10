@@ -1893,6 +1893,54 @@ class DecoratorTests(PytreeRegisteringTestCase):
     def test_mark_static_address_unguarded(self):
         self._test_mark_static_address(guarded=False)
 
+    @parametrize("compile_outer", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_compile_staticmethod(self, compile_outer, fullgraph):
+        cnt = torch._dynamo.testing.CompileCounter()
+        compile_decorator = torch.compile(backend=cnt, fullgraph=fullgraph)
+
+        if compile_outer:
+
+            class Foo:
+                @compile_decorator
+                @staticmethod
+                def bar(x):
+                    return x.sin()
+
+        else:
+
+            class Foo:
+                @staticmethod
+                @compile_decorator
+                def bar(x):
+                    return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_staticmethod_caching_precompile(self):
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class Foo:
+            @torch.compile(backend=cnt)
+            @staticmethod
+            def bar(x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_class_methods(self):
         class A:
             @classmethod
