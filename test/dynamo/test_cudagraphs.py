@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._inductor.cudagraph_trees as cudagraph_trees
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import TEST_CUDA_GRAPH
+from torch.testing._internal.common_utils import HardwareClassification, TEST_CUDA_GRAPH
 
 
 def composed(*decs):
@@ -57,6 +57,8 @@ N_ITERS = 5
 
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
 class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @patch_all()
     def test_basic(self):
         def model(x, y):
