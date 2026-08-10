@@ -194,13 +194,18 @@ def allocate_flex_gemm_aux_outs(
     mat1: TensorBox,
     *,
     column_major: bool = False,
+    contiguous: bool = False,
 ) -> tuple[TensorBox, ...]:
     """Allocate auxiliary buffers with their requested dense strides."""
+    if column_major and contiguous:
+        raise AssertionError("auxiliary outputs require one storage orientation")
     outs = []
     for aux_meta in aux_metas:
         size = ir.convert_shape_to_inductor(aux_meta.shape)
         stride = (
-            [1, size[-2]]
+            ir.FlexibleLayout.contiguous_strides(size)
+            if contiguous
+            else [1, size[-2]]
             if column_major
             else ir.convert_shape_to_inductor(aux_meta.stride())
         )
@@ -629,6 +634,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         local_reduce_metas,
         gemm_args[mat1_index],
         column_major=explicit_swap_ab and local_reduce_layout is None,
+        contiguous=local_reduce_layout is FlexGemmOutputStorageLayout.TRANSPOSED,
     )
     aux_input_nodes = [
         ir.TemplateBuffer.realize_template_input(aux_out) for aux_out in aux_outs

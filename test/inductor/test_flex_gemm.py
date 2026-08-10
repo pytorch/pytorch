@@ -1265,6 +1265,15 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 )
             )
 
+        transposed = FlexGemmOutputStorageLayout.TRANSPOSED
+        axis_m = FlexGemmLocalReduceGeometry(group=128, axis=0)
+        self.assertTrue(output_layout_supports_config(transposed, tile_192, axis_m))
+        self.assertFalse(
+            output_layout_supports_config(
+                transposed, dataclasses.replace(tile_192, swap_ab=True), axis_m
+            )
+        )
+
     def test_precompile_metadata_counts_symbolic_skip(self):
         import sympy
 
@@ -2239,6 +2248,14 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertEqual(
             register_runtime_output_layout(layout, transposed=False), ordinary_key
         )
+
+        layout = FlexGemmOutputStorageLayout.TRANSPOSED
+        key = register_runtime_output_layout(layout, transposed=False)
+        self.assertIsNotNone(key)
+        self.assertTrue(key.startswith("transposed:"))
+        self.assertEqual(register_runtime_output_layout(layout, transposed=False), key)
+        with self.assertRaisesRegex(NotImplementedError, "do not support swap_ab"):
+            register_runtime_output_layout(layout, transposed=True)
 
     def test_padded_output_layout_initialization(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -6527,6 +6544,34 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_contiguous_transpose_rejects_swap(self):
+        m = n = group = 128
+
+        def epilogue_fn(acc):
+            reduced = acc.float().view(m, -1, group).sum(-1)
+            return acc, reduced.mT.contiguous()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={
+                    "backend": "QUACK",
+                    "config": self.localReduceOutputConfig(swap_ab=True),
+                },
+            )
+
+        with self.assertRaisesRegex(
+            Exception, "config constraints are incompatible with output layout"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                self.makeTensor(m, 64), self.makeTensor(64, n)
+            )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_local_m_reduce_supports_tail_m(self):
         m = 96
         n = 128
@@ -8983,6 +9028,139 @@ class TestFlexGemmNVFP4Device(FlexGemmTestCase):
 
 
 instantiate_device_type_tests(TestFlexGemmNVFP4Device, globals(), only_for="cuda")
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
+    def test_mm_tuple_aux_local_m_reduce_contiguous_transpose(self, device):
+        m = 256
+        n = 192
+        k = 64
+        group = 128
+        normalized_input = self.makeTensor(m, n, device=device)
+        incoming = self.makeTensor(m, n, device=device)
+        row_scale = torch.rand(m, 1, device=device, dtype=torch.float32) + 0.5
+        gamma = torch.rand(1, n, device=device, dtype=torch.float32) + 0.5
+        zdz = torch.rand(m, 1, device=device, dtype=torch.float32) * 0.1
+
+        def epilogue_fn(acc):
+            grad = acc.float()
+            normalized = normalized_input.float() * row_scale
+            output = incoming.float() + (grad * gamma - normalized * zdz) * row_scale
+            partial = (grad * normalized).view(-1, group, n).sum(1)
+            return (
+                output.to(acc.dtype),
+                (normalized * gamma).to(acc.dtype),
+                partial.mT.contiguous(),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = self.makeTensor(m, k, device=device)
+        b = self.makeTensor(k, n, device=device)
+        (actual, normalized, dw), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = epilogue_fn(a @ b)
+        high_precision_grad = a.double() @ b.double()
+        high_precision_normalized = normalized_input.double() * row_scale.double()
+        high_precision_output = (
+            incoming.double()
+            + (
+                high_precision_grad * gamma.double()
+                - high_precision_normalized * zdz.double()
+            )
+            * row_scale.double()
+        )
+        self.assertMatchesLowPrecisionEager(
+            actual, expected[0], high_precision_output, k
+        )
+        self.assertMatchesLowPrecisionEager(
+            normalized,
+            expected[1],
+            high_precision_normalized * gamma.double(),
+            1,
+        )
+        self.assertEqual(
+            dw,
+            (high_precision_grad * high_precision_normalized)
+            .view(-1, group, n)
+            .sum(1)
+            .mT.float(),
+            atol=5e-3,
+            rtol=5e-3,
+        )
+        self.assertTrue(dw.is_contiguous())
+        self.assertEqual(dw.shape, (n, m // group))
+        FileCheck().check("FlexGemmOutputStorageLayout.TRANSPOSED").check(
+            "('swap_ab', False)"
+        ).check_not("extern_kernels.mm").run(code)
+        self.assertLocalReduceAuxCode(code, group, axis=0, callbacks=True)
+
+    @parametrize(
+        "case",
+        (
+            ("axis_m_t", "t", 0, 128, 192),
+            ("axis_n_transpose", "transpose", 1, 192, 128),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_tuple_aux_single_group_contiguous_transpose(self, device, case):
+        _, form, axis, m, n = case
+        k = 64
+        group = m if axis == 0 else n
+        tile = torch.randn(m, n, device=device, dtype=torch.float32) * 0.02
+
+        def epilogue_fn(acc):
+            value = acc.float() * tile
+            reduced = (
+                value.view(-1, group, n).sum(1)
+                if axis == 0
+                else value.view(m, -1, group).sum(-1)
+            )
+            transposed = reduced.t() if form == "t" else reduced.transpose(0, 1)
+            return acc.relu(), transposed.contiguous()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={
+                    "backend": "QUACK",
+                    "config": self.localReduceOutputConfig(),
+                },
+            )
+
+        a = self.makeTensor(m, k, device=device)
+        b = self.makeTensor(k, n, device=device)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = epilogue_fn(a.double() @ b.double())
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b)[0], expected[0], k
+        )
+        self.assertEqual(aux, expected[1].float(), atol=5e-3, rtol=5e-3)
+        self.assertTrue(aux.is_contiguous())
+        expected_shape = (n, m // group) if axis == 0 else (n // group, m)
+        self.assertEqual(aux.shape, expected_shape)
+        FileCheck().check("FlexGemmOutputStorageLayout.TRANSPOSED").check_not(
+            "extern_kernels.mm"
+        ).run(code)
+        self.assertLocalReduceAuxCode(code, group, axis=axis, callbacks=True)
+
+
+instantiate_device_type_tests(
+    TestFlexGemmTransposedOutputDevice, globals(), only_for="cuda"
+)
 
 
 @skipIfNoCuteDSL
