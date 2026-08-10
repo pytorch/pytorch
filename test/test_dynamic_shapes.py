@@ -2,11 +2,11 @@
 # ruff: noqa: F841
 import contextlib
 import copy
+import inspect
 import itertools
 import math
 import operator
 import unittest
-from unittest import mock
 
 import numpy as np
 import sympy
@@ -1894,14 +1894,9 @@ class f(torch.nn.Module):
         self.assertEqual(_broadcast_shapes((s3,), (s1,)), [s3])
 
     def test_zero_one_opt_out_uses_declared_range_assumption(self):
-        for hint, lower, expected_premise in (
-            (0, 0, sympy.Ge),
-            (1, 1, sympy.Gt),
-        ):
+        for hint, lower in ((0, 0), (1, 1)):
             with self.subTest(hint=hint, lower=lower):
                 shape_env = ShapeEnv()
-                shape_env._translation_validation_enabled = True
-                shape_env.validator = mock.Mock()
 
                 symbol = shape_env.create_symbol(
                     hint,
@@ -1921,14 +1916,15 @@ class f(torch.nn.Module):
                     self.assertIsNot(sympy.Eq(symbol, 0), sympy.S.false)
                 else:
                     self.assertTrue(symbol.is_positive)
-                shape_env.validator.add_assertion.assert_called_once_with(
-                    expected_premise(symbol, 0, evaluate=False)
-                )
+                self.assertEqual(shape_env.var_to_range[symbol], ValueRanges(lower, 5))
+
+    def test_create_symbol_preserves_symbolic_context_position(self):
+        parameters = list(inspect.signature(ShapeEnv.create_symbol).parameters)
+        self.assertEqual(parameters[7], "symbolic_context")
+        self.assertEqual(parameters[8], "skip_zero_one_guard_specialization")
 
     def test_backed_size_oblivious_keeps_positive_symbol(self):
         shape_env = ShapeEnv()
-        shape_env._translation_validation_enabled = True
-        shape_env.validator = mock.Mock()
 
         symbol = shape_env.create_symbol(
             3,
@@ -1939,7 +1935,7 @@ class f(torch.nn.Module):
 
         self.assertTrue(symbol.is_positive)
         self.assertTrue(symbol.is_nonnegative)
-        shape_env.validator.add_assertion.assert_called_once_with(symbol > 1)
+        self.assertEqual(shape_env.var_to_range[symbol].lower, 0)
 
     def test_zero_one_opt_out_replacement_preserves_provenance(self):
         # An exact alias must inherit the opt-out marker.
@@ -1987,6 +1983,37 @@ class f(torch.nn.Module):
         self.assertTrue(guard_or_false(replacement_symint == 2))
         self.assertEqual(len(shape_env.guards), 1)
 
+        # A symbol alias whose replacement was already cached as an ordinary
+        # composite is not an exact alias and must not erase the marker either.
+        shape_env = ShapeEnv()
+        original = shape_env.create_symbol(
+            1,
+            ConstantSource("original"),
+            DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+            skip_zero_one_guard_specialization=True,
+        )
+        alias = shape_env.create_symbol(
+            1,
+            ConstantSource("alias"),
+            DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        component = shape_env.create_symbol(
+            2,
+            ConstantSource("component"),
+            DimDynamic.DYNAMIC,
+        )
+        original_symint = shape_env.create_symintnode(original, hint=1)
+        shape_env._set_replacement(alias, component - 1, "test_existing_composite")
+        self.assertEqual(shape_env._find(alias), component - 1)
+
+        shape_env._set_replacement(original, alias, "test_cached_alias")
+
+        self.assertNotIn(original, shape_env.replacements)
+        self.assertFalse(guard_or_false(original_symint == 1))
+        self.assertEqual(shape_env.guards, [])
+
     def test_zero_one_opt_out_guard_or_uses_static_ranges(self):
         shape_env = ShapeEnv()
         symbol = shape_env.create_symbol(
@@ -2007,6 +2034,80 @@ class f(torch.nn.Module):
         self.assertFalse(guard_or_false(symint == 1))
         self.assertTrue(guard_or_true(symint == 1))
         self.assertEqual(shape_env.guards, [])
+
+    def test_zero_one_opt_out_invalidates_replacement_caches(self):
+        shape_env = ShapeEnv()
+        original = shape_env.create_symbol(
+            1,
+            ConstantSource("original"),
+            DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        alias = shape_env.create_symbol(
+            1,
+            ConstantSource("alias"),
+            DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        component = shape_env.create_symbol(
+            2,
+            ConstantSource("component"),
+            DimDynamic.DYNAMIC,
+        )
+        original_symint = shape_env.create_symintnode(original, hint=1)
+        shape_env._set_replacement(original, alias, "test_alias")
+        shape_env._set_replacement(alias, component - 1, "test_composite")
+
+        shape_env._add_do_not_specialize_zero_one_symbol(original)
+        self.assertEqual(shape_env._find(original), alias)
+        self.assertEqual(original_symint.node.expr, alias)
+
+        # Adding the marker to the composite dependency makes path compression
+        # safe. Both caches must be invalidated so _find retries the decision.
+        shape_env._add_do_not_specialize_zero_one_symbol(component)
+        self.assertEqual(shape_env._find(original), component - 1)
+        self.assertEqual(original_symint.node.expr, component - 1)
+
+    def test_constraint_validation_ignores_unbacked_optimization_hints(self):
+        from torch._dynamo.source import (
+            LocalSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import EqualityConstraint
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            u0 = shape_env.create_unbacked_symint(LocalSource("u0"))
+            u1 = shape_env.create_unbacked_symint(LocalSource("u1"))
+            x = torch.empty((u0,))
+            y = torch.empty((u1,))
+
+        # These are optimization hints, not concrete input values.
+        shape_env.var_to_hint_override[u0.node._expr] = 3
+        shape_env.var_to_hint_override[u1.node._expr] = 4
+        shape_env._set_replacement(u1.node._expr, u0.node._expr, "test")
+
+        x_source = LocalSource("x")
+        y_source = LocalSource("y")
+        equalities = EqualityConstraint(
+            source_pairs=[
+                (
+                    TensorPropertySource(x_source, TensorProperty.SIZE, 0),
+                    TensorPropertySource(y_source, TensorProperty.SIZE, 0),
+                )
+            ],
+            derived_equalities=[],
+            phantom_symbols=[],
+            relaxed_sources=set(),
+            warn_only=False,
+        )
+        guards = shape_env.produce_guards(
+            [x, y], [x_source, y_source], equalities_inputs=equalities
+        )
+        self.assertIn("L['y'].size()[0] == L['x'].size()[0]", guards)
 
     @fresh_cache()
     def test_slice_backed_size_oblivious(self):

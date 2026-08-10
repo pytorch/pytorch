@@ -360,17 +360,26 @@ def serialize_sym_bool(s: bool | torch.SymBool) -> SymBool:
         )
 
 
-def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
+def serialize_tensor_meta(
+    t: torch.Tensor,
+    record_symbolic_value: Callable[[Any], None] | None = None,
+) -> TensorMeta:
     """
     Extract a TensorMeta describing `t`.
     """
+    sizes = list(t.shape)
+    strides = list(t.stride())
+    storage_offset = t.storage_offset()
+    if record_symbolic_value is not None:
+        for value in (*sizes, *strides, storage_offset):
+            record_symbolic_value(value)
     return TensorMeta(
         dtype=_TORCH_TO_SERIALIZE_DTYPE[t.dtype],
-        sizes=[serialize_sym_int(s) for s in t.shape],
+        sizes=[serialize_sym_int(s) for s in sizes],
         requires_grad=t.requires_grad,
         device=Device(type=t.device.type, index=t.device.index),
-        strides=[serialize_sym_int(s) for s in t.stride()],
-        storage_offset=serialize_sym_int(t.storage_offset()),
+        strides=[serialize_sym_int(s) for s in strides],
+        storage_offset=serialize_sym_int(storage_offset),
         layout=_TORCH_TO_SERIALIZE_LAYOUT[t.layout],
     )
 
@@ -712,6 +721,19 @@ class GraphModuleSerializer(metaclass=Final):
         self.custom_objs: dict[str, Any] = {}
         self.duplicate_getitem_nodes: dict[str, str] = {}
         self.treespec_namedtuple_fields: dict[str, NamedTupleDef] = {}
+        self.symbols_by_shape_env: dict[
+            symbolic_shapes.ShapeEnv, set[sympy.Symbol]
+        ] = {}
+
+    def _record_symbolic_value(self, value: Any) -> None:
+        if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return
+        shape_env = value.node.shape_env
+        if shape_env is None:
+            return
+        self.symbols_by_shape_env.setdefault(shape_env, set()).update(
+            value.node.expr.free_symbols
+        )
 
     @contextmanager
     def save_graph_state(self):
@@ -1616,24 +1638,29 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize_tensor_output(self, name, meta_val) -> TensorArgument:
         if name in self.graph_state.tensor_values:
             raise AssertionError(f"name {name!r} already in tensor_values")
-        self.graph_state.tensor_values[name] = serialize_tensor_meta(meta_val)
+        self.graph_state.tensor_values[name] = serialize_tensor_meta(
+            meta_val, self._record_symbolic_value
+        )
         return TensorArgument(name=name)
 
     def serialize_sym_int_output(self, name, meta_val) -> SymIntArgument:
         if name in self.graph_state.sym_int_values:
             raise AssertionError(f"name {name!r} already in sym_int_values")
+        self._record_symbolic_value(meta_val)
         self.graph_state.sym_int_values[name] = serialize_sym_int(meta_val)
         return SymIntArgument.create(as_name=name)
 
     def serialize_sym_float_output(self, name, meta_val) -> SymFloatArgument:
         if name in self.graph_state.sym_float_values:
             raise AssertionError(f"name {name!r} already in sym_float_values")
+        self._record_symbolic_value(meta_val)
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
     def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
+        self._record_symbolic_value(meta_val)
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
         return SymBoolArgument.create(as_name=name)
 
@@ -2187,9 +2214,8 @@ class GraphModuleSerializer(metaclass=Final):
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
 
-    def serialize_graph_module_metadata(self, graph_module: torch.fx.GraphModule):
+    def serialize_graph_module_metadata(self, meta: dict[str, Any]):
         ret = {}
-        meta = graph_module.meta
         if custom := meta.get("custom"):
             log.debug("\n[serialize_graph_module_metadata] %s", custom)
             try:
@@ -2199,42 +2225,33 @@ class GraphModuleSerializer(metaclass=Final):
                     f"Failed to serialize custom metadata for graph with error {e}"
                 ) from e
 
-        opt_out_symbols: set[str] = set()
-        for node in graph_module.graph.nodes:
-            for value in pytree.tree_leaves(node.meta.get("val")):
-                symbolic_values: Iterable[Any]
-                if isinstance(value, torch.Tensor):
-                    symbolic_values = (
-                        *value.shape,
-                        *value.stride(),
-                        value.storage_offset(),
-                    )
-                else:
-                    symbolic_values = (value,)
-                for symbolic_value in symbolic_values:
-                    if not isinstance(symbolic_value, torch.SymInt):
-                        continue
-                    shape_env = symbolic_value.node.shape_env
-                    if shape_env is not None:
-                        opt_out_symbols.update(
-                            str(s) for s in shape_env.do_not_specialize_zero_one_symbols
-                        )
-        if opt_out_symbols:
-            ret[_DO_NOT_SPECIALIZE_ZERO_ONE_SYMBOLS_KEY] = json.dumps(
-                sorted(opt_out_symbols)
-            )
-
         return ret
+
+    def _serialize_do_not_specialize_zero_one_symbols(self) -> str:
+        opt_out_symbols = {
+            str(symbol)
+            for shape_env, serialized_symbols in self.symbols_by_shape_env.items()
+            for symbol in (
+                serialized_symbols & shape_env.do_not_specialize_zero_one_symbols
+            )
+        }
+        return json.dumps(sorted(opt_out_symbols))
 
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
         log.debug("\n[serialize]")
         graph = self.serialize_graph(graph_module)
+        metadata = self.serialize_graph_module_metadata(graph_module.meta)
+        # Always write the key, including for an empty set, so new payloads are
+        # distinguishable from old payloads that need the assumption fallback.
+        metadata[_DO_NOT_SPECIALIZE_ZERO_ONE_SYMBOLS_KEY] = (
+            self._serialize_do_not_specialize_zero_one_symbols()
+        )
 
         return GraphModule(
             graph=graph,
             signature=self.serialize_signature(self.graph_signature),
             module_call_graph=self.serialize_module_call_graph(self.module_call_graph),
-            metadata=self.serialize_graph_module_metadata(graph_module),
+            metadata=metadata,
             treespec_namedtuple_fields=self.treespec_namedtuple_fields,
         )
 
@@ -2447,14 +2464,15 @@ class GraphModuleDeserializer(metaclass=Final):
                 if isinstance(sym, sympy.Symbol):
                     self.shape_env.var_to_stack[sym] = CapturedTraceback.extract(skip=1)
                     if str(sym) in self.do_not_specialize_zero_one_symbol_names or (
-                        symbolic_shapes.symbol_is_type(sym, SymT.SIZE)
+                        not self.has_do_not_specialize_zero_one_symbols_metadata
+                        and symbolic_shapes.symbol_is_type(sym, SymT.SIZE)
                         and sym.is_nonnegative
                         and sym.is_positive is None
                     ):
                         # srepr preserves the nonnegative assumption for older
                         # payloads. New payloads record the provenance explicitly
                         # so positive size-one Dims can retain the opt-out too.
-                        self.shape_env.do_not_specialize_zero_one_symbols.add(sym)
+                        self.shape_env._add_do_not_specialize_zero_one_symbol(sym)
             return sym
 
         expr = sympy.sympify(
@@ -2998,6 +3016,10 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
+            self.has_do_not_specialize_zero_one_symbols_metadata = (
+                _DO_NOT_SPECIALIZE_ZERO_ONE_SYMBOLS_KEY
+                in serialized_graph_module.metadata
+            )
             self.do_not_specialize_zero_one_symbol_names = set(
                 json.loads(
                     serialized_graph_module.metadata.get(

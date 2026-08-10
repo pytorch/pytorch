@@ -6,6 +6,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
+import json
 import math
 import tempfile
 import unittest
@@ -14,6 +15,8 @@ from collections import namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
+
+import sympy
 
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -652,7 +655,11 @@ def forward(self, x):
             def forward(self, x):
                 return x + 1
 
-        for example_size, lower in ((0, 0), (1, 1)):
+        for example_size, lower, expected_opt_out in (
+            (0, 0, True),
+            (1, 1, True),
+            (3, 0, False),
+        ):
             with self.subTest(example_size=example_size, lower=lower):
                 dim = Dim("dim", min=lower, max=5)
                 ep = export(
@@ -668,14 +675,72 @@ def forward(self, x):
                     if node.op == "placeholder"
                 )
                 roundtrip_dim = placeholder.meta["val"].shape[0]
-                self.assertIn(
-                    roundtrip_dim.node._expr,
-                    roundtrip_dim.node.shape_env.do_not_specialize_zero_one_symbols,
+                opt_out_symbols = (
+                    roundtrip_dim.node.shape_env.do_not_specialize_zero_one_symbols
                 )
+                if expected_opt_out:
+                    self.assertIn(roundtrip_dim.node._expr, opt_out_symbols)
+                else:
+                    self.assertNotIn(roundtrip_dim.node._expr, opt_out_symbols)
                 self.assertEqual(
                     roundtrip_ep.module()(torch.randn(3)).shape,
                     (3,),
                 )
+
+        ep = export(
+            M(),
+            (torch.randn(1),),
+            dynamic_shapes={"x": {0: Dim("dim", min=1, max=5)}},
+        )
+        placeholder = next(node for node in ep.graph.nodes if node.op == "placeholder")
+        shape_env = placeholder.meta["val"].shape[0].node.shape_env
+        unrelated = sympy.Symbol("unrelated", positive=True, integer=True)
+        shape_env._add_do_not_specialize_zero_one_symbol(unrelated)
+        artifact = serialize(ep)
+        serialized_ep = json.loads(artifact.exported_program)
+        metadata = serialized_ep["graph_module"]["metadata"]
+        serialized_opt_outs = json.loads(
+            metadata["torch_do_not_specialize_zero_one_symbols"]
+        )
+        self.assertNotIn(str(unrelated), serialized_opt_outs)
+
+        # Payloads predating the explicit metadata used the nonnegative SIZE
+        # symbol assumption to preserve zero-inclusive size-zero Dims.
+        legacy_ep = export(
+            M(),
+            (torch.randn(0),),
+            dynamic_shapes={"x": {0: Dim("dim", min=0, max=5)}},
+        )
+        legacy_artifact = serialize(legacy_ep)
+        legacy_json = json.loads(legacy_artifact.exported_program)
+        del legacy_json["graph_module"]["metadata"][
+            "torch_do_not_specialize_zero_one_symbols"
+        ]
+        legacy_artifact.exported_program = json.dumps(legacy_json).encode()
+        legacy_roundtrip = deserialize(legacy_artifact)
+        legacy_placeholder = next(
+            node for node in legacy_roundtrip.graph.nodes if node.op == "placeholder"
+        )
+        legacy_dim = legacy_placeholder.meta["val"].shape[0]
+        self.assertIn(
+            legacy_dim.node._expr,
+            legacy_dim.node.shape_env.do_not_specialize_zero_one_symbols,
+        )
+
+    def test_serialize_graph_module_metadata_legacy_signature(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        ep = export(M(), (torch.randn(2),))
+        serializer = GraphModuleSerializer(
+            ep.graph_signature,
+            ep.module_call_graph,
+        )
+        self.assertEqual(
+            serializer.serialize_graph_module_metadata({"custom": {"key": "value"}}),
+            {"custom": '{"key": "value"}'},
+        )
 
     def test_rational_ranges(self) -> None:
         class M(torch.nn.Module):

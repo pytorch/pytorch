@@ -1329,6 +1329,7 @@ def _free_unbacked_symbols_with_path(
     elif isinstance(a, torch.Tensor) and (
         is_batchedtensor(a) or is_gradtrackingtensor(a)
     ):
+        # match_tensor updates r through its closure and uses the current path.
         match_tensor(a)
     elif (
         isinstance(a, torch.Tensor)
@@ -4147,6 +4148,7 @@ class ShapeEnv:
         # These are symbols which we'd like to process as pending, but if
         # they're missing then it's okay too.
         self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
+        self.do_not_specialize_zero_one_symbols: set[sympy.Symbol] = set()
 
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
@@ -4197,7 +4199,6 @@ class ShapeEnv:
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
         self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
-        self.do_not_specialize_zero_one_symbols: set[sympy.Symbol] = set()
 
         # Used by _get_unbacked_replacements / _sub_unbacked_exprs for
         # optimization_hint canonicalization of unbacked expressions.
@@ -4778,7 +4779,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4788,6 +4789,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            len(self.do_not_specialize_zero_one_symbols),
         )
 
     def _update_version_counter(self) -> None:
@@ -4808,6 +4810,16 @@ class ShapeEnv:
         if self._prev_cache_key != cur_key:
             self._prev_cache_key = cur_key
             self._version_counter += 1
+
+    def _add_do_not_specialize_zero_one_symbol(self, symbol: sympy.Symbol) -> None:
+        if symbol in self.do_not_specialize_zero_one_symbols:
+            return
+        self.do_not_specialize_zero_one_symbols.add(symbol)
+        # This set can affect whether _set_replacement accepts a replacement,
+        # so invalidate both the ShapeEnv caches and SymNode.expr caches just
+        # as a replacement change would.
+        self._replacements_version_counter += 1
+        self._update_version_counter()
 
     def _produce_dyn_sizes(
         self,
@@ -5292,7 +5304,7 @@ class ShapeEnv:
 
         for i, sym in enumerate(sym_sizes):
             if isinstance(sym, torch.SymInt) and i in hint_overrides:
-                self.var_to_hint_override[sym.node._expr] = hint_overrides[i]
+                self.var_to_hint_override[sym.node.expr] = hint_overrides[i]
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -5718,8 +5730,8 @@ class ShapeEnv:
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: bool | None = True,
         do_not_specialize_zero_one: bool = False,
-        skip_zero_one_guard_specialization: bool = False,
         symbolic_context: SymbolicContext | None = None,
+        skip_zero_one_guard_specialization: bool = False,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
         # check if constraint_dim is actually static integer
@@ -5883,7 +5895,7 @@ class ShapeEnv:
                         SymT.SIZE, symbol_id, positive=positive, integer=True
                     )
                 if skip_zero_one_guard_specialization and val in (0, 1):
-                    self.do_not_specialize_zero_one_symbols.add(sympy_expr)
+                    self._add_do_not_specialize_zero_one_symbol(sympy_expr)
             else:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, symbol_id, positive=positive, real=True
@@ -6304,14 +6316,8 @@ class ShapeEnv:
             for i, src in enumerate(sources):
                 source_index[src.name] = i
 
-            example_value_replacements = {
-                k: sympy.sympify(v) for k, v in self.var_to_hint_override.items()
-            }
-
             def replace_with_example_values(expr: sympy.Basic) -> sympy.Basic:
-                return expr.xreplace(self.backed_var_to_val).xreplace(
-                    example_value_replacements
-                )
+                return expr.xreplace(self.backed_var_to_val)
 
             def get_expression(
                 tensor_dim_src: Source, *, ignore_replacements: bool = False
@@ -6337,6 +6343,14 @@ class ShapeEnv:
                 eq = sympy.Eq(expr1, expr2)
                 example_expr1 = get_expression(src1, ignore_replacements=True)
                 example_expr2 = get_expression(src2, ignore_replacements=True)
+
+                def raise_mismatch() -> None:
+                    raise ConstraintViolationError(
+                        f"{src1.name} = {replace_with_example_values(example_expr1)}"
+                        " is not equal to "
+                        f"{src2.name} = {replace_with_example_values(example_expr2)}"
+                    )
+
                 example_eq = sympy.Eq(example_expr1, example_expr2)
                 concrete_val = self._maybe_evaluate_static(
                     replace_with_example_values(example_eq),
@@ -6347,19 +6361,11 @@ class ShapeEnv:
                     concrete_val = self.evaluate_expr(eq)
                     evaluated_eq = True
                 if not concrete_val:
-                    raise ConstraintViolationError(
-                        f"{src1.name} = {replace_with_example_values(example_expr1)}"
-                        " is not equal to "
-                        f"{src2.name} = {replace_with_example_values(example_expr2)}"
-                    )
+                    raise_mismatch()
                 if not evaluated_eq:
                     concrete_val = self.evaluate_expr(eq)
                     if not concrete_val:
-                        raise ConstraintViolationError(
-                            f"{src1.name} = {replace_with_example_values(example_expr1)}"
-                            " is not equal to "
-                            f"{src2.name} = {replace_with_example_values(example_expr2)}"
-                        )
+                        raise_mismatch()
 
             for srcEq, root, fn in equalities_inputs.derived_equalities:
                 expr1 = get_expression(srcEq)
@@ -7522,10 +7528,10 @@ class ShapeEnv:
         Apply symbol replacements to any symbols in the given expression.
 
         IMPORTANT: The output of this method MUST depend only on
-        self.replacements and the input expr. Do not add dependencies on other
-        mutable state. SymNode.expr uses _replacements_version_counter (which
-        tracks only replacement changes) to cache calls to this method, so
-        depending on other state would cause stale cache results.
+        self.replacements, self.do_not_specialize_zero_one_symbols, and the
+        input expr. Do not add dependencies on other mutable state. SymNode.expr
+        uses _replacements_version_counter to cache calls to this method, so
+        both allowed dependencies must invalidate that counter when they change.
         """
         replacements: dict[sympy.Basic, sympy.Basic] = {}
         # pyrefly: ignore [missing-attribute]
@@ -8180,10 +8186,15 @@ class ShapeEnv:
                 self.log.debug("SPECIALIZATION", stack_info=True)
         if a in self.do_not_specialize_zero_one_symbols:
             if isinstance(tgt, sympy.Symbol):
-                # Exact aliases are indistinguishable after replacement.
-                self.do_not_specialize_zero_one_symbols.add(tgt)
-            elif tgt.free_symbols and not (
-                tgt.free_symbols & self.do_not_specialize_zero_one_symbols
+                resolved_tgt = self._find(tgt)
+                if isinstance(resolved_tgt, sympy.Symbol):
+                    # Exact aliases are indistinguishable after replacement.
+                    self._add_do_not_specialize_zero_one_symbol(tgt)
+                    self._add_do_not_specialize_zero_one_symbol(resolved_tgt)
+            else:
+                resolved_tgt = tgt
+            if resolved_tgt.free_symbols and not (
+                resolved_tgt.free_symbols & self.do_not_specialize_zero_one_symbols
             ):
                 # Replacing the symbol with an ordinary composite expression
                 # would erase its opt-out provenance. Do not mark every input
@@ -8192,10 +8203,13 @@ class ShapeEnv:
                     "skipped set_replacement %s = %s (%s) "
                     "[would lose zero/one opt-out provenance]",
                     a,
-                    tgt,
+                    resolved_tgt,
                     msg,
                 )
                 return
+            # Constant replacements are intentionally allowed. They reflect a
+            # real program constraint, which produce_guards reports as a
+            # StrictMinMaxConstraint violation for a declared dynamic Dim.
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
         self.replacements[a] = tgt
         # NB: the replacement may get refined, but the user will find the
@@ -8225,13 +8239,13 @@ class ShapeEnv:
         c: d
 
         IMPORTANT: The output of this method MUST depend only on
-        self.replacements and the input symbol. Do not add dependencies on other
-        mutable state. SymNode.expr uses _replacements_version_counter (which
-        tracks only replacement changes) to cache calls to replace() (and
-        transitively this method), so depending on other state would cause
-        stale cache results. (Note: _set_replacement,  may read other fields
-        like var_to_range, but those are side effects that do not affect the
-        returned value.)
+        self.replacements, self.do_not_specialize_zero_one_symbols, and the
+        input symbol. Do not add dependencies on other mutable state.
+        SymNode.expr uses _replacements_version_counter to cache calls to
+        replace() (and transitively this method), so both allowed dependencies
+        must invalidate that counter when they change. (Note: _set_replacement
+        may read other fields like var_to_range, but those are side effects that
+        do not affect the returned value.)
         """
         if a not in self.replacements:
             return a
