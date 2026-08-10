@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <pybind11/chrono.h>
+#include <pybind11/stl.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
@@ -86,18 +87,15 @@ void THCPGraph_init(PyObject* module) {
           "pool",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pool))
       .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump))
+          "pools",
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pools))
+      .def(
+          "_retain_pool",
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::retain_pool))
       .def(
           "enable_debug_mode",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::enable_debug_mode))
-      .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump),
-          py::arg("debug_path"))
       .def(
           "raw_cuda_graph",
           [](::at::cuda::CUDAGraph& self) {
@@ -131,7 +129,17 @@ void THCPGraph_init(PyObject* module) {
               &::at::cuda::CUDAGraph::begin_capture_to_if_node),
           py::arg("scalar_cuda_pred_tensor"))
       .def(
+          "begin_capture_to_while_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_while_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
           "end_capture_to_conditional_node",
           torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::end_capture_to_conditional_node));
+              &::at::cuda::CUDAGraph::end_capture_to_conditional_node))
+      .def(
+          "set_conditional_handle_for_current_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::set_conditional_handle_for_current_node),
+          py::arg("scalar_cuda_pred_tensor"));
 }
