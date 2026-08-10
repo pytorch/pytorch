@@ -220,11 +220,14 @@ std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
         entries_.begin() + static_cast<std::ptrdiff_t>(next_),
         std::back_inserter(result),
         filter);
-  }
-  // query any remaining events
-  for (auto& r : result) {
-    update_state(r);
-    r.start_ = r.end_ = nullptr;
+    // query any remaining events. The copies borrow the same event pointers
+    // as the entries, so this must stay under mutex_: retire_id() clears
+    // those pointers before their owner frees the events, and it also holds
+    // mutex_.
+    for (auto& r : result) {
+      update_state(r);
+      r.start_ = r.end_ = nullptr;
+    }
   }
   return result;
 }
@@ -296,7 +299,7 @@ void FlightRecorder<EventType>::retire_id(
   }
 
   if (can_compute_duration) {
-    // Compute duration without without holding the lock, because
+    // Compute duration without holding the lock, because
     // cudaEventDuration() can hang, and we need to acquire the lock before we
     // can dump(), which we never want to block.
     guard.unlock();

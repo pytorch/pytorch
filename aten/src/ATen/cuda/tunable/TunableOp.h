@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -12,16 +12,22 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/Sleep.h>
+#include <ATen/native/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#ifndef USE_ROCM
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#endif
 
 #ifndef _WIN32
 #include <cxxabi.h>
 #endif
 
+#ifndef USE_ROCM
+#include <mutex>
+#endif
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <deque>
 
 namespace at::cuda::tunable {
 
@@ -36,75 +42,6 @@ class Callable {
       return Call(params);
     }
 };
-
-namespace {
-
-/** http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance */
-
-class Stats {
-  public:
-    Stats() {
-      _n = 0UL;
-      _mean = 0.0;
-      _M2 = 0.0;
-      _sum = 0.0;
-      _min = 0.0;
-      _max = 0.0;
-    }
-
-    void sample_value(const double x) {
-      double delta = 0;
-      _sum = _sum + x;
-      if (0UL == _n) {
-          _min = x;
-          _max = x;
-      }
-      else {
-          _min = _min < x ? _min : x;
-          _max = _max > x ? _max : x;
-      }
-      _n = _n + 1UL;
-      delta = x - _mean;
-      _mean = _mean + delta/_n;
-      _M2 = _M2 + delta * (x - _mean);
-    }
-
-    double variance() const {
-      return _M2/(_n-1);
-    }
-
-    double stddev() const {
-      return std::sqrt(variance());
-    }
-
-    unsigned long _n;
-    double _mean;
-    double _M2;
-    double _sum;
-    double _min;
-    double _max;
-};
-
-class FixedSizeStack {
-  private:
-      std::deque<std::string> stack;
-      const size_t max_size;
-
-  public:
-      FixedSizeStack(size_t size) : max_size(size) {}
-
-      void push(const std::string& value) {
-          if (stack.size() >= max_size) {
-              stack.pop_front(); // Remove the oldest entry
-          }
-          stack.push_back(value); // Add new entry
-      }
-
-      auto rbegin() { return stack.rbegin(); }
-      auto rend() { return stack.rend(); }
-};
-
-} // anonymous namespace
 
 template <typename ParamsT>
 class TunableOp {
@@ -122,11 +59,25 @@ class TunableOp {
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (result == ResultEntry::Null()) {
+          bool should_record_untuned = !ctx->IsTuningEnabled();
           if (ctx->IsTuningEnabled()) {
+#ifndef USE_ROCM
+            bool is_capturing =
+                c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+                c10::cuda::CaptureStatus::None;
+            if (!is_capturing) {
+              RegisterOpCandidates(params);
+              result = FindFastest(params);
+              mgr.Add(op_sig, params_sig, result);
+            } else {
+              should_record_untuned = true;
+            }
+#else
             result = FindFastest(params);
             mgr.Add(op_sig, params_sig, result);
+#endif
           }
-          else if (ctx->IsRecordUntunedEnabled()) {
+          if (should_record_untuned && ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file
             mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
           }
@@ -139,9 +90,19 @@ class TunableOp {
         TUNABLE_LOG2("no result, using default");
         result = ResultEntry::Default();
       }
-      auto iter = ops_.find(result);
-      TORCH_CHECK(iter != ops_.end());
-      return iter->second->Call(params);
+      auto* op = GetOp(result.GetKey());
+#ifndef USE_ROCM
+      if (op == nullptr && RegisterOpForResult(result, params)) {
+        op = GetOp(result.GetKey());
+      }
+#endif
+      if (op == nullptr) {
+        TUNABLE_LOG2("missing candidate ", result, ", using default");
+        result = ResultEntry::Default();
+        op = GetOp(result.GetKey());
+      }
+      TORCH_CHECK(op != nullptr);
+      return op->Call(params);
     }
 
     virtual std::string Signature() {
@@ -156,9 +117,48 @@ class TunableOp {
 
   protected:
     void RegisterOp(const std::string& name, std::unique_ptr<Callable<ParamsT>> op) {
+#ifndef USE_ROCM
+      std::scoped_lock l{ops_lock_};
+#endif
       this->op_names_.emplace_back(name);
       this->ops_.emplace(name, std::move(op));
     }
+
+    bool HasOp(const std::string& name) const {
+#ifndef USE_ROCM
+      std::scoped_lock l{ops_lock_};
+#endif
+      return this->ops_.find(name) != this->ops_.end();
+    }
+
+    Callable<ParamsT>* GetOp(const std::string& name) const {
+#ifndef USE_ROCM
+      std::scoped_lock l{ops_lock_};
+#endif
+      auto it = ops_.find(name);
+      return it == ops_.end() ? nullptr : it->second.get();
+    }
+
+    std::vector<std::string> OpNames() const {
+#ifndef USE_ROCM
+      std::scoped_lock l{ops_lock_};
+#endif
+      return op_names_;
+    }
+
+    virtual void RegisterOpCandidates(const ParamsT* /*params*/) {}
+
+    virtual std::vector<std::string> CandidateNames(const ParamsT* /*params*/) const {
+      return OpNames();
+    }
+
+#ifndef USE_ROCM
+    virtual bool RegisterOpForResult(
+        const ResultEntry& /*result*/,
+        const ParamsT* /*params*/) {
+      return false;
+    }
+#endif
 
   private:
     static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
@@ -194,7 +194,7 @@ class TunableOp {
       return timer.Duration() / num_iter;
     }
 
-    static Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+    static at::native::tunable::Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       std::vector<StreamTimerNoSync> timer(num_iter);
@@ -213,7 +213,7 @@ class TunableOp {
           at::cuda::flush_icache();
         }
       }
-      Stats s;
+      at::native::tunable::Stats s;
       for (size_t i = 0; i < num_iter; i++) {
         s.sample_value(timer[i].Duration());
       }
@@ -226,11 +226,12 @@ class TunableOp {
       auto op_sig = Signature();
       auto params_sig = params->Signature();
       auto blas_sig = params->BLASSignature();
-      TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
+      auto candidate_names = CandidateNames(params);
+      TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", candidate_names.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
-      auto top_solns = FixedSizeStack(5);
+      auto top_solns = at::native::tunable::FixedSizeStack(5);
 
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
@@ -238,7 +239,9 @@ class TunableOp {
       // calculate a reference answer for numerical check
       if (do_numerics_check) {
         reference_params = params->DeepCopy(false);
-        TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+        auto* default_op = GetOp(ResultEntry::Default().GetKey());
+        TORCH_CHECK(default_op != nullptr);
+        TORCH_CHECK(default_op->Call(reference_params) == OK);
       }
 
       // need copies of params to reuse
@@ -264,12 +267,13 @@ class TunableOp {
       // for rotating buffer
       size_t offset = 0;
 
-      for (size_t i = 0; i < op_names_.size(); i++) {
-        auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
+      for (size_t i = 0; i < candidate_names.size(); i++) {
+        auto* candidate = GetOp(candidate_names[i]); // borrow pointer
+        TORCH_CHECK(candidate != nullptr);
 
         auto status = candidate->Call(reusable_params[0]);
         if (status != OK) {
-          TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
           continue;
         }
 
@@ -279,7 +283,7 @@ class TunableOp {
         double approx_duration = s._mean;
         // bail if too slow
         if (approx_duration > 1.5 * min_duration_ms) {
-          TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
           continue;
         }
 
@@ -289,7 +293,7 @@ class TunableOp {
         approx_duration = s._mean;
         // bail if too slow
         if (approx_duration > 1.15 * min_duration_ms) {
-          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
           continue;
         }
 
@@ -298,13 +302,13 @@ class TunableOp {
           auto status = candidate->Call(numerical_params);
           if (status != OK) {
             numerical_params->Delete();
-            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
             continue;
           }
           status = reference_params->NumericalCheck(numerical_params);
           numerical_params->Delete();
           if (status != OK) {
-            TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
             continue;
           }
         }
@@ -355,7 +359,7 @@ class TunableOp {
         TUNABLE_LOG3("├──tuning using "
             "warmup iters ", warmup_iter, " [", warmup_ms, " ms] "
             "and tuning iters ", tuning_iter, " [", tuning_ms, " ms] ",
-            "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
+            "instance id=", i, ", ", op_sig, "(", params_sig, ") ", candidate_names[i]);
         TUNABLE_LOG3("├──offset at ", offset);
         WarmUp(candidate, reusable_params, warmup_iter, offset);
         s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
@@ -364,18 +368,18 @@ class TunableOp {
         // Solution with smallest mean + 2*sigma will be a better solution?
         // if ((s._mean + 2*s_stddev) < (min_duration_ms + 2*min_stddev_ms)) {
         if (s._mean < min_duration_ms) {
-          TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
+          TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", candidate_names[i],
                 " min ", s._min,
                 " max ", s._max,
                 " mean ", s._mean,
                 " std ", s_stddev);
           min_duration_ms = s._mean;
-          id_name = op_names_[i];
-          std::string current_soln = std::to_string(s._mean) + " " + op_names_[i];
+          id_name = candidate_names[i];
+          std::string current_soln = std::to_string(s._mean) + " " + candidate_names[i];
           top_solns.push(current_soln);
         }
         else {
-          TUNABLE_LOG3("├──found slower instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
+          TUNABLE_LOG3("├──found slower instance id=", i, ". " , s._mean, "ms. ", candidate_names[i],
                 " min ", s._min,
                 " max ", s._max,
                 " mean ", s._mean,
@@ -418,6 +422,9 @@ class TunableOp {
 
     std::unordered_map<std::string, std::unique_ptr<Callable<ParamsT>>> ops_;
     std::vector<std::string> op_names_;
+#ifndef USE_ROCM
+    mutable std::mutex ops_lock_;
+#endif
 };
 
 struct OpParams {

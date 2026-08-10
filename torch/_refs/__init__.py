@@ -372,11 +372,15 @@ def is_noncontiguous_supported(device):
 
 def handle_noncontiguous_outputs(input_tlist, output):
     device = None
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import (
+        FakeTensor,
+        is_fake_tensor,
+        maybe_get_fake_device,
+    )
 
     for t in input_tlist:
-        if isinstance(t, FakeTensor):
-            device = t.fake_device
+        if is_fake_tensor(t):
+            device = maybe_get_fake_device(t)
             break
 
     if not is_noncontiguous_supported(device):
@@ -426,7 +430,7 @@ def _broadcast_shapes(*_shapes):
                     continue
             else:
                 # When backed size oblivious is used, we specialize for broadcasting
-                # if its the only way to compile the example input.
+                # if it's the only way to compile the example input.
                 # i.e: s0:1, s1:1 ==>
                 #           assert s0==s1, no specialization on ==1 or !=1.
                 #            The non-broadcast path is picked
@@ -600,6 +604,22 @@ def _make_inplace(fn):
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(a, *args, **kwargs):
+        # In-place ops never resize `a`, but out_wrapper would resize `out=a`
+        # if the broadcasted result shape were larger. Reject the mismatch up
+        # front with the same error eager (TensorIterator) raises. Otherwise
+        # fake/meta tensors silently change shape here, which corrupts shape
+        # metadata recorded before the op (e.g. dynamo's tracked fakes).
+        shapes = [
+            t.shape
+            for t in itertools.chain(args, kwargs.values())
+            if isinstance(t, TensorLike)
+        ]
+        if shapes:
+            broadcasted_shape = tuple(_broadcast_shapes(a.shape, *shapes))
+            torch._check(
+                broadcasted_shape == a.shape,
+                lambda: f"output with shape {a.shape} doesn't match the broadcast shape {broadcasted_shape}",
+            )
         return fn(a, *args, out=a, **kwargs)
 
     inplace_name = f"{fn.__name__}_"
@@ -950,7 +970,7 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         a.dtype is not torch.bool,
         lambda: (
             "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -974,7 +994,7 @@ def positive(a: TensorLikeType) -> TensorLikeType:
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
-        raise RuntimeError(msg)
+        raise NotImplementedError(msg)
     return a
 
 
@@ -1861,7 +1881,7 @@ def sub(
     a, b = _maybe_broadcast(a, b)
 
     if isinstance(a, TensorLike) and isinstance(b, TensorLike):
-        torch._check(
+        torch._check_not_implemented(
             not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
             lambda: (
                 "Subtraction, the `-` operator, with two bool tensors is not supported. "
@@ -3178,7 +3198,7 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
             shape_[offset_idx] = x
         else:
             # When backed size oblivious is used, we specialize for broadcasting
-            # if its the only way to compile the example input.
+            # if it's the only way to compile the example input.
             # i.e: x:1, requested_length:1 ==>
             #           assert x==requested_length, no specialization on ==1 or !=1.
             #            The non-broadcast path is picked
@@ -3370,14 +3390,56 @@ def native_group_norm(
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
-        input.ndim >= 2,
-        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+        num_channels > 0,
+        lambda: f"Expected number of channels to be greater than 0, got {num_channels}",
+    )
+    torch._check(
+        flattened_inner_size > 0,
+        lambda: f"Expected HxW to be greater than 0, got {flattened_inner_size}",
+    )
+    torch._check(
+        num_groups > 0,
+        lambda: f"Expected num groups to be greater than 0, got {num_groups}",
     )
     torch._check(
         num_channels % num_groups == 0,
-        lambda: "Expected number of channels in input to be divisible by num_groups, "
-        + f"but got input of shape {input.shape} and num_groups = {num_groups}",
+        lambda: (
+            "Expected number of channels in input to be divisible by num_groups, "
+            f"but got input of shape {input.shape} and num_groups={num_groups}"
+        ),
     )
+    torch._check(
+        weight is None or (weight.ndim == 1 and weight.numel() == num_channels),
+        lambda: (
+            "Expected weight to be a vector of size equal to the number of "
+            f"channels in input, but got weight of shape {weight.shape} "  # pyrefly: ignore[missing-attribute]
+            f"and input of shape {input.shape}"
+        ),
+    )
+    torch._check(
+        bias is None or (bias.ndim == 1 and bias.numel() == num_channels),
+        lambda: (
+            "Expected bias to be a vector of size equal to the number of "
+            f"channels in input, but got bias of shape {bias.shape} "  # pyrefly: ignore[missing-attribute]
+            f"and input of shape {input.shape}"
+        ),
+    )
+    # This check isn't in the C++ operator, but is necessary for how we apply weight and
+    # bias below.
+    torch._check(
+        input.ndim >= 2,
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+    )
+
+    # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
+    mem_fmt = (
+        torch.contiguous_format
+        if input.device.type not in ("cpu", torch._C._get_privateuse1_backend_name())
+        else utils.suggest_memory_format(input)
+    )
+    input = input.contiguous(memory_format=mem_fmt)
+    weight = weight.contiguous() if weight is not None else None
+    bias = bias.contiguous() if bias is not None else None
 
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = _maybe_convert_to_dtype(input, computation_dtype)
@@ -3428,6 +3490,66 @@ def native_group_norm(
     mean = torch.squeeze(mean, reduction_dims)
     rstd = torch.squeeze(rstd, reduction_dims)
     return (out, mean, rstd)
+
+
+_SCALAR_TYPE_NAME_OVERRIDES = {
+    "uint8": "Byte",
+    "int8": "Char",
+    "int16": "Short",
+    "int32": "Int",
+    "int64": "Long",
+    "float16": "Half",
+    "float32": "Float",
+    "float64": "Double",
+    "complex32": "ComplexHalf",
+    "complex64": "ComplexFloat",
+    "complex128": "ComplexDouble",
+    "bool": "Bool",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
+    "quint4x2": "QUInt4x2",
+    "quint2x4": "QUInt2x4",
+    "bcomplex32": "BComplex32",
+}
+
+
+def _scalar_type_name(dtype: torch.dtype) -> str:
+    dtype_name = str(dtype).removeprefix("torch.")
+    if dtype_name in _SCALAR_TYPE_NAME_OVERRIDES:
+        return _SCALAR_TYPE_NAME_OVERRIDES[dtype_name]
+    if dtype_name.startswith("uint"):
+        return "UInt" + dtype_name.removeprefix("uint")
+    return dtype_name[:1].upper() + dtype_name[1:]
+
+
+def _check_native_layer_norm_cuda_param_dtype(
+    input: Tensor,
+    normalized_ndim: int,
+    weight: Tensor | None,
+    bias: Tensor | None,
+) -> None:
+    if input.device.type != "cuda":
+        return
+
+    mismatched_dtype = None
+    if weight is not None and weight.dtype != input.dtype:
+        mismatched_dtype = weight.dtype
+    elif bias is not None and bias.dtype != input.dtype:
+        mismatched_dtype = bias.dtype
+
+    if mismatched_dtype is None:
+        return
+
+    axis = input.ndim - normalized_ndim
+    num_rows = math.prod(input.shape[:axis])
+    expected_dtype = _scalar_type_name(input.dtype)
+    found_dtype = _scalar_type_name(mismatched_dtype)
+    torch._check(
+        num_rows == 0,
+        lambda: f"expected scalar type {expected_dtype} but found {found_dtype}",
+    )
 
 
 @register_decomposition(aten.native_layer_norm)
@@ -3486,6 +3608,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
+    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -4671,7 +4794,19 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
-    out = utils.clone_preserve_strides(input)
+    # Mirror at::native::clone_preserve_strides: when the input has internal
+    # memory overlap (e.g. an expand from a scalar with stride 0), we cannot
+    # preserve its strides because copy_to() below would write through aliased
+    # storage and corrupt non-diagonal positions. This arises in the backward
+    # of diagonal_scatter(x, src).sum(), where grad_output is expanded. Fall
+    # back to a plain clone, which materializes a contiguous buffer.
+    if builtins.any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(input.size(), input.stride())
+    ):
+        out = input.clone()
+    else:
+        out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
@@ -5413,9 +5548,7 @@ def arange(
         xend = sym_int(end)
         xstep = sym_int(step)
 
-    # For int64 we truncate arguments to int before calculating length, but
-    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or integer_args:
+    if integer_args:
         torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
@@ -5423,7 +5556,7 @@ def arange(
     else:
         length = math.ceil((end - start) / step)
 
-    if is_integer:
+    if is_integer and integer_args:
         return prims.iota(
             length,
             start=xstart,  # type: ignore[possibly-undefined]
@@ -5432,6 +5565,17 @@ def arange(
             device=device,
             requires_grad=requires_grad,
         )
+
+    if is_integer and not integer_args:
+        index = prims.iota(
+            length,
+            start=0,
+            step=1,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        return xstart + xstep * index  # type: ignore[possibly-undefined]
 
     index = prims.iota(
         length,
@@ -6527,7 +6671,6 @@ def log_normal(self, mean=1, std=2, generator=None):
     return torch.exp(std * torch.randn_like(self) + mean)
 
 
-# TODO: add support for functionalization aten.normal_functional
 # NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
@@ -6594,6 +6737,22 @@ def normal(
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
     return normal(mean, std, self.shape, out=self, generator=generator)
+
+
+@register_decomposition(aten.normal_functional)
+def normal_functional(self, mean=0, std=1, *, generator=None):
+    res = normal(
+        mean,
+        std,
+        self.shape,
+        dtype=self.dtype,
+        device=self.device,
+        generator=generator,
+    )
+    if self.stride() == res.stride():
+        return res
+    new_stride = utils.compute_elementwise_output_strides(self)
+    return res.as_strided(self.shape, new_stride)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
