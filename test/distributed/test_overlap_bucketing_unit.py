@@ -1650,6 +1650,48 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         result = scheduler.run()
         result.graph.lint()
 
+    @torch._inductor.config.patch(deterministic=True)
+    def test_no_memory_caps_no_attribute_error(self):
+        """
+        Test that both memory caps set to None don't error during overlap
+        scheduling.
+
+        Before the fix, the scheduler crashed with AttributeError because
+        memory_tracker is None when both max_memory_increase_gb and
+        max_memory_increase_ratio are None, while the code still dereferenced
+        it. The independent max_in_flight_gb limit must also remain active in
+        this configuration.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+
+            # Compute with gemm
+            mm_result = torch.mm(a, b)
+            pointwise = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (pointwise + ag_out).sum()
+
+        with FakeTensorMode():
+            a = torch.randn(16, 16, device=self.device)
+            b = torch.randn(16, 16, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        # Should not error (would have errored before fix)
+        schedule_overlap_bucketing(
+            gm, max_memory_increase_gb=None, max_memory_increase_ratio=None
+        )
+
     def test_no_cycle_with_fusion_regions_and_bucketing(self):
         """Test that fusion regions + bucketing doesn't create cycles."""
 

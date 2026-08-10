@@ -524,11 +524,11 @@ class OverlapScheduler:
             self.allowed_peak_memory_bytes = self.original_peak_memory + (
                 memory_increase_bytes or 0
             )
-            self.memory_tracker = MemoryTracker(self.graph)
+            self.memory_tracker: MemoryTracker | None = MemoryTracker(self.graph)
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
-            self.memory_tracker = None  # type: ignore[assignment]
+            self.memory_tracker = None
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
@@ -629,11 +629,6 @@ class OverlapScheduler:
         Check if prefetching this collective would exceed memory budget at ANY compute node
         between now and when it's used.
         """
-        # No memory caps configured (both None): memory tracking is disabled,
-        # so a prefetch can never be rejected on memory grounds.
-        if self.memory_tracker is None:
-            return False
-
         info = self.collective_info[start_node]
         size = info.size_bytes
 
@@ -643,9 +638,10 @@ class OverlapScheduler:
         if domination_index == sys.maxsize:
             return False
 
-        # check current mem
+        # check current mem (only meaningful when memory tracking is enabled)
         if (
-            self.memory_tracker.current_memory_bytes + size
+            self.memory_tracker is not None
+            and self.memory_tracker.current_memory_bytes + size
             > self.allowed_peak_memory_bytes
         ):
             return True
@@ -659,10 +655,18 @@ class OverlapScheduler:
             ]
 
             # Check 1: Would cumulative prefetch exceed in-flight limit?
+            # This limit is independent of memory tracking (max_in_flight_gb) and
+            # must stay active even when both memory caps are None.
             if (cumulative_prefetch + size) > self.max_in_flight_bytes:
                 return True
 
-            # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
+            # Check 2: Would total memory (baseline + cumulative prefetch) exceed
+            # budget? Requires memory tracking: original_mem_before_compute_index
+            # is only populated when tracking is enabled, so this check must be
+            # skipped (not short-circuited to False) when it is disabled.
+            if self.memory_tracker is None:
+                continue
+
             baseline_mem = self.original_mem_before_compute_index[compute_idx]
             projected = baseline_mem + cumulative_prefetch + size
 
@@ -1145,12 +1149,9 @@ class OverlapScheduler:
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
         if self.memory_tracker is not None:
             self.memory_tracker.schedule_node(node)
-
-        current_memory_bytes = (
-            self.memory_tracker.get_current_memory_bytes()
-            if self.memory_tracker is not None
-            else 0
-        )
+            current_memory_bytes = self.memory_tracker.current_memory_bytes
+        else:
+            current_memory_bytes = 0
         log.debug(
             "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
             node.name,
