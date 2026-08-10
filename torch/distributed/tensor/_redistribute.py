@@ -1620,9 +1620,10 @@ def redistribute_local_tensor(
             # This is safe because _StridedShard.is_shard() returns False, so
             # _comm_type_key() returns None and flattening is never attempted.
             if isinstance(current, _StridedShard) or isinstance(target, _StridedShard):
-                assert mesh_to_use is device_mesh, (  # noqa: S101
-                    "_StridedShard redistribute assumes no flattened transforms"
-                )
+                if mesh_to_use is not device_mesh:
+                    raise AssertionError(
+                        "_StridedShard redistribute assumes no flattened transforms"
+                    )
 
             num_chunks = mesh_to_use.size(mesh_dim=i)
 
