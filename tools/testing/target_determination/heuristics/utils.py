@@ -47,7 +47,7 @@ def _get_pr_info(pr_number: int) -> dict[str, object]:
 def _get_pr_merge_base(pr_info: dict[str, object]) -> str:
     base_info = cast(dict[str, object], pr_info["base"])
     base_ref = cast(str, base_info["ref"])
-    base_sha = cast(str | None, base_info.get("sha"))
+    base_sha = cast("str | None", base_info.get("sha"))
     last_error: Exception | None = None
 
     for base in (f"origin/{base_ref}", base_sha):
@@ -64,7 +64,7 @@ def _get_pr_merge_base(pr_info: dict[str, object]) -> str:
         _github_api_json(f"compare/{quote(base_ref, safe='')}...{head}"),
     )
     merge_base_commit = cast(dict[str, object], compare.get("merge_base_commit", {}))
-    merge_base = cast(str | None, merge_base_commit.get("sha"))
+    merge_base = cast("str | None", merge_base_commit.get("sha"))
     if merge_base:
         return merge_base
     if base_sha:
@@ -89,8 +89,12 @@ def _query_changed_files_from_github(pr_number: int) -> list[str]:
 
 
 def python_test_file_to_test_name(tests: set[str]) -> set[str]:
-    prefix = f"test{os.path.sep}"
-    valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
+    prefix = "test/"
+    valid_tests = {
+        f
+        for f in (test.replace("\\", "/") for test in tests)
+        if f.startswith(prefix) and f.endswith(".py")
+    }
     valid_tests = {f[len(prefix) : -len(".py")] for f in valid_tests}
 
     return valid_tests

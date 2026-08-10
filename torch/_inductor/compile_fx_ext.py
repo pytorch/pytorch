@@ -24,6 +24,7 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstantsWithGm,
     OutputCode,
 )
+from torch._inductor.utils import patch_subprocess_env
 from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
@@ -256,7 +257,8 @@ class _WireProtocolPickledInput:
 
         fake_mode = _current_fake_mode()
         result = GraphPickler.loads(self.value, fake_mode)
-        assert isinstance(result, _WireProtocolInput)
+        if not isinstance(result, _WireProtocolInput):
+            raise AssertionError(f"expected _WireProtocolInput, got {type(result)}")
         return result
 
 
@@ -297,7 +299,8 @@ class _WireProtocolPickledOutput:
 
         fake_mode = _current_fake_mode()
         result = GraphPickler.loads(self.value, fake_mode)
-        assert isinstance(result, _WireProtocolOutput)
+        if not isinstance(result, _WireProtocolOutput):
+            raise AssertionError(f"expected _WireProtocolOutput, got {type(result)}")
         if isinstance(result.graph, CompiledFxGraph):
             result.graph.after_deserialization(constants)
         return result
@@ -352,7 +355,8 @@ class _LoggerState:
                 q.extend(logger.getChildren())
 
     def __enter__(self) -> _CapturedLogs:
-        assert self.captured_logs is None
+        if self.captured_logs is not None:
+            raise AssertionError("captured_logs already set on __enter__")
         self.captured_logs = _CapturedLogs(self)
         self.captured_logs.apply()
         return self.captured_logs
@@ -363,7 +367,8 @@ class _LoggerState:
         exc_value: BaseException | None,
         traceback: types.TracebackType | None,
     ) -> None:
-        assert self.captured_logs is not None
+        if self.captured_logs is None:
+            raise AssertionError("captured_logs not set on __exit__")
         self.captured_logs.remove()
 
 
@@ -386,7 +391,8 @@ class _CapturedLogs:
         self.handlers = None
 
     def finish(self) -> list[logging.LogRecord]:
-        assert self.handlers is None
+        if self.handlers is not None:
+            raise AssertionError("expected handlers to be None in finish")
         logs = []
         try:
             while True:
@@ -396,7 +402,8 @@ class _CapturedLogs:
         return logs
 
     def remove(self) -> None:
-        assert self.handlers is not None
+        if self.handlers is None:
+            raise AssertionError("expected handlers to be set in remove")
         handlers, self.handlers = self.handlers, None
         for name, handler in handlers.items():
             logger = logging.getLogger(name)
@@ -405,7 +412,8 @@ class _CapturedLogs:
     def apply(self) -> None:
         from logging.handlers import QueueHandler
 
-        assert self.handlers is None
+        if self.handlers is not None:
+            raise AssertionError("expected handlers to be None in apply")
         self.handlers = {}
         for name, level in self.state.loggers.items():
             logger = logging.getLogger(name)
@@ -544,15 +552,12 @@ class _SerializedFxCompile(FxCompile):
     def _run_in_child(
         cls,
         pickled_input: _WireProtocolPickledInput,
-        extra_env: Mapping[str, str] | None = None,
+        extra_env: Mapping[str, str | None] | None = None,
     ) -> _WireProtocolPickledOutput:
         metrics = CachedMetricsHelper()
 
         with contextlib.ExitStack() as stack:
-            if extra_env is not None:
-                import unittest
-
-                stack.enter_context(unittest.mock.patch.dict("os.environ", extra_env))
+            stack.enter_context(patch_subprocess_env(extra_env))
 
             # Save warnings to "replay" in the parent
             warning_replay = stack.enter_context(warnings.catch_warnings(record=True))

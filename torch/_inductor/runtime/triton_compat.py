@@ -20,6 +20,22 @@ if triton is not None:
     from triton.runtime.jit import JITFunction, KernelInterface
 
     try:
+        from triton import set_allocator as triton_set_allocator
+    except ImportError:
+        triton_set_allocator = None
+
+    try:
+        from triton.runtime import _allocation as triton_allocation
+    except ImportError:
+        triton_allocator_context = None
+        triton_null_allocator = None
+        TritonNullAllocator = None
+    else:
+        triton_allocator_context = getattr(triton_allocation, "_allocator", None)
+        triton_null_allocator = getattr(triton_allocation, "_NULL_ALLOCATOR", None)
+        TritonNullAllocator = getattr(triton_allocation, "NullAllocator", None)
+
+    try:
         from triton.runtime.autotuner import PTXASError
     except ImportError:
 
@@ -125,6 +141,10 @@ else:
     libdevice = None
     math = None
     knobs = None
+    triton_allocator_context = None
+    triton_null_allocator = None
+    TritonNullAllocator = None
+    triton_set_allocator = None
     builtins_use_semantic_kwarg = False
 
     class triton:  # type: ignore[no-redef]
@@ -146,16 +166,6 @@ else:
     HAS_WARP_SPEC = False
     triton_key = _raise_error
     HAS_TRITON = False
-
-
-def cc_warp_size(cc: str | int) -> int:
-    if torch.version.hip:
-        if "gfx9" in str(cc):
-            return 64
-        else:
-            return 32
-    else:
-        return 32
 
 
 try:
@@ -180,7 +190,10 @@ __all__ = [
     "libdevice",
     "math",
     "triton",
-    "cc_warp_size",
+    "triton_allocator_context",
+    "triton_null_allocator",
+    "TritonNullAllocator",
+    "triton_set_allocator",
     "knobs",
     "triton_key",
 ]

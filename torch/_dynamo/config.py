@@ -161,6 +161,9 @@ specialize_int = False
 # support codegen on float (this is to be fixed).
 specialize_float = False
 
+# Max ops per ComputedLazyConstantVariable chain before realizing under guards; 0 disables
+computed_lazy_constant_max_nodes = 64
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 
@@ -173,6 +176,10 @@ use_lazy_graph_module = (
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = True
+
+# Internal: Shape specification patched during tracing by enter_exit_hooks.
+# Set via torch.compile(dynamic_shapes=...), not directly by users.
+_dynamic_shapes_spec = None
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
@@ -254,7 +261,7 @@ prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
 # NOTE this has been deprecated, it does nothing now.
 traceable_tensor_subclasses: set[type[Any]] = set()
 
-# If a tensor subclass is put into this set, Dynamo will model its instasnces in
+# If a tensor subclass is put into this set, Dynamo will model its instances in
 # a very conservative and limited way (most likely causing lots of graph breaks
 # if one apply tensor ops on these instances). This is useful if you encounter
 # internal compiler errors from Dynamo which are caused by tensor subclasses,
@@ -443,7 +450,7 @@ optimize_ddp_lazy_compile = False
 
 # lambda guarding on object aliasing to improve opportunity for dict tag
 # optimization
-use_lamba_guard_for_object_aliasing = True
+use_lamba_guard_for_object_aliasing = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
@@ -518,7 +525,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = not is_fbcode()
+capture_sparse_compute = True
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -561,9 +568,11 @@ enable_trace_unittest = False
 # Enable tracing LOAD_BUILD_CLASS bytecode
 enable_trace_load_build_class = False
 
-# Enable tracing generator functions lazily. If False, Dynamo will exhaust
-# generators upon first execution. And if True, the generator will be accessed lazily
-enable_faithful_generator_behavior = True
+enable_faithful_generator_behavior = Config(  # type: ignore[var-annotated]
+    default=True,
+    deprecated=True,
+    deprecation_message="does not do anything, generators are always traced lazily",
+)
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
@@ -616,7 +625,8 @@ issue_3_13_0_warning = True
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
 
-# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo.
+# There are slight differences between this config and wrap_top_frame.
 debug_force_nested_calls = False
 
 # Used for testing - forces a graph break when a function
@@ -877,7 +887,7 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 )
 
 # Does not graph break on torch.autograd._profiler_enabled if set to True. We
-# want this flag to be True by default, but there is an unsolbed bug that causes
+# want this flag to be True by default, but there is an unsolved bug that causes
 # distributed jobs to timeout with Kineto profiler when this is set to True.
 constant_fold_autograd_profiler_enabled = False
 
@@ -917,6 +927,11 @@ inline_single_use_invoke_subgraph: bool = True
 # - True: always clear regardless of backend
 # - False: never clear regardless of backend
 invalidate_compile_context_weakrefs: bool | None = None
+
+# Reorder and rename output graph nodes into a canonical topological order so
+# that structurally equivalent graphs (e.g., same model traced with different
+# dict iteration orders across distributed ranks) produce identical FX graphs.
+canonicalize_output_graph_node_order: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403

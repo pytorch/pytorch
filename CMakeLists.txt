@@ -1,21 +1,6 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
-# Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
-# sometimes makes XCode C compiler gets detected as "Clang", even when the C++
-# one is detected as "AppleClang".
-cmake_policy(SET CMP0010 NEW)
-cmake_policy(SET CMP0025 NEW)
 cmake_policy(SET CMP0126 OLD)
-
-# Enables CMake to set LTO on compilers other than Intel.
-cmake_policy(SET CMP0069 NEW)
-# Enable the policy for CMake subprojects. protobuf currently causes issues
-# set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
-
-# Suppress warning flags in default MSVC configuration.  It's not mandatory that
-# we do this (and we don't if cmake is old), but it's nice when it's possible,
-# and it's possible on our Windows configs.
-cmake_policy(SET CMP0092 NEW)
 # Don't remove the FindCUDA module
 cmake_policy(SET CMP0146 OLD)
 
@@ -24,8 +9,42 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
   message(FATAL_ERROR "In-source build are not supported")
 endif()
 
+# Cross-compilation is configured by CMAKE_SYSTEM_NAME / CMAKE_SYSTEM_PROCESSOR,
+# which must be set before project() so CMake enters cross-compile mode and
+# reports the target architecture. The general environment-variable forwarding
+# in cmake/EnvVarForwarding.cmake runs after project() and skips variables that
+# are already defined, so project() would otherwise set these to the host values
+# and the target values passed via the environment would be lost. Forward just
+# the toolchain-determining variables here, before project().
+foreach(_cross_var
+    CMAKE_SYSTEM_NAME
+    CMAKE_SYSTEM_PROCESSOR
+    CMAKE_C_COMPILER
+    CMAKE_CXX_COMPILER
+    CMAKE_SYSROOT
+    CMAKE_TOOLCHAIN_FILE)
+  if(DEFINED ENV{${_cross_var}} AND NOT DEFINED ${_cross_var})
+    set(${_cross_var} "$ENV{${_cross_var}}")
+  endif()
+endforeach()
+
 # ---[ Project and semantic versioning.
-project(Torch CXX C)
+# When built via scikit-build-core, these are set automatically.
+# Provide fallbacks for standalone cmake invocations.
+if(NOT DEFINED SKBUILD_PROJECT_NAME)
+  set(SKBUILD_PROJECT_NAME "torch")
+endif()
+if(NOT DEFINED SKBUILD_PROJECT_VERSION)
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" SKBUILD_PROJECT_VERSION)
+  string(STRIP "${SKBUILD_PROJECT_VERSION}" SKBUILD_PROJECT_VERSION)
+  # version.txt may contain PEP 440 pre-release suffixes like "a0" that are
+  # not valid CMake version components. Strip everything after the last digit
+  # group so project(VERSION ...) still works.
+  string(REGEX MATCH "^[0-9]+\\.[0-9]+(\\.[0-9]+)?" SKBUILD_PROJECT_VERSION "${SKBUILD_PROJECT_VERSION}")
+endif()
+project(${SKBUILD_PROJECT_NAME}
+        VERSION ${SKBUILD_PROJECT_VERSION}
+        LANGUAGES CXX C)
 
 # When built via scikit-build-core, Python_EXECUTABLE is already set.
 # For standalone cmake invocations, find it via find_package.
@@ -65,6 +84,7 @@ set(CMAKE_CXX_STANDARD
     20
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD
     17
     CACHE STRING
@@ -81,15 +101,23 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   )
 endif()
 
+# --- [ Check that minimal clang version is 16+
+# Older clangs (e.g. clang-14) fail to compile C++20 ranges adaptors such as
+# `std::views::filter` over associative containers when paired with libstdc++,
+# see https://github.com/pytorch/pytorch/issues/184630. AppleClang uses its
+# own versioning scheme and is excluded from this check.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+  message(
+    FATAL_ERROR
+      "Clang-16 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+  )
+endif()
+
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
-# https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
+# https://github.com/NVIDIA/cccl/blob/main/docs/libcudacxx/standard_api/numerics_library/complex.rst
 string(APPEND CMAKE_CUDA_FLAGS
        " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
-
-if(LINUX)
-  set(CXX_STANDARD_REQUIRED ON)
-endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_LINK_WHAT_YOU_USE TRUE)
@@ -133,8 +161,6 @@ if(APPLE)
                        CLANG_VERSION_STRING ${clang_full_version_string})
   message(STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING})
 
-  # RPATH stuff
-  set(CMAKE_MACOSX_RPATH ON)
   if(NOT IOS)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
@@ -192,7 +218,9 @@ set(CPU_RISCV OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)")
+  # Linux reports "aarch64", macOS "arm64", and native Windows on Arm "ARM64".
+  # CMake MATCHES is case-sensitive, so accept each spelling.
   set(CPU_AARCH64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
@@ -267,6 +295,13 @@ endif()
 # CUDA is incompatible with TSAN
 cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
+# If USE_XPU is already defined in cache, it means user explicitly set it
+if(DEFINED CACHE{USE_XPU})
+  set(_USE_XPU_EXPLICITLY_SET TRUE)
+else()
+  set(_USE_XPU_EXPLICITLY_SET FALSE)
+endif()
+
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
@@ -280,9 +315,9 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+cmake_dependent_option(USE_HIPSPARSELT "Use hipSPARSELt" ON "USE_ROCM" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
-# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
-cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
+cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA OR USE_ROCM;NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -299,29 +334,26 @@ cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
                        "USE_XPU;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
+# Builds NCCL-EP if true.
+cmake_dependent_option(USE_NCCL_EP "Build NCCL EP contrib library" OFF
+                       "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
                        ON "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
-option(USE_OBSERVERS "Use observers module." OFF)
-option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build."
        OFF)
 
-option(USE_PROF "Use profiling" OFF)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
-option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_EIGEN_SPARSE "Use Eigen Sparse Matrices" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
@@ -342,7 +374,7 @@ option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION
        "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
-option(USE_XNNPACK "Use XNNPACK" ON)
+option(USE_XNNPACK "Use XNNPACK" OFF)
 option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
@@ -355,9 +387,6 @@ cmake_dependent_option(
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
-set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
-cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
-                       OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -756,13 +785,6 @@ if(ANDROID
   endif()
 endif()
 
-if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
-    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
-      set(USE_KLEIDIAI OFF)
-      message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
-    endif()
-endif()
-
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 set(INTERN_BUILD_ATEN_OPS ON)
 
@@ -844,7 +866,7 @@ if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
   message(WARNING "Could not get version from base 'version.txt'")
   # If we can't get the version from the version file we should probably set it
   # to something non-sensical like 0.0.0
-  set(TORCH_DEFAULT_VERSION, "0.0.0")
+  set(TORCH_DEFAULT_VERSION "0.0.0")
 endif()
 set(TORCH_BUILD_VERSION
     "${TORCH_DEFAULT_VERSION}"
@@ -985,10 +1007,6 @@ cmake_dependent_option(
   OFF)
 
 
-# Set USE_MSLK to ON for CUDA build on SM100.
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
-endif()
-
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
 cmake_dependent_option(
@@ -1010,12 +1028,6 @@ endif()
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
-  # CUDA-12.1 crashes when trying to compile with --source-in-ptx See
-  # https://github.com/pytorch/pytorch/issues/102372#issuecomment-1572526893
-  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
-    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
-    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
-  endif()
 endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
@@ -1196,13 +1208,11 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-      message(Warning "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
+      message(WARNING "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
     endif()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
   else()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   endif()
   # aarch64 C++ stack unwinding uses frame-pointer chain walking, so frame
   # pointers must be present in all build types.  The cost is negligible on
@@ -1265,7 +1275,7 @@ if(USE_CPP_CODE_COVERAGE)
     string(APPEND CMAKE_OBJCXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
   else()
     message(
-      ERROR
+      FATAL_ERROR
       "Code coverage for compiler ${CMAKE_CXX_COMPILER_ID} is unsupported")
   endif()
 
@@ -1364,11 +1374,6 @@ if((NOT USE_GLOG)
                   "generate files that are not well tested.")
 endif()
 
-if(USE_CUDA OR USE_ROCM)
-  # TODO: check if we should include other cuda dependency libraries to the
-  # interface as well.
-
-endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies will
 # also become interface libraries, and as a result if there are any dependency
@@ -1475,11 +1480,9 @@ endif()
 
 # Bundle PTXAS if needed
 if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
-  if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
-    message(STATUS "Copying PTXAS into the bin folder")
-    file(COPY "${CUDAToolkit_BIN_DIR}/ptxas"
-         DESTINATION "${PROJECT_BINARY_DIR}")
-  endif()
+  message(STATUS "Copying PTXAS into the bin folder")
+  file(COPY "${CUDAToolkit_BIN_DIR}/ptxas"
+       DESTINATION "${PROJECT_BINARY_DIR}")
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()

@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/Exception.h>
 
@@ -27,6 +26,7 @@
 #endif
 
 #include <tuple>
+#include <utility>
 
 namespace at::native {
 
@@ -91,7 +91,6 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   check1d("max_pool1d", "padding", padding);
   check1d("max_pool1d", "dilation", dilation);
 
-  NoNamesGuard guard;
 
   auto [output, indices] = at::max_pool2d_with_indices(
       self.unsqueeze(-2),
@@ -104,11 +103,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   output  = output.squeeze(-2);
   indices = indices.squeeze(-2);
 
-  guard.reset();
-  namedinference::propagate_names(output, self);
-  namedinference::propagate_names(indices, self);
-
-  return std::make_tuple(output, indices);
+  return std::make_tuple(std::move(output), std::move(indices));
 }
 
 Tensor avg_pool1d(
@@ -161,7 +156,7 @@ Tensor max_pool2d(
 #endif
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+  return std::get<0>(std::move(output_and_indices));
 }
 
 Tensor max_pool3d(
@@ -181,7 +176,7 @@ Tensor max_pool3d(
   }
   auto output_and_indices = at::max_pool3d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+  return std::get<0>(std::move(output_and_indices));
 }
 
 } // namespace at::native
