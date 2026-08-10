@@ -1449,10 +1449,9 @@ class GitHubPR:
                 ghstack_prs=ghstack_prs,
             )
 
-            # Now that the merge commit exists locally, make sure it doesn't
-            # reference docker images that were never built due to a land race.
+            # Log, but do not block on, a docker land race.
             if docker_pr is not None:
-                check_no_docker_merge_skew(repo, docker_pr)
+                warn_on_docker_merge_skew(repo, docker_pr)
 
             repo.push(self.default_branch(), dry_run)
             # When the merge process reaches this part, we can assume that the
@@ -1911,19 +1910,16 @@ def check_docker_builds_ready(pr: GitHubPR) -> None:
         )
 
 
-def check_no_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
-    """Block merge if a docker-affecting PR raced with another docker change.
+def warn_on_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
+    """Log when a docker-affecting PR raced with another docker change.
 
-    The CI docker images are tagged by the git tree hash of .ci/docker.  The
-    images built and tested on the PR head are tagged with the PR head's tree
-    hash, but trunk jobs after the merge request the tree hash of the *merge*
-    commit.  If another docker-affecting PR landed on the base branch after this
-    PR's images were built, those two hashes disagree and the images trunk needs
-    were never built or tested.  Refuse the merge and ask for a rebase, which
-    re-runs ciflow/docker against the new base.
+    The CI docker images are tagged by the git tree hash of .ci/docker, so a
+    docker change landing on the base after this PR's images were built leaves
+    the merge commit asking for an untested tree. This used to refuse the merge
+    (#191508); it now only warns, since docker-builds.yml publishes the merged
+    tree's images on push and jobs wait for them.
 
-    Must be called after the merge commit has been created locally but before it
-    is pushed.
+    Must be called after the merge commit has been created locally.
     """
     if not pr.is_docker_affecting():
         return
@@ -1940,15 +1936,14 @@ def check_no_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
     pr_head_tree = repo.rev_parse(f"{pr_head_sha}:{DOCKER_CI_PATH}")
 
     if merge_commit_tree != pr_head_tree:
-        raise MergeRuleFailedError(
-            "Refusing to merge: this PR modifies the CI docker images, but the "
-            f"{DOCKER_CI_PATH} tree of the merge commit ({merge_commit_tree}) does "
-            f"not match the tree that ciflow/docker built and tested on the PR "
-            f"head ({pr_head_tree}). Another docker-affecting change landed on the "
-            "base branch after your docker images were built, so the images "
-            "required after this merge were never built or tested (a land race). "
-            "Please rebase this PR (e.g. `@pytorchbot rebase`), let the "
-            "`ciflow/docker` builds re-run, and then merge again."
+        print(
+            f"WARNING: docker land race on PR #{pr.pr_num}: the {DOCKER_CI_PATH} "
+            f"tree of the merge commit ({merge_commit_tree}) does not match the "
+            f"tree that ciflow/docker built and tested on the PR head "
+            f"({pr_head_tree}). Another docker-affecting change landed on the base "
+            "branch after these images were built, so the first trunk jobs after "
+            "this merge may wait for docker-builds to publish the merged tree's "
+            "images, or rebuild them locally. Merging anyway."
         )
 
 
