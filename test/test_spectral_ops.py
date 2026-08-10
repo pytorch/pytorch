@@ -1485,7 +1485,7 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     def test_istft_throws(self, device):
         """istft should throw exception for invalid parameters"""
-        stft = torch.zeros((3, 5, 2), device=device)
+        stft = torch.zeros((3, 5, 2), device=device, dtype=torch.cfloat)
         # the window is size 1 but it hops 20 so there is a gap which throw an error
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4,
@@ -1495,8 +1495,8 @@ class TestFFT(TestCase):
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
         # Input cannot be empty
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2), device=device, dtype=torch.cfloat), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2), device=device, dtype=torch.cfloat), 2)
 
     @skipIfTorchDynamo("Failed running call_function")
     @onlyNativeDeviceTypes
