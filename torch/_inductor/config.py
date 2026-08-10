@@ -1285,6 +1285,14 @@ partitioned_scatter_force: bool = (
     os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
 )
 
+# Share 8-32 structurally identical inference-output computations while
+# retaining a distinct storage allocation for every output. Default-on
+# admission is currently limited to NVIDIA SM100 Triton.
+dedupe_graph_outputs: bool = Config(
+    env_name_force="TORCHINDUCTOR_DEDUPE_GRAPH_OUTPUTS",
+    default=True,
+)
+
 
 class _collective:
     auto_select: bool = False

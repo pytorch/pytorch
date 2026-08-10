@@ -309,6 +309,19 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
+    # Share structurally identical graph-output computation while retaining a
+    # distinct storage allocation for each originally distinct output.
+    if config.dedupe_graph_outputs and is_inference:
+        from .dedupe_graph_outputs import (
+            dedupe_graph_outputs_pass,
+            is_output_computation_sharing_supported,
+        )
+
+        if is_output_computation_sharing_supported(gm):
+            GraphTransformObserver(gm, "dedupe_graph_outputs").apply_graph_pass(
+                dedupe_graph_outputs_pass
+            )
+
     GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
         move_constructors_to_gpu
     )

@@ -25,6 +25,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_graph_lowering,
     run_fw_bw_and_get_code,
+    using_b200,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -2396,6 +2397,32 @@ class CudaReproTests(TestCase):
         else:
             self.assertEqual(2, persistent_code.count("tl.load(in_ptr0 +"))
         self.assertLessEqual(persistent_code.count("libdevice.exp"), 1)
+
+    @config.patch("dedupe_graph_outputs", True)
+    @unittest.skipIf(not using_b200(), "requires B200")
+    def test_identical_graph_outputs_share_compute_not_storage(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(x):
+            return tuple((torch.sin(x) + 1).to(torch.bfloat16) for _ in range(8))
+
+        x = torch.randn(8192, device=device_type)
+        expected = fn(x)
+        counters.clear()
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(len({out.data_ptr() for out in actual}), len(actual))
+        unmodified = actual[1][0].item()
+        actual[0][0].add_(1)
+        self.assertEqual(actual[1][0].item(), unmodified)
+        self.assertEqual(counters["inductor"]["dedupe_graph_outputs"], 7)
+
+        source = "\n".join(code)
+        self.assertEqual(source.count("@triton_heuristics.pointwise"), 1)
+        self.assertEqual(source.count("tl.store("), 8)
+        self.assertEqual(source.count("tl_math.sin("), 1)
 
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
