@@ -20,27 +20,18 @@ VENDOR_SCRIPT = REPO_ROOT / "tools" / "vendoring" / "quack" / "vendor.sh"
     "vendored QuACK imports require CuTeDSL/CUTLASS",
 )
 class TestQuackVendor(TestCase):
-    def test_vendored_quack_gemm_imports_from_torch_vendor(self):
+    def test_vendored_quack_rmsnorm_imports_from_torch_vendor(self):
         import torch._vendor.quack as quack
-        from torch._vendor.quack.gemm_act import gemm_act
-        from torch._vendor.quack.gemm_config import GemmConfig
-        from torch._vendor.quack.trace import TraceContext
+        from torch._vendor.quack.cache import jit_cache
+        from torch._vendor.quack.rmsnorm import rmsnorm
+        from torch._vendor.quack.rmsnorm_config import RmsNormFwdConfig
 
         vendor_root = Path(quack.__file__).resolve().parent
         self.assertIn("torch/_vendor/quack", vendor_root.as_posix())
         self.assertTrue(
-            all(
-                callable(obj)
-                for obj in (
-                    gemm_act,
-                    GemmConfig,
-                )
-            )
+            all(callable(obj) for obj in (jit_cache, rmsnorm, RmsNormFwdConfig))
         )
-        trace_context = TraceContext.create(None)
-        trace_context.b("noop")
-        trace_context.e("noop")
-        trace_context.flush()
+        self.assertFalse((vendor_root / "gemm_act.py").exists())
 
     def test_precompile_serializes_rmsnorm_tuned_tensor_kwargs(self):
         import torch
@@ -116,8 +107,8 @@ class TestQuackVendorScript(TestCase):
         self.assertEqual(
             subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode,
             0,
-            "vendor.sh --check reported drift; edit the FlexGEMM patchset or "
-            "PyTorch vendoring patches, not the vendored files",
+            "vendor.sh --check reported drift; edit the PyTorch vendoring patches, "
+            "not the vendored files",
         )
 
 
