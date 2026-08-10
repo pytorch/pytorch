@@ -2756,6 +2756,10 @@ class TestFP8Matmul(TestCase):
 
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+        if torch.version.hip and _get_torch_rocm_version() >= (7, 14):
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
         C_ref = A_ref @ B_ref.t()
 
         compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
@@ -2786,6 +2790,10 @@ class TestFP8Matmul(TestCase):
 
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
+        if torch.version.hip and _get_torch_rocm_version() >= (7, 13):
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
         C_ref = A_ref @ B_ref.t()
 
         compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
