@@ -2763,20 +2763,13 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
 
     @staticmethod
     def _generate_autows_default_configs() -> list[BaseConfig]:
-        """autoWS configs for DEFAULT search. Placeholder pending benchmark data.
-
-        EPILOGUE_SUBTILE spans the same values as the non-autoWS Blackwell sets:
-        _scale_mm_configs shrinks BLOCK_N to fit N and _autows_constraints_ok then
-        drops BLOCK_N // EPILOGUE_SUBTILE < 32, so omitting 1 leaves narrow-N
-        shapes with no config at all.
-        """
+        """autoWS configs for DEFAULT search. Placeholder pending benchmark data."""
         return [
             BlackwellGPUGemmConfig(
                 block_m=block_m,
                 block_n=block_n,
                 block_k=64,
-                # 2-CTA caps the pipeline at 2 stages (see _autows_constraints_ok)
-                num_stages=2 if two_ctas else 3,
+                num_stages=2 if two_ctas else 3,  # 2-CTA caps the pipeline at 2 stages
                 num_warps=8,
                 group_m=8,
                 epilogue_subtile=epilogue_subtile,
