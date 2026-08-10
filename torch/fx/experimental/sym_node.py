@@ -117,10 +117,6 @@ class SymNode:
         self._optimized_summation = optimized_summation
         self._expr_ver = -1
         self._expr_cache: object | None = None
-        # sympy's is_number is an uncached walk of the expression tree, and
-        # _expr never changes, so remember the answer the first time expr is
-        # asked for it.
-        self._expr_is_number: bool | None = None
 
         # What's the difference between hint and constant?
         #
@@ -215,13 +211,16 @@ class SymNode:
 
     @property
     def expr(self) -> sympy.Basic:
-        is_number = self._expr_is_number
-        if is_number is None:
-            is_number = self._expr_is_number = bool(
-                isinstance(self._expr, int)
-                or self._expr.is_number  # pyrefly: ignore[missing-attribute]
-            )
-        if is_number:
+        # is_Number is a class attribute, equivalent to isinstance of
+        # sympy.Number without needing sympy imported here. Deliberately not
+        # is_number, which walks the whole expression tree uncached: _expr is
+        # not expected to be an unsimplified non-symbolic expression, and one
+        # that slipped through would just take the general path below, where
+        # replace() is a no-op on it anyway.
+        if (
+            isinstance(self._expr, int)
+            or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
+        ):
             return self._expr
         if self.shape_env is None:
             raise AssertionError("shape_env is required to access expr")

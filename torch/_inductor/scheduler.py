@@ -7638,6 +7638,7 @@ class Scheduler:
         # _loop_state_gen identifies, so key on that. snodes are leaf
         # SchedulerNodes (checked above), which the scheduler keeps for its
         # lifetime, so keying on the nodes themselves retains nothing extra.
+        # pyrefly: ignore[missing-attribute]
         cache_key = tuple((sn, sn._loop_state_gen) for sn in snodes)
         cached = self._tiling_memory_cache.get(cache_key, _TILING_MEMORY_MISS)
         if cached is not _TILING_MEMORY_MISS:
