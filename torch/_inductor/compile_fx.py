@@ -1430,22 +1430,11 @@ class _InProcessFxCompile(FxCompile):
                 f"graph {graph_id}",
             )
 
-            # Building this parses the source of every Triton kernel in the
-            # graph, and it is only ever used as a structured-trace artifact:
-            # logged here, and logged again by the FX graph cache when this
-            # graph is loaded from it. Produce it from payload_fn so that
-            # trace_structured's own "is anyone listening" check decides
-            # whether the work happens at all, and keep what it produced for
-            # the cache to replay.
-            produced: list[str] = []
-
-            def _fx_graph_runnable_payload() -> str:
-                fd = io.StringIO()
-                torch._dynamo.repro.after_aot.save_graph_repro(
-                    fd, gm, example_inputs, "inductor", save_dir=None
-                )
-                produced.append(fd.getvalue())
-                return produced[0]
+            fd = io.StringIO()
+            torch._dynamo.repro.after_aot.save_graph_repro(
+                fd, gm, example_inputs, "inductor", save_dir=None
+            )
+            runnable_graph_str = fd.getvalue()
 
             trace_structured(
                 "artifact",
@@ -1453,9 +1442,8 @@ class _InProcessFxCompile(FxCompile):
                     "name": "fx_graph_runnable",
                     "encoding": "string",
                 },
-                payload_fn=_fx_graph_runnable_payload,
+                payload_fn=lambda: runnable_graph_str,
             )
-            runnable_graph_str = produced[0] if produced else ""
 
             V.debug.fx_graph(gm, example_inputs)
             # TODO: Should we actually dump this?  It should be redundant with the aot
@@ -2960,6 +2948,28 @@ def compile_fx(
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
     if config.cpp_wrapper or config.fx_wrapper:
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        if _coor_enabled():
+            # cpp_wrapper/AOTInductor bakes the compile-time device index into the C++
+            # device guard, and fx_wrapper's device-context codegen is a no-op (see
+            # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
+            # emit a non-portable artifact.
+            #
+            # NB cudagraphs is deliberately NOT refused here. Its device dependence
+            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
+            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
+            # artifact is not shared across ranks today: the FX graph cache key embeds the
+            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
+            # and that is what the device-agnostic launcher handles. Whoever makes the FX
+            # graph cache key device-agnostic must revisit device_idxs (and re-check that
+            # graph-partition functions still define _coor_device_idx in their own scope)
+            # before cudagraphs can ride on a shared artifact.
+            raise RuntimeError(
+                "compile-on-one-rank (device-as-parameter) is not supported with "
+                "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "
+                "compile-time device index, which is not rank-portable."
+            )
         from torch._export.non_strict_utils import _fakify_script_objects
 
         cpp_wrapper_config = config.cpp_wrapper

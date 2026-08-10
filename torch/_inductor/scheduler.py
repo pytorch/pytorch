@@ -2270,7 +2270,6 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         super().__init__(scheduler)
         self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
-        self._loop_state_gen = 0
         self._init_from_node(node)
         self._compute_attrs()
 
@@ -2372,7 +2371,6 @@ class SchedulerNode(BaseSchedulerNode):
             self.group,
             self.read_writes,
             self.unmet_dependencies,
-            self._loop_state_gen,
         )
 
     def restore_loop_state(self, state: tuple[Any, ...]) -> None:
@@ -2383,19 +2381,12 @@ class SchedulerNode(BaseSchedulerNode):
             self.group,
             self.read_writes,
             self.unmet_dependencies,
-            self._loop_state_gen,
         ) = state
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
             self._loop_mutation_listener(self)
-        # Identifies the current loop state, so analyses derived from it can be
-        # cached across the O(n^2) fusion pair search. Bumped after notifying
-        # the listener, which snapshots the pre-mutation state: snapshot and
-        # restore then carry the generation, so rolling a trial reindex back
-        # also restores cache validity.
-        self._loop_state_gen += 1
 
     def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
         if self._body is None:
@@ -4235,10 +4226,6 @@ class _LoopMutationTracker:
         self.state.restore()
 
 
-# Distinguishes "not cached" from a cached None in _tiling_memory_cache.
-_TILING_MEMORY_MISS = object()
-
-
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -4254,7 +4241,6 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
-        self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
@@ -7632,29 +7618,15 @@ class Scheduler:
         if any(node.is_cpu() for node in snodes):
             return None
 
-        # The fusion search asks this for the same nodes over and over while
-        # pairing them up (on one model, 1160 calls over 53 distinct nodes).
-        # The answer is a function of the nodes' loop state, which
-        # _loop_state_gen identifies, so key on that. snodes are leaf
-        # SchedulerNodes (checked above), which the scheduler keeps for its
-        # lifetime, so keying on the nodes themselves retains nothing extra.
-        cache_key = tuple((sn, sn._loop_state_gen) for sn in snodes)
-        cached = self._tiling_memory_cache.get(cache_key, _TILING_MEMORY_MISS)
-        if cached is not _TILING_MEMORY_MISS:
-            return cached
-
         analysis = analyze_memory_coalescing_for_nodes(snodes)
         if analysis is None:
-            self._tiling_memory_cache[cache_key] = None
             return None
 
         reduction = max(snodes, key=lambda node: int(node.is_reduction()))
         _, (numel, rnumel) = reduction.group
-        result = SIMDScheduling.select_tiling_with_memory(
+        return SIMDScheduling.select_tiling_with_memory(
             snodes, numel, rnumel, analysis
         ).memory
-        self._tiling_memory_cache[cache_key] = result
-        return result
 
     def _reindexing_regresses_memory_coalescing(
         self,
