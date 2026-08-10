@@ -40,6 +40,7 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     IS_MACOS,
@@ -60,6 +61,8 @@ def tensor_N(shape, dtype=float):
 
 class BaseTestCase(TestCase):
     """Base class used for all TensorBoard tests"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -196,6 +199,8 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
 
 
 class TestTensorBoardPyTorchNumpyDevice(BaseTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_pytorch_np(self, device):
         tensors = [
             torch.rand(3, 10, 10, device=device),
