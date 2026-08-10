@@ -1,8 +1,16 @@
-"""Declaration contract and validating loader for native-AOT op modules.
+"""Declaration contract for native-AOT op modules.
+
+THE contract an op author programs against. The mechanism behind it (the
+validating loader, discovery, decl_id) lives in
+torchgen/native_aot_decl.py and is re-exported here, because installed
+torchgen must load declarations out of tree, where tools/ is not shipped.
+This file stays the documented home of the contract: every module
+docstring, generated .cpp header and README section names this path.
 
 An op opts into AOT by shipping ``torch/_native/ops/<op>/aot.py``, a
-module whose scope imports with stdlib alone (torch lazily inside
-function bodies) so torchgen can load it pre-build.
+module whose scope is TORCH-FREE (torch lazily inside function bodies)
+so torchgen can load it pre-build. Stdlib and torchgen are both fine at
+module scope; torchgen is pure Python with no torch dependency.
 
 A module declares either ONE op (the module itself carries the exports
 below) or a FAMILY: it exports ``declarations() -> list`` of objects,
@@ -27,10 +35,9 @@ Required exports (module or declaration object):
   kernel_precompile_grid() -> list[dict]
                               the artifact grid; list-valued fields
                               cross-multiply; one precompiled kernel per
-                              expanded point. Field values must survive
-                              a JSON round-trip (sidecars store the
-                              spec; tuples read back as lists and are
-                              normalized for skip detection)
+                              expanded point. Field values must be
+                              JSON-representable (sidecars store the
+                              spec)
   covered_axes(*schema_args) -> dict
                               project a live call onto grid axes; a call
                               is covered (declines the JIT route) iff
@@ -89,183 +96,23 @@ in the op's structured impl scope (outputs allocated by meta(), device
 guard held). Dispatch conditions are evaluated ASSUMING the prelude
 passed; locals the prelude declares are in scope for dispatch and
 launch.
-
-This module is stdlib-only: torchgen, the export tool, and the runtime
-coverage layer all load it by file path.
 """
 
-from __future__ import annotations
-
-import importlib.util
-import inspect
-import os
-from typing import Any, Protocol
-
-
-class AotDeclaration(Protocol):
-    ATEN_OP: str
-    DISPATCH_KEY: str
-    KERNEL_MODULE: str
-    # Architectures this op's kernels are valid on (sm strings, e.g.
-    # ("sm_90a", "sm_100a")). Optional in source declarations; the
-    # validating loader defaults it to _DEFAULT_ARCHS and materializes
-    # it, so loaded declarations always carry it (consumers read
-    # d.ARCHS directly, never getattr). Export skips (declaration x
-    # arch) pairs outside it; codegen emits a runtime gate from the
-    # intersection of ARCHS with the arches actually shipped.
-    ARCHS: tuple[str, ...]
-
-    def kernel_precompile_grid(self) -> list[dict]: ...
-    def covered_axes(self, *args: Any, **kwargs: Any) -> dict: ...
-    def cpp_dispatch(self, spec: dict) -> str: ...
-    def cpp_launch(self, spec: dict, launch_fn: str) -> str: ...
+from torchgen.native_aot_decl import (
+    AotDeclaration,
+    decl_id,
+    discover_declarations,
+    load_by_path,
+    load_declaration,
+    load_declarations,
+)
 
 
-def decl_id(d: AotDeclaration) -> str:
-    """C-identifier for a declaration: overload dots become underscores
-    ("gt.Tensor" -> "gt_Tensor"). Names the DispatchStub
-    (<id>_aot_stub), the generated kernel fn, the artifact directory,
-    and the covers custom op (covers_<id>)."""
-    return d.ATEN_OP.replace(".", "_")
-
-
-_REQUIRED_CONSTS = ("ATEN_OP", "DISPATCH_KEY", "KERNEL_MODULE")
-_REQUIRED_FNS = {
-    # name -> takes_spec (the cardinality convention: spec-taking exports
-    # render once per precompile point, no-arg exports once per op)
-    "kernel_precompile_grid": False,
-    "covered_axes": None,  # schema-shaped; arity not checked here
-    "cpp_dispatch": True,
-    "cpp_launch": True,
-}
-_OPTIONAL_FNS = {
-    "cpp_dispatch_prelude": False,
-    "cpp_helpers": False,
-    "cpp_covers": False,
-}
-
-# Default ARCHS: every current kernel requires sm90+ features (TMA,
-# clusters, cp.async.bulk); Blackwell variants included. Declarations
-# override to narrow (e.g. a Blackwell-only kernel pins ("sm_100a",)).
-_DEFAULT_ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
-
-_SM_RE = r"sm_\d+a?"
-
-
-def _load_by_path(name: str, path: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load module from {path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _check_arity(mod, name: str, takes_spec: bool, path: str) -> None:
-    fn = getattr(mod, name)
-    params = [
-        p
-        for p in inspect.signature(fn).parameters.values()
-        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-    ]
-    n = len(params)
-    want = (1 if takes_spec else 0) + (1 if name == "cpp_launch" else 0)
-    if n != want:
-        kind = "per-point (spec-taking)" if takes_spec else "per-op (no-arg)"
-        raise RuntimeError(
-            f"{path}: {name} must be {kind}, expected {want} positional "
-            f"parameter(s), got {n}"
-        )
-
-
-def _validate(d, path: str, label: str) -> None:
-    for const in _REQUIRED_CONSTS:
-        if not isinstance(getattr(d, const, None), str):
-            raise RuntimeError(f"{path}: {label} missing or non-str constant {const}")
-
-    for name, takes_spec in _REQUIRED_FNS.items():
-        if not callable(getattr(d, name, None)):
-            raise RuntimeError(f"{path}: {label} missing required function {name}()")
-        if takes_spec is not None:
-            _check_arity(d, name, takes_spec, path)
-    for name, takes_spec in _OPTIONAL_FNS.items():
-        if getattr(d, name, None) is not None:
-            _check_arity(d, name, takes_spec, path)
-
-    # Normalize ARCHS here, once: optional in the source module, always
-    # present (as a tuple) on validated declarations. Everything
-    # downstream reads d.ARCHS directly -- this is the only place
-    # absence is legal.
-    import re
-
-    try:
-        archs = d.ARCHS
-    except AttributeError:
-        archs = _DEFAULT_ARCHS
-    if not archs or not all(
-        isinstance(a, str) and re.fullmatch(_SM_RE, a) for a in archs
-    ):
-        raise RuntimeError(
-            f"{path}: {label} ARCHS must be a non-empty sequence of sm "
-            f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
-        )
-    d.ARCHS = tuple(archs)
-
-    grid = d.kernel_precompile_grid()
-    if not isinstance(grid, list) or not grid:
-        raise RuntimeError(
-            f"{path}: {label} kernel_precompile_grid() must return a non-empty list"
-        )
-    for point in grid:
-        if not isinstance(point, dict):
-            raise RuntimeError(
-                f"{path}: {label} grid entries must be dicts, got {type(point)}"
-            )
-
-
-def load_declarations(path: str) -> list[AotDeclaration]:
-    """Load and validate one aot.py: a single-op module (the module IS
-    the declaration) or a family module (exports declarations() -> list
-    of declaration objects). Raises RuntimeError naming the offending
-    path/declaration on contract violations."""
-    mod = _load_by_path(os.path.basename(os.path.dirname(path)) + "_aot", path)
-
-    family = getattr(mod, "declarations", None)
-    if family is not None:
-        decls = family()
-        if not isinstance(decls, list) or not decls:
-            raise RuntimeError(f"{path}: declarations() must return a non-empty list")
-        for i, d in enumerate(decls):
-            _validate(d, path, f"declarations()[{i}] ({getattr(d, 'ATEN_OP', '?')}):")
-        return decls
-
-    _validate(mod, path, "")
-    return [mod]
-
-
-def load_declaration(path: str) -> AotDeclaration:
-    """Single-declaration convenience: exactly one declaration expected."""
-    decls = load_declarations(path)
-    if len(decls) != 1:
-        raise RuntimeError(f"{path}: expected a single declaration, got {len(decls)}")
-    return decls[0]
-
-
-def discover_declarations(ops_dir: str) -> dict[tuple[str, str], AotDeclaration]:
-    """All (dispatch_key, op) -> declaration under ops_dir. Duplicate
-    (op, key) pairs are an error."""
-    decls: dict[tuple[str, str], AotDeclaration] = {}
-    if not os.path.isdir(ops_dir):
-        return decls
-    for entry in sorted(os.listdir(ops_dir)):
-        path = os.path.join(ops_dir, entry, "aot.py")
-        if not os.path.exists(path):
-            continue
-        for d in load_declarations(path):
-            key = (d.DISPATCH_KEY, d.ATEN_OP)
-            if key in decls:
-                raise RuntimeError(
-                    f"{path}: duplicate declaration for {d.ATEN_OP}@{d.DISPATCH_KEY}"
-                )
-            decls[key] = d
-    return decls
+__all__ = [
+    "AotDeclaration",
+    "decl_id",
+    "discover_declarations",
+    "load_by_path",
+    "load_declaration",
+    "load_declarations",
+]

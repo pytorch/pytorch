@@ -32,7 +32,6 @@ Usage:
 """
 
 import argparse
-import importlib.util
 import json
 import os
 import sys
@@ -42,6 +41,10 @@ REPO = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 )
 sys.path.insert(0, REPO)
+
+from torchgen import native_aot_decl as decl
+
+
 OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 
 FILE_TMPL = """\
@@ -53,6 +56,7 @@ FILE_TMPL = """\
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -61,6 +65,13 @@ FILE_TMPL = """\
 {kernel_includes}
 
 namespace {{
+
+// The DSL's exported ABI carries int32_t shape slots while aten sizes are
+// int64_t; the generated gates decline rather than truncate. See
+// _int32_size_gate in tools/native_aot/gen_aot_lib.py.
+inline bool _naot_dim_too_big(int64_t d) {{
+  return d > std::numeric_limits<int32_t>::max();
+}}
 
 {launchers}
 bool {op}_{key_lc}_aot_kernel({params}) {{
@@ -96,18 +107,7 @@ TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
 """
 
 
-def _load_sibling(name: str):
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py")
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load module from {path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-toolchains = _load_sibling("toolchains")
-decl = _load_sibling("decl")
+from tools.native_aot import toolchains
 
 
 def indent(code: str, pad: str) -> str:
@@ -151,6 +151,65 @@ def _arch_gate(d, sidecars: list[dict]) -> str:
     )
 
 
+def _int32_size_gate(params: str) -> str:
+    """Runtime gate: decline any call whose tensor has a dimension that
+    does not fit in int32.
+
+    aten stores sizes and strides as int64_t (TensorBase.h: `int64_t
+    size(int64_t)`), but CuTeDSL's export_to_c emits `int32_t
+    dynamic_shapes[]` in the generated per-kernel ABI header, and it
+    does so REGARDLESS of the symbol width the builder asked for --
+    verified by probe: declaring the shape with cute.sym_int64()
+    produces a byte-identical header to cute.sym_int() (strides DO honor
+    sym_int64, sizes do not). So the 2^31 ceiling is imposed by the DSL's
+    C ABI, not by our kernels, and we cannot widen it from this side.
+
+    Without this gate the launcher's `static_cast<int32_t>(t.size(dim))`
+    would silently truncate a >=2^31 dim and hand the kernel a wrong
+    (possibly negative) extent: wrong results or corrupted memory, with
+    no error. Declining instead routes the call to the JIT layer or to
+    stock aten, neither of which has the limit.
+
+    Emitted ahead of the declaration's prelude AND into cpp_covers (like
+    _arch_gate) so no declaration has to hand-write it, and so coverage
+    never claims a shape the stub will refuse.
+
+    TODO(native-aot): drop this once CuTeDSL emits int64_t shape slots
+    (or honors the requested symbol width) in export_to_c; then sizes
+    match aten and the gate becomes dead code.
+    """
+    # Parameter list -> the at::Tensor names in scope. The prelude sees
+    # plain `const at::Tensor & x`; cpp_covers sees the functional schema
+    # plus out-variant outputs as `const std::optional<at::Tensor>& x`.
+    plain: list[str] = []
+    optional: list[str] = []
+    for raw in params.split(","):
+        p = raw.strip()
+        if not p:
+            continue
+        name = p.split()[-1].lstrip("&*")
+        if "std::optional<at::Tensor>" in p:
+            optional.append(name)
+        elif "at::Tensor" in p:
+            plain.append(name)
+    if not plain and not optional:
+        return ""
+    checks = [
+        f"{n}.sizes().end() != std::find_if({n}.sizes().begin(), {n}.sizes().end(), _naot_dim_too_big)"
+        for n in plain
+    ]
+    checks += [
+        f"({n}.has_value() && {n}->sizes().end() != "
+        f"std::find_if({n}->sizes().begin(), {n}->sizes().end(), _naot_dim_too_big))"
+        for n in optional
+    ]
+    return (
+        "  // Size gate: the DSL's exported ABI carries int32_t shape slots\n"
+        "  // (see _int32_size_gate); a bigger dim would truncate silently.\n"
+        f"  if (C10_UNLIKELY({' || '.join(checks)})) return false;\n"
+    )
+
+
 def gen_op(
     op: str,
     key: str,
@@ -181,7 +240,9 @@ def gen_op(
             op=op,
             key_lc=key.lower(),
             params=covers_params,
-            body=_arch_gate(d, sidecars) + indent(covers_body, "  "),
+            body=_arch_gate(d, sidecars)
+            + _int32_size_gate(covers_params)
+            + indent(covers_body, "  "),
         )
         covers_reg = COVERS_REG_TMPL.format(
             op=op, key_lc=key.lower(), schema=covers_schema
@@ -218,7 +279,9 @@ def gen_op(
             ([helpers] if helpers else []) + [gen_launcher(s) for s in sidecars]
         ),
         params=impl_params,
-        cond=_arch_gate(d, sidecars) + indent(prelude, "  "),
+        cond=_arch_gate(d, sidecars)
+        + _int32_size_gate(impl_params)
+        + indent(prelude, "  "),
         guards="\n".join(branches),
     )
 
@@ -299,7 +362,10 @@ def covers_signature(op: str) -> tuple[str, str]:
     schema_args = ", ".join(pieces)
     # Op name in the registered schema is the decl_id (dots are illegal
     # in custom-op names); the runtime resolves covers_<decl_id> too.
-    return ", ".join(params), f"covers_{op.replace('.', '_')}({schema_args}) -> bool"
+    return (
+        ", ".join(params),
+        f"covers_{decl.decl_id_for_op(op)}({schema_args}) -> bool",
+    )
 
 
 def main() -> None:
@@ -314,7 +380,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    export_mod = _load_sibling("export")
+    from tools.native_aot import export as export_mod
 
     # Artifact dirs are named by decl_id (one per declaration; family
     # modules under one ops/<dir> produce several). Map them back to
