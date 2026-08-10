@@ -935,6 +935,40 @@ class CudaReproTests(TestCase):
         if not same(fn(a, b), fn_optimized(a, b)):
             raise AssertionError
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
+    def test_bool_mask_index_retrace_unbacked_memo(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w_bs = torch.nn.Parameter(torch.randn(3, 4, 4, device="cuda"))
+                self.w_g = torch.nn.Parameter(torch.randn(3, 3, device="cuda"))
+
+            def forward(self, x):
+                block_mask = torch.eye(4, dtype=torch.bool)
+                non_diag_w_bs = self.w_bs[:, ~block_mask]
+                sym_w_bs = (self.w_bs + self.w_bs.transpose(1, 2)) / 2
+                non_diag_sym_w_bs = sym_w_bs[:, ~block_mask]
+
+                global_mask = torch.eye(3, dtype=torch.bool)
+                non_diag_w_g = self.w_g[~global_mask]
+                sym_w_g = (self.w_g + self.w_g.t()) / 2
+                non_diag_sym_w_g = sym_w_g[~global_mask]
+
+                return (
+                    x
+                    + non_diag_w_bs.sum()
+                    + non_diag_sym_w_bs.sum()
+                    + non_diag_w_g.sum()
+                    + non_diag_sym_w_g.sum()
+                )
+
+        x = torch.randn((), device="cuda")
+        model = Model()
+
+        actual = torch.compile(model, fullgraph=True)(x)
+        self.assertEqual(actual, model(x))
+
     def test_simplify_dims(self):
         def fn(a):
             return (a + 1,)

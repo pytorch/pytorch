@@ -4462,7 +4462,14 @@ class ShapeEnv:
                 dest,
             )
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")
-        self.unbacked_renamings[orig_s] = new_s
+        if dest is not None and free_unbacked_symbols(dest):
+            # A memoized data-dependent result can bind the same fresh symbol
+            # to multiple old names.  Alias unification below makes the later
+            # names equivalent to the first unbacked destination, so keep that
+            # first rename as the stable name used by binding metadata.
+            self.unbacked_renamings.setdefault(orig_s, new_s)
+        else:
+            self.unbacked_renamings[orig_s] = new_s
         if dest is not None:
             self._unify_unbacked_aliases(new_s, dest)
 

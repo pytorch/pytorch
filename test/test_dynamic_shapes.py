@@ -39,6 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
     is_symbolic,
     rebind_unbacked,
+    resolve_unbacked_bindings,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
@@ -804,6 +805,38 @@ def forward(self, x_1):
         shape_env._rename_unbacked_to(orig, new)
         self.assertEqual(shape_env.replacements[orig], new)
         self.assertEqual(shape_env.replacements[new], dest)
+
+    def test_rename_unbacked_to_keeps_first_binding_name(self):
+        shape_env = ShapeEnv()
+        first = shape_env.create_unbacked_symint().node.expr
+        second = shape_env.create_unbacked_symint().node.expr
+        replayed = shape_env.create_unbacked_symint().node.expr
+        path = (pytree.SequenceKey(0),)
+
+        shape_env._rename_unbacked_to(replayed, first)
+        shape_env._rename_unbacked_to(replayed, second)
+
+        self.assertEqual(shape_env.unbacked_renamings[replayed], first)
+        self.assertEqual(shape_env._find(second), first)
+        self.assertEqual(
+            resolve_unbacked_bindings(shape_env, {replayed: path}), {first: path}
+        )
+
+    def test_rename_unbacked_to_updates_binding_name_for_backed_dest(self):
+        shape_env = ShapeEnv()
+        first = shape_env.create_unbacked_symint().node.expr
+        second = shape_env.create_unbacked_symint().node.expr
+        replayed = shape_env.create_unbacked_symint().node.expr
+        path = (pytree.SequenceKey(0),)
+
+        shape_env._rename_unbacked_to(replayed, first)
+        shape_env._set_replacement(replayed, sympy.Integer(4), "test-setup")
+        shape_env._rename_unbacked_to(replayed, second)
+
+        self.assertEqual(shape_env.unbacked_renamings[replayed], second)
+        self.assertEqual(
+            resolve_unbacked_bindings(shape_env, {replayed: path}), {second: path}
+        )
 
     def test_rename_unbacked_to_raises_on_disjoint_ranges(self):
         shape_env = ShapeEnv()
