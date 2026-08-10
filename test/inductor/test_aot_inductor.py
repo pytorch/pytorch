@@ -2868,22 +2868,12 @@ class AOTInductorTestsTemplate:
         )
 
     def test_cond_unbacked_symint_predicate(self):
-        class M(torch.nn.Module):
-            def forward(self, x, flag):
-                flag = flag.item()
-
-                def true_fn(x):
-                    return x.clone()
-
-                def false_fn(x):
-                    return x + 1
-
-                return torch.cond(flag > 0, true_fn, false_fn, (x,))
-
         x = torch.randn((28, 28), device=self.device)
         input_true = (x, torch.tensor(1, device=self.device))
         input_false = (x, torch.tensor(-1, device=self.device))
-        self.check_model_with_multiple_inputs(M(), [input_true, input_false])
+        self.check_model_with_multiple_inputs(
+            CondModels.UnbackedSymIntPredicate(), [input_true, input_false]
+        )
 
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_unbacked_symint_closure(self, dynamic):
@@ -9544,8 +9534,6 @@ GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
     "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_gpu(
         ("cuda", "xpu"), is_skip=True
     ),
-    # The dual-wrapper JIT first pass cannot run an unbacked SymInt predicate.
-    "test_cond_unbacked_symint_predicate": fail_gpu(("cuda", "xpu")),
 }
 
 
