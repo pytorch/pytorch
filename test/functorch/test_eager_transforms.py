@@ -59,8 +59,8 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_utils import (
@@ -745,7 +745,6 @@ class TestGradTransform(TestCase):
         self.assertEqual(result, expected)
 
     # TODO: https://github.com/pytorch/functorch/issues/12
-    @onlyCPU
     def test_unrelated_hessian(self, device):
         N = 5
         M = 3
@@ -754,7 +753,7 @@ class TestGradTransform(TestCase):
         def f(x):
             return W @ x
 
-        x = torch.randn(M)
+        x = torch.randn(M, device=device)
         result = jacrev(jacrev(f))(x)
         expected = torch.zeros(N, M, M, device=device)
         self.assertEqual(result, expected)
@@ -3194,12 +3193,13 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @onlyCUDA
-    def test_linearize_errors(self):
+    # The primals are built on CPU so that `device` is always a second, distinct
+    # device to move a tangent onto for the device-mismatch check below.
+    @onlyAccelerator
+    def test_linearize_errors(self, device):
         dtype = torch.float
-        device = torch.device("cpu")
-        x_p = make_tensor((3, 1), device=device, dtype=dtype)
-        x_t = make_tensor((3, 1), device=device, dtype=dtype)
+        x_p = make_tensor((3, 1), device="cpu", dtype=dtype)
+        x_t = make_tensor((3, 1), device="cpu", dtype=dtype)
 
         def fn(x):
             return x.sin()
@@ -3224,7 +3224,7 @@ class TestLinearize(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "in flattened pytree doesn't match the device"
         ):
-            jvp_fn(x_t.to(torch.device("cuda")))
+            jvp_fn(x_t.to(device))
 
 
 # The tests here follow the cases in [Forward Grad View/inplace]
