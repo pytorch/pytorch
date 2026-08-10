@@ -4781,7 +4781,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("floor", 448.0, float("inf"), 247),
             ("floor", 2.0**-122, 64.0, 255),
         ),
-        name_fn=lambda case: f"{case[0]}_max{case[1]:g}_code{case[3]}",
+        name_fn=lambda c: f"{c[0]}_max{c[1]:g}_code{c[3]}".replace(".", "_"),
     )
     def test_mm_tuple_aux_mx_scale_rounding(self, case):
         rounding, max_value, value, expected_code = case

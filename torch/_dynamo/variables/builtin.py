@@ -132,6 +132,7 @@ from .object_protocol import (
     pynumber_multiply,
     pynumber_negative,
     pynumber_positive,
+    pynumber_tobase,
     pysequence_check,
     pysequence_contains,
     python_constant_richcompare_impl,
@@ -1989,6 +1990,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return pynumber_float(tx, arg)
+
+    def call_bin(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 2)
+
+    def call_oct(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 8)
+
+    def call_hex(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 16)
 
     def call_bool(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
