@@ -50,6 +50,7 @@ from .int_tuple import (
     suffix_product,
 )
 
+
 # Use TypeAliasType so that __module__ is set correctly for public API reexports
 # See: https://github.com/pytorch/pytorch/issues/171905
 CoordinateType = TypeAliasType(
