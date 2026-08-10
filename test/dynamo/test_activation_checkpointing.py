@@ -140,6 +140,28 @@ def count_ops(
     return gm
 
 
+def count_ops_recursive(gm, args, freq=None, freq_ge=None, op=None):
+    """Like count_ops, but counts `op` across gm and every nested subgraph module.
+
+    Needed when the checkpointed region is an invoke_subgraph HOP: its ops --
+    including any recomputed in the backward via a re-invoked forward subgraph --
+    live in nested GraphModules, not the top-level graph.
+    """
+    actual = 0
+    for mod in gm.modules():
+        if isinstance(mod, torch.fx.GraphModule):
+            actual += sum(1 for node in mod.graph.nodes if node.target == op)
+    if freq is not None and actual != freq:
+        raise AssertionError(
+            f"Expected {op} to occur {freq} times across {gm} and its subgraphs, got {actual}."
+        )
+    if freq_ge is not None and actual < freq_ge:
+        raise AssertionError(
+            f"Expected {op} to occur >= {freq_ge} times across {gm} and its subgraphs, got {actual}."
+        )
+    return gm
+
+
 def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: set[str]):
     if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
@@ -344,6 +366,240 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_internals_recomputed(self, device):
+        # checkpoint lowered to invoke_subgraph + recompute-as-call: the region's
+        # interior mm is recomputed in the backward (by re-invoking the shared
+        # forward subgraph), not saved -- so it reappears in the bwd graph. Counts
+        # recurse because the ops live inside the HOP subgraphs.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        fw_compiler = functools.partial(
+            count_ops_recursive, freq=1, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops_recursive, freq=3, op=torch.ops.aten.mm.default
+        )  # 2 grad mms + 1 recomputed fwd mm
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_stacked(self, device):
+        # Stacked checkpoint regions still produce correct grads; each region is
+        # recomputed via its own re-invoked forward subgraph.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            a = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+            return torch.utils.checkpoint.checkpoint(gn, a, y, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_nested(self, device):
+        # A checkpoint region nested inside another. The inner region is atomic
+        # within the outer (recomputed as part of it, not with its own
+        # save/recompute split -- that would need recursive partitioning), but
+        # gradients must be correct.
+        def inner(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def outer(x, y):
+            return torch.utils.checkpoint.checkpoint(inner, x, y, use_reentrant=False)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(outer, x, y, use_reentrant=False)
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rejects_context_fn(self, device):
+        # Selective checkpointing (context_fn) is not supported on this path yet;
+        # it must raise rather than silently ignore the policy.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "selective activation checkpointing"):
+            torch.compile(fn, fullgraph=True, backend="eager")(x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rejects_rng(self, device):
+        # RNG in a recompute-as-call region is unsupported: re-invoking the
+        # forward would draw fresh values, so it must raise rather than corrupt.
+        def gn(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.5, training=True)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "does not support RNG"):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                x, y
+            ).sum().backward()
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rejects_nested_rng(self, device):
+        # RNG inside a nested HOP within the checkpoint region must also be
+        # rejected -- the ban scans nested subgraph modules recursively, not just
+        # the region's top-level graph.
+        from torch.compiler import nested_compile_region
+
+        @nested_compile_region
+        def inner(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.5, training=True)
+
+        # Call inner from two sites so it is preserved as a nested HOP (a
+        # single-use region would be inlined, moving the RNG to the top level and
+        # not exercising the recursive scan).
+        def gn(x, y):
+            return inner(x, y) + inner(y, x)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "does not support RNG"):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                x, y
+            ).sum().backward()
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    @torch._dynamo.config.patch(inline_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rejects_full_inline(self, device):
+        # Full invoke_subgraph inlining would flatten the region and erase the
+        # recompute marker; the combination must raise, not silently save-all.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False
+            ).sum()
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "cannot flatten a checkpoint region"):
+            torch.compile(fn, fullgraph=True, backend="eager")(x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rejects_checkpoint_kwargs(self, device):
+        # Options that only affect the eager checkpoint impl (debug here; also
+        # early_stop and non-default determinism_check) are rejected, not
+        # silently ignored, on the invoke_subgraph path.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, debug=True
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "debug is not supported"):
+            torch.compile(fn, fullgraph=True, backend="eager")(x, y)
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_inductor_correctness(self, device):
+        # End-to-end through the real Inductor backend: recompute-as-call on a
+        # reduction region produces gradients matching eager. This checks the
+        # full lowering is correct; it does NOT reproduce the gh-186572 bf16 drift
+        # (that needs the affected reduction-config heuristic, so it's fp32 here
+        # to avoid unrelated bf16 eager-vs-Inductor reduction-order noise). The
+        # drift fix itself is structural -- forward and recompute lower from the
+        # same subgraph.
+        def gn(x):
+            scale = torch.rsqrt((x.float() * x.float()).mean(-1, keepdim=True) + 1e-6)
+            return x * scale.to(x.dtype)
+
+        def fn(x):
+            y = torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+            return (y * 3.0 + x).square().sum()
+
+        x = torch.randn(
+            512, 1024, dtype=torch.float32, device=device, requires_grad=True
+        )
+        self._validate(fn, "inductor", x)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_dynamic_shapes(self, device):
+        # Exercises the symint (num_sym > 0) path in the backward rewrite: a
+        # dynamic dim flows symints through the region's save/recompute set
+        # (verified to reach num_sym == 2 saved symints for this shape).
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False
+            ).sum()
+
+        def make():
+            return (
+                torch.randn(8, 4, device=device, requires_grad=True),
+                torch.randn(4, 4, device=device, requires_grad=True),
+            )
+
+        torch.manual_seed(0)
+        xe, ye = make()
+        fn(xe, ye).backward()
+        torch.manual_seed(0)
+        xc, yc = make()
+        torch.compile(fn, fullgraph=True, backend="aot_eager", dynamic=True)(
+            xc, yc
+        ).backward()
+        self.assertEqual(xc.grad, xe.grad)
+        self.assertEqual(yc.grad, ye.grad)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_multi_output(self, device):
+        # Exercises num_fw_outputs > 1 in the rewrite/restitch arithmetic.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y)), torch.tanh(torch.matmul(y, x))
+
+        def fn(x, y):
+            a, b = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+            return a.sum() + b.sum()
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
 
     @requires_gpu_and_triton
     @parametrize(
