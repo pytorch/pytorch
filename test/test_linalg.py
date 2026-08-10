@@ -941,6 +941,33 @@ class TestLinalg(TestCase):
             self.assertEqual(A.grad.shape, A.shape)
             self.assertEqual(A.grad, torch.zeros_like(A))
 
+    def _det_slogdet_solve_opinfo_cases(self, device, dtype):
+        # One well-conditioned primal per distinct unbatched square size, drawn
+        # from each op's OpInfo sample_inputs.
+        from torch.testing._internal.common_methods_invocations import op_db
+
+        for name in ("linalg.det", "linalg.slogdet", "linalg.solve"):
+            op = next(o for o in op_db if o.name == name)
+            seen = set()
+            for si in op.sample_inputs(device, dtype, requires_grad=False):
+                M = si.input
+                if M.ndim != 2 or M.shape[-1] != M.shape[-2] or M.numel() == 0:
+                    continue
+                m = M.shape[-1]
+                if m < 2 or m in seen:
+                    continue
+                seen.add(m)
+                M = M.detach()
+                if name == "linalg.det":
+                    yield name, m, torch.linalg.det, M
+                elif name == "linalg.slogdet":
+                    yield name, m, lambda X: torch.linalg.slogdet(X).logabsdet, M
+                else:
+                    gen = torch.Generator(device=device).manual_seed(4321 + m)
+                    b = torch.randn(m, generator=gen, device=device, dtype=dtype)
+                    c = torch.randn(m, generator=gen, device=device, dtype=dtype)
+                    yield name, m, lambda X, b=b, c=c: c @ torch.linalg.solve(X, b), M
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cdouble)
@@ -1069,6 +1096,18 @@ class TestLinalg(TestCase):
                              msg="batched det via jacfwd(jacfwd) disagrees with "
                                  "eager Hessian")
 
+        if not dtype.is_complex:
+            # jacfwd rejects complex inputs, so real dtypes only.
+            for name, m, g, M in self._det_slogdet_solve_opinfo_cases(device, dtype):
+                expected = torch.autograd.functional.hessian(g, M)
+                for label, got in (("jacfwd(jacfwd)", fwd(fwd(g))(M)),
+                                   ("jacrev(jacfwd)", rev(fwd(g))(M))):
+                    self.assertFalse(torch.isnan(got).any(),
+                                     msg=f"{name} m={m} via {label} produced NaN")
+                    self.assertEqual(got, expected, atol=1e-9, rtol=1e-7,
+                                     msg=f"{name} m={m} via {label} disagrees with "
+                                         "eager Hessian")
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -1174,9 +1213,10 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_slogdet_solve_reverse_over_forward_classic_api(self, device, dtype):
-        # Regression test for PR #192667's reviewer-raised classic forward-AD
-        # path. torch.func inputs carry subclass wrappers, so they cannot show
-        # whether requires_grad keeps a JVP graph-connected to the primal.
+        # Companion to https://github.com/pytorch/pytorch/issues/192540 for the
+        # classic make_dual API: torch.func inputs carry subclass wrappers, so
+        # only this path shows whether requires_grad keeps the JVP
+        # graph-connected to the primal.
         A_values = torch.tensor([[1.3, 0.4], [-0.7, 0.9]], device=device, dtype=dtype)
         V = torch.tensor([[0.2, -0.3], [0.6, 0.5]], device=device, dtype=dtype)
         b = torch.tensor([1.0, -2.0], device=device, dtype=dtype)
@@ -1210,6 +1250,20 @@ class TestLinalg(TestCase):
 
             A_ref = A_values.detach().clone().requires_grad_()
             g_ref = torch.autograd.grad(ref_fn(A_ref), A_ref)[0]
+            self.assertEqual(g_test, g_ref, atol=1e-9, rtol=1e-7)
+
+        # The reference, jvp of grad, is forward-over-reverse and never routes
+        # through the JVP rule, so it is independent of the path under test.
+        for name, m, f, M in self._det_slogdet_solve_opinfo_cases(device, dtype):
+            A = M.clone().requires_grad_()
+            gen = torch.Generator(device=device).manual_seed(99 + m)
+            Vm = torch.randn(m, m, generator=gen, device=device, dtype=dtype)
+            with fwAD.dual_level():
+                _, tangent = fwAD.unpack_dual(f(fwAD.make_dual(A, Vm)))
+            self.assertIsNotNone(tangent.grad_fn,
+                                 msg=f"{name} m={m} tangent has no grad_fn")
+            g_test = torch.autograd.grad(tangent, A)[0]
+            g_ref = torch.func.jvp(torch.func.grad(f), (M,), (Vm,))[1]
             self.assertEqual(g_test, g_ref, atol=1e-9, rtol=1e-7)
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
