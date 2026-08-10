@@ -270,6 +270,13 @@ class CUDAGraph(_CUDAGraph):
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     _post_instantiate_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Transient get_graph_data() cache shared across a single instantiate()'s
+    # post-instantiate hooks, so multiple consumers (dependency recording, an
+    # export_graph_data dump) query the topology once instead of once each.
+    # Only populated while _caching_graph_data is set; dropped right after the
+    # hooks run so the topology is not retained for the graph's lifetime.
+    _caching_graph_data: bool
+    _instantiate_graph_data: dict | None
     # Replay lifecycle hooks, fired around each replay (hot path -- only iterated
     # when non-empty). See register_replay_start_hook / register_replay_end_hook.
     _replay_start_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -290,6 +297,8 @@ class CUDAGraph(_CUDAGraph):
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
         instance._post_instantiate_hooks = OrderedDict()
+        instance._caching_graph_data = False
+        instance._instantiate_graph_data = None
         instance._replay_start_hooks = OrderedDict()
         instance._replay_end_hooks = OrderedDict()
         instance._retained_finalizer = None
@@ -569,9 +578,16 @@ class CUDAGraph(_CUDAGraph):
         self._maybe_remap_annotations()
         # Fire registered instantiate hooks (e.g. a profiler observer inspecting the freshly
         # instantiated graph). Registering a hook is the opt-in; no consumer -> a no-op.
-        run_graph_instantiate_hooks(self)
-        for hook in list(self._post_instantiate_hooks.values()):
-            hook(self)
+        # get_graph_data() is cached for the duration of the hooks so several consumers share
+        # one query; the cache is dropped afterwards so nothing is retained for the graph.
+        self._caching_graph_data = True
+        try:
+            run_graph_instantiate_hooks(self)
+            for hook in list(self._post_instantiate_hooks.values()):
+                hook(self)
+        finally:
+            self._caching_graph_data = False
+            self._instantiate_graph_data = None
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
@@ -711,6 +727,9 @@ class CUDAGraph(_CUDAGraph):
         caused by mapping of independent streams to the same hardware
         channel.
         """
+        # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
+        if self._instantiate_graph_data is not None:
+            return self._instantiate_graph_data
         from torch.cuda._graph_annotations import _is_tools_id_unavailable
 
         _require_cuda_bindings()
@@ -803,10 +822,13 @@ class CUDAGraph(_CUDAGraph):
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
             info["graph_id"] = exec_graph_id
 
-        return {
+        data = {
             "exec_graph_id": exec_graph_id,
             "nodes": node_infos,
         }
+        if self._caching_graph_data:
+            self._instantiate_graph_data = data
+        return data
 
 
 def _dump_graph_dot(cuda_graph: CUDAGraph, path: str, *, verbose: bool = True) -> None:
