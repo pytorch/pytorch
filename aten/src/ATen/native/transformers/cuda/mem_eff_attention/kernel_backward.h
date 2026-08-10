@@ -765,9 +765,9 @@ struct AttentionBackwardKernel {
       // Advance pointers that depend on the total concatenated
       // number of queries, as `num_queries` is modified in the block
       // below
-      dropout_batch_head_rng_offset =
-          batch_id * (num_heads * num_queries * num_keys) +
-          head_id * (num_queries * num_keys);
+      // See NOTE [Mem-efficient attention dropout RNG offset]
+      dropout_batch_head_rng_offset = gemm_kernel_utils::dropout_rng_offset(
+          batch_id, head_id, num_heads, num_queries, num_keys);
       logsumexp_ptr += batch_id * lse_strideB + head_id * lse_strideH;
 
       if (cu_seqlens_q_ptr != nullptr) {
