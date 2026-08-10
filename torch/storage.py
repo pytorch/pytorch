@@ -1464,6 +1464,13 @@ class TypedStorage:
     def _new_shared_cuda(cls, *args, **kwargs):
         return torch.UntypedStorage._new_shared_cuda(*args, **kwargs)
 
+    @classmethod
+    def _new_shared_xpu(cls, *args, **kwargs):
+        return torch.UntypedStorage._new_shared_xpu(*args, **kwargs)
+
+    def _share_xpu_(self, *args, **kwargs):
+        return self._untyped_storage._share_xpu_(*args, **kwargs)
+
     def _share_filename_cpu_(self, *args, **kwargs):
         (
             manager_handle,
@@ -1479,6 +1486,10 @@ class TypedStorage:
     @classmethod
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
         return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+
+    @classmethod
+    def _release_ipc_counter_xpu(cls, *args, **kwargs):
+        return torch.UntypedStorage._release_ipc_counter_xpu(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
         return self._untyped_storage._shared_incref(*args, **kwargs)
