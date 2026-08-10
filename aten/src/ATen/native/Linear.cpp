@@ -686,6 +686,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   Tensor i3 = i3_;
   std::vector<c10::SymInt> output_size;
   std::vector<int64_t> sum_dims_12, sum_dims_23;
+  output_size.reserve(total_dim);
   int64_t unroll_size = -1;
   // asserts...
   for (const auto i : c10::irange(total_dim)) {
@@ -791,6 +792,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 
   std::vector<c10::SymInt> output_size;
   auto size1 = input1.sym_sizes();
+  output_size.reserve(size1.size());
   output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
   output_size.push_back(weight.sym_size(0));
   auto input1_flattened = input1.reshape_symint({-1, input1.sym_size(-1)});

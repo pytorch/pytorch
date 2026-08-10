@@ -1,12 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
+import sys
 import types
 import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    make_dynamo_test,
+    xfailIfPy313AndEarlier,
+)
 
 
 class CustomIterable:
@@ -65,6 +69,55 @@ class CustomSet(set):
 class CustomSetDefaultIter(set):
     def __init__(self, iterable) -> None:
         super().__init__([10, 20, 30])
+
+
+class CustomListDefaultIter(list):
+    pass
+
+
+class WithReversed:
+    def __init__(self, data):
+        self.data = data
+
+    def __reversed__(self):
+        return iter(self.data[::-1])
+
+
+class SeqWithReversed:
+    """Has both sequence protocol AND __reversed__; __reversed__ should win."""
+
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+    def __reversed__(self):
+        return iter(["custom"])
+
+
+class NotReversible:
+    pass
+
+
+class RevDict(dict):
+    def __reversed__(self):
+        return iter(["custom_key"])
+
+
+class NotReversibleNone:
+    """`__reversed__ = None` is CPython's opt-out sentinel."""
+
+    __reversed__ = None
+
+    def __len__(self):
+        return 3
+
+    def __getitem__(self, idx):
+        return idx
 
 
 class TestIterators(torch._dynamo.test_case.TestCase):
@@ -329,7 +382,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             result.append(char.upper())
         self.assertEqual("".join(result), "HELLO")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_bytes_iteration(self):
         """Test iteration over bytes"""
@@ -346,6 +398,52 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             ord("o") * 2,
         ]
         self.assertEqual(result, expected)
+
+    def test_constant_variable_list_tp_iter(self):
+        """ConstantVariable wrapping a list value should iterate via tp_iter_impl.
+
+        ConstantVariable.create() normally redirects list to ListVariable. This
+        test bypasses __init__ to construct a ConstantVariable holding a list
+        directly, exercising the generic tp_iter_impl unpack path.
+        """
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lists import ListIteratorVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = [1, 2, 3]
+
+        result = cv.tp_iter_impl(None)
+        self.assertIsInstance(result, ListIteratorVariable)
+        self.assertEqual([v.as_python_constant() for v in result.items], [1, 2, 3])
+
+    def test_constant_variable_tuple_tp_iter(self):
+        """ConstantVariable wrapping a tuple value iterates via tp_iter_impl."""
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lists import ListIteratorVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = (10, 20, 30)
+
+        result = cv.tp_iter_impl(None)
+        self.assertIsInstance(result, ListIteratorVariable)
+        self.assertEqual([v.as_python_constant() for v in result.items], [10, 20, 30])
+
+    def test_constant_variable_non_iterable_tp_iter(self):
+        """Non-iterable ConstantVariable falls back to base unimplemented."""
+        from torch._dynamo.exc import Unsupported
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = 42
+
+        with self.assertRaises(Unsupported):
+            cv.tp_iter_impl(None)
 
     @make_dynamo_test
     def test_comprehensions_with_iterator(self):
@@ -399,6 +497,53 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         rev = reversed(lst).__iter__()
         result = list(rev)
         self.assertEqual(result, [5, 4, 3, 2, 1])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_reversed(self):
+        """reversed() dispatches to user-defined __reversed__"""
+        self.assertEqual(list(reversed(WithReversed([1, 2, 3, 4]))), [4, 3, 2, 1])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_sequence_protocol(self):
+        """reversed() on user class with __len__ + __getitem__ but no __reversed__"""
+        seq = SequenceClass([10, 20, 30, 40])
+        self.assertEqual(list(reversed(seq)), [40, 30, 20, 10])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_reversed_overrides_sequence(self):
+        """User-defined __reversed__ wins over the sequence protocol fallback"""
+        self.assertEqual(list(reversed(SeqWithReversed([1, 2, 3]))), ["custom"])
+
+    @make_dynamo_test
+    def test_reversed_user_defined_not_reversible(self):
+        """User class with neither __reversed__ nor sequence protocol -> TypeError"""
+        with self.assertRaises(TypeError):
+            reversed(NotReversible())
+
+    @make_dynamo_test
+    def test_reversed_user_defined_dict_subclass(self):
+        """dict subclass with overridden __reversed__ is dispatched to"""
+        d = RevDict(a=1, b=2)
+        self.assertEqual(list(reversed(d)), ["custom_key"])
+
+    @make_dynamo_test
+    def test_reversed_range(self):
+        """reversed(range(...)) returns a reverse range_iterator"""
+        self.assertEqual(list(reversed(range(5))), [4, 3, 2, 1, 0])
+        self.assertEqual(list(reversed(range(2, 10, 3))), [8, 5, 2])
+        self.assertEqual(list(reversed(range(0))), [])
+
+    @make_dynamo_test
+    def test_reversed_mappingproxy(self):
+        """reversed() on types.MappingProxyType dispatches to dict.__reversed__"""
+        mp = types.MappingProxyType({"a": 1, "b": 2, "c": 3})
+        self.assertEqual(list(reversed(mp)), ["c", "b", "a"])
+
+    @make_dynamo_test
+    def test_reversed_none_sentinel(self):
+        """`__reversed__ = None` opts out, even when sequence protocol exists"""
+        with self.assertRaises(TypeError):
+            reversed(NotReversibleNone())
 
     @make_dynamo_test
     def test_next_with_default(self):
@@ -654,7 +799,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         result = sorted(items)
         self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_custom_list_subclass_with_custom_iter(self):
         """Test custom list subclass that overloads __iter__"""
@@ -678,6 +822,19 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         cs = CustomSet([1, 2, 3])
         result = sorted(cs.__iter__())
         self.assertEqual(result, [2, 4, 6])
+
+    @make_dynamo_test
+    def test_custom_list_subclass_with_default_iter(self):
+        """Test custom list subclass with default __iter__ (inherited from list)"""
+
+        cl = CustomListDefaultIter([1, 2, 3])
+        result = list(iter(cl))
+        self.assertEqual(result, [1, 2, 3])
+
+        result2 = []
+        for v in cl:
+            result2.append(v * 2)
+        self.assertEqual(result2, [2, 4, 6])
 
     @make_dynamo_test
     def test_custom_set_subclass_with_default_iter(self):
@@ -1300,6 +1457,16 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "default")
 
     @make_dynamo_test
+    def test_next_non_iterator_raises_type_error(self):
+        with self.assertRaisesRegex(TypeError, "'list' object is not an iterator"):
+            next([1, 2])
+
+    @make_dynamo_test
+    def test_next_non_iterator_with_default_raises_type_error(self):
+        with self.assertRaisesRegex(TypeError, "'list' object is not an iterator"):
+            next([1, 2], "default")
+
+    @make_dynamo_test
     def test_error_on_dict_keys_mutation_during_iteration(self):
         """Test that mutating a dict during iteration raises RuntimeError"""
         d = {"a": 1, "b": 2, "c": 3}
@@ -1346,6 +1513,280 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
     def test_len_blocked_slot_raises_type_error(self):
         with self.assertRaises(TypeError):
             len(BlockedLen())
+
+
+class IterPropAttrErrorWithGetItem:
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def __iter__(self):
+        raise AttributeError("no __iter__")
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+
+class IterPropAttrErrorNoGetItem:
+    @property
+    def __iter__(self):
+        raise AttributeError("no __iter__")
+
+
+class IterPropReturnsCallable:
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def __iter__(self):
+        return lambda: iter(self.data)
+
+
+class IterPropRaisesValueError:
+    @property
+    def __iter__(self):
+        raise ValueError("boom")
+
+
+class BlockedIterWithGetItem:
+    __iter__ = None
+
+    def __getitem__(self, index):
+        return [1, 2, 3][index]
+
+
+class _IterDescriptor:
+    def __get__(self, obj, owner):
+        return lambda: iter(obj.data)
+
+
+class _AttrErrorDescriptor:
+    def __get__(self, obj, owner):
+        raise AttributeError("no attr")
+
+
+class IterViaDescriptor:
+    __iter__ = _IterDescriptor()
+
+    def __init__(self, data):
+        self.data = data
+
+
+class IterDescriptorAttrErrorWithGetItem:
+    __iter__ = _AttrErrorDescriptor()
+
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+
+class IterNotCallable:
+    __iter__ = 42
+
+
+class IterStaticMethod:
+    __iter__ = staticmethod(lambda: iter([1, 2, 3]))
+
+
+class NextProp:
+    def __init__(self, n):
+        self.n = n
+        self.i = 0
+
+    def __iter__(self):
+        return self
+
+    @property
+    def __next__(self):
+        def inner():
+            if self.i >= self.n:
+                raise StopIteration
+            self.i += 1
+            return self.i
+
+        return inner
+
+
+class NextNone:
+    def __iter__(self):
+        return self
+
+    __next__ = None
+
+
+class NextPropAttrError:
+    def __iter__(self):
+        return self
+
+    @property
+    def __next__(self):
+        raise AttributeError("gone")
+
+
+class TestSpecialMethodIterLookup(torch._dynamo.test_case.TestCase):
+    """slot_tp_iter / slot_tp_iternext lookup semantics: __iter__ / __next__
+    resolved via MRO-only special lookup with descriptor binding
+    (lookup_maybe_method in Objects/typeobject.c)."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # Pre-3.14 slot_tp_iter blanket-clears lookup errors (PyErr_Clear) before
+    # the __getitem__ probe; Dynamo does not encode this yet.
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_iter_property_attribute_error_with_getitem(self):
+        # __iter__ bind raises AttributeError -> swallowed -> seqiter fallback
+        self.assertEqual(list(IterPropAttrErrorWithGetItem([1, 2, 3])), [1, 2, 3])
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_iter_property_attribute_error_no_getitem(self):
+        with self.assertRaises(TypeError):
+            iter(IterPropAttrErrorNoGetItem())
+
+    @make_dynamo_test
+    def test_iter_property_returns_callable(self):
+        self.assertEqual(list(IterPropReturnsCallable([1, 2, 3])), [1, 2, 3])
+
+    @xfailIfPy313AndEarlier
+    @make_dynamo_test
+    def test_iter_property_raises_value_error(self):
+        # Pre-3.14 slot_tp_iter swallows any lookup error (blanket
+        # PyErr_Clear) and falls through to the absent __getitem__ probe
+        # -> TypeError; 3.14 only swallows AttributeError, so ValueError
+        # propagates
+        expected = ValueError if sys.version_info >= (3, 14) else TypeError
+        with self.assertRaises(expected):
+            iter(IterPropRaisesValueError())
+
+    @make_dynamo_test
+    def test_iter_none_with_getitem(self):
+        # __iter__ = None wins over the __getitem__ fallback
+        with self.assertRaises(TypeError):
+            iter(BlockedIterWithGetItem())
+
+    @make_dynamo_test
+    def test_iter_via_descriptor(self):
+        self.assertEqual(list(IterViaDescriptor([1, 2, 3])), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_iter_descriptor_attribute_error_with_getitem(self):
+        self.assertEqual(list(IterDescriptorAttrErrorWithGetItem([4, 5, 6])), [4, 5, 6])
+
+    @make_dynamo_test
+    def test_iter_not_callable(self):
+        with self.assertRaises(TypeError):
+            iter(IterNotCallable())
+
+    @make_dynamo_test
+    def test_iter_staticmethod(self):
+        self.assertEqual(list(IterStaticMethod()), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_next_property(self):
+        self.assertEqual(list(NextProp(3)), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_next_none_raises_type_error(self):
+        it = iter(NextNone())
+        with self.assertRaises(TypeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_next_missing_raises_type_error(self):
+        # builtin next() gates on PyIter_Check
+        with self.assertRaises(TypeError):
+            next(NoIterNoGetitem())
+
+    @make_dynamo_test
+    def test_next_property_attribute_error_propagates(self):
+        # slot_tp_iternext uses the raising lookup variant: AttributeError
+        # from the bind is NOT swallowed
+        it = iter(NextPropAttrError())
+        with self.assertRaises(AttributeError):
+            next(it)
+
+
+class ColorInt(enum.IntEnum):
+    RED = 1
+
+
+class TestSpecialMethodLookupRegressions(torch._dynamo.test_case.TestCase):
+    """Regressions for the special-method lookup engine: C-slot dunders must
+    never recurse, and error messages must match eager."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    def test_iter_on_c_iterable_object_graph_breaks(self):
+        # zip object as graph input: its __iter__ is a C wrapper descriptor
+        # with no traceable body.  Must graph break cleanly (Unsupported),
+        # never RecursionError.
+        from torch._dynamo.exc import Unsupported
+
+        def fn(it, x):
+            return [v + 1 for v in it] and x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                zip([1, 2], [3, 4]), torch.ones(2)
+            )
+
+    def test_iter_on_dict_items_object_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(items, x):
+            it = iter(items)
+            return next(it) and x + 1
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                {"a": 1}.items(), torch.ones(2)
+            )
+
+    @make_dynamo_test
+    def test_intenum_unary_neg(self):
+        # int.__neg__ on an IntEnum member: inherited C slot of a modeled
+        # constant base -- must fold/delegate, never recurse.
+        self.assertEqual(-ColorInt.RED, -1)
+
+    @make_dynamo_test
+    def test_iter_none_with_getitem_message(self):
+        # slot_tp_iter's attr_is_none branch: message is "is not iterable",
+        # not "'NoneType' object is not callable"
+        raised = False
+        try:
+            iter(BlockedIterWithGetItem())
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not iterable", str(e))
+        self.assertTrue(raised)
+
+    @make_dynamo_test
+    def test_next_missing_message(self):
+        # builtin next() gates on PyIter_Check: "is not an iterator"
+        raised = False
+        try:
+            next(NoIterNoGetitem())
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not an iterator", str(e))
+        self.assertTrue(raised)
 
 
 if __name__ == "__main__":

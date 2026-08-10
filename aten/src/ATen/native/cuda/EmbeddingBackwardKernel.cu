@@ -453,7 +453,7 @@ Tensor embedding_backward_cuda_kernel(
                   offset2bag.const_data_ptr<index_t>(),
                   count.defined() ? count.const_data_ptr<index_t>() : nullptr, numel, stride,
                   mode_mean, bag_size.const_data_ptr<index_t>(),
-                  per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
+                  per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : nullptr,
                   per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
                   partial_segment_offset.const_data_ptr<index_t>(),
                   num_of_partial_segments_ptr, grad_weight_per_segment.mutable_data_ptr<partial_weight_t>(),
