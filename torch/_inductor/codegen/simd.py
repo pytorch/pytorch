@@ -49,7 +49,11 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties, InductorMeta
+from ..runtime.hints import (
+    DeviceProperties,
+    InductorMeta,
+    SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK,
+)
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -3968,6 +3972,43 @@ class SIMDScheduling(BaseScheduling):
             len(subkernel_nodes),
             [len(p) for p in partitions],
         )
+
+        def exclude_large_online_softmax_from_combo(pn: BaseSchedulerNode) -> bool:
+            node_info = node_schedule_map[pn]
+            device = pn.get_device()
+            if free_unbacked_symbols(node_info.rnumel):
+                return False
+            # Mid-size reductions keep combo fusion and use vector accumulators.
+            rnumel_hint = V.graph.sizevars.optimization_hint(node_info.rnumel)
+            return (
+                config.triton.scalar_online_softmax_accumulators
+                and torch.version.hip is None
+                and device is not None
+                and device.type == "cuda"
+                and not node_info.is_persistent_reduction
+                and rnumel_hint >= SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK
+                and any(
+                    isinstance(node.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+                    and node.node.get_reduction_type() == "online_softmax_reduce"
+                    for node in node_info.features.reduction_nodes()
+                )
+            )
+
+        split_partitions: list[list[BaseSchedulerNode]] = []
+        for node_group in partitions:
+            combinable: list[BaseSchedulerNode] = []
+            for pn in node_group:
+                if exclude_large_online_softmax_from_combo(pn):
+                    if combinable:
+                        split_partitions.append(combinable)
+                        combinable = []
+                    split_partitions.append([pn])
+                else:
+                    combinable.append(pn)
+            if combinable:
+                split_partitions.append(combinable)
+        partitions = split_partitions
+
         kernel_code_list = []
         for node_group in partitions:
             if len(node_group) == 0:

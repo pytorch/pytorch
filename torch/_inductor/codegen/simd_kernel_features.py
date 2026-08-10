@@ -10,6 +10,7 @@ from typing import Any
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
@@ -159,6 +160,38 @@ class SIMDKernelFeatures:
         for node in self.scheduler_nodes():
             counts.update(node._body.op_counts)
         return counts
+
+    @cache_on_self
+    def has_multiple_escaping_full_size_outputs(self) -> bool:
+        """Return whether at least two full-size outputs escape this kernel."""
+        scheduler_nodes = tuple(self.scheduler_nodes())
+        scheduler_node_set = OrderedSet(scheduler_nodes)
+        materialized_numel = V.graph.sizevars.optimization_hint(
+            self.numel * self.reduction_numel
+        )
+        escaping_names: OrderedSet[str] = OrderedSet()
+        for node in scheduler_nodes:
+            for buf in node.get_outputs():
+                name = buf.get_name()
+                if name in V.graph.removed_buffers or all(
+                    user.node in scheduler_node_set for user in buf.users
+                ):
+                    continue
+                try:
+                    buf_numel = buf.node.get_numel()
+                    is_smaller = (
+                        not free_unbacked_symbols(buf_numel)
+                        and V.graph.sizevars.optimization_hint(buf_numel)
+                        < materialized_numel
+                    )
+                except NotImplementedError:
+                    is_smaller = False
+                if is_smaller:
+                    continue
+                escaping_names.add(name)
+                if len(escaping_names) >= 2:
+                    return True
+        return False
 
     def contains_op(self, op_name: str) -> bool:
         """True if V.ops.{op_name} is used in node_schedule"""
