@@ -68,6 +68,39 @@ class GroupedTensorSSALayout:
     def reduce_dims(self) -> tuple[int, ...]:
         return (-1, 2) if self.axis == 1 else (-2, 1)
 
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the grouped extent available in one TensorSSA fragment."""
+        return (
+            f"cutlass.const_expr(min({self.group_size}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the number of grouped runs in one TensorSSA fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group_size}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        """Return the grouped TensorSSA view for this logical axis."""
+        group = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.axis == 1:
+            return f"((1, {group}, {repeats}), 1, 1)"
+        return f"(({group}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        """Return the reduced TensorSSA shape before fragment broadcast."""
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
+
+    @property
+    def reduction_profile(self) -> str:
+        """Return the CuTe reduction profile for the grouped dimension."""
+        return (
+            "((None, 1, None), 1, 1)" if self.axis == 1 else "((1, None, None), 1, 1)"
+        )
+
     def matches_reduction_dim(self, dim: Any) -> bool:
         """Return whether an FX reduction selects this layout's grouped dimension."""
         dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
@@ -258,46 +291,3 @@ def squeeze_source_node(node: torch.fx.Node) -> torch.fx.Node | None:
         return None
     source_node = node.args[0]
     return source_node if isinstance(source_node, torch.fx.Node) else None
-
-
-FUNCTION_REDUCTION_TYPES = {
-    torch.ops.aten.sum.dim_IntList: ("sum", True),
-    torch.ops.aten.mean.dim: ("mean", True),
-    torch.ops.aten.prod.dim_int: ("prod", True),
-    torch.ops.aten.amax.default: ("max", False),
-    torch.ops.aten.amin.default: ("min", False),
-}
-
-FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
-    (
-        torch.ops.aten.all.dim,
-        torch.ops.aten.all.dims,
-        torch.ops.aten.all.default,
-        torch.ops.aten.any.dim,
-        torch.ops.aten.any.dims,
-        torch.ops.aten.any.default,
-        torch.ops.aten.argmax.default,
-        torch.ops.aten.argmin.default,
-        torch.ops.aten.std.correction,
-        torch.ops.aten.std.dim,
-        torch.ops.aten.var.correction,
-        torch.ops.aten.var.dim,
-    )
-)
-
-
-def reduction_from_node(node: torch.fx.Node) -> tuple[Any, Any, Any, Any, str] | None:
-    if node.op != "call_function" or node.target not in FUNCTION_REDUCTION_TYPES:
-        return None
-    reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
-    input_node = node.args[0]
-    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-    return input_node, dim, keepdim, dtype if has_dtype else None, reduction_type
-
-
-def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
-    if node.op != "call_function" or node.target not in FUNCTION_UNSUPPORTED_REDUCTIONS:
-        return None
-    return str(node.target)

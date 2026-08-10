@@ -114,23 +114,47 @@ FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., An
 }
 
 
+def flex_gemm_logsumexp(
+    input: torch.Tensor,
+    dim: int | tuple[int, ...] | list[int],
+    keepdim: bool = False,
+    *,
+    fallback: Callable[..., Any],
+) -> torch.Tensor:
+    """Expose one online max/sum state for a single-dimension logsumexp."""
+    if isinstance(dim, (tuple, list)):
+        if len(dim) != 1:
+            return fallback(input, dim, keepdim)
+        dim = dim[0]
+    from torch._inductor import inductor_prims
+
+    maximum, total = inductor_prims.prepare_softmax_online(input, dim)
+    if not keepdim:
+        maximum = maximum.squeeze(dim)
+        total = total.squeeze(dim)
+    return total.log() + maximum
+
+
 def flex_gemm_body_decomposition_table(
     kernel_options: dict[str, Any],
     decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
 ) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
-    """Override composite body decompositions enabled by QUACK fast math."""
-    if (
-        kernel_options.get("backend") != "QUACK"
-        or kernel_options.get("fast_math") is not True
-    ):
+    """Override composite body decompositions used by the QUACK backend."""
+    if kernel_options.get("backend") != "QUACK":
         return None
     merged_decompositions = dict(decomposition_table)
-    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
-    gelu = torch.ops.aten.gelu.default
-    if gelu in merged_decompositions:
-        merged_decompositions[gelu] = partial(
-            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+    logsumexp = torch.ops.aten.logsumexp.default
+    if logsumexp in merged_decompositions:
+        merged_decompositions[logsumexp] = partial(
+            flex_gemm_logsumexp, fallback=merged_decompositions[logsumexp]
         )
+    if kernel_options.get("fast_math") is True:
+        merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+        gelu = torch.ops.aten.gelu.default
+        if gelu in merged_decompositions:
+            merged_decompositions[gelu] = partial(
+                flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+            )
     return merged_decompositions
 
 

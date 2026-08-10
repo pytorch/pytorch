@@ -278,7 +278,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
-        expand_epimod_prepare_softmax_online,
         flex_gemm_indexed_output_plan,
         flex_gemm_output_values,
         gemm_node as flex_gemm_node,
@@ -492,8 +491,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    # Normalize supported online-softmax forms before shared analysis.
-    expand_epimod_prepare_softmax_online(subgraph.graph_module)
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
     log_flex_gemm_artifact(
         "analysis",
@@ -711,6 +708,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         store_finalize=epimod_source.local_reduce_store_finalize,
         prepass_combine=epimod_source.local_reduce_prepass_combine,
         prepass_finalize=epimod_source.local_reduce_prepass_finalize,
+        reduce_planes=epimod_source.local_reduce_planes,
+        fragment_reduced=epimod_source.local_reduce_fragment_reduced,
     )
     epilogue_arg_indices = tuple(
         range(
@@ -718,6 +717,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             len(gemm_input_nodes) + len(epilogue_input_nodes),
         )
     )
+    quack_config_constraints = {} if explicit_config is None else dict(explicit_config)
+    if epimod_source.local_reduce_fragment_reduced:
+        # Fragment partials are lowered for the unswapped accumulator geometry.
+        quack_config_constraints["swap_ab"] = False
     choices: list[Any] = []
     error = flex_gemm_epilogue_template.maybe_append_choice(
         choices,
@@ -731,11 +734,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             alpha=float(alpha),
             beta=float(beta),
             blockscaled_format=blockscaled_format,
-            quack_config_constraints=(
-                tuple(sorted(explicit_config.items()))
-                if explicit_config is not None
-                else ()
-            ),
+            quack_config_constraints=tuple(sorted(quack_config_constraints.items())),
             epilogue_arg_indices=epilogue_arg_indices,
             epilogue_arg_kinds=epilogue_arg_kinds,
             aux_out_indices=aux_out_indices,
