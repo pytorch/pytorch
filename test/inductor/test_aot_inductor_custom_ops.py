@@ -15,12 +15,14 @@ from torch.export import Dim, export
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
 )
+from torch.testing._internal.common_device_type import Capability, requires_capabilities
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -544,6 +546,8 @@ class AOTInductorTestsTemplate:
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -610,6 +614,8 @@ GPU_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -629,6 +635,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -636,6 +644,10 @@ class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
     code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
+
+    @requires_capabilities(Capability.lib.triton)
+    def setUp(self):
+        super().setUp()
 
 
 copy_tests(

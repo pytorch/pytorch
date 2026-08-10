@@ -59,8 +59,10 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
+    Capability,
     e4m3_type,
     e5m2_type,
+    requires_capabilities,
     skipCUDAIf,
 )
 from torch.testing._internal.common_dtype import (
@@ -74,6 +76,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -9144,6 +9147,8 @@ torch._inductor.aoti_load_package("{model_path}")
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -9181,6 +9186,8 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 
 class TestAOTInductorConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})
@@ -9346,6 +9353,8 @@ MPS_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -9365,6 +9374,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -9372,6 +9383,10 @@ class AOTInductorTestABICompatibleGpu(TestCase):
     code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
+
+    @requires_capabilities(Capability.lib.triton)
+    def setUp(self):
+        super().setUp()
 
 
 copy_tests(
@@ -9393,6 +9408,8 @@ class AOTInductorTestDualWrapper(TestCase):
     """Run AOTInductor tests with autotune_at_compile_time=False, exercising
     the lazy Triton compile + dual-wrapper-mode codegen path."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -9401,6 +9418,7 @@ class AOTInductorTestDualWrapper(TestCase):
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
+    @requires_capabilities(Capability.lib.triton)
     def setUp(self):
         super().setUp()
         ctx = torch._inductor.config.patch("triton.autotune_at_compile_time", False)
@@ -9418,6 +9436,8 @@ copy_tests(
 
 @unittest.skipIf(not torch.backends.mps.is_available(), "No MPS backend available")
 class AOTInductorTestABICompatibleMps(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     device = "mps"
     device_type = "mps"
     check_model = check_model
@@ -9436,6 +9456,8 @@ copy_tests(
 
 
 class TestCheckLowerboundConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_check_lowerbound_codegen(self):
         """
         Test that check_lowerbound config controls lowerbound check codegen.

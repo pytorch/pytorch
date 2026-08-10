@@ -33,7 +33,8 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     TRITON_PTXAS_VERSION,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
+from torch.testing._internal.common_device_type import Capability, requires_capabilities
+from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -73,31 +74,34 @@ def compile(
     return loaded
 
 
-@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@parameterized_class(
-    [
-        {"device": "cpu", "package_cpp_only": False},
-    ]
-    + (
-        [
-            # FIXME: AssertionError: AOTInductor compiled library does not exist at
-            {"device": "cpu", "package_cpp_only": True}
-        ]
-        if not IS_FBCODE
-        else []
+def _package_class_name(cls, _, params):
+    return (
+        f"TestAOTInductorPackage{'Cpp' if params['package_cpp_only'] else ''}_"
+        f"{params['device']}"
     )
-    + (
-        [
-            {"device": GPU_TYPE, "package_cpp_only": False},
-            {"device": GPU_TYPE, "package_cpp_only": True},
-        ]
-        if sys.platform != "darwin"
-        else []
-    ),
-    class_name_func=lambda cls,
-    _,
-    params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
+
+
+_CPU_PACKAGE_PARAMS = [
+    {"device": "cpu", "package_cpp_only": False},
+] + (
+    [
+        # FIXME: AssertionError: AOTInductor compiled library does not exist at
+        {"device": "cpu", "package_cpp_only": True}
+    ]
+    if not IS_FBCODE
+    else []
 )
+
+_GPU_PACKAGE_PARAMS = (
+    [
+        {"device": GPU_TYPE, "package_cpp_only": False},
+        {"device": GPU_TYPE, "package_cpp_only": True},
+    ]
+    if sys.platform != "darwin"
+    else []
+)
+
+
 class TestAOTInductorPackage(TestCase):
     def check_model(
         self: TestCase,
@@ -1183,6 +1187,22 @@ class TestAOTInductorPackage(TestCase):
             "Failed to find a generated cpp file or so file for model 'forward' in the zip archive.",
         ):
             load_package(package_path, model_name="forward")
+
+
+@parameterized_class(_CPU_PACKAGE_PARAMS, class_name_func=_package_class_name)
+class TestAOTInductorPackageCpu(TestAOTInductorPackage):
+    hw_classification = HardwareClassification.CPU
+
+
+if _GPU_PACKAGE_PARAMS:
+
+    @parameterized_class(_GPU_PACKAGE_PARAMS, class_name_func=_package_class_name)
+    class TestAOTInductorPackageGpu(TestAOTInductorPackage):
+        hw_classification = HardwareClassification.ACCELERATOR
+
+        @requires_capabilities(Capability.lib.triton)
+        def setUp(self):
+            super().setUp()
 
 
 if __name__ == "__main__":
