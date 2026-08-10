@@ -3568,6 +3568,10 @@ class TestSparseCSRDevice(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
+
+class TestSparseCSRCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not TEST_CUDA_CUDSS, "The test requires cudss")
     @dtypes(*floating_types())
     def test_linalg_solve_sparse_csr_cusolver(self, device, dtype):
@@ -4414,6 +4418,7 @@ instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=T
 
 instantiate_device_type_tests(TestSparseCSRCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSparseCSRDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSparseCSRCUDA, globals(), only_for="cuda")
 
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 
