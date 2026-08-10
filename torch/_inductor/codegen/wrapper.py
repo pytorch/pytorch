@@ -2315,8 +2315,8 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = V.graph.sizevars.optimization_hint(dims)
-            block_dims = V.graph.sizevars.optimization_hints(block_dims)
+            dims = V.graph.sizevars.upper_bounds_or_hints(dims)
+            block_dims = V.graph.sizevars.upper_bounds_or_hints(block_dims)
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
@@ -2334,7 +2334,7 @@ class PythonWrapperCodegen(CodeGen):
     def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
         block_shape = desc.block_shape
         if apply_size_hints:
-            block_shape = V.graph.sizevars.optimization_hints(block_shape)
+            block_shape = V.graph.sizevars.upper_bounds_or_hints(block_shape)
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
@@ -3784,7 +3784,7 @@ class PythonWrapperCodegen(CodeGen):
                     name,
                     ws.device,
                     ws.dtype,
-                    shape=(V.graph.sizevars.optimization_hint(ws.count),),
+                    shape=(V.graph.sizevars.upper_bound_or_hint(ws.count),),
                     stride=(1,),
                 )
             )
@@ -3897,15 +3897,15 @@ class PythonWrapperCodegen(CodeGen):
 
             if buf is None:
                 raise AssertionError(f"Failed to find a buffer for arg {arg}")
-            size = V.graph.sizevars.optimization_hints(buf.get_size())
-            allocation_size = V.graph.sizevars.optimization_hints(
+            size = V.graph.sizevars.upper_bounds_or_hints(buf.get_size())
+            allocation_size = V.graph.sizevars.upper_bounds_or_hints(
                 V.graph.get_allocation_size(buf)
             )
-            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+            stride = V.graph.sizevars.upper_bounds_or_hints(buf.get_stride())
 
             device = buf.get_device()
             dtype = buf.get_dtype()
-            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
+            offset = V.graph.sizevars.upper_bound_or_hint(buf.get_layout().offset)
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
@@ -3933,7 +3933,7 @@ class PythonWrapperCodegen(CodeGen):
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 
-            return str(V.graph.sizevars.optimization_hint(arg))
+            return str(V.graph.sizevars.upper_bound_or_hint(arg))
 
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)

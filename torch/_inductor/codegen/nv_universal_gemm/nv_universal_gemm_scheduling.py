@@ -1082,8 +1082,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
             args_code.writeline("args = []")
 
             for inp in input_nodes:
-                size = V.graph.sizevars.optimization_hints(inp.get_size())
-                stride = V.graph.sizevars.optimization_hints(inp.get_stride())
+                size = V.graph.sizevars.upper_bounds_or_hints(inp.get_size())
+                stride = V.graph.sizevars.upper_bounds_or_hints(inp.get_stride())
                 dtype = inp.get_dtype()
                 device = inp.get_device()
                 args_code.writeline(
@@ -1091,16 +1091,16 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 )
 
             for ol in output_layouts:
-                out_size = V.graph.sizevars.optimization_hints(ol.size)
-                out_stride = V.graph.sizevars.optimization_hints(ol.stride)
+                out_size = V.graph.sizevars.upper_bounds_or_hints(ol.size)
+                out_stride = V.graph.sizevars.upper_bounds_or_hints(ol.stride)
                 args_code.writeline(
                     f"args.append(rand_strided({out_size}, {out_stride}, device='{ol.device}', dtype={ol.dtype}))"
                 )
 
             for read_name in epilogue_reads:
                 buf = V.graph.get_buffer(read_name)
-                size = V.graph.sizevars.optimization_hints(buf.get_size())
-                stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+                size = V.graph.sizevars.upper_bounds_or_hints(buf.get_size())
+                stride = V.graph.sizevars.upper_bounds_or_hints(buf.get_stride())
                 dtype = buf.get_dtype()
                 device = buf.get_device()
                 args_code.writeline(

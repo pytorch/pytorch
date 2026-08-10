@@ -850,11 +850,12 @@ class TestNVUniversalGemmHeuristics(TestCase):
     def _create_mock_inputs(self, m=512, n=512, k=512, dtype=torch.float16):
         """Create a mock MMKernelInputs."""
         inputs = MagicMock()
-        inputs.mnk_hinted.return_value = (m, n, k)
+        inputs.mnk_autotune.return_value = (m, n, k)
+        inputs.batch_autotune.return_value = 1
         inputs.dtype.return_value = dtype
         inputs._mat1_idx = 0
         inputs._mat2_idx = 1
-        inputs.strides_hinted.return_value = ((k, 1), (n, 1))
+        inputs.strides_autotune.return_value = ((k, 1), (n, 1))
         return inputs
 
     def test_fallback_when_heuristics_unavailable(self):

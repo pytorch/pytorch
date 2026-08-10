@@ -161,11 +161,13 @@ class CUTLASSTemplate(KernelTemplate):
                 )
             )
         # Resolve symbolic sizes to concrete ints for benchmarking only.
-        V.graph.sizevars.optimization_hints(
+        V.graph.sizevars.upper_bounds_or_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
-        size_args = V.graph.sizevars.optimization_hints(kernel.get_dynamic_shape_args())
-        offset_args = V.graph.sizevars.optimization_hints(kernel.get_offset_args())
+        size_args = V.graph.sizevars.upper_bounds_or_hints(
+            kernel.get_dynamic_shape_args()
+        )
+        offset_args = V.graph.sizevars.upper_bounds_or_hints(kernel.get_offset_args())
 
         if key is not None:
             self.code_cache[key] = code, size_args, offset_args

@@ -411,7 +411,7 @@ def infer_dense_strides(
 
 def create_indices_fake(x) -> torch.Tensor:
     """Create a fake indices that is used for autotuning."""
-    size = V.graph.sizevars.optimization_hints(x.get_size())
+    size = V.graph.sizevars.upper_bounds_or_hints(x.get_size())
     indices = torch.arange(0, size[-1], dtype=x.get_dtype(), device=x.get_device())
     indices = indices.expand(size).contiguous()
     return indices
@@ -433,10 +433,10 @@ def create_num_blocks_fake_generator(sparse_indices):
     """
 
     def create_num_blocks_fake(x) -> torch.Tensor:
-        num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
+        num_blocks_for_autotuning = V.graph.sizevars.upper_bound_or_hint(
             sparse_indices.shape[-1]
         )
-        size = V.graph.sizevars.optimization_hints(x.get_size())
+        size = V.graph.sizevars.upper_bounds_or_hints(x.get_size())
         return torch.full(
             size,
             num_blocks_for_autotuning,

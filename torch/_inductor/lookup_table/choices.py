@@ -64,8 +64,8 @@ class LookupTableChoices(InductorChoices):
         """
         # Get node information using existing methods
         dtypes = kernel_inputs.dtypes()
-        shapes = kernel_inputs.shapes_hinted()
-        strides = kernel_inputs.strides_hinted()
+        shapes = kernel_inputs.shapes_autotune()
+        strides = kernel_inputs.strides_autotune()
 
         # Create tuple of (dtype, shape_list, stride_list) for each node
         node_info = tuple(

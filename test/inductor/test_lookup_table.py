@@ -73,7 +73,15 @@ class MockMMKernelInputs(MMKernelInputs):
         """Delegate to symbolic since real tensors already have int shapes"""
         return self.shapes_symbolic()
 
+    def shapes_autotune(self) -> tuple[tuple[int, ...], ...]:
+        """Delegate to symbolic since real tensors already have int shapes"""
+        return self.shapes_symbolic()
+
     def strides_hinted(self) -> tuple[tuple[int, ...], ...]:
+        """Delegate to symbolic since real tensors already have int strides"""
+        return self.strides_symbolic()  # pyre-ignore
+
+    def strides_autotune(self) -> tuple[tuple[int, ...], ...]:
         """Delegate to symbolic since real tensors already have int strides"""
         return self.strides_symbolic()  # pyre-ignore
 

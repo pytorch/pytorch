@@ -234,9 +234,9 @@ def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
     value = AlgorithmSelectorCache.benchmark_example_value(node)
     base = value if value._base is None else value._base
     sizevars = V.graph.sizevars
-    sizes = sizevars.optimization_hints(node.get_size())
-    strides = sizevars.optimization_hints(get_strides_with_layout_constraints(node))
-    offset = sizevars.optimization_hint(node.get_layout().offset)
+    sizes = sizevars.upper_bounds_or_hints(node.get_size())
+    strides = sizevars.upper_bounds_or_hints(get_strides_with_layout_constraints(node))
+    offset = sizevars.upper_bound_or_hint(node.get_layout().offset)
     return torch.as_strided(base, sizes, strides, offset)
 
 

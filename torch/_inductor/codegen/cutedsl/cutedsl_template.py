@@ -137,7 +137,7 @@ class CuteDSLTemplate(KernelTemplate):
                     f"{expected_args}, got {list(call_args)}."
                 )
             extra_args = tuple(
-                V.graph.sizevars.optimization_hints(call_args[len(expected_args) :])
+                V.graph.sizevars.upper_bounds_or_hints(call_args[len(expected_args) :])
             )
 
             bmreq = CuteDSLBenchmarkRequest(

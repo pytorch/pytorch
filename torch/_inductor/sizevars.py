@@ -258,6 +258,10 @@ class SizeVarAllocator:
     calculations for tensor operations.
     """
 
+    # Treat compiler/default dynamic limits as effectively unbounded for
+    # autotune benchmark materialization.
+    _MAX_AUTOTUNE_UPPER_BOUND = 2**31 - 2
+
     def __init__(self, shape_env=None) -> None:
         super().__init__()
         # Note: this can lead to bugs. Reasoning APIs depends on existing information in
@@ -1150,6 +1154,84 @@ class SizeVarAllocator:
             fallback = config.unbacked_symint_fallback
         return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
 
+    @staticmethod
+    def _finite_upper_bound_to_int(upper: Any) -> int | None:
+        if upper in (int_oo, -int_oo, sympy.oo, -sympy.oo):
+            return None
+        if isinstance(upper, sympy.Basic):
+            if upper.has(sympy.nan) or upper.free_symbols:
+                return None
+            upper = sympy.ceiling(upper)
+        try:
+            upper_int = int(upper)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if upper_int > SizeVarAllocator._MAX_AUTOTUNE_UPPER_BOUND:
+            return None
+        return upper_int
+
+    def upper_bound_or_hint(
+        self,
+        expr: Expr | int,
+        fallback: int | None = None,
+    ) -> int:
+        """
+        Evaluate a symbolic size expression at a coherent max-shape point.
+
+        This is for non-guarding optimization decisions such as autotuning
+        example tensor shapes.  Each symbol with a useful finite upper bound is
+        assigned that bound; symbols with unbounded or compiler-default ranges
+        use their optimization hints.  The expression is then evaluated once
+        under those assignments so related sizes, strides, and scalar arguments
+        remain consistent.
+        """
+        if isinstance(expr, int):
+            return expr
+
+        simplified = self.simplify(expr)
+        realized = _maybe_realize_expr(simplified, fallback)
+        if realized is not None:
+            return int(realized)
+
+        if isinstance(simplified, Expr):
+            bounded_expr = self.remove_precomputed_replacements(simplified)
+            bounded_expr = self.simplify(bounded_expr)
+            symbol_values: dict[sympy.Symbol, int] = {}
+            for symbol in bounded_expr.free_symbols:
+                value_range = self.shape_env.bound_sympy(symbol)
+                upper_int = (
+                    self._finite_upper_bound_to_int(value_range.upper)
+                    if value_range is not None
+                    else None
+                )
+                symbol_values[symbol] = (
+                    upper_int
+                    if upper_int is not None
+                    else self.optimization_hint(symbol, fallback=fallback)
+                )
+            try:
+                bounded_expr = sympy_subs(bounded_expr, symbol_values)
+            except ZeroDivisionError:
+                return self.optimization_hint(expr, fallback=fallback)
+
+            realized = _maybe_realize_expr(bounded_expr, fallback)
+            if realized is not None:
+                return int(realized)
+
+        return self.optimization_hint(expr, fallback=fallback)
+
+    def upper_bounds_or_hints(
+        self,
+        exprs: Iterable[Expr | int],
+        fallback: int | None = None,
+    ) -> tuple[int, ...]:
+        """
+        Like :meth:`upper_bound_or_hint` but for a sequence of expressions.
+        """
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+        return tuple(self.upper_bound_or_hint(x, fallback=fallback) for x in exprs)
+
     def all_unbacked_explicitly_hinted(self, exprs: IterateExprs) -> bool:
         """
         Return True if every unbacked symbol in *exprs* has an explicit
@@ -1205,6 +1287,37 @@ class SizeVarAllocator:
         """
         return tuple(
             self.optimization_hint_with_override(e, hint_override) for e in exprs
+        )
+
+    def upper_bound_or_hint_with_override(
+        self,
+        expr: Expr | int,
+        hint_override: int | None,
+        fallback: int | None = None,
+    ) -> int:
+        if isinstance(expr, int):
+            return expr
+
+        simplified = _maybe_realize_expr(self.simplify(expr), None)
+        if simplified is not None:
+            return int(simplified)
+
+        if hint_override is not None:
+            return hint_override
+
+        return self.upper_bound_or_hint(expr, fallback=fallback)
+
+    def upper_bounds_or_hints_with_override(
+        self,
+        exprs: Iterable[Expr | int],
+        hint_override: int | None,
+        fallback: int | None = None,
+    ) -> tuple[int, ...]:
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+        return tuple(
+            self.upper_bound_or_hint_with_override(e, hint_override, fallback=fallback)
+            for e in exprs
         )
 
     def guarding_hints_or_throw(

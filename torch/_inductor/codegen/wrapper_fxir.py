@@ -1046,26 +1046,26 @@ class FxConverter:
 
             def node_to_tuning_arg(arg: Any) -> Any:
                 """
-                Create real tensors for autotuning arguments, substituting size hints
-                for dynamic shapes.
+                Create real tensors for autotuning arguments at the coherent
+                max-shape benchmark point.
                 """
 
-                def to_size_hint_sympy_int(arg: sympy.Expr | int) -> int:
-                    return V.graph.sizevars.optimization_hint(arg)
+                def to_autotune_size(arg: sympy.Expr | int) -> int:
+                    return V.graph.sizevars.upper_bound_or_hint(arg)
 
-                def to_size_hint_list(arg: list[torch.SymInt | int]) -> list[int]:
+                def to_autotune_sizes(arg: list[torch.SymInt | int]) -> list[int]:
                     args_sympy = [
                         x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
                     ]
-                    return pytree.tree_map(to_size_hint_sympy_int, args_sympy)
+                    return pytree.tree_map(to_autotune_size, args_sympy)
 
                 if not isinstance(arg, torch.fx.Node):
-                    return to_size_hint_sympy_int(arg)
+                    return to_autotune_size(arg)
 
                 fake = arg.meta["val"]
                 return torch.empty_strided(
-                    to_size_hint_list(fake.shape),
-                    to_size_hint_list(fake.stride()),
+                    to_autotune_sizes(fake.shape),
+                    to_autotune_sizes(fake.stride()),
                     dtype=fake.dtype,
                     device=device,
                 ).zero_()

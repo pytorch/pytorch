@@ -10,6 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import (
     Buffer,
@@ -312,9 +313,17 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            fake_tensor = ir_node_to_tensor(ir_buffer, replace_symbols_with_hints=True)
-            if fake_tensor is None:
-                raise AssertionError("ir_node_to_tensor returned None")
+            tensor_meta = TensorMeta.from_irnodes(ir_buffer)
+            if not isinstance(tensor_meta, TensorMeta):
+                raise AssertionError("expected one TensorMeta per input")
+            # Preserve the old adapter contract: generators receive a zero-filled
+            # logical tensor, and input generation must not advance application RNG.
+            fake_tensor = torch.empty_strided(
+                tensor_meta.sizes,
+                tensor_meta.strides,
+                device=tensor_meta.device,
+                dtype=tensor_meta.dtype,
+            ).zero_()
             return user_function(fake_tensor)
 
         return internal_input_gen_fn

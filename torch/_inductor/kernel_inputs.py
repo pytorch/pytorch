@@ -128,6 +128,13 @@ class KernelInputs(ABC):
             for node in self._input_nodes
         )
 
+    def shapes_autotune(self) -> tuple[tuple[int, ...], ...]:
+        """Get coherent max-shape sizes for compile-time autotuning."""
+        return tuple(
+            V.graph.sizevars.upper_bounds_or_hints(node.get_size())
+            for node in self._input_nodes
+        )
+
     def strides_symbolic(self) -> tuple[tuple[sympy.Integer, ...], ...]:
         """
         Get the symbolic strides of all input nodes.
@@ -146,6 +153,13 @@ class KernelInputs(ABC):
         """
         return tuple(
             V.graph.sizevars.optimization_hints(node.get_stride())
+            for node in self._input_nodes
+        )
+
+    def strides_autotune(self) -> tuple[tuple[int, ...], ...]:
+        """Get coherent max-shape strides for compile-time autotuning."""
+        return tuple(
+            V.graph.sizevars.upper_bounds_or_hints(node.get_stride())
             for node in self._input_nodes
         )
 
@@ -338,6 +352,17 @@ class MMKernelInputs(KernelInputs):
 
         return (m, n, k)
 
+    def mnk_autotune(self) -> tuple[int, int, int]:
+        """Get M, N, K at the coherent max-shape autotune point."""
+        shapes = self.shapes_autotune()
+        mat1_shape = shapes[self._mat1_idx]
+        mat2_shape = shapes[self._mat2_idx]
+        m, k = mat1_shape[-2:]
+        k_check, n = mat2_shape[-2:]
+        if k != k_check:
+            raise AssertionError(f"K dimensions don't match: {k} vs {k_check}")
+        return (m, n, k)
+
     def batch_hinted(self) -> int:
         """
         Get the hinted batch size for batched matrix multiplication.
@@ -352,3 +377,8 @@ class MMKernelInputs(KernelInputs):
         if len(mat1_shape) >= 3:
             return mat1_shape[-3]  # Batch from third-to-last dimension
         return 1  # Non-batched operation
+
+    def batch_autotune(self) -> int:
+        """Get the batch size at the coherent max-shape autotune point."""
+        mat1_shape = self.shapes_autotune()[self._mat1_idx]
+        return mat1_shape[-3] if len(mat1_shape) >= 3 else 1

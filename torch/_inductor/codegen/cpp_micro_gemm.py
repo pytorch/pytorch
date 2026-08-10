@@ -2185,7 +2185,7 @@ def create_micro_gemm(
     from ..utils import has_free_symbols
 
     dynamic_M = has_free_symbols((m,))
-    m = V.graph.sizevars.optimization_hint(m, fallback=1)
+    m = V.graph.sizevars.upper_bound_or_hint(m, fallback=1)
     if not (isinstance(m, int) or m.is_number):
         raise AssertionError(m)
     if output_dtype is None:

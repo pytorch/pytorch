@@ -317,7 +317,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
             max(
                 next_power_of_2(
-                    V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
+                    V.graph.sizevars.upper_bound_or_hint(seq_len_q) * gqa_shared_heads
                 ),
                 1 if torch.xpu.is_available() else 16,
             )

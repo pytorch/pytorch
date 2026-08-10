@@ -120,12 +120,12 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         if not self.should_run(inputs):
             return kernels[:count]
 
-        m, n, k = inputs.mnk_hinted()
-        batch_size = inputs.batch_hinted()
+        m, n, k = inputs.mnk_autotune()
+        batch_size = inputs.batch_autotune()
         dtype_a = inputs.dtype(inputs._mat1_idx)
         dtype_b = inputs.dtype(inputs._mat2_idx)
         out_dtype = inputs.out_dtype()
-        strides = inputs.strides_hinted()
+        strides = inputs.strides_autotune()
         layout_a = "row" if strides[inputs._mat1_idx][-1] == 1 else "col"
         layout_b = "row" if strides[inputs._mat2_idx][-1] == 1 else "col"
 
