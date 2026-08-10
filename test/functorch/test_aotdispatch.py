@@ -66,6 +66,8 @@ from torch._functorch.partitioners import (
     _extract_fwd_bwd_modules,
     _extract_fwd_bwd_outputs,
     _extract_graph_with_inputs_outputs,
+    materialize_cpu_floating_aminmax_eq_input,
+    NodeInfo,
 )
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
@@ -110,6 +112,7 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
@@ -6319,6 +6322,74 @@ def forward(self, primals, tangents):
 
 
 class TestPartitioning(AOTTestCase):
+    def test_materialize_cpu_floating_aminmax_eq_input_fw_order(self):
+        def make_node_info(required_fw_nodes, required_bw_nodes):
+            return NodeInfo(
+                inputs=[required_fw_nodes[0]],
+                _required_fw_nodes=OrderedSet(required_fw_nodes),
+                required_bw_nodes=OrderedSet(required_bw_nodes),
+                tangents_closure=OrderedSet(required_bw_nodes),
+                unclaimed_nodes=OrderedSet(),
+                fw_order={node: index for index, node in enumerate(required_fw_nodes)},
+                static_lifetime_input_nodes=OrderedSet(),
+            )
+
+        # Graphs without a matching reduction must leave NodeInfo untouched,
+        # even when backward-only nodes are interleaved with forward nodes.
+        noop_graph = torch.fx.Graph()
+        noop_input = noop_graph.placeholder("primals_1")
+        noop_tangent = noop_graph.placeholder("tangents_1")
+        noop_sin = noop_graph.call_function(torch.ops.aten.sin.default, (noop_input,))
+        noop_graph.output((noop_sin, noop_tangent))
+        noop_info = make_node_info(
+            [noop_input, noop_sin],
+            [noop_tangent],
+        )
+        original_fw_order = noop_info.fw_order
+        original_required_fw_nodes = noop_info.required_fw_nodes
+
+        materialize_cpu_floating_aminmax_eq_input(noop_graph, noop_info)
+
+        self.assertIs(noop_info.fw_order, original_fw_order)
+        self.assertIs(noop_info.required_fw_nodes, original_required_fw_nodes)
+
+        # A rewritten graph must keep dense forward-only ordering and reuse one
+        # materialization when amin and amax consume the same input.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("primals_1")
+        tangent = graph.placeholder("tangents_1")
+        sin = graph.call_function(torch.ops.aten.sin.default, (x,))
+        amin = graph.call_function(torch.ops.aten.amin.default, (sin, [-1]))
+        amax = graph.call_function(torch.ops.aten.amax.default, (sin, [-1]))
+        amin_eq = graph.call_function(torch.ops.aten.eq.Tensor, (sin, amin))
+        amax_eq = graph.call_function(torch.ops.aten.eq.Tensor, (sin, amax))
+        graph.output((amin, amax, amin_eq, amax_eq, tangent))
+        sin.meta["val"] = torch.randn(2, 3)
+        node_info = make_node_info(
+            [x, sin, amin, amax],
+            [tangent, amin_eq, amax_eq],
+        )
+        original_required_fw_nodes = node_info.required_fw_nodes
+
+        materialize_cpu_floating_aminmax_eq_input(graph, node_info)
+
+        ordered_fw_nodes = [
+            node for node in graph.nodes if node_info.is_required_fw(node)
+        ]
+        self.assertEqual(
+            node_info.fw_order,
+            {node: index for index, node in enumerate(ordered_fw_nodes)},
+        )
+        self.assertIsNot(node_info.required_fw_nodes, original_required_fw_nodes)
+        self.assertEqual(node_info.required_fw_nodes, ordered_fw_nodes)
+        clones = [
+            node for node in graph.nodes if node.target == torch.ops.aten.clone.default
+        ]
+        self.assertEqual(len(clones), 1)
+        clone = clones[0]
+        for node in (amin, amax, amin_eq, amax_eq):
+            self.assertIs(node.args[0], clone)
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
