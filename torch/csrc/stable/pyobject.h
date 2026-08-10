@@ -21,6 +21,15 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
+// Whether py_obj is a Python torch.Tensor (or a subclass). A cheap probe for
+// callers that want to type-check before tensor_from_pyobject (which errors on
+// non-tensors).
+inline bool is_tensor_pyobject(void* py_obj) {
+  bool ret = false;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_is_tensor_pyobject(py_obj, &ret));
+  return ret;
+}
+
 // Wrap a Python torch.Tensor (PyObject* passed as void*) as a stable Tensor
 // that shares its underlying TensorImpl.
 inline Tensor tensor_from_pyobject(void* py_obj) {

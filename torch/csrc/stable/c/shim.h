@@ -322,6 +322,12 @@ AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
 // still links only libtorch; if libtorch_python is not loaded at runtime the
 // call errors. The GIL must be held.
 
+// Whether py_obj is a Python torch.Tensor (or a subclass). A cheap probe for
+// callers that want to type-check before torch_tensor_from_pyobject (which
+// errors on non-tensors).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_tensor_pyobject(void* py_obj, bool* ret);
+
 // Wrap a Python torch.Tensor as a new AtenTensorHandle that shares the
 // underlying TensorImpl with the input.
 AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(

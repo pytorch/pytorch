@@ -17,6 +17,14 @@ namespace torch::detail {
 namespace {
 
 struct ConcretePyObjectConversion final : PyObjectConversionInterface {
+  bool is_tensor_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_is_tensor_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    return THPVariable_Check(obj);
+  }
+
   at::Tensor tensor_from_pyobject(PyObject* obj) const override {
     // The GIL guards the THPVariable access below; a boxed STABLE_TORCH_LIBRARY
     // kernel may run with the GIL released, so assert rather than race.
