@@ -52,6 +52,10 @@ def try_solve(
         log.debug("expression with unsupported type: %s", type(expr))
         return None
 
+    if not isinstance(expr.lhs, sympy.Expr) or not isinstance(expr.rhs, sympy.Expr):
+        log.debug("relational expression with non-arithmetic operands: %s", expr)
+        return None
+
     lhs_has_thing = expr.lhs.has(thing)
     rhs_has_thing = expr.rhs.has(thing)
 
