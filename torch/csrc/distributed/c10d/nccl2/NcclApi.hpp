@@ -454,8 +454,7 @@ class DefaultNcclApi : public NcclApi {
   [[nodiscard]] ncclResult_t groupStart() override;
   [[nodiscard]] ncclResult_t groupEnd() override;
 #ifdef NCCL_SIM_INFO_INITIALIZER
-  [[nodiscard]] ncclResult_t groupSimulateEnd(
-      ncclSimInfo_t* simInfo) override;
+  [[nodiscard]] ncclResult_t groupSimulateEnd(ncclSimInfo_t* simInfo) override;
 #endif
 
   [[nodiscard]] ncclResult_t commUserRank(ncclComm_t comm, int* userRank)

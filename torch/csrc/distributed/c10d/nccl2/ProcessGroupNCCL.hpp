@@ -249,8 +249,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
-  void startTimeEstimate();
-  float endTimeEstimate();
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
 
   // Create a child backend over `ranks` (a subset of this group's ranks) via
   // ncclCommSplit. Collective over the parent communicator: every parent rank

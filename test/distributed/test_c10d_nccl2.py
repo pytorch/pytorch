@@ -76,9 +76,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(opts.config.max_ctas, 4)
 
     @requires_nccl()
-    @requires_nccl_version(
-        (2, 22), "Need NCCL 2.22+ for collective time estimation"
-    )
+    @requires_nccl_version((2, 22), "Need NCCL 2.22+ for collective time estimation")
     @skip_if_lt_x_gpu(2)
     def test_time_estimate(self) -> None:
         torch.cuda.set_device(self.device)

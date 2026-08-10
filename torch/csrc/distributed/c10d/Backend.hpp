@@ -162,8 +162,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Experimental collective time-estimation API. Backends that return true
+  // must simulate collectives issued between startTimeEstimate() and
+  // endTimeEstimate(), which returns the estimated duration in microseconds.
   virtual bool supportsTimeEstimation() const {
     return false;
+  }
+
+  virtual void startTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
+  }
+
+  virtual float endTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
   }
 
   virtual bool supportsShrinking() const {
