@@ -106,6 +106,9 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::select
 ```
 
+```{doxygenfunction} torch::stable::index_select
+```
+
 ```{doxygenfunction} torch::stable::narrow
 ```
 
@@ -118,6 +121,9 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::to(const torch::stable::Tensor &self, torch::stable::Device device, bool non_blocking, bool copy)
+```
+
+```{doxygenfunction} torch::stable::is_pinned
 ```
 
 ## In-place Operations
@@ -161,4 +167,7 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::bitwise_right_shift
+```
+
+```{doxygenfunction} torch::stable::floor_divide
 ```
