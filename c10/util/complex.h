@@ -66,3 +66,8 @@ constexpr c10::complex<T> conj(const c10::complex<T>& z) {
 // math functions are included in a separate file
 #include <c10/util/complex_math.h> // IWYU pragma: keep
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
+
+namespace c10 {
+using torch::headeronly::is_complex;
+using torch::headeronly::scalar_value_type;
+} // namespace c10

@@ -7,7 +7,7 @@
 
 #include <limits>
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 template <typename T>
 struct is_complex : public std::false_type {};
@@ -33,7 +33,7 @@ struct scalar_value_type<c10::complex<T>> {
   using type = T;
 };
 
-} // namespace c10
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 
@@ -46,8 +46,3 @@ bool isnan(const c10::complex<T>& v) {
 }
 
 } // namespace std
-
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
-using c10::is_complex;
-using c10::scalar_value_type;
-HIDDEN_NAMESPACE_END(torch, headeronly)
