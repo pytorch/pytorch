@@ -30,7 +30,7 @@ from ...kernel.mm import (
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
 )
-from ...kernel.mm_plus_mm import mm_plus_mm_template, mm_plus_mm_xpu_template
+from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
@@ -2154,6 +2154,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ]
     preprocess_mm_configs: Callable[..., Generator[TritonConfig, None, None]]
 
+    # Whether to render the K loop in ascending order (range(0, tl.cdiv(K, BLOCK_K)))
+    # instead of the descending order (range(K, 0, -BLOCK_K)). Backend heuristics
+    # for devices whose Triton backend miscompiles negative-step loops with a
+    # runtime start value (e.g. XPU's SPIR-V backend) set this to True.
+    ascending_k: bool = False
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -2487,6 +2493,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
+            ASCENDING_K=self.ascending_k,  # Loop style for mm_plus_mm / bmm (XPU)
             ACC_TYPE=self._get_acc_type(out_dtype),
             num_stages=triton_config.num_stages,
             num_warps=triton_config.num_warps,
@@ -3525,6 +3532,14 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
+    # triton-xpu's SPIR-V backend miscompiles the descending-K loops
+    # (negative-step range with a runtime start value) when the K loop runs
+    # more than one iteration, so render the K loop ascending. triton_mm.py.jinja
+    # already uses an ascending loop and never references ASCENDING_K; this flag
+    # only affects the bmm template (also used by baddbmm via
+    # XPUAddmmTemplateConfigHeuristic).
+    ascending_k = True
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -3596,6 +3611,11 @@ class XPUMMPlusMMTemplateConfigHeuristic(
 ):
     """MM Plus MM template heuristic for XPU"""
 
+    # triton-xpu's SPIR-V backend miscompiles the descending-K loops used by
+    # mm_plus_mm (negative-step range with a runtime start value) whenever the
+    # K loop runs more than one iteration, so render both K loops ascending.
+    ascending_k = True
+
     def __init__(self) -> None:
         super().__init__()
         # Override mm_configs to use mm_plus_mm_configs
@@ -3604,20 +3624,6 @@ class XPUMMPlusMMTemplateConfigHeuristic(
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_plus_mm_configs
-
-
-@register_template_heuristic(mm_plus_mm_xpu_template.uid, "xpu")
-class XPUMMPlusMMXpuTemplateConfigHeuristic(
-    MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
-):
-    """MM Plus MM ascending-K template heuristic for XPU"""
-
-    def __init__(self) -> None:
-        super().__init__()
-        # Override mm_configs to use mm_plus_mm_configs
-        self.mm_configs = self.mm_plus_mm_configs
-        # exhaustive configs not validated for mm_plus_mm yet; match mm_configs
         self.exhaustive_configs = self.mm_plus_mm_configs
 
 
