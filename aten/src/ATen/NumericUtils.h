@@ -31,14 +31,11 @@ template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return ::isnan(val);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  return sycl::isnan(val);
 #else
   return std::isnan(val);
 #endif
-}
-
-template <typename T, std::enable_if_t<c10::is_complex<T>::value, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return std::isnan(val.real()) || std::isnan(val.imag());
 }
 
 template <typename T, std::enable_if_t<std::is_same_v<T, at::Half>, int> = 0>
@@ -85,6 +82,11 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
   return val.isnan();
 }
 
+template <typename T, std::enable_if_t<c10::is_complex<T>::value, int> = 0>
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return at::_isnan(val.real()) || at::_isnan(val.imag());
+}
+
 // std::isinf isn't performant to use on integral types; it will
 // (uselessly) convert to floating point and then do the test.
 // This function is.
@@ -98,6 +100,8 @@ template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 inline C10_HOST_DEVICE bool _isinf(T val) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return ::isinf(val);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  return sycl::isinf(val);
 #else
   return std::isinf(val);
 #endif
@@ -137,7 +141,7 @@ C10_HOST_DEVICE inline T exp(T x) {
   return __expf(x);
 #elif defined(__SYCL_DEVICE_ONLY__)
   // use native::exp fast approximation for peak bandwidth
-  return sycl::native::exp(x);
+  return sycl::native::exp(static_cast<float>(x));
 #else
   return ::exp(x);
 #endif
@@ -145,7 +149,11 @@ C10_HOST_DEVICE inline T exp(T x) {
 
 template <>
 C10_HOST_DEVICE inline double exp<double>(double x) {
+#if defined(__SYCL_DEVICE_ONLY__)
+  return sycl::exp(x);
+#else
   return ::exp(x);
+#endif
 }
 
 template <typename T>
@@ -158,7 +166,7 @@ C10_HOST_DEVICE inline T log(T x) {
   return __logf(x);
 #elif defined(__SYCL_DEVICE_ONLY__)
   // use native::log fast approximation for peak bandwidth
-  return sycl::native::log(x);
+  return sycl::native::log(static_cast<float>(x));
 #else
   return ::log(x);
 #endif
@@ -166,7 +174,11 @@ C10_HOST_DEVICE inline T log(T x) {
 
 template <>
 C10_HOST_DEVICE inline double log<double>(double x) {
+#if defined(__SYCL_DEVICE_ONLY__)
+  return sycl::log(x);
+#else
   return ::log(x);
+#endif
 }
 
 template <typename T>
@@ -180,7 +192,7 @@ C10_HOST_DEVICE inline T log1p(T x) {
   return __logf(1.0f + x);
 #elif defined(__SYCL_DEVICE_ONLY__)
   // use native::log fast approximation for peak bandwidth
-  return sycl::native::log(1.0f + x);
+  return sycl::native::log(1.0f + static_cast<float>(x));
 #else
   return ::log1p(x);
 #endif
@@ -188,7 +200,11 @@ C10_HOST_DEVICE inline T log1p(T x) {
 
 template <>
 C10_HOST_DEVICE inline double log1p<double>(double x) {
+#if defined(__SYCL_DEVICE_ONLY__)
+  return sycl::log1p(x);
+#else
   return ::log1p(x);
+#endif
 }
 
 template <typename T>
@@ -201,7 +217,7 @@ C10_HOST_DEVICE inline T tan(T x) {
   return __tanf(x);
 #elif defined(__SYCL_DEVICE_ONLY__)
   // use native::tan fast approximation for peak bandwidth
-  return sycl::native::tan(x);
+  return sycl::native::tan(static_cast<float>(x));
 #else
   return ::tan(x);
 #endif
@@ -209,7 +225,11 @@ C10_HOST_DEVICE inline T tan(T x) {
 
 template <>
 C10_HOST_DEVICE inline double tan<double>(double x) {
+#if defined(__SYCL_DEVICE_ONLY__)
+  return sycl::tan(x);
+#else
   return ::tan(x);
+#endif
 }
 
 } // namespace at
