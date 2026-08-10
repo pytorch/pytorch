@@ -374,6 +374,7 @@ class IndexingOptions:
     _has_rindex: bool
     index: sympy.Expr
     expand_shape: Sequence[int | str] | None
+    reduction_axes_omitted: bool = False
 
     def has_mask(self) -> bool:
         return bool(self.mask_vars)
@@ -3795,6 +3796,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        allow_reduction_invariant_indexing=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -4185,6 +4187,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape=expand_shape,
             )
 
+        reduction_axes_omitted = False
         if need_dense and not have_dense:
             if self.inside_reduction and self.is_native_matmul:
                 # This avoids full broadcasting (need_dense) when performing native matmul.
@@ -4243,6 +4246,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_str = "[" + ",".join(map(str, expand_list)) + "]"
                 expand_shape = tuple(expand_list)
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+            elif (
+                allow_reduction_invariant_indexing
+                and not config.triton.dense_indexing
+                and not dense_indexing
+                and (
+                    minimal_shape := self._reduction_invariant_indexing_shape(
+                        index,
+                        mask_vars,
+                    )
+                )
+                is not None
+            ):
+                expand_str = "[" + ", ".join(map(str, minimal_shape)) + "]"
+                expand_shape = minimal_shape
+                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+                reduction_axes_omitted = True
             else:
                 expand_str, expand_shape = _get_expand_str()
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
@@ -4273,6 +4292,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             has_rindex,
             index,
             expand_shape=expand_shape,
+            reduction_axes_omitted=reduction_axes_omitted,
         )
 
     def codegen_block_ptr(
@@ -4544,6 +4564,71 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return result_shape
 
+    def _reduction_invariant_indexing_shape(
+        self,
+        index: sympy.Expr,
+        mask_vars: Iterable[str | TritonCSEVariable],
+    ) -> BlockShapeType:
+        """Return a minimal shape for reduction-invariant masked indexing.
+
+        An axis remains singleton only when both the address and every non-range
+        predicate are broadcast on it. Omitting a reduction axis additionally
+        requires a positive logical extent, which permits removing its synthetic
+        range mask. Temporary values participate through their propagated block
+        shapes, so this also covers provably invariant indirect addresses.
+        """
+        if not self.inside_reduction or self._load_mask is None:
+            return None
+
+        # These schedules introduce coordinate scopes outside the block shape
+        # tracked by this proof.
+        if self.cooperative_reduction or self.mix_order_reduction:
+            return None
+
+        active_range_trees = self.active_range_trees()
+        # A combo grid can launch a subkernel because a sibling has a larger grid.
+        # A singleton load still needs one valid pointwise coordinate in that
+        # subkernel, including for axes without a tensor dimension.
+        if self.is_combo_kernel and any(
+            not tree.is_reduction
+            and not V.graph.sizevars.statically_known_gt(tree.numel, sympy.S.Zero)
+            for tree in active_range_trees
+        ):
+            return None
+
+        load_masks = OrderedSet[str | TritonCSEVariable](mask_vars)
+        if self._load_mask:
+            load_masks.add(self._load_mask)
+        shape = self._broadcast_shape_with_masks(
+            TritonSymbols.get_block_shape(index), load_masks
+        )
+        if shape is None:
+            return None
+        if not shape:
+            shape = ("1",) * self.triton_tensor_ndim()
+
+        dense_shape = tuple(self.dense_size_list())
+        if len(shape) != len(dense_shape):
+            return None
+        omitted_reduction = False
+        for tree in active_range_trees:
+            dim = tree.tensor_dim
+            if dim is None or str(shape[dim]) == str(dense_shape[dim]):
+                continue
+            if not tree.is_reduction:
+                if str(shape[dim]) != "1":
+                    return None
+                continue
+            if (
+                str(shape[dim]) != "1"
+                # A zero-length reduction makes the existing dense load fully masked.
+                or not V.graph.sizevars.statically_known_gt(tree.numel, sympy.S.Zero)
+            ):
+                return None
+            omitted_reduction = True
+
+        return tuple(shape) if omitted_reduction else None
+
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
@@ -4804,12 +4889,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index,
             block_ptr=True,
             tma_compatibility_checker=tma_checker,
+            # Lane-shape changes are currently qualified only on CUDA and ROCm.
+            # Other Triton backends retain dense indexing until they are covered.
+            allow_reduction_invariant_indexing=(
+                V.graph.get_current_device_or_throw().type == "cuda"
+            ),
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
-        ):
-            self.has_load_with_contiguous_rdim = True
+        if isinstance(indexing, IndexingOptions):
+            if self._has_stride1_on_rdim(indexing.index):
+                self.has_load_with_contiguous_rdim = True
+            reduction_axes_omitted = indexing.reduction_axes_omitted
+        else:
+            reduction_axes_omitted = False
 
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
@@ -4996,7 +5088,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     ),
                 )
 
-        if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
+        if not self.inside_reduction or (
+            not indexing.has_rmask()
+            and not has_rindex
+            # Narrowed masked loads are emitted in the reduction body and must
+            # not be reused across loop iterations.
+            and not reduction_axes_omitted
+        ):
             self.outside_loop_vars.add(result_var)
 
         return result_var
