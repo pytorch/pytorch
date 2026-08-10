@@ -26,20 +26,27 @@ class TestPlatforms(TestCase):
             platforms.get("does-not-exist")
 
     def test_cuda_caps_only_overrides_underivable_flags(self):
-        # Capability-derived flags are deliberately absent so common_cuda computes
-        # them; only flags reading the build or driver are pinned here.
-        for name in ("linux-cuda-sm80", "linux-cuda-sm86", "linux-cuda-sm90"):
-            caps = platforms.get(name).caps
-            self.assertNotIn("PLATFORM_SUPPORTS_FP8", caps)
-            self.assertNotIn("PLATFORM_SUPPORTS_FLASH_ATTENTION", caps)
-            self.assertTrue(caps["PLATFORM_SUPPORTS_FUSED_SDPA"])
+        # Every other PLATFORM_SUPPORTS_* must be absent so common_cuda computes it
+        # for the simulated capability. A hardcoded copy silently diverges: an
+        # earlier one claimed FP8_GROUPED_GEMM was `sm >= (9, 0)` when the real
+        # predicate is `SM90OrLater and not SM100OrLater`, so B200 results were wrong.
+        underivable = {
+            "PLATFORM_SUPPORTS_FUSED_SDPA",
+            "PLATFORM_SUPPORTS_CK_SDPA",
+            "PLATFORM_SUPPORTS_GREEN_CONTEXT",
+            "PLATFORM_SUPPORTS_WORKQUEUE_CONFIG",
+        }
+        for name in (
+            "linux-cuda-sm80",
+            "linux-cuda-sm86",
+            "linux-cuda-sm90",
+            "linux-cuda-sm100",
+        ):
+            self.assertEqual(set(platforms.get(name).caps), underivable, name)
 
     def test_registry_covers_the_ciflow_runner_capabilities(self):
         self.assertEqual(platforms.get("linux-cuda-sm86").cuda_capability, (8, 6))
         self.assertEqual(platforms.get("linux-cuda-sm100").cuda_capability, (10, 0))
-        # MXFP8 grouped gemm reads the build, so it stays an explicit override.
-        sm100 = platforms.get("linux-cuda-sm100").caps
-        self.assertTrue(sm100["PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM"])
 
     def test_subprocess_env_hides_accelerators(self):
         env = platforms.get("linux-rocm").subprocess_env()
