@@ -643,6 +643,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             else:
                 MAX_NUM_STAGES = 1
+            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
+            # emitted by device-side descriptors.
+            if inductor_meta.get("uses_device_tma"):
+                MAX_NUM_STAGES = 1
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
                 max(num_iters // 4, 1), MAX_NUM_STAGES
             )

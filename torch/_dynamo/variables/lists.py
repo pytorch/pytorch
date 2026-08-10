@@ -55,6 +55,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    GetSet,
     Method,
     ValueMutationNew,
     VariableTracker,
@@ -1388,6 +1389,11 @@ class DequeVariable(CommonListMethodsVariable):
         *CommonListMethodsVariable._nonvar_fields,
     }
 
+    # deque exposes a single read-only getset descriptor, maxlen.
+    tp_getset = {
+        "maxlen": GetSet(lambda self, tx: self.maxlen, None),
+    }
+
     def _rotate(
         self,
         tx: "InstructionTranslatorBase",
@@ -1617,13 +1623,6 @@ class DequeVariable(CommonListMethodsVariable):
             ]
         )
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "maxlen":
-            return self.maxlen
-        return super().getattro_impl(tx, name)
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1635,6 +1634,23 @@ class DequeVariable(CommonListMethodsVariable):
         # below (which uses the pre-call maxlen captured here).
         if name == "__init__":
             return self.tp_init_impl(tx, args, kwargs)
+
+        if name == "__setattr__":
+            # deque has no __dict__, so every attribute write raises. A name
+            # backed by a getset descriptor (maxlen) is read-only; anything else
+            # is simply absent.
+            attr_name = args[0].as_python_constant()
+            if self.lookup_tp_getset_member(attr_name) is not None:
+                msg = (
+                    f"attribute '{attr_name}' of 'collections.deque' objects "
+                    "is not writable"
+                )
+            else:
+                msg = (
+                    f"'collections.deque' object has no attribute '{attr_name}' "
+                    "and no __dict__ for setting new attributes"
+                )
+            raise_observed_exception(AttributeError, tx, args=[msg])
 
         if name == "__reversed__":
             # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
