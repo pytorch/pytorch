@@ -51,7 +51,8 @@
     D = D + (rk[:, None] * stride_dk + rbn[None, :] * stride_dn)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    {% if ASCENDING_K %}
+    {% if ASCENDING_K|default(false) %}
+    # XPU renders the K loops ascending (see MMTemplateConfigMixin.ascending_k).
     for k_idx in range(0, tl.cdiv(K1, BLOCK_K)):
         # First matmul with A @ B
         if EVEN_K:
@@ -75,7 +76,7 @@
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
-    {% if ASCENDING_K %}
+    {% if ASCENDING_K|default(false) %}
     for k_idx in range(0, tl.cdiv(K1, BLOCK_K)):
         # Second matmul with C @ D
         if EVEN_K:

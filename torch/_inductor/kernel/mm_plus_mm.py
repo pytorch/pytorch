@@ -30,12 +30,8 @@ aten_mm_plus_mm = ExternKernelChoice(
     torch.ops.inductor._mm_plus_mm, "torch::inductor::_mm_plus_mm"
 )
 
-# The mm_plus_mm Triton template. The triton-xpu SPIR-V backend miscompiles
-# the descending-K loop style (negative-step range with a runtime start
-# value) when the K loop runs more than one iteration, so the XPU heuristic
-# sets the ASCENDING_K template kwarg (see XPUMMPlusMMTemplateConfigHeuristic)
-# and both K loops render as ascending for XPU. CUDA and ROCm keep the
-# descending-K loop unchanged.
+# The mm_plus_mm Triton template. XPU renders the K loops ascending via the
+# ASCENDING_K kwarg (see MMTemplateConfigMixin.ascending_k).
 mm_plus_mm_template = TritonTemplate(
     name="mm_plus_mm",
     grid=mm_grid,
@@ -86,9 +82,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1, check_max_autotune=False):
-        # One template for all devices: the XPU heuristic selects the
-        # ascending-K loop style via the ASCENDING_K template kwarg so
-        # autotune cannot pick a miscompiling kernel on XPU.
+        # One template; XPU renders it ascending via ASCENDING_K (see ascending_k).
         templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates

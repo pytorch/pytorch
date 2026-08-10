@@ -2154,10 +2154,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ]
     preprocess_mm_configs: Callable[..., Generator[TritonConfig, None, None]]
 
-    # Whether to render the K loop in ascending order (range(0, tl.cdiv(K, BLOCK_K)))
-    # instead of the descending order (range(K, 0, -BLOCK_K)). Backend heuristics
-    # for devices whose Triton backend miscompiles negative-step loops with a
-    # runtime start value (e.g. XPU's SPIR-V backend) set this to True.
+    # Whether to render the K loop ascending (range(0, tl.cdiv(K, BLOCK_K)))
+    # instead of descending (range(K, 0, -BLOCK_K)). XPU's Triton->SPIR-V
+    # backend miscompiles the descending form when the loop runs more than one
+    # iteration, so the XPU heuristics set this to True. Off XPU the flag stays
+    # False and ASCENDING_K is never injected (see get_extra_kwargs), so those
+    # kernels are unaffected.
     ascending_k: bool = False
 
     def get_extra_kwargs(
@@ -2187,14 +2189,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
         }
-        # Only the bmm / baddbmm / mm_plus_mm templates render the K loop
-        # conditionally via ASCENDING_K; plain mm and the other mm-family
-        # templates never reference it. Inject the flag here (op-aware) rather
-        # than in the shared options dict so the other templates' cache keys
-        # stay unchanged. The value is True on XPU, whose Triton->SPIR-V backend
-        # miscompiles the descending-K loop (see ascending_k).
-        if op_name in ("bmm", "baddbmm", "mm_plus_mm"):
-            extra_kwargs["ASCENDING_K"] = self.ascending_k
+        # The key is only injected on XPU (see ascending_k). Off XPU it is
+        # absent entirely, so the bmm/mm_plus_mm kernels get no ASCENDING_K
+        # constexpr define and no codegen cache-key change.
+        if self.ascending_k and op_name in ("bmm", "baddbmm", "mm_plus_mm"):
+            extra_kwargs["ASCENDING_K"] = True
         return extra_kwargs
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
@@ -3540,12 +3539,8 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
-    # triton-xpu's SPIR-V backend miscompiles the descending-K loops
-    # (negative-step range with a runtime start value) when the K loop runs
-    # more than one iteration, so render the K loop ascending. triton_mm.py.jinja
-    # already uses an ascending loop and never references ASCENDING_K; this flag
-    # only affects the bmm template (also used by baddbmm via
-    # XPUAddmmTemplateConfigHeuristic).
+    # See MMTemplateConfigMixin.ascending_k. Applies to the bmm template
+    # (also used by baddbmm via XPUAddmmTemplateConfigHeuristic).
     ascending_k = True
 
     def __init__(self) -> None:
@@ -3619,9 +3614,7 @@ class XPUMMPlusMMTemplateConfigHeuristic(
 ):
     """MM Plus MM template heuristic for XPU"""
 
-    # triton-xpu's SPIR-V backend miscompiles the descending-K loops used by
-    # mm_plus_mm (negative-step range with a runtime start value) whenever the
-    # K loop runs more than one iteration, so render both K loops ascending.
+    # See MMTemplateConfigMixin.ascending_k.
     ascending_k = True
 
     def __init__(self) -> None:

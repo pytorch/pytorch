@@ -370,10 +370,14 @@ class TestSelectAlgorithm(TestCase):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(
+        max_autotune_gemm_backends="TRITON", autotune_fallback_to_aten=False
+    )
     def test_mm_plus_mm_xpu_ascending_k_loop(self):
-        # Regression test for the triton-xpu SPIR-V backend miscompiling
-        # descending-K loops (range(K1, 0, -BLOCK_K)) whenever the K loop runs
-        # more than one iteration. XPU must render both K loops ascending.
+        # Regression: triton-xpu miscompiles descending-K loops
+        # (range(K1, 0, -BLOCK_K)) when the K loop runs more than one iteration,
+        # so XPU must render both mm_plus_mm K loops ascending.
         def foo(a, b, c, d):
             return (a @ b) + (c @ d)
 
@@ -381,36 +385,29 @@ class TestSelectAlgorithm(TestCase):
         b = torch.randn(512, 512, device=GPU_TYPE)
         c = torch.randn(512, 512, device=GPU_TYPE)
         d = torch.randn(512, 512, device=GPU_TYPE)
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "autotune_fallback_to_aten": False,
-                "triton.native_matmul": False,
-            }
-        ):
-            _, (code,) = run_and_get_code(torch.compile(foo), a, b, c, d)
-        FileCheck().check("tl.cdiv").check_not("range(K1, 0, -").run(code)
+        _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
+        code = code[0]
+        # K1 is the mm_plus_mm template's K variable (plain mm uses K), so its
+        # presence proves the fused template was selected and that it ascended.
+        self.assertIn("tl.cdiv(K1, BLOCK_K)", code)
+        FileCheck().check_not("range(K1, 0, -").run(code)
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(
+        max_autotune_gemm_backends="TRITON", autotune_fallback_to_aten=False
+    )
     def test_bmm_xpu_ascending_k_loop(self):
-        # Same regression guard for bmm (also used by baddbmm): XPU renders
-        # the K loop ascending instead of descending.
+        # Same regression guard for bmm (also used by baddbmm).
         def foo(a, b):
             return torch.bmm(a, b)
 
         a = torch.randn(2, 128, 128, device=GPU_TYPE)
         b = torch.randn(2, 128, 128, device=GPU_TYPE)
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "autotune_fallback_to_aten": False,
-                "triton.native_matmul": False,
-            }
-        ):
-            _, (code,) = run_and_get_code(torch.compile(foo), a, b)
-        FileCheck().check("tl.cdiv").check_not("range(K, 0, -").run(code)
+        _, code = run_and_get_code(torch.compile(foo), a, b)
+        code = code[0]
+        self.assertIn("triton_tem_fused_bmm", code)
+        FileCheck().check_not("range(K, 0, -").run(code)
 
     @patches
     def test_mm_dup_args(self):

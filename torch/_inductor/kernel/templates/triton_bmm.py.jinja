@@ -48,10 +48,8 @@
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q_clamped*stride_bq)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    {% if ASCENDING_K %}
-    # triton-xpu's SPIR-V backend miscompiles the descending-K loop
-    # (negative-step range with a runtime start value) when the K loop runs
-    # more than one iteration, so XPU renders this loop ascending.
+    {% if ASCENDING_K|default(false) %}
+    # XPU renders the K loop ascending (see MMTemplateConfigMixin.ascending_k).
     for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
         if EVEN_K:
             a = tl.load(A)
