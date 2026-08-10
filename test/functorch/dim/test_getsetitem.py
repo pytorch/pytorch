@@ -4,7 +4,7 @@ from functorch.dim import Dim, DimList, dims, Tensor
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    TestCase
+    TestCase,
 )
 
 class TestGetSetItem(TestCase):

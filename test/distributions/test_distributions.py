@@ -115,6 +115,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
+    onlyAccelerator,
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
@@ -125,7 +126,6 @@ from torch.testing._internal.common_utils import (
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
-    onlyAccelerator,
     HardwareClassification,
     TEST_XPU,
     TestCase,
@@ -1335,6 +1335,8 @@ class DistributionsTestCase(TestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributions(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch.set_default_device(self.get_primary_device())
@@ -4556,6 +4558,7 @@ class TestDistributions(DistributionsTestCase):
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
     def test_default_device(self, device):
         device_type = torch.device(device).type
         self.assertEqual(torch.get_default_device().type, device_type)
@@ -4633,6 +4636,7 @@ class TestDistributionsDevice(DistributionsTestCase):
             torch.set_default_dtype(saved_dtype)
 
     @onlyAccelerator
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample_on_device(self, device):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
@@ -4707,6 +4711,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
 
     @onlyAccelerator
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_shape_on_device(self, device):
         alpha = torch.randn(2, 3, device=device).exp().requires_grad_()
         beta = torch.randn(2, 3, device=device).exp().requires_grad_()
@@ -4728,6 +4733,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
     @onlyAccelerator
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_sample_on_device(self, device):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -4766,10 +4772,9 @@ class TestDistributionsDevice(DistributionsTestCase):
             )
             self.assertEqual(actual_log_prob[i], expected_log_prob, atol=1e-3, rtol=0)
 
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
-    @dtypesIfCUDA(torch.double)
-    @dtypesIfXPU(torch.double)
+    @skipMPS
     def test_beta_underflow(self, dtype, device):
         # For low values of (alpha, beta), the gamma samples can underflow
         # with float32 and result in a spurious mode at 0.5. To prevent this,
@@ -4785,11 +4790,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
         frac_ones = float((beta_samples > 0.9).sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
-        dev_type = torch.device(device).type
-        # Use atol=0.12 for accelerated devices (cuda/xpu/mps/npu etc.), atol=0.05 for CPU.
-        atol = 0.12 if dev_type != "cpu" else 0.05
-        self.assertEqual(frac_zeros, 0.5, atol=atol, rtol=0)
-        self.assertEqual(frac_ones, 0.5, atol=atol, rtol=0)
+        self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
+        self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
 
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
@@ -7346,6 +7348,7 @@ class TestJit(DistributionsTestCase):
 instantiate_device_type_tests(
     TestDistributionsDevice,
     globals(),
+    allow_mps=True,
 )
 
 if __name__ == "__main__" and torch._C.has_lapack:
