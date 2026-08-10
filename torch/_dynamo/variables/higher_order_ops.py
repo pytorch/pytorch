@@ -4427,6 +4427,15 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self.allow_side_effects = (
             torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
+        if torch._functorch.config.checkpoint_via_invoke_subgraph:
+            # On this path the region stays a HOP (not desugared), so it must
+            # honor invoke_subgraph's aliasing contract: inputs/outputs may not
+            # alias, and aliased intermediates are filtered rather than returned.
+            # (allow_side_effects intentionally keeps checkpoint's own semantics
+            # above -- driven by skip_fwd_side_effects_in_bwd_under_checkpoint --
+            # rather than invoke_subgraph's always-True.)
+            self.supports_aliasing = False
+            self.filter_aliased_intermediates = True
 
     def _call_function(
         self,
@@ -4451,17 +4460,48 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                     f"checkpoint not implemented for {type(ctx)} context_fn"
                 )
 
+        if (
+            context_fn is not None
+            and torch._functorch.config.checkpoint_via_invoke_subgraph
+        ):
+            # Selective activation checkpointing routes the policy through the
+            # tag path's re-trace; the invoke_subgraph path does not consume it
+            # yet, so reject rather than silently ignoring the policy.
+            raise NotImplementedError(
+                "context_fn (selective activation checkpointing) is not yet "
+                "supported with torch._functorch.config.checkpoint_via_invoke_subgraph; "
+                "disable the flag or remove context_fn."
+            )
+
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
+
+        if torch._functorch.config.checkpoint_via_invoke_subgraph:
+            # determinism_check / debug / early_stop only affect the eager
+            # checkpoint impl, which the invoke_subgraph path bypasses. Reject
+            # non-default values (this also catches invalid determinism_check
+            # strings that eager would reject) rather than silently ignoring them.
+            for name, default in (
+                ("determinism_check", "default"),
+                ("debug", False),
+                ("early_stop", True),
+            ):
+                opt = checkpoint_kwargs.get(name)
+                if opt is not None and opt.as_python_constant() != default:
+                    raise NotImplementedError(
+                        f"checkpoint {name} is not supported with "
+                        "torch._functorch.config.checkpoint_via_invoke_subgraph; use "
+                        "the default or disable the flag."
+                    )
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
         (
             p_args,
-            _,
+            p_kwargs,
             example_value,
             _body_r,
             checkpointed_gmod,
-            _,
+            body_name,
             body_graph_output_vts,
             _,
         ) = self.create_wrapped_node(
@@ -4473,6 +4513,30 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         )
         if context_fn is not None:
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
+
+        if torch._functorch.config.checkpoint_via_invoke_subgraph:
+            # Route the region through invoke_subgraph so it stays a shared HOP
+            # through the partitioner (see config docs). invoke_subgraph's
+            # autograd prefixes the identifier fw/bw; run_joint_graph_passes_on_hops
+            # then partitions the region and, keyed off the `_checkpoint_region`
+            # mark below, rewrites the backward to re-invoke the shared forward
+            # subgraph. The mark also makes the single-use inlining pass preserve
+            # the region as a HOP -- a checkpoint region is single-call at trace
+            # time but must survive to the partitioner for recompute-as-call.
+            # checkpoint_kwargs (determinism_check, debug) only affect the eager
+            # checkpoint impl on the tag path and are inert here; preserve_rng_state
+            # is moot since RNG regions are rejected downstream.
+            checkpointed_gmod.meta["_checkpoint_region"] = True
+            p_args = (p_args[0], body_name, *p_args[1:])
+            return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
+                tx,
+                torch._higher_order_ops.invoke_subgraph,
+                tuple(p_args),
+                p_kwargs,
+                example_value,
+                _body_r,
+                body_graph_output_vts,
+            )
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 

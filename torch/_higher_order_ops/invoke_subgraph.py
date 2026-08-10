@@ -275,9 +275,22 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
+        # Proxy is allowed because symbolically re-tracing a GraphModule replays
+        # its calls with proxies rather than values -- notably when unpickling a
+        # cached graph (_deserialize_graph_module), where rejecting them makes
+        # every cache load fail and silently disables caching for any graph
+        # holding an invoke_subgraph call.
         if not all(
             isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+                o,
+                (
+                    torch.Tensor,
+                    int,
+                    torch.SymInt,
+                    torch.Generator,
+                    FakeScriptObject,
+                    torch.fx.Proxy,
+                ),
             )
             or is_custom_class(type(o))
             for o in operands
@@ -626,6 +639,9 @@ def get_output_metadata(subgraph, *operands):
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
 
+    # The one signal a below-autograd trace can get wrong; see the check below.
+    has_tensor_out_without_grad = False
+
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
@@ -648,9 +664,24 @@ def get_output_metadata(subgraph, *operands):
             # Check if tensor requires grad from metadata
             if hasattr(val, "requires_grad") and not val.requires_grad:
                 output_metadata.indexes_with_no_grad.add(idx)
+                has_tensor_out_without_grad = True
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
+
+    # A tensor's requires_grad=False is unreliable when the subgraph was traced
+    # below autograd (make_fx detaches every output), and believing it builds the
+    # backward with zero tangents. Any recorded True means grad-ness was tracked,
+    # so only re-derive by execution when nothing claims grad yet an operand does.
+    if (
+        has_tensor_out_without_grad
+        and len(output_metadata.indexes_with_no_grad) == output_metadata.num_fw_outs
+        and any(
+            isinstance(operand, torch.Tensor) and operand.requires_grad
+            for operand in operands
+        )
+    ):
+        return _get_output_metadata_by_execution(subgraph, *operands)
 
     return output_metadata
 
@@ -1317,21 +1348,24 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # module (set by InvokeSubgraphAutogradOp.backward) but may be wrapped
     # by FunctionalizeCtxWrapper — unwrap to find it.
     nested_config = None
+    # Marks regions lowered from torch.utils.checkpoint (see the front-door in
+    # CheckpointHigherOrderVariable). Propagated to node meta so downstream
+    # passes (run_joint_graph_passes_on_hops) can scope AC-specific handling to
+    # checkpoint regions rather than all invoke_subgraph HOPs.
+    is_checkpoint_region = False
     orig_subgraph = (
         subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
     )
     for gm in (graph, orig_subgraph):
-        if (
-            isinstance(gm, torch.fx.GraphModule)
-            and hasattr(gm, "meta")
-            and "nested_region_config" in gm.meta
-        ):
-            nested_config = gm.meta["nested_region_config"]
-            break
+        if isinstance(gm, torch.fx.GraphModule) and hasattr(gm, "meta"):
+            if nested_config is None and "nested_region_config" in gm.meta:
+                nested_config = gm.meta["nested_region_config"]
+            if gm.meta.get("_checkpoint_region"):
+                is_checkpoint_region = True
 
     call_id = _current_invoke_subgraph_call_id()
 
-    if nested_config is not None or call_id is not None:
+    if nested_config is not None or call_id is not None or is_checkpoint_region:
         node = out_proxy.node
         if "custom" not in node.meta:
             node.meta["custom"] = {}
@@ -1339,6 +1373,8 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             node.meta["custom"]["nested_region_config"] = nested_config
         if call_id is not None:
             node.meta["custom"]["call_id"] = call_id
+        if is_checkpoint_region:
+            node.meta["custom"]["_checkpoint_region"] = True
 
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
