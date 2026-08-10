@@ -459,7 +459,7 @@ class TpReprTests(TestCase):
     def test_repr_of_hash_of_compile_time_object(self):
         # hash() returning id(self) on a sourceless object yields a
         # FakeIdVariable (HASH kind); repr() must route through its
-        # repr_impl and mirror int.__repr__ (a decimal string).
+        # tp_repr_impl and mirror int.__repr__ (a decimal string).
         class Obj:
             def __hash__(self):
                 return id(self)
