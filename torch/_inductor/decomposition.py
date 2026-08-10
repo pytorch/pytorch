@@ -935,17 +935,18 @@ def uniform(
     stride: list[int | torch.SymInt],
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
+    storage_len = utils.compute_required_storage_length(
+        cast(list[int], shape), cast(list[int], stride), 0
+    )
+    sample_shape: list[int | torch.SymInt] = [storage_len]
     if generator is None:
-        rand_samples = torch.rand(shape, dtype=dtype, device=device)
+        rand_samples = torch.rand(sample_shape, dtype=dtype, device=device)
     else:
         rand_samples = torch.rand(
-            shape, generator=generator, dtype=dtype, device=device
+            sample_shape, generator=generator, dtype=dtype, device=device
         )
     res = (high - low) * rand_samples + low
-
-    if tuple(stride) != utils.make_contiguous_strides_for(cast(list[int], shape)):
-        return res.as_strided(shape, stride)
-    return res
+    return res.as_strided(shape, stride)
 
 
 @register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)

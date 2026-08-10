@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import operator
 import sys
+from unittest import mock
 
 import torch
 import torch._dynamo.config
@@ -1079,6 +1080,47 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TorchRuntimeError, "too few dimensions"):
             opt_fn(t)
 
+    def test_fake_tensor_runtime_error_prim_meta_impl_not_caught(self):
+        op = torch.ops.prims.sin.default
+
+        def fn(t):
+            try:
+                return op(t)
+            except RuntimeError:
+                return t.cos()
+
+        t = torch.randn(2, 3)
+        with mock.patch.object(op, "prim_meta_impl", lambda t: t.expand(2)):
+            self.assertEqual(fn(t), t.sin())
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(TorchRuntimeError, "too few dimensions"):
+                opt_fn(t)
+
+    def test_fake_tensor_runtime_error_unsafe_fallback_not_caught(self):
+        lib = torch.library.Library("vision", "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        lib.define("fallback_user_check(Tensor t) -> Tensor")
+
+        def fallback_user_check(t):
+            if t.sum().item() == 0:
+                return torch._refs.expand(t, 2)
+            return t.clone()
+
+        lib.impl("fallback_user_check", fallback_user_check, "CPU")
+        op = torch.ops.vision.fallback_user_check.default
+
+        def fn(t):
+            try:
+                op(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.ones(2, 3)
+        self.assertEqual(fn(t), t.cos())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(TorchRuntimeError, "too few dimensions"):
+            opt_fn(t)
+
     def test_fake_tensor_runtime_error_check_classification(self):
         def check_error(check, message):
             with self.assertRaises(RuntimeError) as cm:
@@ -1176,6 +1218,35 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             with self.assertRaisesRegex(TorchRuntimeError, "real kernel rejected"):
+                opt_fn(t)
+
+    def test_fake_tensor_runtime_error_propagated_real_check_not_caught(self):
+        @torch.library.custom_op(
+            "test_dynamo::propagated_real_user_check", mutates_args=()
+        )
+        def propagated_real_user_check(t: torch.Tensor) -> torch.Tensor:
+            if t.sum().item() > 0:
+                return torch._refs.expand(t, 2)
+            return t.clone()
+
+        @propagated_real_user_check.register_fake
+        def _(t):
+            return t.clone()
+
+        def fn(t):
+            try:
+                propagated_real_user_check(t)
+            except RuntimeError:
+                return t.sin()
+            return t.cos()
+
+        t = torch.ones(2, 3)
+        self.assertEqual(fn(t), t.sin())
+        self.assertEqual(fn(-t), (-t).cos())
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(TorchRuntimeError, "too few dimensions"):
                 opt_fn(t)
 
     def test_fake_tensor_runtime_error_without_try_except(self):

@@ -362,9 +362,9 @@ def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
 
 
 def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
-    """Resolve the arity flags for method `name` from the VT's runtime
-    python_type()."""
-    return _flags_from_ml_flags(maybe_get_python_type(vt), name)
+    """Resolve the arity flags for method `name` from the VT's arity-reference
+    type (see VariableTracker.method_flags_type)."""
+    return _flags_from_ml_flags(vt.method_flags_type(), name)
 
 
 @dataclasses.dataclass(slots=True)
@@ -425,6 +425,20 @@ def getset_build(
 ) -> Callable[..., VariableTracker]:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
+
+
+def unsupported_attr(name: str) -> Callable[..., VariableTracker | None]:
+    def graph_break(
+        vt: VariableTracker, tx: InstructionTranslatorBase
+    ) -> VariableTracker | None:
+        unimplemented(
+            gb_type="Unsupported attribute",
+            context=f"attr_unsupported {vt} {name}",
+            explanation=f"{type(vt).__name__} does not support attribute '{name}'",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
+    return graph_break
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1640,6 +1654,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
 
+    def method_flags_type(self) -> type:
+        """Type whose CPython ml_flags define this VT's tp_methods arities
+        (see _derive_method_flags). Defaults to python_type(); a VT whose
+        python_type() is a pure-Python stand-in without C ml_flags (e.g.
+        OrderedSet) overrides this to the builtin whose method arities it
+        mirrors, so MethodFlags still enforces arity."""
+        return maybe_get_python_type(self)
+
     # fields to leave unmodified in apply()
     _nonvar_fields = {
         "value",
@@ -1776,6 +1798,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return "<unknown type>"
         except NotImplementedError:
             return "<unknown type>"
+
+    def python_qualified_name(self) -> str:
+        """
+        Equivalent to _PyType_GetFullyQualifiedName
+
+        See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+        """
+        try:
+            type_ = self.python_type()
+        except NotImplementedError:
+            return "<unknown type>"
+        # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
+        # (and not execute user code)
+        mod = type_.__module__
+        qn = type_.__qualname__
+        if mod not in ("__main__", "builtins"):
+            return f"{mod}.{qn}"
+        else:
+            return qn
 
     def as_python_constant(self) -> Any:
         """For constants"""

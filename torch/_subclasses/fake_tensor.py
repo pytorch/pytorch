@@ -2938,7 +2938,10 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
             try:
-                real_out = func(*real_args, **real_kwargs)
+                # This auxiliary real execution may depend on input data and
+                # cannot establish provenance for fake-tensor failures.
+                with torch._suppress_torch_check_user_error():
+                    real_out = func(*real_args, **real_kwargs)
             except ZeroDivisionError as exc:
                 # we shouldn't broadly catch all errors here;
                 # some come from real-kernel mutation/aliasing checks we want to run.
@@ -3119,7 +3122,8 @@ class FakeTensorMode(TorchDispatchMode):
             and hasattr(func, "prim_meta_impl")
             and not stride_incorrect_op(func)
         ):
-            with self:
+            # prim_meta_impl is a mutable, fake-only registration boundary.
+            with self, torch._suppress_torch_check_user_error():
                 return maybe_propagate_real_tensors(
                     func.prim_meta_impl(*args, **kwargs)
                 )
@@ -3617,7 +3621,10 @@ def run_fallback_kernel(
         flat_args = [to_real_tensor(a) for a in flat_args]
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
 
-        r = func(*args, **kwargs)
+        # The fallback runs on fabricated zero tensors, so its failures cannot
+        # establish eager-input provenance for user exception handling.
+        with torch._suppress_torch_check_user_error():
+            r = func(*args, **kwargs)
 
     storages: set[_StoragePointer] = set()
 
