@@ -1857,17 +1857,18 @@ def get_tma_workspace_arg(
     )
 
 
-def get_default_kpack(block_k: int = 16) -> int:
+def get_default_kpack() -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
-        return 1
-    return 2
+    # Only ROCM gfx942 supports kpack > 1, Triton Compiler takes it as 1 for other Archs
+    # Align it up here to get accurate kpack for Non-gfx942 Archs
+    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName:
+        return 2
+    return 1
 
 
-# MFMA K-extent (kdim) for the CDNA "16x16" and "32x32" MMA families, keyed by
-# (element_byte_width, matrix_instr_nonkdim). Values from the gfx942/gfx950
-# V_MFMA_* ISA table.
+# K-extent (kdim) of the gfx942 (CDNA3) MFMA instruction, keyed by
+# (element_byte_width, matrix_instr_nonkdim).
 _MFMA_KDIM = {
     # nonkdim == 16 : 16x16x{K}
     (4, 16): 4,  # f32      -> 16x16x4
@@ -1881,13 +1882,7 @@ _MFMA_KDIM = {
 
 
 def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
-    """K-extent of the selected MFMA instruction.
-
-    Returns None if the (dtype_size, matrix_instr_nonkdim) pair is unknown, so
-    callers can fall back to a conservative bound. Byte width disambiguates every
-    supported case except tf32/xf32 (both 4-byte); callers that care about tf32
-    must key on the real dtype instead.
-    """
+    """gfx942 MFMA K-extent, None for an unknown (dtype_size, nonkdim) pair."""
     return _MFMA_KDIM.get((dtype_size, matrix_instr_nonkdim))
 
 
