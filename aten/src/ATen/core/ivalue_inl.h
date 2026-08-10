@@ -1303,7 +1303,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       }
       oss << devices[idx];
     }
-    return oss.str();
+    return std::move(oss).str();
   }
 
   static c10::DeviceType getTypeOfDevices(
@@ -1757,7 +1757,6 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
-DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
 DEFINE_TO(c10::SymFloat, toSymFloat)

@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, overload, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -13,9 +14,13 @@ from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -305,7 +310,7 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
@@ -317,15 +322,15 @@ def _set_compilation_env():
     # but it exposes some bugs in existing tests so we have to have a temporary flag to control
     # the behavior, which allows dynamo to store an empty graph for a frame without falling back to eager
     try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
+        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch.fx._symbolic_trace._set_is_fx_tracing(False)
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch.fx._symbolic_trace._set_is_fx_tracing(_old_is_tracing)
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
@@ -334,8 +339,8 @@ def _set_compilation_env():
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        if isinstance(inp, FakeTensor):
-            fake_mode_det = inp.fake_mode
+        if is_fake_tensor(inp):
+            fake_mode_det = maybe_get_fake_mode(inp)
             break
 
     fake_mode: AbstractContextManager = nullcontext()
@@ -455,7 +460,7 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
@@ -465,14 +470,14 @@ def _collect_fake_inputs(inputs):
                             unwrapped_input = getattr(val, attr_name)
                             if not isinstance(unwrapped_input, torch.Tensor):
                                 continue
-                            if not isinstance(unwrapped_input, FakeTensor):
+                            if not is_fake_tensor(unwrapped_input):
                                 raise AssertionError(
                                     f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
                                 )
                             inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor, got {type(val)}"
                             )
@@ -572,11 +577,24 @@ def clone_outputs_aliasing_inputs(args):
     return maybe_clone
 
 
+def query_requires_grad(t: torch.Tensor) -> bool:
+    """requires_grad of ``t``, looking through a functional wrapper.
+
+    A FunctionalTensor does not carry the autograd metadata of the tensor it
+    wraps, so asking it directly reports False for something that does require
+    grad. This matters when the joint is traced with functionalization active.
+    """
+    if torch._is_functional_tensor(t):
+        t = torch._from_functional_tensor(t)
+    return t.requires_grad
+
+
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and query_requires_grad(ret))
+            for ret in fw_out
         ]
 
     return fw_with_masks
@@ -598,12 +616,7 @@ def prepare_fw_with_masks_all_requires_grad(fn):
                 fw_out,
             )
 
-        def _query_requires_grad(t: torch.Tensor) -> bool:
-            if torch._is_functional_tensor(t):
-                t = torch._from_functional_tensor(t)
-            return t.requires_grad
-
-        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
+        return fw_out, pytree.tree_map_only(torch.Tensor, query_requires_grad, fw_out)
 
     return fw_with_masks
 
@@ -795,7 +808,7 @@ def _stack_pytree(pytrees):
 def save_values_for_backward(ctx, args):
     if not all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None), FakeScriptObject))
-        or is_opaque_type(type(arg))
+        or is_custom_class(type(arg))
         for arg in args
     ):
         raise AssertionError(f"Invalid arg types in {args}")
@@ -947,8 +960,15 @@ def get_dummy_aot_autograd_config():
     )
 
 
-# Slices off the first element of a given dimension
+# Slices off the first element of a given dimension. Used to build a
+# representative single slice for subgraph tracing of control-flow ops.
+# When `dim` has size 0 (e.g. a zero-length scan) there is no real slice to
+# take, so return an uninitialized tensor with `dim` removed.
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    if t.shape[dim] == 0:
+        shape = list(t.shape)
+        del shape[dim]
+        return t.new_zeros(shape)
     return torch.select_copy(t, dim, 0)
 
 
@@ -1132,23 +1152,36 @@ def check_input_alias_and_mutation_return_outputs(
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
+# Set skip_cache=True for HOPs that should not be cached in FakeTensorMode
+# (previously these ops were registered with .py_impl(FakeTensorMode)) and
+# were never cached so we are just preserving original behaviour
+hops_that_skip_faketensor_cache: set[torch._ops.OpOverload] = set()
+
 
 F = TypeVar("F", bound=Callable)
+_P = ParamSpec("_P")
 
 
 @overload
-def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
+def register_fake(
+    hop, fn: None = None, *, skip_cache: bool = ...
+) -> Callable[[F], F]: ...
 
 
 @overload
-def register_fake(hop, fn: F) -> F: ...
+def register_fake(hop, fn: F, *, skip_cache: bool = ...) -> F: ...
 
 
-def register_fake(hop, fn=None):
+def register_fake(hop, fn=None, *, skip_cache=False):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
     register_fake utility for the custom ops. The registered function is called
     inside the fake_tensor _dispatch_impl.
+
+    Set skip_cache=True to keep a HOP's fake output out of the FakeTensorMode
+    cache -- either to preserve the historical uncached behavior of
+    py_impl(FakeTensorMode), or because its outputs alias in ways the cache
+    cannot reconstruct (e.g. auto_functionalized).
     """
     if hop in registered_hop_fake_fns:
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
@@ -1159,6 +1192,8 @@ def register_fake(hop, fn=None):
         redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
+        if skip_cache:
+            hops_that_skip_faketensor_cache.add(hop)
         return func
 
     if fn is None:
@@ -1186,34 +1221,51 @@ class SubgraphCallableWrapper:
 
 
 class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
-    """
-    Wraps a subgraph with functionalization context for the AOT Dispatcher
-    metadata collection pass.
+    """Functionalizes a subgraph and optionally returns selected input updates.
+
+    Each update is a new tensor; the original input is not mutated.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
-    def __init__(self, ctx, subgraph):
+    def __init__(self, ctx, subgraph, mutated_input_indices=()):
         super().__init__(subgraph, subgraph)
         self.ctx = ctx
+        self.mutated_input_indices = mutated_input_indices
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        def append_mutated_inputs(fn):
+            if not self.mutated_input_indices:
+                return fn
+
+            def wrapped(*args, **kwargs):
+                inputs = args[0] if self._boxed_call else args
+                # Snapshot before a boxed GraphModule clears its input list.
+                mutated_inputs = tuple(inputs[i] for i in self.mutated_input_indices)
+                # Dynamo normalizes invoke_subgraph outputs to tuples.
+                return (*fn(*args, **kwargs), *mutated_inputs)
+
+            return wrapped
+
         if isinstance(self.subgraph, torch.fx.GraphModule):
             if self._boxed_call:
                 # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                functionalized = self.ctx.functionalize(
+                    append_mutated_inputs(self.subgraph)
+                )
                 if len(args) == 1 and isinstance(args[0], list):
-                    return self.ctx.functionalize(self.subgraph)(args[0])
-                return self.ctx.functionalize(self.subgraph)(list(args))
+                    return functionalized(args[0])
+                return functionalized(list(args))
             else:
                 # Running graph with interpreter is needed for propagating the stack_trace
                 with fx_traceback.preserve_node_meta():
                     return self.ctx.functionalize(
-                        torch.fx.Interpreter(self.subgraph).run
+                        append_mutated_inputs(torch.fx.Interpreter(self.subgraph).run)
                     )(*args, **kwargs)
-        functionalized = self.ctx.functionalize(self.subgraph)
+        functionalized = self.ctx.functionalize(append_mutated_inputs(self.subgraph))
         if self._boxed_call:
             if len(args) == 1 and isinstance(args[0], list):
                 return functionalized(args[0])
@@ -1410,3 +1462,37 @@ def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
 def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
+
+
+def create_fn_remove_none(
+    fn: Callable[_P, Any],
+) -> tuple[Callable[_P, list[torch.Tensor]], list[bool]]:
+    """Wrap ``fn`` so its non-Tensor output leaves are dropped, and expose the
+    mask of which leaves survived.
+
+    Returns ``(wrapped, mask)``:
+      - ``wrapped(*args)`` calls ``fn(*args)``, flattens the pytree result and
+        returns only its Tensor leaves as a list.
+      - ``mask`` is a list populated whenever ``wrapped`` runs -- one bool per
+        leaf, ``True`` where the leaf is a Tensor. Callers should read it
+        AFTER invoking ``wrapped`` (typically indirectly via
+        ``materialize_as_graph``), then pass it to ``fill_none_with_masks``
+        to reconstruct the full output with ``None`` at the dropped slots.
+
+    Used in HOP autograd impls in two places:
+      - Around a forward branch that may return non-Tensor leaves (None,
+        int/SymInt), so ``create_bw_fn``'s joint sees a tensor-only signature.
+      - Around the resulting backward joint whose grad list contains ``None``
+        at non-differentiable input slots, so the materialized ``GraphModule``
+        returns a uniform Tensor list.
+    """
+    mask: list[bool] = []
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        leaves = pytree.tree_leaves(fn(*args, **kwargs))
+        mask.clear()
+        mask.extend(isinstance(o, torch.Tensor) for o in leaves)
+        return filter_with_masks(leaves, mask)
+
+    return wrapped, mask

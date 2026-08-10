@@ -358,6 +358,40 @@ class _PipelineSchedule(ABC):
                 (avoids redundant init on eval↔train mode switches).
         """
         if all(isinstance(stage, PipelineStage) for stage in stages):
+            # A fake process group cannot exchange real data: a cross-rank
+            # vote recv reads zeros and selects DYNAMIC, which then fails in
+            # `_recv_meta` (nothing was actually sent). Since dynamic
+            # inference can never work across ranks of a fake group, decide
+            # locally in that case: STATIC if every local stage has complete
+            # metadata, else error. Same-rank-only pipelines (e.g. a
+            # single-rank fake world) don't communicate, so the normal vote
+            # still works and DYNAMIC remains usable there.
+            pp_stages = cast(list[PipelineStage], stages)
+            has_cross_rank = any(
+                (not st.is_first and not st._is_same_rank(st.stage_index - 1))
+                or (not st.is_last and not st._is_same_rank(st.stage_index + 1))
+                for st in pp_stages
+            )
+            if has_cross_rank and any(
+                dist.get_backend(st.group) == "fake" for st in pp_stages
+            ):
+                for st in pp_stages:
+                    if InferenceMode.needs_dynamic(st._user_meta, has_backward):
+                        raise RuntimeError(
+                            f"Stage {st.stage_index} requires dynamic shape "
+                            "inference, which is not supported with a fake "
+                            "process group. Provide complete static metadata "
+                            "(inputs/outputs, plus input_grads/output_grads "
+                            "for DTensors with backward) to the PipelineStage "
+                            "constructor."
+                        )
+                    st._inference_mode = InferenceMode.STATIC
+                logger.debug(
+                    "Fake process group detected; set inference_mode=static "
+                    "for %d stage(s) without voting",
+                    len(stages),
+                )
+                return
             acc: torch.Tensor | None = None
             for stage in cast(list[PipelineStage], stages):
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
@@ -438,33 +472,49 @@ class _PipelineSchedule(ABC):
                 if torch.device(stage.device).type != "cpu"
             }
         )
-        with torch.random.fork_rng(devices=devices):
-            if needs_fwd:
-                next_stage_args: Any = None
-                for stage in stages:
-                    stage_args = args if stage.is_first else next_stage_args
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches,
-                        stage_args,
-                        kwargs,
-                        has_backward=self._has_backward,
-                    )
-                fwd_initialized = True
+        device_type = devices[0].type if devices else None
+        # Assert all device types are the same
+        if device_type is not None and not all(
+            device.type == device_type for device in devices
+        ):
+            device_types = {device.type for device in devices}
+            raise AssertionError(
+                "All stages must have the same device type for RNG forking. "
+                f"Found device types: {device_types}"
+            )
+        pipeline_stages = [
+            stage for stage in stages if isinstance(stage, PipelineStage)
+        ]
+        for stage in pipeline_stages:
+            stage._pre_metadata_inference_backup()
 
-            if needs_bwd:
-                prev_stage_grad_meta: Any = None
-                for stage in reversed(stages):
-                    prev_stage_grad_meta = stage._prepare_backward_infra(
-                        self._n_microbatches,
-                        loss_fn=self._loss_fn,
-                        target=target,
-                        received_grad_meta=prev_stage_grad_meta,
-                        loss_kwargs=loss_kwargs,
-                    )
-                bwd_initialized = True
+        try:
+            with torch.random.fork_rng(devices=devices, device_type=device_type):
+                if needs_fwd:
+                    next_stage_args: Any = None
+                    for stage in stages:
+                        stage_args = args if stage.is_first else next_stage_args
+                        next_stage_args = stage._prepare_forward_infra(
+                            self._n_microbatches,
+                            stage_args,
+                            kwargs,
+                            has_backward=self._has_backward,
+                        )
+                    fwd_initialized = True
 
-        for stage in stages:
-            if isinstance(stage, PipelineStage):
+                if needs_bwd:
+                    prev_stage_grad_meta: Any = None
+                    for stage in reversed(stages):
+                        prev_stage_grad_meta = stage._prepare_backward_infra(
+                            self._n_microbatches,
+                            loss_fn=self._loss_fn,
+                            target=target,
+                            received_grad_meta=prev_stage_grad_meta,
+                            loss_kwargs=loss_kwargs,
+                        )
+                    bwd_initialized = True
+        finally:
+            for stage in pipeline_stages:
                 stage._post_metadata_inference_cleanup()
 
         return fwd_initialized, bwd_initialized
@@ -499,38 +549,86 @@ class _PipelineSchedule(ABC):
         losses: list | None = None,
         return_outputs=True,
         loss_kwargs: dict[str, Any] | None = None,
+        arg_mbs: Any = None,
+        kwarg_mbs: Any = None,
+        target_mbs: Any = None,
         **kwargs,
     ):
-        """
-        Run one iteration of the pipeline schedule with *whole-batch* input.
-        Will chunk the input into microbatches automatically, and go through the
-        microbatches according to the schedule implementation.
-
-        args: positional arguments to the model (as in non-pipeline case).
-        kwargs: keyword arguments to the model (as in non-pipeline case).
-        target: target for the loss function.
-        losses: a list to store the losses for each microbatch.
-        return_outputs: whether to return the outputs from the last stage.
-        loss_kwargs: extra keyword arguments forwarded to the loss function.
-        """
+        r"""Run one iteration of the pipeline schedule."""
         raise NotImplementedError
 
-    def eval(self, *args, target=None, losses: list | None = None, **kwargs):
-        """
-        Run one iteration of the pipeline schedule with *whole-batch* input.
-        Will chunk the input into microbatches automatically, and go through the
-        microbatches, calling forward only.
+    def eval(
+        self,
+        *args,
+        target=None,
+        losses: list | None = None,
+        arg_mbs: Any = None,
+        kwarg_mbs: Any = None,
+        target_mbs: Any = None,
+        **kwargs,
+    ):
+        r"""Run one forward-only iteration of the pipeline schedule.
 
-        args: positional arguments to the model (as in non-pipeline case).
-        kwargs: keyword arguments to the model (as in non-pipeline case).
-        target: target values for the loss function.
-        losses: a list to store the losses for each microbatch.
+        ``eval`` uses the same input contract as ``step``, but temporarily
+        disables backward execution. By default, ``args``, ``kwargs``, and
+        ``target`` are full-batch values that the schedule splits into
+        microbatches. When the caller has already split inputs into
+        microbatches, pass them through ``arg_mbs``, ``kwarg_mbs``, and
+        ``target_mbs`` instead.
+
+        Args:
+            \*args (Any): Whole-batch positional root inputs when this rank owns
+                the first pipeline stage. Do not pass positional inputs with
+                pre-split inputs.
+            target (Any, optional): Whole-batch target for loss computation.
+                When passing pre-split inputs, pass targets through
+                ``target_mbs`` instead. Default: ``None``.
+            losses (list, optional): Mutable list populated with one loss per
+                microbatch when this schedule owns the last stage and a
+                ``loss_fn`` was configured. Default: ``None``.
+            arg_mbs (list[tuple], optional): Pre-split positional inputs, one
+                tuple per microbatch. Default: ``None``.
+            kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
+                dict per microbatch. Default: ``None``.
+            target_mbs (list, optional): Pre-split targets, one entry per
+                microbatch. Default: ``None``.
+            \*\*kwargs (Any): Whole-batch keyword root inputs when this rank owns
+                the first pipeline stage. Do not pass keyword inputs with
+                pre-split inputs.
+
+        Returns:
+            Any or None: The merged output from the last stage when this rank
+                owns the last stage; otherwise ``None``.
+
+        Raises:
+            TypeError: If a pre-split microbatch container has the wrong type.
+            ValueError: If whole-batch and pre-split inputs are mixed, or if a
+                pre-split container does not have one entry per microbatch.
+
+        Examples::
+
+            >>> # xdoctest: +SKIP("requires a constructed distributed pipeline schedule")
+            >>> output = schedule.eval(x, mask=mask)
+            >>> arg_mbs = [(x0,), (x1,)]
+            >>> kwarg_mbs = [{"mask": mask0}, {"mask": mask1}]
+            >>> output = schedule.eval(
+            ...     arg_mbs=arg_mbs,
+            ...     kwarg_mbs=kwarg_mbs,
+            ... )
         """
         # Save the original has_backward state
         original_has_backward = self._has_backward
         try:
             self._has_backward = False
-            return self.step(*args, target=target, losses=losses, **kwargs)
+            return self.step(
+                *args,
+                target=target,
+                losses=losses,
+                arg_mbs=arg_mbs,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs,
+                **kwargs,
+            )
         finally:
             # Restore the original state
             self._has_backward = original_has_backward
@@ -599,6 +697,63 @@ class _PipelineSchedule(ABC):
             # Return a list of empty tuples/dicts with matching length as chunks
             return [()] * self._n_microbatches, [{}] * self._n_microbatches
 
+    def _get_microbatch_inputs(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        target: Any,
+        arg_mbs: Any,
+        kwarg_mbs: Any,
+        target_mbs: Any,
+    ) -> tuple[list | None, list | None, list | None]:
+        pre_split = any(mbs is not None for mbs in (arg_mbs, kwarg_mbs, target_mbs))
+        if not pre_split:
+            args_split, kwargs_split = self._split_inputs(args, kwargs)
+            targets_split = (
+                list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+                if target is not None
+                else None
+            )
+            return args_split, kwargs_split, targets_split
+
+        if args:
+            raise ValueError(
+                "When using pre-split inputs, pass pre-split positional inputs "
+                "through arg_mbs=... instead of positional args."
+            )
+
+        if kwargs:
+            names = ", ".join(sorted(kwargs))
+            raise ValueError(
+                f"Unexpected keyword arguments with pre-split inputs: {names}. "
+                "Pass pre-split keyword inputs through kwarg_mbs=..."
+            )
+
+        if target is not None:
+            raise ValueError(
+                "When using pre-split inputs, pass pre-split targets through "
+                "target_mbs=... instead of target=..."
+            )
+
+        arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs)
+
+        for mb_index, (arg_mb, kwarg_mb) in enumerate(
+            zip(arg_mbs, kwarg_mbs, strict=True)
+        ):
+            if not isinstance(arg_mb, tuple):
+                raise TypeError(
+                    "arg_mbs must be a list of tuples, but "
+                    f"arg_mbs[{mb_index}] is a {type(arg_mb)}"
+                )
+
+            if not isinstance(kwarg_mb, dict):
+                raise TypeError(
+                    "kwarg_mbs must be a list of dicts, but "
+                    f"kwarg_mbs[{mb_index}] is a {type(kwarg_mb)}"
+                )
+
+        return arg_mbs, kwarg_mbs, target_mbs
+
     def _merge_outputs(self, output_chunks: list[Any]) -> Any:
         """
         Merge output chunks back to a batch state.
@@ -623,17 +778,38 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
     desc_str = f"{desc}, " if desc else ""
     logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
 
+    # Per-direction P2P (config.pipeline_per_direction_p2p) tags forward and
+    # backward ops with different communicators. A fused batch (e.g. 1F1B's
+    # fwd_sends + bwd_recvs) then spans >1 group; issue each group's ops as their
+    # own batch so they run on separate comms/streams instead of one FIFO. When
+    # all ops share a group (the default), this is a no-op fast path.
+    ops_by_group: dict[str, list[dist.P2POp]] = {}
+    for p in p2p_ops:
+        ops_by_group.setdefault(p.group.group_name, []).append(p)
+    if len(ops_by_group) > 1:
+        works: list[dist.Work] = []
+        # Issue the groups in a deterministic, rank-independent order (by group
+        # name -- identical on every rank for a given group). The same fused
+        # batch is built in opposite list order on neighboring ranks (e.g.
+        # ``fwd_sends + bwd_recvs`` vs ``bwd_sends + fwd_recvs``); sorting keeps
+        # every rank issuing the two communicators in the same order.
+        for _, group_ops in sorted(ops_by_group.items()):
+            works += _batch_p2p(group_ops, desc=desc)
+        return works
+
     op_types = {p.op for p in p2p_ops}
     if op_types == {dist.isend}:
-        return [
+        send_works = [
             p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
             for p in p2p_ops
         ]
+        return [work for work in send_works if work is not None]
     if op_types == {dist.irecv}:
-        return [
+        recv_works = [
             p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
             for p in p2p_ops
         ]
+        return [work for work in recv_works if work is not None]
 
     return dist.batch_isend_irecv(p2p_ops)
 
@@ -734,19 +910,65 @@ class PipelineScheduleSingle(_PipelineSchedule):
         losses: list | None = None,
         return_outputs: bool = True,
         loss_kwargs: dict[str, Any] | None = None,
+        arg_mbs: Any = None,
+        kwarg_mbs: Any = None,
+        target_mbs: Any = None,
         **kwargs,
     ):
-        """
-        Run one iteration of the pipeline schedule with *whole-batch* input.
-        Will chunk the input into microbatches automatically, and go through the
-        microbatches according to the schedule implementation.
+        r"""Run one training iteration of a single-stage pipeline schedule.
 
-        args: positional arguments to the model (as in non-pipeline case).
-        kwargs: keyword arguments to the model (as in non-pipeline case).
-        target: target for the loss function.
-        losses: a list to store the losses for each microbatch.
-        return_outputs: whether to return the outputs from the last stage.
-        loss_kwargs: extra keyword arguments forwarded to the loss function.
+        By default, ``args``, ``kwargs``, and ``target`` are full-batch values
+        that the schedule splits into microbatches. When the caller has already
+        split inputs into microbatches, pass them through ``arg_mbs``,
+        ``kwarg_mbs``, and ``target_mbs`` instead.
+
+        Args:
+            \*args (Any): Whole-batch positional inputs for the first pipeline
+                stage. Do not pass positional inputs with pre-split inputs.
+            target (Any, optional): Whole-batch target for loss computation.
+                When passing pre-split inputs, pass targets through
+                ``target_mbs`` instead. Default: ``None``.
+            losses (list, optional): Mutable list populated with one loss per
+                microbatch when this schedule owns the last stage and a
+                ``loss_fn`` was configured. Default: ``None``.
+            return_outputs (bool, optional): Whether to merge and return output
+                chunks on the last stage. Default: ``True``.
+            loss_kwargs (dict, optional): Extra keyword arguments forwarded to
+                the configured ``loss_fn``. Default: ``None``.
+            arg_mbs (list[tuple], optional): Pre-split positional inputs, one
+                tuple per microbatch. Default: ``None``.
+            kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
+                dict per microbatch. Default: ``None``.
+            target_mbs (list, optional): Pre-split targets, one entry per
+                microbatch. Default: ``None``.
+            \*\*kwargs (Any): Whole-batch keyword inputs for the first pipeline
+                stage. Do not pass keyword inputs with pre-split inputs.
+
+        Returns:
+            Any or None: The merged output from the last stage when this rank
+                owns the last stage and ``return_outputs=True``; otherwise
+                ``None``.
+
+        Raises:
+            RuntimeError: If backward computation is enabled and ``step`` is
+                called under ``torch.no_grad()``. Use :meth:`eval` for
+                forward-only execution.
+            TypeError: If a pre-split microbatch container has the wrong type.
+            ValueError: If whole-batch and pre-split inputs are mixed, or if a
+                pre-split container does not have one entry per microbatch.
+
+        Examples::
+
+            >>> # xdoctest: +SKIP("requires a constructed distributed pipeline schedule")
+            >>> output = schedule.step(x, mask=mask, target=target)
+            >>> arg_mbs = [(x0,), (x1,)]
+            >>> kwarg_mbs = [{"mask": mask0}, {"mask": mask1}]
+            >>> target_mbs = [target0, target1]
+            >>> output = schedule.step(
+            ...     arg_mbs=arg_mbs,
+            ...     kwarg_mbs=kwarg_mbs,
+            ...     target_mbs=target_mbs,
+            ... )
         """
         if self._has_backward and not torch.is_grad_enabled():
             raise RuntimeError(
@@ -761,14 +983,13 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Clean per iteration
         self._stage.clear_runtime_states()
 
-        # Split inputs into microbatches
-        args_split, kwargs_split = self._split_inputs(args, kwargs)
-
-        # Split target into microbatches
-        targets_split = (
-            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
-            if target is not None
-            else None
+        args_split, kwargs_split, targets_split = self._get_microbatch_inputs(
+            args,
+            kwargs,
+            target,
+            arg_mbs,
+            kwarg_mbs,
+            target_mbs,
         )
 
         # Run microbatches
@@ -1928,19 +2149,67 @@ class PipelineScheduleMulti(_PipelineSchedule):
         losses: list | None = None,
         return_outputs: bool = True,
         loss_kwargs: dict[str, Any] | None = None,
+        arg_mbs: Any = None,
+        kwarg_mbs: Any = None,
+        target_mbs: Any = None,
         **kwargs,
     ):
-        """
-        Run one iteration of the pipeline schedule with *whole-batch* input.
-        Will chunk the input into microbatches automatically, and go through the
-        microbatches according to the schedule implementation.
+        r"""Run one training iteration of a multi-stage pipeline schedule.
 
-        args: positional arguments to the model (as in non-pipeline case).
-        kwargs: keyword arguments to the model (as in non-pipeline case).
-        target: target for the loss function.
-        losses: a list to store the losses for each microbatch.
-        return_outputs: whether to return the outputs from the last stage.
-        loss_kwargs: extra keyword arguments forwarded to the loss function.
+        By default, ``args``, ``kwargs``, and ``target`` are full-batch values
+        that the schedule splits into microbatches. When the caller has already
+        split inputs into microbatches, pass them through ``arg_mbs``,
+        ``kwarg_mbs``, and ``target_mbs`` instead.
+
+        Args:
+            \*args (Any): Whole-batch positional root inputs when this rank owns
+                the first pipeline stage. Do not pass positional inputs with
+                pre-split inputs.
+            target (Any, optional): Whole-batch target for loss computation.
+                When passing pre-split inputs, pass targets through
+                ``target_mbs`` instead. Default: ``None``.
+            losses (list, optional): Mutable list populated with one loss per
+                microbatch when this schedule owns the last stage and a
+                ``loss_fn`` was configured. Default: ``None``.
+            return_outputs (bool, optional): Whether to merge and return output
+                chunks on the last stage. Default: ``True``.
+            loss_kwargs (dict, optional): Extra keyword arguments forwarded to
+                the configured ``loss_fn``. Default: ``None``.
+            arg_mbs (list[tuple], optional): Pre-split positional inputs, one
+                tuple per microbatch. Default: ``None``.
+            kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
+                dict per microbatch. Default: ``None``.
+            target_mbs (list, optional): Pre-split targets, one entry per
+                microbatch. Default: ``None``.
+            \*\*kwargs (Any): Whole-batch keyword root inputs when this rank owns
+                the first pipeline stage. Do not pass keyword inputs with
+                pre-split inputs.
+
+        Returns:
+            Any or None: The merged output from the last stage when this rank
+                owns the last stage and ``return_outputs=True``; otherwise
+                ``None``.
+
+        Raises:
+            RuntimeError: If backward computation is enabled and ``step`` is
+                called under ``torch.no_grad()``. Use :meth:`eval` for
+                forward-only execution.
+            TypeError: If a pre-split microbatch container has the wrong type.
+            ValueError: If whole-batch and pre-split inputs are mixed, or if a
+                pre-split container does not have one entry per microbatch.
+
+        Examples::
+
+            >>> # xdoctest: +SKIP("requires a constructed distributed pipeline schedule")
+            >>> output = schedule.step(x, mask=mask, target=target)
+            >>> arg_mbs = [(x0,), (x1,)]
+            >>> kwarg_mbs = [{"mask": mask0}, {"mask": mask1}]
+            >>> target_mbs = [target0, target1]
+            >>> output = schedule.step(
+            ...     arg_mbs=arg_mbs,
+            ...     kwarg_mbs=kwarg_mbs,
+            ...     target_mbs=target_mbs,
+            ... )
         """
         if (
             self._has_backward
@@ -1961,14 +2230,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.clear_runtime_states()
 
-        # Split inputs into microbatches
-        args_split, kwargs_split = self._split_inputs(args, kwargs)
-
-        # Split target into microbatches
-        targets_split = (
-            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
-            if target is not None
-            else None
+        args_split, kwargs_split, targets_split = self._get_microbatch_inputs(
+            args,
+            kwargs,
+            target,
+            arg_mbs,
+            kwarg_mbs,
+            target_mbs,
         )
 
         # Run microbatches
@@ -3017,7 +3285,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3214,7 +3482,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3400,7 +3668,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
