@@ -72,7 +72,7 @@ class WorkNCCL : public c10d::Work {
   float getDuration() const override;
   uint64_t getSequencenumber() const override;
 
-  std::chrono::milliseconds getTimeout() const {
+  std::chrono::milliseconds getTimeout() const override {
     return timeout_ms_;
   }
 
@@ -91,6 +91,9 @@ class WorkNCCL : public c10d::Work {
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq) {
     seq_ = seq;
+  }
+  void setOwnedEphemeralTimeout(std::chrono::milliseconds timeout) {
+    owned_ephemeral_timeout_ = timeout;
   }
 
  protected:
@@ -117,12 +120,16 @@ class WorkNCCL : public c10d::Work {
   std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
   ProcessGroupNCCL* comm_; // non-owning; see class comment
+  int64_t reconfigure_uuid_{-1};
+  bool blocking_wait_{false};
   std::unique_ptr<at::cuda::CUDAEvent> start_event_;
   std::unique_ptr<at::cuda::CUDAEvent> end_event_;
   at::cuda::CUDAStream stream_;
 
   std::chrono::steady_clock::time_point work_start_time_;
   std::chrono::milliseconds timeout_ms_;
+  std::chrono::milliseconds owned_ephemeral_timeout_{0};
+  std::atomic<bool> ephemeral_timeout_released_{false};
   // Whether the events above were created with CUDA timing enabled, i.e.
   // whether getDuration() can be served for this work.
   bool timing_enabled_{false};

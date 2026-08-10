@@ -26,6 +26,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch.testing._internal.common_utils import (
+    dtype_name,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -1268,7 +1269,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             ((((N,), torch.float32),), True),
         ),
         name_fn=lambda case: "_and_".join(
-            f"{'x'.join(map(str, shape))}_{dtype}" for shape, dtype in case[0]
+            f"{'x'.join(map(str, sh))}_{dtype_name(dt)}" for sh, dt in case[0]
         ),
     )
     def test_scaled_mm_broadcast_epilogue_fusion(self, case):
