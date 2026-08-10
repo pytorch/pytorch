@@ -5767,7 +5767,11 @@ class Scheduler:
                                 ms_fused_choice = choice
                     multi_node._choice_timings[hint_override] = new_timings
                     if ms_fused_choice is not None:
-                        assert isinstance(ms_fused_choice, TritonTemplateCallerBase)  # noqa: S101
+                        if not isinstance(ms_fused_choice, TritonTemplateCallerBase):
+                            raise AssertionError(
+                                f"expected TritonTemplateCallerBase, "
+                                f"got {type(ms_fused_choice)}"
+                            )
                         hint_override_best_fusion_choice[hint_override] = (
                             ms_fused_choice
                         )
@@ -8150,8 +8154,10 @@ class Scheduler:
 
             write_dep = epilogue_writes[0]
             read_dep = epilogue_reads[0]
-            assert isinstance(read_dep, MemoryDep)  # noqa: S101
-            assert isinstance(write_dep, MemoryDep)  # noqa: S101
+            if not isinstance(read_dep, MemoryDep):
+                raise AssertionError(f"expected MemoryDep, got {type(read_dep)}")
+            if not isinstance(write_dep, MemoryDep):
+                raise AssertionError(f"expected MemoryDep, got {type(write_dep)}")
             if read_dep.index != write_dep.index or read_dep.size != write_dep.size:
                 why("epilogue's read and write indices differ")
                 return False
