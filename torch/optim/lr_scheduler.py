@@ -1164,14 +1164,15 @@ class SequentialLR(LRScheduler):
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
 
-        # Perform the initial step for only the first scheduler
-        self._schedulers[0]._initial_step()
+        # Perform the initial step for only the scheduler meant to run at step 0.
+        idx = bisect_right(self._milestones, 0)
+        self._schedulers[idx]._initial_step()
 
-        self._last_lr = schedulers[0].get_last_lr()
+        self._last_lr = schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
-        Recursively undo any step performed by the initialisation of
+        Recursively undo any step performed by the initialization of
         schedulers.
         """
         scheds = self if sched is None else sched
@@ -1487,13 +1488,13 @@ class ChainedScheduler(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> # Assuming optimizer uses lr = 0.05 for all groups
-        >>> # lr = 0.05      if epoch == 0
-        >>> # lr = 0.0450    if epoch == 1
-        >>> # lr = 0.0405    if epoch == 2
+        >>> # lr = 0.005      if epoch == 0
+        >>> # lr = 0.00450    if epoch == 1
+        >>> # lr = 0.00405    if epoch == 2
         >>> # ...
-        >>> # lr = 0.00675   if epoch == 19
-        >>> # lr = 0.06078   if epoch == 20
-        >>> # lr = 0.05470   if epoch == 21
+        >>> # lr = 0.000675   if epoch == 19
+        >>> # lr = 0.006078   if epoch == 20
+        >>> # lr = 0.005470   if epoch == 21
         >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=20)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = ChainedScheduler([scheduler1, scheduler2], optimizer=optimizer)

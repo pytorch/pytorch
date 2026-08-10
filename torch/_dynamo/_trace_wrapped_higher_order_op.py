@@ -18,7 +18,7 @@ which assumes accurate fake tensor metadata, without actually running fn.
 In the future, we may allow for a "meta" function associated with fn to allow for more interesting input-output patterns.
 
 Note that tensors / Python state are allowed to be mutated.
-This is relaxed constraint is not always sound, but it is sound for backward tracing with fake
+This relaxed constraint is not always sound, but it is sound for backward tracing with fake
 tensors as it takes place in AOTAutograd, as the backward pass is guaranteed not to depend on concrete
 tensor values (via fake tensor) or Python state (because the autograd engine doesn't depend on Python).
 
@@ -56,6 +56,12 @@ def zeros_and_scatter(
     vals: Tensor,
 ) -> Tensor:
     """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+    if not indices:
+        if shape:
+            raise RuntimeError(
+                "zeros_and_scatter with no indices only supports scalar outputs"
+            )
+        return vals.sum()
     grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
@@ -72,10 +78,10 @@ def _(
 @zeros_and_scatter.register_vmap  # type: ignore[misc]
 def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
     """The batching rule is special in that it returns a tensor that is not batched"""
-    indices_indims = indims[1]
+    indices_indims: list[int | None] = indims[1] if indims[1] is not None else []
     expanded_indices = []
     for idx, idx_indim in zip(indices, indices_indims):
-        # The index is not a being batched, we should unsqueeze and expand to val
+        # The index is not being batched, we should unsqueeze and expand to val
         if idx_indim is None:
             expanded_indices.append(idx.expand(value.shape))
         else:
@@ -100,6 +106,12 @@ class ModIndex(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
+        if not indices:
+            if x.ndim != 0:
+                raise RuntimeError(
+                    "mod_index with no indices only supports scalar tensors"
+                )
+            return x
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
