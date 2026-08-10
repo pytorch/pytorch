@@ -77,13 +77,14 @@ from torch.testing._internal.common_cuda import (
     TEST_MULTIGPU,
     with_tf32_off,
 )
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import largeTensorTest, skipPRIVATEUSE1
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
     TEST_WITH_ROCM,
+    TEST_PRIVATEUSE1,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -117,7 +118,8 @@ torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
-STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
+STATIC_LAUNCHER_DEVICES = ("cuda", "xpu", "privateuseone")
+TEST_MULTIPRIVATEUSE1 = TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= 2
 
 
 class TestCacheKeyStrategy(TestCase):
@@ -201,9 +203,9 @@ class TestCacheKeyStrategy(TestCase):
                     fake_strategy,
                 ),
                 mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
-                mock.patch.object(torch.cuda, "current_device", return_value=0),
+                mock.patch.object(torch.get_device_module(GPU_TYPE), "current_device", return_value=0),
                 mock.patch.object(
-                    torch.cuda,
+                    torch.get_device_module(GPU_TYPE),
                     "get_device_properties",
                     return_value=device_properties,
                 ),
@@ -534,7 +536,7 @@ class TestFxGraphCache(TestCase):
     def _find_triton_kernel_binaries(self):
         found = []
         triton_dir = os.path.join(cache_dir(), "triton")
-        device_type = "hip" if torch.version.hip else "cuda"
+        device_type = "hip" if torch.version.hip else GPU_TYPE
         binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
         for dirpath, _, filenames in os.walk(triton_dir):
             for filename in filenames:
@@ -1059,12 +1061,12 @@ class TestFxGraphCache(TestCase):
             self.reset()
             CacheArtifactManager.clear()
 
-            x = torch.randn(256, 256, device="cuda")
-            y = torch.randn(256, 256, device="cuda")
+            x = torch.randn(256, 256, device=GPU_TYPE)
+            y = torch.randn(256, 256, device=GPU_TYPE)
             compiled_fn = torch.compile(fn, dynamic=False)
 
             self.assertEqual(fn(x, y), compiled_fn(x, y))
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
             artifacts = torch.compiler.save_cache_artifacts()
             self.assertIsNotNone(artifacts)
@@ -1205,11 +1207,11 @@ class TestFxGraphCache(TestCase):
         def fn(x):
             return x + 1 * x
 
-        x = torch.randn(3, 2, device="cuda")
+        x = torch.randn(3, 2, device=GPU_TYPE)
 
         with fresh_cache():
             compiled_fn = torch.compile(fn)
-            with torch.amp.autocast(device_type="cuda"):
+            with torch.amp.autocast(device_type=GPU_TYPE):
                 eager_result = fn(x)
                 compiled_result = compiled_fn(x)
             self.assertEqual(eager_result, compiled_result)
@@ -1227,7 +1229,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(len(cache_info.precompile_artifacts), 1)
 
             compiled_fn = torch.compile(fn)
-            with torch.amp.autocast(device_type="cuda"):
+            with torch.amp.autocast(device_type=GPU_TYPE):
                 eager_result = fn(x)
                 compiled_result = compiled_fn(x)
             self.assertEqual(eager_result, compiled_result)
@@ -1617,7 +1619,8 @@ class TestFxGraphCache(TestCase):
     @config.patch("fx_graph_cache", True)
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not (TEST_MULTIGPU or TEST_MULTIPRIVATEUSE1), "only one GPU detected")
+    @skipPRIVATEUSE1
     @requires_cuda_and_triton
     def test_no_arguments_tensor_device_guards(self):
         """
@@ -1630,7 +1633,7 @@ class TestFxGraphCache(TestCase):
 
         @torch.compile
         def f():
-            y = torch.randn(3, device="cuda")
+            y = torch.randn(3, device=GPU_TYPE)
             return (y,)
 
         with torch.cuda._DeviceGuard(0):
@@ -1647,7 +1650,8 @@ class TestFxGraphCache(TestCase):
     @config.patch("fx_graph_cache", True)
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not (TEST_MULTIGPU or TEST_MULTIPRIVATEUSE1), "only one GPU detected")
+    @skipPRIVATEUSE1
     @requires_cuda_and_triton
     def test_tensor_device_guards_cpu_tensor(self):
         """
@@ -2371,7 +2375,7 @@ class TestFxGraphCache(TestCase):
             def backward(ctx, grad_output):
                 return grad_output * 2
 
-        x = torch.rand([10], requires_grad=True, device="cuda")
+        x = torch.rand([10], requires_grad=True, device=GPU_TYPE)
         counters.clear()
 
         sf = SimpleFunction
@@ -3503,7 +3507,7 @@ class TestFxGraphCacheHashing(TestCase):
             torch.set_num_threads(orig_num_threads)
 
     def test_cpu_thread_count_ignored_for_explicit_non_cpu_factory(self):
-        gm = self._no_input_factory_graph(device="cuda")
+        gm = self._no_input_factory_graph(device=GPU_TYPE)
         orig_num_threads = torch.get_num_threads()
 
         try:
@@ -3523,7 +3527,7 @@ class TestFxGraphCacheHashing(TestCase):
             ((4,),),
             {
                 "dtype": torch.float32,
-                "device": torch.device("cuda"),
+                "device": torch.device(GPU_TYPE),
                 "debug_device": "cpu",
             },
         )
@@ -3549,7 +3553,7 @@ class TestFxGraphCacheHashing(TestCase):
         gm = torch.fx.GraphModule({}, graph)
 
         with torch._subclasses.FakeTensorMode():
-            example_input = torch.empty(4, device="cuda")
+            example_input = torch.empty(4, device=GPU_TYPE)
 
         orig_num_threads = torch.get_num_threads()
         try:
@@ -3570,7 +3574,7 @@ class TestFxGraphCacheHashing(TestCase):
         gm = torch.fx.GraphModule({}, graph)
 
         with torch._subclasses.FakeTensorMode():
-            example_input = torch.empty(4, device="cuda")
+            example_input = torch.empty(4, device=GPU_TYPE)
         x.meta["val"] = example_input
         result.meta["example_value"] = example_input
 
@@ -4685,6 +4689,7 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
+    @skipPRIVATEUSE1
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
@@ -4932,10 +4937,10 @@ class TestAutotuneCache(TestCase):
         def f(x, y, a, b):
             return Model()(x, y, a, b)
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
-        a = torch.randn(1000, 100).cuda()
-        b = torch.randn(1000, 100).cuda()
+        x = torch.randn(100, 100).to(GPU_TYPE)
+        y = torch.randn(100, 100).to(GPU_TYPE)
+        a = torch.randn(1000, 100).to(GPU_TYPE)
+        b = torch.randn(1000, 100).to(GPU_TYPE)
         f_compiled = torch.compile(f, fullgraph=True)
 
         with PatchCaches():
