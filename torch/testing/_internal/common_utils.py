@@ -1409,6 +1409,16 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
+def _get_unittest_test_name_patterns(argv: list[str]) -> list[str]:
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("-k", action="append", default=[])
+    args, _ = parser.parse_known_args(argv[1:])
+    return [
+        pattern if "*" in pattern else f"*{pattern}*"
+        for pattern in args.k
+    ]
+
+
 class HardwareClassificationTestLoader(unittest.TestLoader):
     """Unittest TestLoader that filters loaded tests by hw_classification."""
     def __init__(self, hw_classification):
@@ -1505,6 +1515,11 @@ def run_tests(argv=None):
         ]
 
     if TEST_IN_SUBPROCESS:
+        test_name_patterns = _get_unittest_test_name_patterns(argv)
+        if test_name_patterns:
+            if HW_CLASSIFICATION is None:
+                testLoader = unittest.TestLoader()
+            testLoader.testNamePatterns = test_name_patterns
         suite = testLoader.loadTestsFromModule(__main__)
         other_args = []
         if DISABLED_TESTS_FILE:
