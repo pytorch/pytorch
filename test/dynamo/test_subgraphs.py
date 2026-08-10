@@ -34,7 +34,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             cnt.frame_count,
             frame_count,
-            f"actual {cnt.frame_count} != expected {frame_count}",
+            lambda msg: f"{msg}\nactual {cnt.frame_count} != expected {frame_count}",
         )
         self.assertEqual(cnt.op_count, op_count)
 
@@ -308,7 +308,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             ],
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_resume_del_releases_tensor(self):
         refs = []
         events = []

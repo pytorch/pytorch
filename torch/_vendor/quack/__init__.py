@@ -24,7 +24,12 @@ from . import cute_dsl_mlir_threading
 cute_dsl_elf_fix.patch()
 cute_dsl_mlir_threading.patch()
 
-from .rmsnorm import rmsnorm  # noqa: E402
+def __getattr__(name):
+    if name == "rmsnorm":
+        from .rmsnorm import rmsnorm
+
+        return rmsnorm
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

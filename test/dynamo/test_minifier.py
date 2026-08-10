@@ -5,12 +5,21 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import torch._dynamo
-from torch._dynamo.test_minifier_common import MinifierTestBase
+from torch._dynamo.test_minifier_common import (
+    _decode_subprocess_output,
+    MinifierTestBase,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
 class MinifierTests(MinifierTestBase):
+    def test_decode_subprocess_output_handles_non_utf8_bytes(self):
+        self.assertEqual(
+            _decode_subprocess_output(b"readable output\xb1continues"),
+            "readable output\ufffdcontinues",
+        )
+
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd
     def _test_after_dynamo(self, device, backend, expected_error):
         run_code = f"""\
@@ -177,9 +186,9 @@ class Repro(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, x_19):
-        x_20 = torch.relu(x_19);  x_19 = None
-        return (x_20,)""",
+    def forward(self, sin_19):
+        relu = torch.relu(sin_19);  sin_19 = None
+        return (relu,)""",
         )
 
 

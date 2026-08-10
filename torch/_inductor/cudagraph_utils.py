@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
@@ -12,6 +12,7 @@ from torch._inductor.utils import GraphPartitionMap, InputType
 from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
+from . import config
 from .utils import is_using_cudagraph_partition
 
 
@@ -33,12 +34,28 @@ OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
+def cudagraph_trees_generation_cloning() -> Literal["user_visible"] | None:
+    mode = config.triton.cudagraph_trees_generation_cloning
+    if mode not in (None, "user_visible"):
+        raise AssertionError(
+            "Expected torch._inductor.config.triton."
+            "cudagraph_trees_generation_cloning to be None or 'user_visible', "
+            f"got {mode!r}"
+        )
+    return mode
+
+
+def cudagraph_trees_clone_live_user_visible_outputs() -> bool:
+    return cudagraph_trees_generation_cloning() == "user_visible"
+
+
 INPUT_STORAGE_MUTATION_TARGETS = (
     torch.ops.aten.set_.default,
     torch.ops.aten.set_.source_Storage,
     torch.ops.aten.set_.source_Storage_storage_offset,
     torch.ops.aten.set_.source_Tensor,
     torch.ops.aten.set_.source_Tensor_storage_offset,
+    torch.ops.aten.shallow_copy_data_.default,
 )
 
 
@@ -171,6 +188,10 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    kernel_free_cudagraph: bool = False
+    user_visible_output_idxs: frozenset[int] = dataclasses.field(
+        default_factory=frozenset
+    )
 
 
 def get_mutating_use_stack_trace_from_node(
@@ -532,6 +553,7 @@ class CudagraphCachedInfo:
 
     placeholders: Sequence[PlaceholderInfo]
     stack_traces: list[str | None]
+    user_visible_output_idxs: Sequence[int]
     cudagraph_fail_reasons: list[str]
 
 
@@ -545,6 +567,7 @@ class CudagraphMetadata:
     static_input_idxs: OrderedSet[int]
     mutated_input_idxs: OrderedSet[int]
     stack_traces: list[str | None]
+    user_visible_output_idxs: OrderedSet[int]
     constants: dict[str, torch.Tensor]
 
 
@@ -583,11 +606,29 @@ def get_partition_cudagraph_metadata(
         partition_placeholders.append(placeholder)
 
     partition_stack_traces = []
-    for graph_output_idx in partition_map.output_index_mapping:
-        if graph_output_idx is not None:
-            partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
-        else:
+    partition_user_visible_output_idxs: OrderedSet[int] = OrderedSet()
+    # Graph output metadata must be remapped to the partition output indices
+    # passed to cudagraphify.
+    for partition_output_idx, graph_output_idxs in enumerate(
+        partition_map.output_index_mapping
+    ):
+        if not graph_output_idxs:
             partition_stack_traces.append(None)
+            continue
+
+        user_visible_graph_output_idxs = [
+            graph_output_idx
+            for graph_output_idx in graph_output_idxs
+            if graph_output_idx in metadata.user_visible_output_idxs
+        ]
+        stack_trace_idx = (
+            user_visible_graph_output_idxs[0]
+            if user_visible_graph_output_idxs
+            else graph_output_idxs[0]
+        )
+        partition_stack_traces.append(metadata.stack_traces[stack_trace_idx])
+        if user_visible_graph_output_idxs:
+            partition_user_visible_output_idxs.add(partition_output_idx)
 
     partition_constants = {
         name: metadata.constants[name] for name in partition_map.constant_names
@@ -598,6 +639,7 @@ def get_partition_cudagraph_metadata(
         partition_static_input_idxs,
         partition_mutated_input_idxs,
         partition_stack_traces,
+        partition_user_visible_output_idxs,
         partition_constants,
     )
 

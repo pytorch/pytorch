@@ -39,9 +39,8 @@
 namespace c10 {
 
 const uint128_pod kuint128max = {
-    .hi = uint64_t{0xFFFFFFFFFFFFFFFFu},
-    .lo = uint64_t{0xFFFFFFFFFFFFFFFFu},
-};
+    uint64_t{0xFFFFFFFFFFFFFFFFu},
+    uint64_t{0xFFFFFFFFFFFFFFFFu}};
 
 // Returns the 0-based position of the last set bit (i.e., most significant bit)
 // in the given uint64. The argument may not be 0.

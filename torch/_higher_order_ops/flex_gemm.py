@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
+import dataclasses
+from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
     autograd_not_implemented,
@@ -13,27 +16,182 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common.wrappers import elementwise_type_promotion_wrapper
+from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
-FLEX_GEMM_OP_INPUT_INDICES = {
-    torch.ops.aten.mm.default: (0, 1),
-    torch.ops.aten.addmm.default: (1, 2),
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOpSpec:
+    """Canonical operand positions for a supported FlexGEMM op."""
+
+    name: str
+    mat1_index: int
+    mat2_index: int
+    input_ndim: int
+    bias_index: int | None = None
+
+
+FLEX_GEMM_OP_SPECS = {
+    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1, input_ndim=2),
+    torch.ops.aten.addmm.default: FlexGemmOpSpec(
+        "addmm", 1, 2, input_ndim=2, bias_index=0
+    ),
+    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1, input_ndim=3),
+    torch.ops.aten.baddbmm.default: FlexGemmOpSpec(
+        "baddbmm", 1, 2, input_ndim=3, bias_index=0
+    ),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
+    torch.bmm: torch.ops.aten.bmm.default,
+    torch.baddbmm: torch.ops.aten.baddbmm.default,
 }
-_SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
+_SUPPORTED_BACKENDS = {"NVGEMM", "QUACK", "TRITON"}
 
 
-def supported_flex_gemm_op_names() -> str:
-    return "/".join(
-        op.name().removeprefix("aten::") for op in FLEX_GEMM_OP_INPUT_INDICES
+_SUPPORTED_FLEX_GEMM_OP_NAMES = "/".join(
+    spec.name for spec in FLEX_GEMM_OP_SPECS.values()
+)
+_PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
+
+# Note [Preserving FlexGEMM body GEMMs]
+# FlexGEMM lowering materializes the captured epilogue by finding the body GEMM
+# node whose target matches the HOP-carried gemm_op. Generic graph passes can
+# rewrite batch-size-1 bmm into mm(...).unsqueeze(0), which removes the matching
+# node. This body pass tags FlexGEMM GEMM nodes so bmm_to_mm in joint_graph.py
+# skips them.
+
+
+def mark_flex_gemm_body_gemm_node(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Mark body GEMMs so Inductor's batch-1 bmm rewrite keeps them matchable."""
+    for node in body_graph.graph.find_nodes(op="call_function", target=gemm_op):
+        node.meta[_PRESERVE_FLEX_GEMM_GEMM_OP] = True
+
+
+FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
+    Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
+] = (mark_flex_gemm_body_gemm_node,)
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def flex_gemm_fast_math_sigmoid(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh sigmoid identity selected by QUACK fast math."""
+    return torch.tanh(x * 0.5) * 0.5 + 0.5
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def flex_gemm_fast_math_silu(x: torch.Tensor) -> torch.Tensor:
+    """Use the tanh SiLU identity selected by QUACK fast math."""
+    half = x * 0.5
+    return half * torch.tanh(half) + half
+
+
+def flex_gemm_fast_math_gelu(
+    x: torch.Tensor,
+    approximate: str = "none",
+    *,
+    fallback: Callable[..., Any],
+) -> torch.Tensor:
+    """Select the standard tanh GELU approximation for exact GELU calls."""
+    if approximate == "none":
+        approximate = "tanh"
+    return fallback(x, approximate)
+
+
+FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., Any]] = {
+    torch.ops.aten.sigmoid.default: flex_gemm_fast_math_sigmoid,
+    torch.ops.aten.silu.default: flex_gemm_fast_math_silu,
+}
+
+
+def flex_gemm_body_decomposition_table(
+    kernel_options: dict[str, Any],
+    decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
+) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
+    """Override composite body decompositions enabled by QUACK fast math."""
+    if (
+        kernel_options.get("backend") != "QUACK"
+        or kernel_options.get("fast_math") is not True
+    ):
+        return None
+    merged_decompositions = dict(decomposition_table)
+    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+    gelu = torch.ops.aten.gelu.default
+    if gelu in merged_decompositions:
+        merged_decompositions[gelu] = partial(
+            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+        )
+    return merged_decompositions
+
+
+def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
+    """Pack adjacent Float32 values into E2M1x2 storage for FlexGEMM tests.
+
+    This private helper lets tests spell the intended epilogue with public inline
+    assembly while a blessed user-facing quantization API is still being decided.
+    The last dimension is one low/high pair: the PTX x2 conversion consumes both
+    values and emits one byte, whose same-width dtype view supplies the logical
+    ``torch.float4_e2m1fn_x2`` type without changing storage.
+    """
+    if input.dtype is not torch.float32 or input.ndim == 0 or input.shape[-1] != 2:
+        raise ValueError(
+            "NVFP4 pack input must be Float32 with innermost dimension 2, "
+            f"got dtype={input.dtype}, shape={tuple(input.shape)}"
+        )
+    if torch.compiler.is_compiling() or is_fake(input):
+        low = input[..., 0]
+        high = input[..., 1]
+        packed = inline_asm_elementwise(
+            high,
+            low,
+            asm_str=(
+                "{ .reg .b8 packed; "
+                "cvt.rn.satfinite.e2m1x2.f32 packed, $1, $2; "
+                "cvt.u32.u8 $0, packed; }"
+            ),
+            constraints="=r,r,r",
+            dtype=torch.uint8,
+        )
+        return packed.contiguous().view(torch.float4_e2m1fn_x2)
+
+    # Eager path is mostly for testing.
+    input_bits = input.view(torch.int32)
+    sign = input_bits & 0x80000000
+    magnitude = (input_bits ^ sign).view(torch.float32)
+    saturated = magnitude >= 6.0
+    denormal = (~saturated) & (magnitude < 1.0)
+    normal = ~(saturated | denormal)
+    denormal_code = ((magnitude + 4194304.0).view(torch.int32) - 1249902592).to(
+        torch.uint8
     )
+    normal_bits = magnitude.view(torch.int32)
+    mantissa_odd = (normal_bits >> 22) & 1
+    normal_code = ((normal_bits - 1054867457 + mantissa_odd) >> 22).to(torch.uint8)
+    codes = torch.full_like(magnitude, 7, dtype=torch.uint8)
+    codes = torch.where(denormal, denormal_code, codes)
+    codes = torch.where(normal, normal_code, codes)
+    codes = codes | (((sign >> 28).to(torch.uint8)) & 8)
+    packed = (codes[..., 1] << 4) | codes[..., 0]
+    return packed.contiguous().view(torch.float4_e2m1fn_x2)
 
 
-_SUPPORTED_FLEX_GEMM_OP_NAMES = supported_flex_gemm_op_names()
+def apply_flex_gemm_body_graph_passes(
+    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+) -> None:
+    """Apply FlexGEMM body annotations before generic Inductor graph passes."""
+    for graph_pass in FLEX_GEMM_BODY_GRAPH_PASSES:
+        graph_pass(body_graph, gemm_op)
 
 
 class FlexGemm(HigherOrderOperator):
@@ -48,7 +206,7 @@ class FlexGemm(HigherOrderOperator):
         gemm_kwargs: dict[str, Any],
         kernel_options: dict[str, Any],
     ) -> Any:
-        if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
+        if gemm_op not in FLEX_GEMM_OP_SPECS:
             raise RuntimeError(f"unsupported GEMM op for FlexGEMM: {gemm_op}")
         if not isinstance(gemm_args, (tuple, list)):
             raise RuntimeError(f"gemm_args must be a tuple/list, got {type(gemm_args)}")
@@ -168,7 +326,13 @@ def flex_gemm_proxy_torch_dispatch_mode(
         def tracing_body_fn(*flat_body_args):
             return body_fn(*flat_body_args)
 
-        body_graph = reenter_make_fx(tracing_body_fn)(*flat_args)
+        body_graph = reenter_make_fx(
+            tracing_body_fn,
+            subgraph_decomp_table=flex_gemm_body_decomposition_table(
+                kernel_options, proxy_mode.decomposition_table
+            ),
+        )(*flat_args)
+        apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(
