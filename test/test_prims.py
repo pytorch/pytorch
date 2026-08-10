@@ -6,11 +6,10 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
-                                                  set_default_dtype)
+from torch.testing._internal.common_utils import (HardwareClassification, parametrize, run_tests,
+                                                  TestCase, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
     dtypes,
     OpDTypes,
 )
@@ -35,7 +34,8 @@ NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrims(TestCase):
-    @onlyCUDA
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         def _wrapper(a, b, broadcast_dimensions):
@@ -84,7 +84,6 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, b.shape)
             self.assertEqual(a.unsqueeze(2), result)
 
-    @onlyCUDA
     @dtypes(torch.float32)
     def test_broadcast_in_dim_sum(self, device, dtype):
         def _wrapper(a):
@@ -126,7 +125,7 @@ class TestPrims(TestCase):
 
     @dtypes(torch.float32)
     def test_collapse(self, device, dtype):
-        t = torch.rand(2, 2, 2)
+        t = torch.rand(2, 2, 2, device=device)
         dim_ranges = [(0, 0), (0, 1), (1, 2), (0, 2)]
         expected_shapes = [(2, 2, 2), (4, 2), (2, 4), (8,)]
 
@@ -175,7 +174,6 @@ class TestPrims(TestCase):
         )
         self.assertTrue(all_prims_namespace)
 
-    @onlyCUDA
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
@@ -272,35 +270,6 @@ class TestPrims(TestCase):
         self.assertEqual(result_eager, result_refs)
 
 
-    @onlyCUDA
-    @dtypes(torch.float32)
-    def test_philox_rand(self, device, dtype):
-        sizes = (1000, 1000000)  # offsets of 4 and 8
-        repeats = 2  # Checks multiple rand calls results with multiple philox_rand calls
-        for size in sizes:
-            torch.cuda.manual_seed(123)
-            references = []
-            results = []
-            rng_states = []
-            for _ in range(repeats):
-                rng_states.append(CUDARngStateHelper.get_torch_state_as_tuple())
-                references.append(torch.rand(size, device=device, dtype=dtype))
-
-            torch.cuda.manual_seed(123)
-            for idx in range(repeats):
-                seed, offset = rng_states[idx]
-                result, _ = torch.ops.rngprims.philox_rand((size,),
-                                                           seed=seed,
-                                                           offset=offset,
-                                                           stride=None,
-                                                           device=device,
-                                                           dtype=dtype)
-                results.append(result)
-
-            for a, b in zip(references, results):
-                self.assertEqual(a, b)
-
-
     @dtypes(torch.float32)
     def test_functional_rng_wrappers(self, device, dtype):
 
@@ -333,6 +302,8 @@ class TestPrims(TestCase):
         self.assertEqual(result.shape, (1,))
 
 class TestPrimsBasic(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
         self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
@@ -372,6 +343,8 @@ instantiate_device_type_tests(TestPrims, globals())
 
 
 class TestRefs(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(torch.float32)
     def test_constant_pad_nd_memory_format(self, device, dtype):
         # Test memory format is preserved in unambiguous cases
@@ -381,7 +354,7 @@ class TestRefs(TestCase):
                 (torch.channels_last_3d, 5),
                 (torch.contiguous_format, 5),
         ):
-            a = torch.zeros([2] * ndim).to(memory_format=mf)
+            a = torch.zeros([2] * ndim, device=device).to(memory_format=mf)
             res = refs.constant_pad_nd(a, pad=[1] * (2 * ndim))
             self.assertTrue(res.is_contiguous(memory_format=mf))
 
@@ -406,32 +379,32 @@ class TestRefs(TestCase):
         self.assertEqual(actual.stride(), expect.stride())
         self.assertTrue(actual.is_contiguous())
 
-    def test_unbind(self):
+    def test_unbind(self, device):
         # If unbind returns empty tuple, it breaks some assumptions in some backward tests in test_ops.py.
         # So can't put this test into common_methods_invocations.py.
-        a = torch.rand([3, 0, 4])
+        a = torch.rand([3, 0, 4], device=device)
         actual = refs.unbind(a, 1)
         expect = torch.unbind(a, 1)
         self.assertEqual(actual, expect)
 
-    def test_logspace_with_complex_input(self):
-        actual = refs.logspace(2, 10 + 5j, steps=5)
-        expect = torch.logspace(2, 10 + 5j, steps=5)
+    def test_logspace_with_complex_input(self, device):
+        actual = refs.logspace(2, 10 + 5j, steps=5, device=device)
+        expect = torch.logspace(2, 10 + 5j, steps=5, device=device)
         self.assertEqual(actual, expect)
 
-    def test_linspace_with_complex_input(self):
-        actual = refs.linspace(2, 10 + 5j, steps=5)
-        expect = torch.linspace(2, 10 + 5j, steps=5)
+    def test_linspace_with_complex_input(self, device):
+        actual = refs.linspace(2, 10 + 5j, steps=5, device=device)
+        expect = torch.linspace(2, 10 + 5j, steps=5, device=device)
         self.assertEqual(actual, expect)
 
     # From https://github.com/pytorch/pytorch/issues/109558
-    def test_infinite_loop_from_py_dispatcher(self):
+    def test_infinite_loop_from_py_dispatcher(self, device):
         # enables prim decomps
         with torch._dispatch.python.enable_python_dispatcher():
-            x = torch.ones(4)
+            x = torch.ones(4, device=device)
             x.to(device="meta")
 
-    def test_inferred_tags(self):
+    def test_inferred_tags(self, device):
         self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
 
 
@@ -440,6 +413,8 @@ instantiate_device_type_tests(TestRefs, globals())
 
 
 class TestDecomp(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
     def test_decomposition_method_vararg(self, device, dtype, op):
         # some ops have vararg variants for the methods. this tests it.
@@ -483,6 +458,39 @@ class TestDecomp(TestCase):
 
 
 instantiate_device_type_tests(TestDecomp, globals())
+
+
+class TestPrimsPhiloxOnCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_philox_rand(self):
+        device = "cuda"
+        dtype = torch.float32
+        sizes = (1000, 1000000)  # offsets of 4 and 8
+        repeats = 2  # Checks multiple rand calls results with multiple philox_rand calls
+        for size in sizes:
+            torch.cuda.manual_seed(123)
+            references = []
+            results = []
+            rng_states = []
+            for _ in range(repeats):
+                rng_states.append(CUDARngStateHelper.get_torch_state_as_tuple())
+                references.append(torch.rand(size, device=device, dtype=dtype))
+
+            torch.cuda.manual_seed(123)
+            for idx in range(repeats):
+                seed, offset = rng_states[idx]
+                result, _ = torch.ops.rngprims.philox_rand((size,),
+                                                           seed=seed,
+                                                           offset=offset,
+                                                           stride=None,
+                                                           device=device,
+                                                           dtype=dtype)
+                results.append(result)
+
+            for a, b in zip(references, results):
+                self.assertEqual(a, b)
 
 
 if __name__ == "__main__":
