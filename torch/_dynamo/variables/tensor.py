@@ -3547,6 +3547,11 @@ class UntypedStorageVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.UntypedStorage
 
+    def _get_cdata(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return StorageCDataVariable(self)
+
+    tp_getset = {"_cdata": GetSet(_get_cdata, None)}
+
     def method_size(
         self,
         tx: "InstructionTranslatorBase",
@@ -3593,6 +3598,24 @@ class UntypedStorageVariable(VariableTracker):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
         codegen.call_method(0)
+
+
+class StorageCDataVariable(VariableTracker):
+    def __init__(self, from_storage: UntypedStorageVariable, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.from_storage = from_storage
+
+    def python_type(self) -> type:
+        return int
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.from_storage.from_tensor)
+        keepalive = codegen.new_var("tensor_keepalive")
+        codegen.dup_top()
+        codegen.store(keepalive)
+        codegen.load_method("untyped_storage")
+        codegen.call_method(0)
+        codegen.load_attr("_cdata")
 
 
 class DataPtrVariable(VariableTracker):
@@ -3663,5 +3686,8 @@ class DataPtrVariable(VariableTracker):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
+        keepalive = codegen.new_var("tensor_keepalive")
+        codegen.dup_top()
+        codegen.store(keepalive)
         codegen.load_method(self.method_name)
         codegen.call_method(0)
