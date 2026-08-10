@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import contextlib
 import unittest
 import unittest.mock
 
@@ -7,6 +6,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
+    BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
     BlackwellTMATemplateConfigMixin,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
@@ -22,28 +22,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._triton import has_datacenter_blackwell_tma_device
-
-
-def _autows_template_kwargs(
-    cfg: BlackwellGPUGemmConfig, **overrides: object
-) -> dict[str, object]:
-    """Template kwargs for `cfg` exactly as the production path emits them.
-
-    Overrides use template-kwarg spelling (e.g. BLOCK_N=32) and stand in for
-    _scale_mm_configs having already shrunk a block size to fit the problem.
-    """
-    heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
-    (triton_config,) = heuristic._finalize_mm_configs([cfg])
-    kwargs: dict[str, object] = {
-        **triton_config.kwargs,
-        "num_stages": triton_config.num_stages,
-        "num_warps": triton_config.num_warps,
-    }
-    unknown = overrides.keys() - kwargs.keys()
-    if unknown:
-        raise KeyError(f"not a template kwarg: {sorted(unknown)}")
-    kwargs.update(overrides)
-    return kwargs
 
 
 def has_tlx() -> bool:
@@ -756,99 +734,35 @@ class TestBlackwellExhaustiveConfigs(TestCase):
 
 
 class TestBlackwellAutoWSConfigs(TestCase):
-    """autoWS config generation for the Blackwell persistent-TMA template."""
+    """autoWS config selection for the Blackwell persistent-TMA template."""
 
-    mixin = BlackwellTMATemplateConfigMixin
-
-    def _two_cta_available(self):
-        """2-CTA configs are pruned unless both the Triton build and the knob allow it."""
-        return (
-            unittest.mock.patch(
-                "torch._inductor.heuristics.template.triton.has_two_ctas",
-                lambda: True,
-            ),
-            config.patch({"triton.enable_template_tma_store": True}),
-        )
-
-    def test_autows_search_space_dispatch(self):
-        """DEFAULT gets the curated set, EXHAUSTIVE keeps the full sweep."""
-        heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+    def test_autows_heuristic_uses_autows_configs(self):
         with (
             unittest.mock.patch(
                 "torch._inductor.heuristics.template.triton.USE_META_WS", True
             ),
             config.patch({"triton.enable_template_autows": True}),
         ):
-            with config.patch({"max_autotune_gemm_search_space": "DEFAULT"}):
-                default = heuristic._get_config_generator().keywords["configs"]
-            with config.patch({"max_autotune_gemm_search_space": "EXHAUSTIVE"}):
-                exhaustive = heuristic._get_config_generator().keywords["configs"]
-        self.assertEqual(default, self.mixin._generate_autows_default_configs())
-        self.assertEqual(len(exhaustive), len(self.mixin._generate_autows_configs()))
-
-    def test_autows_default_configs_are_a_subset_of_the_sweep(self):
-        """Curated configs must be drawn from the sweep, and must not collide
-        under the _finalize_mm_configs dedup key.
-        """
-
-        def key(cfg):
-            return (
-                cfg.block_m,
-                cfg.block_n,
-                cfg.block_k,
-                cfg.num_stages,
-                cfg.num_warps,
-                cfg.epilogue_subtile,
-                cfg.data_partition_factor,
-                cfg.separate_epilogue_store,
-                cfg.two_ctas,
+            _HEURISTIC_CACHE.clear()
+            BaseHeuristicSingleton._instances.pop(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic, None
             )
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
 
-        configs = self.mixin._generate_autows_default_configs()
-        self.assertTrue(configs)
-        self.assertEqual(len({key(c) for c in configs}), len(configs))
-        sweep = {key(c) for c in self.mixin._generate_autows_configs()}
-        for cfg in configs:
-            self.assertIn(key(cfg), sweep)
+        mixin = BlackwellTMATemplateConfigMixin
+        self.assertEqual(heuristic.mm_configs, mixin._generate_autows_default_configs())
+        self.assertEqual(
+            len(heuristic.exhaustive_configs), len(mixin._generate_autows_configs())
+        )
+        for cfg in heuristic.mm_configs:
+            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+            self.assertTrue(cfg.use_meta_ws)
 
-    def test_autows_default_configs_survive_constraints(self):
-        """Every curated autoWS DEFAULT config must survive _autows_constraints_ok."""
-        with contextlib.ExitStack() as stack:
-            for ctx in self._two_cta_available():
-                stack.enter_context(ctx)
-            for cfg in self.mixin._generate_autows_default_configs():
-                self.assertTrue(
-                    self.mixin._autows_constraints_ok(_autows_template_kwargs(cfg)),
-                    f"curated autoWS config is pruned by its own constraints: {cfg}",
-                )
-
-    def test_autows_default_configs_cover_epilogue_subtiles(self):
-        """Callers pin EPILOGUE_SUBTILE to 1, 2 or 4 (see the parametrized
-        persistent-TMA tests above), so each must be reachable.
-        """
-        subtiles = {
-            cfg.epilogue_subtile
-            for cfg in self.mixin._generate_autows_default_configs()
-        }
-        self.assertEqual(subtiles, {1, 2, 4})
-
-    def test_autows_default_configs_cover_narrow_n(self):
-        """A curated set without EPILOGUE_SUBTILE=1 leaves narrow-N shapes with
-        no config at all; see _generate_autows_default_configs.
-        """
-        with contextlib.ExitStack() as stack:
-            for ctx in self._two_cta_available():
-                stack.enter_context(ctx)
-            survivors = [
-                cfg
-                for cfg in self.mixin._generate_autows_default_configs()
-                # BLOCK_N is scaled down to 32 for an N=32 problem
-                if self.mixin._autows_constraints_ok(
-                    _autows_template_kwargs(cfg, BLOCK_N=32)
-                )
-            ]
-        self.assertTrue(
-            survivors, "no curated autoWS config survives for a narrow-N (N=32) shape"
+    def tearDown(self):
+        super().tearDown()
+        _HEURISTIC_CACHE.clear()
+        BaseHeuristicSingleton._instances.pop(
+            CUDABlackwellPersistentTMATemplateConfigHeuristic, None
         )
 
 

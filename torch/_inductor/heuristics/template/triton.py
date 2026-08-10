@@ -72,13 +72,6 @@ def _use_template_autows() -> bool:
     return config.triton.enable_template_autows and USE_META_WS
 
 
-# The fb-triton cross-CTA issue barrier is single-slot, so a 2-CTA pipeline
-# deeper than this deadlocks. Read by both _autows_constraints_ok and the
-# curated config set, which must stay within it.
-_AUTOWS_TWO_CTA_MAX_STAGES = 2
-_AUTOWS_DEFAULT_NUM_STAGES = 3
-
-
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
@@ -2758,7 +2751,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             # Real constraint is realized SMEM buffer depth <= 2: the cross-CTA issue
             # barrier is single-slot, so a deeper pipeline deadlocks. Depth also moves
             # with BLOCK_K/EPILOGUE_SUBTILE, so cap num_stages as a proxy.
-            if template_kwargs["num_stages"] > _AUTOWS_TWO_CTA_MAX_STAGES:
+            if template_kwargs["num_stages"] > 2:
                 return False
             # 2-CTA halves B along N, and BLOCK_N=64 leaves 32 elements per CTA,
             # under the 64 the 128-byte swizzle needs. Below BLOCK_M=128 the MMA
@@ -2768,38 +2761,22 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 return False
         return True
 
-    def _get_config_generator(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        if _use_template_autows():
-            configs = (
-                self._generate_autows_configs()
-                if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-                else self._generate_autows_default_configs()
-            )
-            return partial(self.preprocess_mm_configs, configs=configs)
-        return super()._get_config_generator()
-
     @staticmethod
     def _generate_autows_default_configs() -> list[BaseConfig]:
-        """Curated autoWS config set for DEFAULT max-autotune search.
+        """autoWS configs for DEFAULT search. Placeholder pending benchmark data.
 
-        EPILOGUE_SUBTILE must span the same values the non-autoWS Blackwell sets
-        do. _scale_mm_configs shrinks BLOCK_N to the next power of two above N and
-        _autows_constraints_ok then drops anything with
-        BLOCK_N // EPILOGUE_SUBTILE < 32, so dropping 1 leaves narrow-N shapes with
-        no config at all; dropping 4 leaves EPILOGUE_SUBTILE=4 callers with none.
+        EPILOGUE_SUBTILE spans the same values as the non-autoWS Blackwell sets:
+        _scale_mm_configs shrinks BLOCK_N to fit N and _autows_constraints_ok then
+        drops BLOCK_N // EPILOGUE_SUBTILE < 32, so omitting 1 leaves narrow-N
+        shapes with no config at all.
         """
         return [
             BlackwellGPUGemmConfig(
                 block_m=block_m,
                 block_n=block_n,
                 block_k=64,
-                num_stages=(
-                    _AUTOWS_TWO_CTA_MAX_STAGES
-                    if two_ctas
-                    else _AUTOWS_DEFAULT_NUM_STAGES
-                ),
+                # 2-CTA caps the pipeline at 2 stages (see _autows_constraints_ok)
+                num_stages=2 if two_ctas else 3,
                 num_warps=8,
                 group_m=8,
                 epilogue_subtile=epilogue_subtile,
@@ -3214,8 +3191,12 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
-        self.exhaustive_configs = self._generate_exhaustive_configs()
+        if _use_template_autows():
+            self.mm_configs = self._generate_autows_default_configs()
+            self.exhaustive_configs = self._generate_autows_configs()
+        else:
+            self.mm_configs = self.blackwell_persistent_mm_configs
+            self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
