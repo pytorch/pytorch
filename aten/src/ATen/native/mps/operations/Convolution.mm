@@ -255,7 +255,7 @@ MTLComputePipelineState_t mps::Conv3dSimdTile::pipeline_state(mps::MetalShaderLi
 // Direct Metal conv1d is only profitable via the flat-tile MPP kernels; a
 // geometry the catalog misses would run the simdgroup fallback well below
 // MPSGraph, so it stays on the graph unless the shape needs 64-bit indexing
-// (which MPSGraph cannot run at all). Takes the (N, C, 1, L) view4d tensors.
+// (which the graph is not trusted with). Takes the (N, C, 1, L) view4d tensors.
 static bool conv1d_direct_metal_eligible(const Tensor& input_t,
                                          const Tensor& weight_t,
                                          bool has_bias,
@@ -272,7 +272,7 @@ static bool conv1d_direct_metal_eligible(const Tensor& input_t,
   if (input_channels == 0 || input_channels * input_length > kInt32Max || output_channels * output_length > kInt32Max) {
     return true;
   }
-  if (!is_macos_at_least(MacOSVersion::MACOS_26_0)) {
+  if (!has_mpp()) {
     return false;
   }
   const int64_t input_channels_per_group = input_channels / groups;
@@ -302,18 +302,16 @@ static bool conv1d_direct_metal_eligible(const Tensor& input_t,
   specialization.dilation_depth = specialization.dilation_height = 1;
   specialization.dilation_width = params.conv2d.dW;
   specialization.src_channels = input_channels_per_group <= 64
-      ? c10::checked_convert<int>(input_channels_per_group, "input channels per group")
+      ? c10::checked_convert<int32_t>(input_channels_per_group, "input channels per group")
       : -1;
-  specialization.src_width = c10::checked_convert<int>(std::max<int64_t>(input_length, 16384), "source width");
+  specialization.src_width = c10::checked_convert<int32_t>(std::max<int64_t>(input_length, 16384), "source width");
   specialization.src_height = 16384;
   specialization.has_bias = has_bias;
   specialization.out_ncdhw = output_t.is_contiguous();
   specialization.grouped = groups > 1;
   const auto tile = select_conv3d_mpp_tile(params, groups);
-  const int64_t padded_output_channels =
-      c10::metal::ceil_div(output_channels / groups, int64_t(tile.output_channels)) * tile.output_channels;
-  const int64_t padded_output_width =
-      c10::metal::ceil_div(output_length, int64_t(tile.output_width)) * tile.output_width;
+  const int64_t padded_output_channels = c10::metal::round_up(output_channels / groups, int64_t(tile.output_channels));
+  const int64_t padded_output_width = c10::metal::round_up(output_length, int64_t(tile.output_width));
   const int64_t useful_outputs = output_channels / groups * output_length;
   // At least half the padded tile is useful for catalog shapes. Below one
   // eighth, padding dominates and Graph/matmul wins on every measured probe.
@@ -604,9 +602,8 @@ static bool conv1d_dw_indexing_fits_int32(const Tensor& weight_t,
                                           const Tensor& output_t) {
   const auto output_length = output_t.size(3);
   const auto vectorized = stride == 1 && output_length >= conv1d_dw_outputs_per_thread;
-  const auto max_output_index = vectorized
-      ? c10::metal::ceil_div(output_length, int64_t(conv1d_dw_outputs_per_thread)) * conv1d_dw_outputs_per_thread - 1
-      : output_length - 1;
+  const auto max_output_index =
+      vectorized ? c10::metal::round_up(output_length, int64_t(conv1d_dw_outputs_per_thread)) - 1 : output_length - 1;
   return conv1d_indexing_fits_int32(weight_t.size(3), stride, padding, dilation, max_output_index);
 }
 

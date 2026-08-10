@@ -373,9 +373,9 @@ kernel void conv_weight_to_dhwio(
        output_channel] = source
           [(int64_t)output_channel * params.output_channel_stride +
            (int64_t)input_channel * params.input_channel_stride +
-           kernel_depth_index * params.depth_stride +
-           kernel_height_index * params.height_stride +
-           kernel_width_index * params.width_stride];
+           (int64_t)kernel_depth_index * params.depth_stride +
+           (int64_t)kernel_height_index * params.height_stride +
+           (int64_t)kernel_width_index * params.width_stride];
 }
 
 static_assert(

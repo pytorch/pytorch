@@ -62,7 +62,9 @@ Conv3dMppTile select_conv3d_mpp_tile(const Conv3DParams& params, int64_t groups)
       {.output_channels = 64, .output_width = 128, .output_height = 1, .simdgroups = 4},
       {.output_channels = 128, .output_width = 64, .output_height = 1, .simdgroups = 4},
   };
-  const c10::ArrayRef<Conv3dMppTile> candidates = params.conv2d.outH == 1
+  const bool use_conv1d_tiles = groups == 1 && params.conv2d.outH == 1 && params.kD == 1 &&
+      params.conv2d.kH == 1 && params.sD == 1 && params.conv2d.sH == 1 && params.dD == 1 && params.conv2d.dH == 1;
+  const c10::ArrayRef<Conv3dMppTile> candidates = use_conv1d_tiles
       ? c10::ArrayRef<Conv3dMppTile>(conv1d_candidates)
       : c10::ArrayRef<Conv3dMppTile>(conv3d_candidates);
   auto best_tile = candidates[0];
