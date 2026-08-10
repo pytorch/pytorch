@@ -3143,6 +3143,8 @@ class eager_numerics:
         os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
     )
 
+    # This can be enabled directly; Inductor also disables FTZ while
+    # emulate_precision_casts is active.
     disable_ftz: bool = False
 
     # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
