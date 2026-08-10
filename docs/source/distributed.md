@@ -403,6 +403,10 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_impl
+```
+
+```{eval-rst}
 .. autofunction:: get_backend_config
 ```
 
@@ -424,6 +428,18 @@ check whether the process group has already been initialized use {func}`torch.di
 
 ```{eval-rst}
 .. autofunction:: get_pg_count
+```
+
+```{eval-rst}
+.. autofunction:: set_timeout
+```
+
+### Fault-tolerant reconfiguration
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._supports_reconfigure
+.. autofunction:: torch.distributed.distributed_c10d._get_reconfigure_handle
+.. autofunction:: torch.distributed.distributed_c10d._reconfigure
 ```
 
 ## Shutdown
@@ -645,6 +661,10 @@ if rank == 0:
 ```
 
 ```{eval-rst}
+.. autofunction:: gather_single
+```
+
+```{eval-rst}
 .. autofunction:: gather_object
 ```
 
@@ -761,6 +781,20 @@ Please refer to the [profiler documentation](https://pytorch.org/docs/main/profi
 ```
 
 ## Optimization with Symmetric Memory
+
+### NCCL Symmetric Kernels
+
+NCCL 2.27 and later ship device kernels written specifically for symmetric,
+window-registered buffers, using low-latency, multimem/NVLS, and TMA algorithms
+rather than the generic ring/tree path. ``all_reduce``, ``all_gather_into_tensor``
+and ``reduce_scatter_tensor`` dispatch to them automatically once their buffers
+are registered — the call site does not change. When the buffers are not
+registered, or the op/dtype combination has no symmetric implementation, NCCL
+silently falls back to the regular path.
+
+For how to register buffers, the supported op/dtype matrix, and how to confirm
+the symmetric kernels actually ran, see
+[NCCL Symmetric Kernels](nccl-symmetric-kernels) in the Symmetric Memory documentation.
 
 ### Copy Engine Collectives
 
@@ -1731,10 +1765,4 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
-```
-
-```{toctree}
-:hidden:
-
-distributed._dist2
 ```

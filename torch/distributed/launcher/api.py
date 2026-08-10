@@ -133,14 +133,17 @@ class LaunchConfig:
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
 
-        if (
-            self.numa_options is None
-            and torch.cuda.is_available()
-            # We assume local_rank n uses cuda device n.
-            and torch.cuda.device_count() == self.nproc_per_node
-        ):
-            self.numa_options = get_default_numa_options()
-            logger.info("Using default numa options = %r", self.numa_options)
+        if self.numa_options is None:
+            try:
+                should_use_default_numa = (
+                    torch.accelerator.is_available()
+                    and torch.accelerator.device_count() == self.nproc_per_node
+                )
+            except RuntimeError:
+                should_use_default_numa = False
+            if should_use_default_numa:
+                self.numa_options = get_default_numa_options()
+                logger.info("Using default numa options = %r", self.numa_options)
 
         # Set shutdown_timeout from environment variable if not explicitly set
         if self.shutdown_timeout is None:
@@ -204,7 +207,7 @@ def _get_entrypoint_name(entrypoint: Callable | str | None, args: list[Any]) -> 
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
     2. If entrypoint is a string, check its value:
         2.1 if entrypoint equals to ``sys.executable`` (like "python"), use the first element from ``args``
-            which does not start with hifen letter (for example, "-u" will be skipped).
+            which does not start with hyphen letter (for example, "-u" will be skipped).
         2.2 otherwise, use ``entrypoint`` value.
     3. Otherwise, return empty string.
     """

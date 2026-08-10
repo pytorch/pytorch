@@ -10,14 +10,14 @@ __all__ = ["detect_anomaly", "set_detect_anomaly"]
 
 
 class detect_anomaly:
-    r"""Context-manager that enable anomaly detection for the autograd engine.
+    r"""Context-manager that enables anomaly detection for the autograd engine.
 
     This does two things:
 
     - Running the forward pass with detection enabled will allow the backward
       pass to print the traceback of the forward operation that created the failing
       backward function.
-    - If ``check_nan`` is ``True``, any backward computation that generate "nan"
+    - If ``check_nan`` is ``True``, any backward computation that generates "nan"
       value will raise an error. Default ``True``.
 
     .. warning::
