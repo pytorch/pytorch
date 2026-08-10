@@ -1509,15 +1509,7 @@ class _IterationSpace:
     values: Sequence[sympy.Expr]
 
 
-@dataclasses.dataclass(frozen=True)
-class _ContiguousSubParentRemappedValue:
-    parts: tuple[CSEVariable, ...]
-    parent_extent: sympy.Expr
-
-
-RemappedRangeValue = (
-    CSEVariable | tuple[CSEVariable, ...] | _ContiguousSubParentRemappedValue
-)
+RemappedRangeValue = CSEVariable | tuple[CSEVariable, ...]
 
 
 class _SubParentFusionDecision(NamedTuple):
@@ -1568,23 +1560,11 @@ class _DerivedIterationFamily:
     def resolve_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
         """The pre-materialized value for ``name``, or None if there is none.
 
-        Lane tuples select interleaved lanes with ``index % factor``. Contiguous
-        lanes select from the index's constant offset within the parent extent.
-        Non-lane entries are already the value.
+        A tuple entry in ``remapped_values`` is a lane tuple: the parent tile
+        was split into ``len(value)`` lanes, and ``index`` selects one of them
+        as ``index % len(value)``. Non-tuple entries are already the value.
         """
         value = self.remapped_values.get(name)
-        if isinstance(value, _ContiguousSubParentRemappedValue):
-            factor = len(value.parts)
-            lane = scheduler.NestedReduction.sub_parent_contiguous_lane(
-                index, factor, value.parent_extent
-            )
-            part = _select_lane(value.parts, lane)
-            if part is None:
-                raise AssertionError(
-                    "sub-parent planner invariant violated: contiguous load "
-                    f"for {name!r} has non-constant lane for index {index}"
-                )
-            return part
         if not isinstance(value, tuple):
             return value
         lane = scheduler.NestedReduction.interleaved_sub_parent_lane(
@@ -2067,37 +2047,27 @@ class _GroupedReductionLayout:
                 elems_per_group=str(FloorDiv(self.local_reduction_size_sym, factor)),
             )
             return True
-        if source_layout is None:
+        interleaved = scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
+        if source_layout is not interleaved:
             return False
-        source_layout_kind = scheduler.NestedReduction.SubParentSourceLayout
         sub_parent_tree = family.sub_parent_tree()
         child_block = sub_parent_tree.block_size_str()
         factor_dim = str(factor)
         shape = value.shape
         assert shape is not None  # noqa: S101
-        # parent_dim() only accepts rank-1/2 tiles.
-        prefix = (str(shape[1 - self.parent_axis]),) if len(shape) == 2 else ()
+        if len(shape) == 2:
+            passthrough_dim = str(shape[1 - self.parent_axis])
+            reshape_shape = (passthrough_dim, child_block, factor_dim)
+            part_shape = (passthrough_dim, child_block)
+        else:
+            reshape_shape = (child_block, factor_dim)
+            part_shape = (child_block,)
         parts = tuple(
-            kernel.cse.newvar(dtype=value.dtype, shape=(*prefix, child_block))
+            kernel.cse.newvar(dtype=value.dtype, shape=part_shape)
             for _ in range(factor)
         )
-        part_names = tuple(map(str, parts))
-        if source_layout is source_layout_kind.CONTIGUOUS:
-            reshape_shape = (*prefix, factor_dim, child_block)
-            permute_dims = (0, 2, 1) if prefix else (1, 0)
-            kernel.emit_split_via_reshape(
-                value, reshape_shape, part_names, permute_dims=permute_dims
-            )
-            family.remapped_values[name] = _ContiguousSubParentRemappedValue(
-                parts,
-                self.local_reduction_size,
-            )
-        else:
-            assert source_layout is source_layout_kind.INTERLEAVED  # noqa: S101
-            kernel.emit_split_via_reshape(
-                value, (*prefix, child_block, factor_dim), part_names
-            )
-            family.remapped_values[name] = parts
+        kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
+        family.remapped_values[name] = parts
         return True
 
     def _broadcast_value_to_axis_resolution(

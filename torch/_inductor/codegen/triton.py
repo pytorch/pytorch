@@ -6154,6 +6154,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
+    def _bitcast_reshape_expr(
+        self,
+        value: CSEVariable,
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> str:
+        value_expr = str(value)
+        if dtype in TRITON_FLOAT8_DTYPES:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        return self._reshape_expr(value, shape, value_expr=value_expr)
+
     def _emit_recursive_split(
         self,
         expr: str,
@@ -6161,12 +6172,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         shape: Sequence[sympy.Expr | int | str],
         dtype: torch.dtype,
     ) -> None:
-        """Split a trailing axis into ``len(names)`` lanes.
-
-        ``tl.split`` only ever yields two values, so a factor above 2 is built
-        as a binary tree. Float8 goes through uint8 because ``tl.split`` does
-        not accept fp8 operands.
-        """
+        """Split a trailing axis into a power-of-two number of lanes."""
         factor = len(names)
         assert factor > 1 and factor & (factor - 1) == 0  # noqa: S101
         is_float8 = dtype in TRITON_FLOAT8_DTYPES
@@ -6198,42 +6204,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
         self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
 
-    def _bitcast_reshape_expr(
-        self,
-        value: CSEVariable,
-        shape: Sequence[sympy.Expr | int | str],
-        dtype: torch.dtype,
-    ) -> str:
-        value_expr = str(value)
-        if dtype in TRITON_FLOAT8_DTYPES:
-            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        return self._reshape_expr(value, shape, value_expr=value_expr)
-
     def emit_split_via_reshape(
         self,
         value: CSEVariable,
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
-        permute_dims: Sequence[int] | None = None,
     ) -> None:
-        """Split ``value`` into the lanes named by ``part_names``.
-
-        ``tl.split`` can only divide the trailing axis in two. Interleaved lanes
-        reshape directly to a trailing lane axis; contiguous lanes reshape the
-        lane axis before the child extent, then use ``permute_dims`` to move it
-        to the end.
-
-        float8 goes through uint8 because Triton's ``tl.split`` does not accept
-        fp8 operands.
-        """
+        """Reshape ``value`` to expose the trailing lane axis, then split it."""
         dtype = value.dtype
         assert dtype is not None  # noqa: S101
         expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
-        split_shape: Sequence[sympy.Expr | int | str] = reshape_shape
-        if permute_dims is not None:
-            expr = f"tl.permute({expr}, ({', '.join(map(str, permute_dims))}))"
-            split_shape = tuple(reshape_shape[i] for i in permute_dims)
-        self._emit_recursive_split(expr, part_names, split_shape, dtype)
+        self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
 
     def emit_broadcast_via_reshape(
         self,
