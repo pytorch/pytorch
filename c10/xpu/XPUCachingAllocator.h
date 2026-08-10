@@ -2,9 +2,25 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/util/Registry.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
+
+class C10_XPU_API FreeMemoryCallback {
+ public:
+  virtual ~FreeMemoryCallback() = default;
+  virtual bool Execute() = 0;
+};
+
+C10_DECLARE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback);
+#define REGISTER_FREE_MEMORY_CALLBACK_XPU(name, ...) \
+  C10_REGISTER_CLASS(FreeXPUMemoryCallbacksRegistry, name, __VA_ARGS__)
+
+struct ShareableHandle {
+  std::ptrdiff_t offset;
+  std::string handle;
+};
 
 class XPUAllocator : public DeviceAllocator {
  public:
@@ -105,6 +121,12 @@ C10_XPU_API void releasePool(
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
+
+C10_XPU_API ShareableHandle shareIpcHandle(void* ptr);
+
+C10_XPU_API std::shared_ptr<void> getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device);
 
 } // namespace c10::xpu::XPUCachingAllocator
 

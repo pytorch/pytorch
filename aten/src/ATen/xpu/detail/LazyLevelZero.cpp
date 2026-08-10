@@ -91,6 +91,25 @@ ZE_STUB4(
     const void*,
     ze_memory_allocation_properties_t*,
     ze_device_handle_t*)
+ZE_STUB5(
+  zeEventPoolCreate,
+  ze_context_handle_t,
+  const ze_event_pool_desc_t*,
+  uint32_t,
+  ze_device_handle_t*,
+  ze_event_pool_handle_t*)
+ZE_STUB1(zeEventPoolDestroy, ze_event_pool_handle_t)
+ZE_STUB3(zeEventCreate, ze_event_pool_handle_t, const ze_event_desc_t*, ze_event_handle_t*)
+ZE_STUB1(zeEventDestroy, ze_event_handle_t)
+ZE_STUB2(zeEventPoolGetIpcHandle, ze_event_pool_handle_t, ze_ipc_event_pool_handle_t*)
+ZE_STUB3(
+  zeEventPoolOpenIpcHandle,
+  ze_context_handle_t,
+  ze_ipc_event_pool_handle_t,
+  ze_event_pool_handle_t*)
+ZE_STUB1(zeEventPoolCloseIpcHandle, ze_event_pool_handle_t)
+ZE_STUB1(zeEventHostSignal, ze_event_handle_t)
+ZE_STUB2(zeEventHostSynchronize, ze_event_handle_t, uint64_t)
 ZE_STUB3(
     zeModuleBuildLogGetString,
     ze_module_build_log_handle_t,

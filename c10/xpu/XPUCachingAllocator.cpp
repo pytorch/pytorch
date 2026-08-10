@@ -1,16 +1,86 @@
+#include <c10/core/DeviceGuard.h>
+#include <c10/util/CallOnce.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
+#include <cerrno>
+#include <cstring>
+#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <vector>
+
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+
+#include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
 
 namespace c10::xpu::XPUCachingAllocator {
 
+C10_DEFINE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback)
+
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
+
+namespace {
+
+enum class PtracerAnyState {
+  Unsupported,
+  DisabledByEnv,
+  Enabled,
+  EnableFailed,
+};
+
+struct PtracerAnyStatus {
+  PtracerAnyState state;
+  int error_code;
+};
+
+bool allowPtracerAnyForIpcImport() {
+  return c10::utils::check_env("PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY") == true;
+}
+
+PtracerAnyStatus tryEnablePtracerAnyForIpcImport() {
+#if defined(__linux__) && defined(PR_SET_PTRACER_ANY)
+  const bool ptracer_opt_in = allowPtracerAnyForIpcImport();
+  if (!ptracer_opt_in) {
+    return {
+        PtracerAnyState::DisabledByEnv,
+        0,
+    };
+  }
+
+  static c10::once_flag prctl_once;
+  static bool ptracer_enabled = false;
+  static int ptracer_error = 0;
+
+  c10::call_once(prctl_once, []() {
+    if (::prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) == 0) {
+      ptracer_enabled = true;
+      return;
+    }
+    ptracer_error = errno;
+  });
+
+  return {
+      ptracer_enabled ? PtracerAnyState::Enabled
+                      : PtracerAnyState::EnableFailed,
+      ptracer_error,
+  };
+#else
+  return {
+      PtracerAnyState::Unsupported,
+      0,
+  };
+#endif
+}
+
+} // namespace
 
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
@@ -914,6 +984,15 @@ class DeviceCachingAllocator {
     return true;
   }
 
+  bool trigger_free_memory_callbacks() {
+    bool freed_memory = false;
+    for (const auto& name : FreeXPUMemoryCallbacksRegistry()->Keys()) {
+      freed_memory |=
+          FreeXPUMemoryCallbacksRegistry()->Create(name)->Execute();
+    }
+    return freed_memory;
+  }
+
   bool alloc_block(
       AllocParams& p,
       bool isRetry,
@@ -1394,7 +1473,9 @@ class DeviceCachingAllocator {
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
-    bool block_found = get_free_block(params);
+    bool block_found =
+      get_free_block(params) ||
+      (trigger_free_memory_callbacks() && get_free_block(params));
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
       block_found = alloc_block(params, false, context) ||
@@ -1513,6 +1594,24 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+  }
+
+  std::pair<void*, ptrdiff_t> getIpcBaseInfo(Block* block) {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(
+        !block->expandable_segment,
+        "XPU IPC is not supported for expandable segments");
+
+    Block* base_block = block;
+    while (base_block->prev != nullptr) {
+      base_block = base_block->prev;
+    }
+
+    const auto storage_offset_bytes = static_cast<ptrdiff_t>(
+        reinterpret_cast<char*>(block->ptr) -
+        reinterpret_cast<char*>(base_block->ptr));
+
+    return {base_block->ptr, storage_offset_bytes};
   }
 
   void emptyCache(MempoolId_t mempool_id) {
@@ -1809,6 +1908,190 @@ class DeviceCachingAllocator {
   }
 };
 
+namespace xpu_ipc {
+
+using SyclIpcHandle =
+    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
+
+class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
+ public:
+  std::shared_ptr<void> getOrOpenHandle(
+      const SyclIpcHandle& handle_data,
+      c10::DeviceIndex device) {
+    auto handle_key = makeKey(handle_data);
+
+    if (auto cached = lookupCached(handle_key, device)) {
+      return cached;
+    }
+
+    void* raw_ptr = openHandle(handle_data, device);
+    return publish(handle_key, device, raw_ptr);
+  }
+
+ private:
+  struct CacheEntry {
+    c10::DeviceIndex device{-1};
+    void* ptr{nullptr};
+    std::weak_ptr<void> wp;
+  };
+
+  static std::string makeKey(const SyclIpcHandle& handle_data) {
+    return std::string(
+        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+  }
+
+  std::shared_ptr<void> lookupCached(
+      const std::string& handle_key,
+      c10::DeviceIndex device) {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto it = handle_to_ptr_.find(handle_key);
+    if (it == handle_to_ptr_.end()) {
+      return nullptr;
+    }
+    if (it->second.device == device) {
+      if (auto cached = it->second.wp.lock()) {
+        return cached;
+      }
+    }
+    handle_to_ptr_.erase(it);
+    return nullptr;
+  }
+
+  void* openHandle(const SyclIpcHandle& handle_data, c10::DeviceIndex device) {
+    c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
+    auto& current_queue = xpu::getCurrentXPUStream(device).queue();
+    sycl::context ctx = current_queue.get_context();
+    sycl::device dev = current_queue.get_device();
+
+    auto open_once = [&]() {
+      void* p = sycl::ext::oneapi::experimental::ipc_memory::open(
+          handle_data, ctx, dev);
+      TORCH_CHECK(p != nullptr, "Failed to open XPU IPC handle");
+      return p;
+    };
+
+    try {
+      return open_once();
+    } catch (const std::exception& first_error) {
+      return openHandleWithPtracerRetry(open_once, first_error);
+    }
+  }
+
+  template <typename OpenOnceFn>
+  void* openHandleWithPtracerRetry(
+      OpenOnceFn&& open_once,
+      const std::exception& first_error) {
+    const auto ptracer_status = tryEnablePtracerAnyForIpcImport();
+
+    if (ptracer_status.state == PtracerAnyState::Enabled) {
+      return retryAfterEnablingPtracer(open_once, first_error);
+    }
+
+    throwPtracerUnavailable(ptracer_status, first_error);
+  }
+
+  template <typename OpenOnceFn>
+  static void* retryAfterEnablingPtracer(
+      OpenOnceFn&& open_once,
+      const std::exception& first_error) {
+    try {
+      return open_once();
+    } catch (const std::exception& second_error) {
+      TORCH_CHECK(
+          false,
+          "XPU IPC open failed: ",
+          first_error.what(),
+          ". Retry after enabling PR_SET_PTRACER_ANY also failed: ",
+          second_error.what());
+    }
+  }
+
+  [[noreturn]] static void throwPtracerUnavailable(
+      const PtracerAnyStatus& ptracer_status,
+      const std::exception& first_error) {
+    if (ptracer_status.state == PtracerAnyState::EnableFailed) {
+      TORCH_CHECK(
+          false,
+          "XPU IPC open failed: ",
+          first_error.what(),
+          ". Failed to enable PR_SET_PTRACER_ANY (errno=",
+          ptracer_status.error_code,
+          ")");
+    }
+
+    if (ptracer_status.state == PtracerAnyState::DisabledByEnv) {
+      TORCH_CHECK(
+          false,
+          "XPU IPC open failed: ",
+          first_error.what(),
+          ". Retry with PR_SET_PTRACER_ANY is disabled by default. "
+          "To opt in, set PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY=1.");
+    }
+
+    TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
+  }
+
+  std::shared_ptr<void> publish(
+      const std::string& handle_key,
+      c10::DeviceIndex device,
+      void* raw_ptr) {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+
+    auto existing = handle_to_ptr_.find(handle_key);
+    if (existing != handle_to_ptr_.end() && existing->second.device == device) {
+      if (auto cached = existing->second.wp.lock()) {
+        closeHandle(device, raw_ptr, "XPU IPC close of duplicate mapping failed: ");
+        return cached;
+      }
+    }
+
+    auto shared_ptr = makeManagedPtr(raw_ptr, device, handle_key);
+    handle_to_ptr_[handle_key] = CacheEntry{device, raw_ptr, shared_ptr};
+    return shared_ptr;
+  }
+
+  std::shared_ptr<void> makeManagedPtr(
+      void* raw_ptr,
+      c10::DeviceIndex device,
+      const std::string& handle_key) {
+    std::weak_ptr<IpcMemoryCache> self = weak_from_this();
+    return std::shared_ptr<void>(
+        raw_ptr, [self, device, handle_key](void* ptr) {
+          if (auto cache = self.lock()) {
+            cache->release(handle_key, device, ptr);
+          }
+        });
+  }
+
+  void release(const std::string& handle_key, c10::DeviceIndex device, void* ptr) {
+    {
+      std::lock_guard<std::mutex> lock(cache_mutex_);
+      auto it = handle_to_ptr_.find(handle_key);
+      if (it != handle_to_ptr_.end() && it->second.ptr == ptr) {
+        handle_to_ptr_.erase(it);
+      }
+    }
+    closeHandle(device, ptr, "XPU IPC close failed: ");
+  }
+
+  static void closeHandle(c10::DeviceIndex device, void* ptr, const char* error_prefix) {
+    try {
+      c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
+      sycl::ext::oneapi::experimental::ipc_memory::close(ptr);
+    } catch (const std::exception& e) {
+      TORCH_WARN(error_prefix, e.what());
+    }
+  }
+
+  std::mutex cache_mutex_;
+  ska::flat_hash_map<std::string, CacheEntry> handle_to_ptr_;
+};
+
+static std::shared_ptr<IpcMemoryCache> ipc_memory_cache =
+    std::make_shared<IpcMemoryCache>();
+
+} // namespace xpu_ipc
+
 static void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public XPUAllocator {
@@ -2078,6 +2361,44 @@ class NativeCachingAllocator : public XPUAllocator {
     assertValidDevice(device);
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
   }
+
+  ShareableHandle shareIpcHandle(void* ptr) {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(block, "Invalid device pointer for XPU IPC: ", ptr);
+
+    auto [base_ptr, storage_offset_bytes] =
+        device_allocators[block->device]->getIpcBaseInfo(block);
+
+    try {
+      c10::DeviceGuard guard(c10::Device(c10::kXPU, block->device));
+      auto& current_queue = xpu::getCurrentXPUStream(block->device).queue();
+      sycl::context ctx = current_queue.get_context();
+      auto handle = sycl::ext::oneapi::experimental::ipc_memory::get(
+          base_ptr, ctx);
+      auto handle_data = handle.data();
+
+      return {
+          storage_offset_bytes,
+          std::string(
+              reinterpret_cast<const char*>(handle_data.data()),
+              handle_data.size())};
+    } catch (const std::exception& e) {
+      TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
+    }
+  }
+
+  std::shared_ptr<void> getIpcDevPtr(
+      std::string handle_str,
+      c10::DeviceIndex device) {
+    TORCH_CHECK(!handle_str.empty(), "Empty XPU IPC handle");
+
+    xpu_ipc::SyclIpcHandle handle_data(
+        reinterpret_cast<const std::byte*>(handle_str.data()),
+        reinterpret_cast<const std::byte*>(handle_str.data()) +
+            handle_str.size());
+
+    return xpu_ipc::ipc_memory_cache->getOrOpenHandle(handle_data, device);
+  }
 };
 
 static NativeCachingAllocator native_allocator;
@@ -2158,6 +2479,16 @@ void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
+}
+
+ShareableHandle shareIpcHandle(void* ptr) {
+  return native_allocator.shareIpcHandle(ptr);
+}
+
+std::shared_ptr<void> getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device) {
+  return native_allocator.getIpcDevPtr(std::move(handle), device);
 }
 
 } // namespace c10::xpu::XPUCachingAllocator

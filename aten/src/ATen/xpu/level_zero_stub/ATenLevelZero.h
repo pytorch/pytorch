@@ -38,6 +38,15 @@ namespace at::xpu {
   _(zeKernelCreate)            \
   _(zeKernelGetProperties)     \
   _(zeMemGetAllocProperties)   \
+  _(zeEventPoolCreate)         \
+  _(zeEventPoolDestroy)        \
+  _(zeEventCreate)             \
+  _(zeEventDestroy)            \
+  _(zeEventPoolGetIpcHandle)   \
+  _(zeEventPoolOpenIpcHandle)  \
+  _(zeEventPoolCloseIpcHandle) \
+  _(zeEventHostSignal)         \
+  _(zeEventHostSynchronize)    \
   _(zeModuleBuildLogGetString) \
   _(zeModuleBuildLogDestroy)
 
