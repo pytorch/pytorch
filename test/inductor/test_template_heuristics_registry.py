@@ -13,10 +13,13 @@ from torch._inductor.heuristics.template.triton import (
     FlexConfig,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestBlackwellGPUGemmConfig(TestCase):
     """Tests for BlackwellGPUGemmConfig class."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_default_values(self):
         """Test that BlackwellGPUGemmConfig has correct default values."""
@@ -58,6 +61,8 @@ class TestBlackwellGPUGemmConfig(TestCase):
 
 
 class TestTemplateHeuristicsRegistry(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # Save original registry state
@@ -216,6 +221,8 @@ class TestTemplateHeuristicsRegistry(TestCase):
 
 
 class TestA100DefaultFlexConfig(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_head_dim_192_entries(self):
         """``(bf16, 192)`` and ``(fp16, 192)`` entries are required for
         DeepSeek V3 MLA (qk_nope_head_dim=128 + qk_rope_head_dim=64 = 192,
