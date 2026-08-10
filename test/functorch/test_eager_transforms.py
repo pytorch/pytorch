@@ -5349,12 +5349,10 @@ def construct_sum_pyop():
         with enable_single_level_autograd_function():
             return MySum.apply(x, dim)
 
-    @mysum.py_impl(torch._C.DispatchKey.AutogradCPU)
-    def mysum_autograd_cpu(x, dim):
-        return torch.sum(x, dim)
-
-    @mysum.py_impl(torch._C.DispatchKey.AutogradCUDA)
-    def mysum_autograd_cuda(x, dim):
+    # Registered on the Autograd alias key rather than per-backend AutogradCPU /
+    # AutogradCUDA / ... so that this test operator works on any backend.
+    @mysum.py_impl(torch._C.DispatchKey.Autograd)
+    def mysum_autograd(x, dim):
         return torch.sum(x, dim)
 
     return mysum
