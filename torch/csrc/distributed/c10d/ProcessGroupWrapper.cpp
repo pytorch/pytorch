@@ -382,10 +382,7 @@ ProcessGroupWrapper::ProcessGroupWrapper(
     c10::intrusive_ptr<Backend> glooBackend)
     : Backend(backend->getRank(), backend->getSize()),
       backend_(backend),
-      glooBackend_(std::move(glooBackend)) {
-  // Set the sequence number for the underlying process group.
-  backend_->setSequenceNumberForGroup();
-}
+      glooBackend_(std::move(glooBackend)) {}
 
 const std::string ProcessGroupWrapper::getBackendName() const {
   return backend_->getBackendName();
@@ -525,14 +522,6 @@ void ProcessGroupWrapper::monitoredBarrier(
   return backend_->monitoredBarrier(opts, waitAllRanks);
 }
 
-void ProcessGroupWrapper::setSequenceNumberForGroup() {
-  // Set underlying pg's sequence number if it is not set.
-  if (backend_->getSequenceNumberForGroup() == 0) {
-    // Set the sequence number for the underlying process group.
-    backend_->setSequenceNumberForGroup();
-  }
-}
-
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
   return backend_->getSequenceNumberForGroup();
 }
@@ -660,6 +649,14 @@ std::unordered_map<std::string, uint64_t> ProcessGroupWrapper::
 
 ErrorType ProcessGroupWrapper::getError() {
   return backend_->getError();
+}
+
+std::optional<at::Device> ProcessGroupWrapper::getBoundDeviceId() const {
+  return backend_->getBoundDeviceId();
+}
+
+void ProcessGroupWrapper::setBoundDeviceId(std::optional<at::Device> device) {
+  backend_->setBoundDeviceId(device);
 }
 
 void ProcessGroupWrapper::eagerConnectSingleDevice(at::Device device) {

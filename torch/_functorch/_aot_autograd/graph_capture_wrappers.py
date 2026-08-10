@@ -22,9 +22,9 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
-from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
@@ -677,11 +677,11 @@ def sc_visit(
             match getattr(e, a):
                 case torch.Tensor() as inner:
                     visit(inner)
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
     visit(t)
@@ -753,8 +753,11 @@ def apply_in_graph_mutations(
     if input_info.mutates_storage_metadata:
         if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
             with torch.no_grad():
-                # pyrefly: ignore [bad-argument-type, no-matching-overload]
-                inpt_old.set_(inpt_new)
+                if input_info.mutation_is_shallow_copy_data:
+                    torch.ops.aten.shallow_copy_data_(inpt_old, inpt_new)
+                else:
+                    # pyrefly: ignore [bad-argument-type, no-matching-overload]
+                    inpt_old.set_(inpt_new)
 
     # Note [Ordering of resize_() and set_()]
     # Importantly: the common usage in FSDP is that we have a dummy parameter
@@ -822,16 +825,16 @@ def apply_in_graph_mutations(
                 inpt_old  # type: ignore[assignment]
             )
         with torch.no_grad(), maybe_preserve_vc:
-            copy_mutated_input(inpt_old, inpt_new)
+            inpt_old.copy_(inpt_new)
     elif input_info.mutations_under_no_grad_or_inference_mode:
         # Under no_grad = run under no_grad (we still bump the VC though)
         # (inference_mode will also bump the VC, as long as the tensor in question
         # was created outside of inference_mode)
 
         with torch.no_grad():
-            copy_mutated_input(inpt_old, inpt_new)
+            inpt_old.copy_(inpt_new)
     else:
-        copy_mutated_input(inpt_old, inpt_new)
+        inpt_old.copy_(inpt_new)
 
 
 # This creates the final function that we want to trace using make_fx(),
@@ -1295,7 +1298,7 @@ def handle_effect_tokens_fn(
     return inner_fn, args, args_descs
 
 
-# Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
+# Given a function operating on Subclass -> Subclass, returns a function that operates on Tensor -> Tensor
 # Also returns:
 # - the new set of arguments to pass into this function (now that tensor subclasses have been eliminated)
 # - the updated ViewAndMutationMeta for this dense -> dense function.
@@ -1469,15 +1472,17 @@ def aot_dispatch_subclass(
     # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
-    meta_updated = run_functionalized_fw_and_collect_metadata(
-        without_output_descs(metadata_fn),
-        # pyrefly: ignore [bad-argument-type]
-        flat_args_descs=primals_unwrapped_descs,
-        static_input_indices=remapped_static_indices,
-        keep_input_mutations=meta.keep_input_mutations,
-        # pyrefly: ignore [not-iterable]
-    )(*primals_unwrapped)
+    with torch._dynamo.eval_frame._use_eager_on_nested_compile():
+        meta_updated = run_functionalized_fw_and_collect_metadata(
+            without_output_descs(metadata_fn),
+            # pyrefly: ignore [bad-argument-type]
+            flat_args_descs=primals_unwrapped_descs,
+            static_input_indices=remapped_static_indices,
+            keep_input_mutations=meta.keep_input_mutations,
+            # pyrefly: ignore [not-iterable]
+        )(*primals_unwrapped)
 
+    meta_updated.aotautograd_input_source_map = meta.aotautograd_input_source_map
     subclass_meta.fw_metadata = meta_updated
 
     return SubclassTracingInfo(
@@ -1496,7 +1501,6 @@ def create_functional_call(
     strict_out_tuple: bool = True,
 ) -> Callable[..., Any]:
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
-    # https://github.com/pytorch/pytorch/issues/103569
 
     @simple_wraps(mod)
     def functional_call(*args: Any, **kwargs: Any) -> Any:

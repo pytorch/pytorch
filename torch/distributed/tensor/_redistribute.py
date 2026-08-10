@@ -318,7 +318,9 @@ def _get_flattened_mesh_by_layout(
     input) rather than as a get_attr constant holding an unpicklable
     ProcessGroup.
     """
-    if _are_we_tracing() and torch.distributed.config.compile_on_one_rank:
+    import torch.compiler.config
+
+    if _are_we_tracing() and torch.compiler.config.compile_on_one_rank:
         # Pre-check: the custom op can't return None (torch.library doesn't
         # support Optional opaque return types), so guard here first.
         if _get_flattened_mesh_by_layout_impl(mesh, mesh_dims) is None:
@@ -1618,9 +1620,10 @@ def redistribute_local_tensor(
             # This is safe because _StridedShard.is_shard() returns False, so
             # _comm_type_key() returns None and flattening is never attempted.
             if isinstance(current, _StridedShard) or isinstance(target, _StridedShard):
-                assert mesh_to_use is device_mesh, (  # noqa: S101
-                    "_StridedShard redistribute assumes no flattened transforms"
-                )
+                if mesh_to_use is not device_mesh:
+                    raise AssertionError(
+                        "_StridedShard redistribute assumes no flattened transforms"
+                    )
 
             num_chunks = mesh_to_use.size(mesh_dim=i)
 

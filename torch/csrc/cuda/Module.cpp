@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -867,6 +868,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
 
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
+  py::str annotate_s = "annotate";
   py::str device_free_s = "device_free";
 
   using c10::CachingDeviceAllocator::TraceEntry;
@@ -891,30 +893,35 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::ANNOTATE:
+        return annotate_s;
     }
     TORCH_CHECK(false, "unreachable");
+  };
+
+  auto traceEntryToDict = [&](const TraceEntry& te) {
+    py::dict trace_entry;
+    if (te.context_) {
+      auto sc = getCapturedTracebackFromContext(te.context_);
+      to_gather_frames.emplace_back(sc);
+      to_gather_dest.emplace_back(trace_entry);
+    }
+    trace_entry[action_s] = action_to_str(te.action_);
+    trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
+        te.addr_;
+    trace_entry[size_s] = te.size_;
+    trace_entry[stream_s] = int64_t(te.stream_);
+    trace_entry[time_us_s] = te.time_.t_;
+    trace_entry[compile_context_s] = te.compile_context_;
+    trace_entry[user_metadata_s] = te.user_metadata_;
+    trace_entry[pool_id_s] = te.mempool_;
+    return trace_entry;
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
     py::list trace;
     for (const auto& te : traceInfo) {
-      py::dict trace_entry;
-      if (te.context_) {
-        // without further compression frames can get really large on dump
-        auto sc = getCapturedTracebackFromContext(te.context_);
-        to_gather_frames.emplace_back(sc);
-        to_gather_dest.emplace_back(trace_entry);
-      }
-      trace_entry[action_s] = action_to_str(te.action_);
-      trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
-          te.addr_;
-      trace_entry[size_s] = te.size_;
-      trace_entry[stream_s] = int64_t(te.stream_);
-      trace_entry[time_us_s] = te.time_.t_;
-      trace_entry[compile_context_s] = te.compile_context_;
-      trace_entry[user_metadata_s] = te.user_metadata_;
-      trace_entry[pool_id_s] = te.mempool_;
-      trace.append(trace_entry);
+      trace.append(traceEntryToDict(te));
     }
     traces.append(trace);
   }
@@ -973,11 +980,56 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   }
   allocator_settings[roundup_power2_divisions_s] = roundup_settings;
 
+  // Collect host allocator data
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  py::list host_segments_list;
+  py::list host_traces_list;
+  if (host_alloc && host_alloc->is_history_enabled()) {
+    auto host_segs = host_alloc->get_segments();
+    for (const auto& seg : host_segs) {
+      py::dict segmentDict;
+      segmentDict[device_s] = -1;
+      segmentDict[address_s] = seg.address;
+      segmentDict[total_size_s] = seg.size;
+      segmentDict[allocated_size_s] = seg.allocated ? seg.size : 0;
+      segmentDict[active_size_s] = seg.active ? seg.size : 0;
+      segmentDict[requested_size_s] = seg.size;
+      segmentDict[stream_s] = int64_t(0);
+      segmentDict[segment_type_s] = small_s;
+      segmentDict[segment_pool_id] = seg.owner_private_pool_id;
+      segmentDict[is_expandable_s] = false;
+      add_frame_key(segmentDict, seg.context_when_allocated);
+
+      py::dict blockDict;
+      blockDict[address_s] = seg.address;
+      blockDict[size_s] = seg.size;
+      blockDict[requested_size_s] = seg.size;
+      blockDict[state_s] =
+          (seg.allocated ? active_allocated_s
+                         : (seg.active ? active_pending_free_s : inactive_s));
+      add_frame_key(blockDict, seg.context_when_allocated);
+
+      py::list blocks;
+      blocks.append(blockDict);
+      segmentDict[blocks_s] = blocks;
+      host_segments_list.append(segmentDict);
+    }
+
+    if (include_traces) {
+      auto host_trace_entries = host_alloc->get_traces();
+      for (const auto& te : host_trace_entries) {
+        host_traces_list.append(traceEntryToDict(te));
+      }
+    }
+  }
+
   py::dict result;
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
   result["external_annotations"] = external_annotations;
+  result["host_segments"] = host_segments_list;
+  result["host_traces"] = host_traces_list;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -1179,8 +1231,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           bool,
-          const std::vector<std::string>&)>(
-          torch::cuda::_record_memory_history));
+          const std::vector<std::string>&,
+          bool,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def(
       "_cuda_record_memory_history",
@@ -1192,11 +1245,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           bool,
-          const std::vector<std::string>&)>(
-          torch::cuda::_record_memory_history));
+          const std::vector<std::string>&,
+          bool,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
+
+  m.def("_cuda_memoryMetadataSupported", []() {
+    return c10::cuda::CUDACachingAllocator::supportsUserMetadata();
   });
 
   m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {
@@ -1205,6 +1263,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_getMemoryMetadata", []() {
     return c10::cuda::CUDACachingAllocator::getUserMetadata();
+  });
+
+  m.def("_cuda_annotateMemory", [](size_t ptr, const std::string& metadata) {
+    c10::cuda::CUDACachingAllocator::annotateMemory(
+        reinterpret_cast<void*>(ptr), metadata);
   });
 
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {
@@ -1402,21 +1465,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
         t.unsafeGetTensorImpl()
             ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
-  m.def(
-      "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
-  m.def(
-      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->clear_data_ptr_access_error_msg_();
       });
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
@@ -1714,6 +1762,20 @@ static PyObject* THCPModule_resetCublasLtWorkspaceSize(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_cudnnClearDropoutState_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if defined(USE_ROCM)
+  // On ROCm, RNNs dispatch to MIOpen, which caches its dropout state buffer in
+  // thread-local storage separate from the cuDNN path.
+  at::native::_miopen_clear_dropout_state();
+#endif
+  at::native::_cudnn_clear_dropout_state();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1848,6 +1910,29 @@ PyObject* THCPModule_cuda_tunableop_get_max_tuning_iterations(
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetMaxTuningIterations());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_set_cublaslt_requested_algo_count(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "cuda_tunableop_set_cublaslt_requested_algo_count expects an int, but got ",
+      THPUtils_typename(arg));
+  auto count = static_cast<int>(THPUtils_unpackLong(arg));
+  at::cuda::tunable::getTuningContext()->SetCublasLtRequestedAlgoCount(count);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_get_cublaslt_requested_algo_count(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt32(
+      at::cuda::tunable::getTuningContext()->GetCublasLtRequestedAlgoCount());
   END_HANDLE_TH_ERRORS
 }
 
@@ -2185,6 +2270,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_resetCublasLtWorkspaceSize,
      METH_NOARGS,
      nullptr},
+    {"_cudnn_clear_dropout_state",
+     THCPModule_cudnnClearDropoutState_wrap,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_isCurrentStreamCapturing",
      THCPModule_isCurrentStreamCapturing_wrap,
      METH_NOARGS,
@@ -2347,6 +2436,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_get_max_tuning_iterations,
      METH_NOARGS,
      nullptr},
+    {"_cuda_tunableop_set_cublaslt_requested_algo_count",
+     THCPModule_cuda_tunableop_set_cublaslt_requested_algo_count,
+     METH_O,
+     nullptr},
+    {"_cuda_tunableop_get_cublaslt_requested_algo_count",
+     THCPModule_cuda_tunableop_get_cublaslt_requested_algo_count,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_tunableop_set_filename",
      THCPModule_cuda_tunableop_set_filename,
      METH_VARARGS,
@@ -2393,7 +2490,7 @@ void initNvtxBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
-#if defined(USE_CUSPARSELT)
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
 void initCusparseltBindings(PyObject* module);
 #endif
 
@@ -2408,7 +2505,7 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
-#if defined(USE_CUSPARSELT)
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
   shared::initCusparseltBindings(module);
 #endif
   shared::initGdsBindings(module);
