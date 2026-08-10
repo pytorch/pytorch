@@ -18,7 +18,7 @@ from torch._higher_order_ops.flat_apply import (
     is_graphable,
     to_graphable,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import HardwareClassification, skipIfTorchDynamo
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
@@ -86,6 +86,8 @@ class OutputInvalid:
 
 
 class FlatApplyTests(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         tensor = torch.tensor
 
@@ -231,6 +233,8 @@ class <lambda>(torch.nn.Module):
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class TestInputOutput(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         a = 4
         b = torch.randn(4, 4)
