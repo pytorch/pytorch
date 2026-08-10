@@ -2761,16 +2761,38 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 return False
         return True
 
-    def _get_config_generator(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        # No curated autoWS set yet: sweep the full autoWS space for both default
-        # and exhaustive search, and let _get_template_configs_impl prune it.
-        if _use_template_autows():
-            return partial(
-                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+    @staticmethod
+    def _generate_autows_default_configs() -> list[BaseConfig]:
+        """autoWS configs for DEFAULT search. Placeholder pending benchmark data.
+
+        EPILOGUE_SUBTILE spans the same values as the non-autoWS Blackwell sets:
+        _scale_mm_configs shrinks BLOCK_N to fit N and _autows_constraints_ok then
+        drops BLOCK_N // EPILOGUE_SUBTILE < 32, so omitting 1 leaves narrow-N
+        shapes with no config at all.
+        """
+        return [
+            BlackwellGPUGemmConfig(
+                block_m=block_m,
+                block_n=block_n,
+                block_k=64,
+                # 2-CTA caps the pipeline at 2 stages (see _autows_constraints_ok)
+                num_stages=2 if two_ctas else 3,
+                num_warps=8,
+                group_m=8,
+                epilogue_subtile=epilogue_subtile,
+                use_meta_ws=True,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=True,
+                two_ctas=two_ctas,
+                warp_specialize=True,
+                flatten=False,
             )
-        return super()._get_config_generator()
+            for block_m in [128, 256]
+            for block_n in [128, 256]
+            for epilogue_subtile in [1, 2, 4]
+            for data_partition_factor in [1, 2]
+            for two_ctas in [False, True]
+        ]
 
     @staticmethod
     def _generate_autows_configs() -> list[BaseConfig]:
@@ -3169,8 +3191,12 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
-        self.exhaustive_configs = self._generate_exhaustive_configs()
+        if _use_template_autows():
+            self.mm_configs = self._generate_autows_default_configs()
+            self.exhaustive_configs = self._generate_autows_configs()
+        else:
+            self.mm_configs = self.blackwell_persistent_mm_configs
+            self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
