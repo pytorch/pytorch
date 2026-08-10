@@ -1414,12 +1414,6 @@ def forward(self, arg0_1):
         self.assertEqual(ep_moved.example_inputs[0][1].device, torch.device(device0))
         self.assertEqual(ep_moved.example_inputs[1]["z"].device, torch.device(device0))
 
-
-@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
-@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
-class TestPassesRNN(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     def test_move_to_device_pass(self, device):
         device_type = torch.device(device).type
         device0 = f"{device_type}:0"
@@ -1460,7 +1454,6 @@ class TestPassesRNN(TestCase):
 
 
 instantiate_device_type_tests(TestPassesDevice, globals(), except_for="cpu")
-instantiate_device_type_tests(TestPassesRNN, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
