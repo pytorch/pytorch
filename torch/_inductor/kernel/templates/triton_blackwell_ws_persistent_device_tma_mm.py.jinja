@@ -7,6 +7,10 @@
         return
     start_pid = tl.program_id(0)
     grid_m = tl.cdiv(M, BLOCK_M)
+    {%- if TWO_CTAS %}
+    # even M-tile count so CTAs pair into clusters; must match blackwell_persistent_mm_grid
+    grid_m = (grid_m + 1) // 2 * 2
+    {%- endif %}
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = grid_m * grid_n
@@ -73,11 +77,20 @@
                 if B_ROW_MAJOR
                 else [offs_bn_desc, offs_k_desc],
             )
+            {%- if TWO_CTAS %}
+            accumulator += tl.dot(
+                a if A_ROW_MAJOR else a.T,
+                b if B_ROW_MAJOR else b.T,
+                allow_tf32=ALLOW_TF32,
+                two_ctas=True,
+            )
+            {%- else %}
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
                 allow_tf32=ALLOW_TF32,
             )
+            {%- endif %}
 
         tile_id_c += NUM_SMS
         pid_m, pid_n = _compute_pid(

@@ -39,6 +39,21 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 
 
 @SymbolicGridFn
+def blackwell_persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
+    """Like persistent_mm_grid, but when 2-CTA is enabled rounds the M-tile count
+    and launched grid to even so CTAs pair into clusters (ctas_per_cga=(2, 1, 1)).
+    """
+    num_pid_m = cdiv(M, meta["BLOCK_M"])
+    if meta.get("TWO_CTAS", False):
+        num_pid_m = (num_pid_m + 1) // 2 * 2
+    num_tiles = num_pid_m * cdiv(N, meta["BLOCK_N"])
+    grid_size = min(meta["NUM_SMS"], num_tiles)
+    if meta.get("TWO_CTAS", False):
+        grid_size = (grid_size // 2) * 2
+    return (grid_size, 1, 1)
+
+
+@SymbolicGridFn
 def persistent_grouped_mm_grid(*args):
     meta = args[-1]
     return (meta["NUM_SMS"], 1, 1)
