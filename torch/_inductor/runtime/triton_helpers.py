@@ -393,6 +393,37 @@ def online_softmax_combine(
 
 
 @triton.jit
+def online_softmax_reduce_scalar_combine(
+    lhs_max,
+    lhs_sum,
+    rhs_max,
+    valid_mask,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    if strict_signed_zero:
+        block_max = max2_strict(rhs_max, dim)
+        out_max = _maximum_reduce(lhs_max, block_max)
+    else:
+        block_max = max2(rhs_max, dim)
+        out_max = maximum(lhs_max, block_max)
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    out_max_keepdim = tl.expand_dims(out_max, dim)
+    rhs_scale = tl.where(
+        out_max_keepdim == float("-inf"),
+        1.0,
+        exp(rhs_max - out_max_keepdim, use_fast_math),
+    )
+    # The guard above gives padded lanes scale 1 when every value is -inf.
+    rhs_scale = tl.where(valid_mask, rhs_scale, 0.0)
+    out_sum = lhs_sum * lhs_scale + tl.sum(rhs_scale, dim)
+    return out_max, out_sum
+
+
+@triton.jit
 def online_softmax_combine_with_sum(
     lhs_max,
     lhs_sum,

@@ -14,7 +14,12 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import ReductionHint, TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import (
+    AutotuneHint,
+    ReductionHint,
+    SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK,
+    TRITON_MAX_BLOCK,
+)
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
@@ -22,6 +27,9 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.triton_compat import Config
+
+
+_SCALAR_ONLINE_SOFTMAX_TILED_RBLOCK = 4096
 
 
 # ------------------------------------------------------------------
@@ -210,7 +218,20 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         device_major = triton_meta["device"].major
         warp_size = triton_meta["device"].warp_size_or_default
-        MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
+
+        has_scalar_online_softmax_reduction = (
+            AutotuneHint.SCALAR_ONLINE_SOFTMAX
+            in inductor_meta.get("autotune_hints", ())
+        )
+        use_scalar_online_softmax_configs = (
+            has_scalar_online_softmax_reduction
+            and SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK <= rnumel
+        )
+        if device_major is not None and device_major >= 10:
+            # Prefer smaller MAX_R0_BLOCK for Blackwell by default
+            MAX_R0_BLOCK = 1024
+        else:
+            MAX_R0_BLOCK = 2048
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
             register_intensive = True
@@ -265,6 +286,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     warp_size=warp_size,
                 )
 
+        contiguous_rblock = (
+            _SCALAR_ONLINE_SOFTMAX_TILED_RBLOCK
+            if use_scalar_online_softmax_configs and "y" in size_hints
+            else MAX_R0_BLOCK
+        )
         contiguous_config = make_config(
             # Default XBLOCK=2 launches too few programs to fill
             # the device. Prefer XBLOCK=1 so the autotuner has a candidate
@@ -272,7 +298,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             1
             if (torch.version.hip and size_hints.get("x", 0) <= 64)
             else (2 if rnumel <= 2048 else 1),
-            min(rnumel, MAX_R0_BLOCK),
+            min(rnumel, contiguous_rblock),
             register_intensive=register_intensive,
         )
         tiny_config = make_config(
@@ -289,6 +315,17 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             num_dynamic,
             register_intensive,
         )
+
+        # Scalar online-softmax accumulators make larger R0_BLOCK candidates
+        # viable without coordinate-descent tuning.
+        scalar_acc_configs: list[Config] = []
+        if use_scalar_online_softmax_configs and "y" not in size_hints:
+            first_rblock = min(rnumel, _SCALAR_ONLINE_SOFTMAX_TILED_RBLOCK)
+            scalar_acc_configs = [
+                make_config(1, first_rblock),
+                make_config(1, min(rnumel, 8192), num_warps=4),
+                make_config(1, min(rnumel, 16384), num_warps=8),
+            ]
 
         configs: list[Config] = []
 
@@ -308,20 +345,26 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
+            if scalar_acc_configs:
+                return configs + scalar_acc_configs
             return configs + [contiguous_config]
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return configs + [tiny_config]
 
-        result_configs = configs + [
-            contiguous_config,
-            outer_config,
-            tiny_config,
-            make_config(64, 64),
-            make_config(8, 512),
-            make_config(64, 4, num_warps=8),
-        ]
+        result_configs = (
+            configs
+            + [
+                contiguous_config,
+                outer_config,
+                tiny_config,
+                make_config(64, 64),
+                make_config(8, 512),
+                make_config(64, 4, num_warps=8),
+            ]
+            + scalar_acc_configs
+        )
 
         return self._finalize_configs(
             result_configs, make_config, size_hints, inductor_meta

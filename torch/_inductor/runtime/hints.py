@@ -157,12 +157,16 @@ class HeuristicType(Enum):
 
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
+    SCALAR_ONLINE_SOFTMAX = 1
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
     # which isn't valid python.
     # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
     __repr__ = Enum.__str__
+
+
+SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK = 8192
 
 
 class DeviceProperties(typing.NamedTuple):
