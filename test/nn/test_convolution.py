@@ -339,6 +339,63 @@ class TestConvolutionNN(NNTestCase):
                 output_mask,
             )
 
+    @parametrize_test("dim", [1, 2, 3])
+    def test_conv_transpose_meta_output_padding(self, dim):
+        conv = [F.conv_transpose1d, F.conv_transpose2d, F.conv_transpose3d][dim - 1]
+        input = torch.randn(1, 4, *([5] * dim))
+        weight = torch.randn(4, 8, *([3] * dim))
+        meta_input = input.to("meta")
+        meta_weight = weight.to("meta")
+
+        invalid = dict(stride=2, output_padding=2, dilation=2)
+        invalid_msg = "output padding must be smaller than either stride or dilation"
+        for test_input, test_weight in (
+            (input, weight),
+            (meta_input, meta_weight),
+        ):
+            with self.assertRaisesRegex(RuntimeError, invalid_msg):
+                conv(test_input, test_weight, **invalid)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "negative output_padding is not supported"
+            ):
+                conv(test_input, test_weight, stride=2, output_padding=-1)
+
+        valid_args = [
+            # output_padding only needs to be smaller than stride or dilation.
+            dict(stride=2, output_padding=2, dilation=3),
+            dict(stride=3, output_padding=2, dilation=2),
+        ]
+        if dim > 1:
+            # Exercise different sides of the disjunction in different dimensions.
+            valid_args.append(
+                dict(
+                    stride=tuple(2 if i % 2 == 0 else 3 for i in range(dim)),
+                    output_padding=(2,) * dim,
+                    dilation=tuple(3 if i % 2 == 0 else 2 for i in range(dim)),
+                )
+            )
+
+        for valid in valid_args:
+            expected = conv(input, weight, **valid).shape
+            self.assertEqual(conv(meta_input, meta_weight, **valid).shape, expected)
+
+        # Native convolution bypasses backend-specific output_padding validation
+        # for zero-batch inputs, so meta must preserve the same empty result.
+        empty_input = input[:0]
+        eager_empty = conv(empty_input, weight, **invalid)
+        meta_empty = conv(empty_input.to("meta"), meta_weight, **invalid)
+        self.assertEqual(meta_empty.shape, eager_empty.shape)
+
+        if dim == 2:
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                lambda inp, w: conv(inp, w, **invalid),
+                backend="eager",
+                dynamic=True,
+            )
+            self.assertEqual(compiled(empty_input, weight).shape, eager_empty.shape)
+
     def test_conv3d_overflow_values(self):
         input = torch.full(
             (
