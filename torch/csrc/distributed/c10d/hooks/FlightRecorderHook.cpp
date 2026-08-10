@@ -151,6 +151,11 @@ std::optional<c10::Device> opDevice(const PreHookArgs& args) {
 // hooked groups get distinct ids from here whether or not they share one.
 std::atomic<size_t> next_pg_id{0};
 
+// Cap on stashed early completions, see FlightRecorderHook::onCompletion. Only
+// ops issued concurrently on different threads can queue up here, so this is
+// generous; it exists so an unclaimable entry cannot accumulate.
+constexpr size_t kMaxEarlyCompletions = 16;
+
 // Both accessors throw rather than return empty on a backend that does not
 // implement them (Backend's defaults, which custom backends keep), and neither
 // is required to record, so ask by trying.
@@ -364,6 +369,7 @@ void FlightRecorderHook::remove() {
     inflight = std::move(inflight_);
     inflight_.clear();
     work_ids_.clear();
+    early_completions_.clear();
     had_completion_hook = std::exchange(push_completion_, false);
     had_abort_hook = std::exchange(abort_hook_registered_, false);
   }
@@ -390,9 +396,26 @@ void FlightRecorderHook::onCompletion(const CompletionHookArgs& args) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto id_it = work_ids_.find(args.work);
     if (id_it == work_ids_.end()) {
-      // Not one of ours: an op recorded by a natively recording backend, one
-      // issued under a graph capture, one already evicted, or one from before
-      // this hook was attached.
+      // Either not one of ours -- an op recorded by a natively recording
+      // backend, one issued under a graph capture, one already evicted, or one
+      // from before this hook was attached -- or the post-hook that registers
+      // the Work has not run yet. The backend wins that race whenever it
+      // establishes completion for a fast op between issue and firePostHook,
+      // and a dropped callback retires nothing, so the collective reads
+      // "scheduled" for ever: the false hang this hook exists to rule out.
+      // Stash it for onPost to claim instead.
+      //
+      // Only while an op is between its pre- and post-hook: with none
+      // outstanding this cannot be that race, and an entry nothing claims could
+      // later be matched by a Work that reuses the address. The cap bounds what
+      // an op whose post-hook never runs (the backend threw after enqueueing)
+      // leaves behind.
+      if (inflight_.size() > work_ids_.size()) {
+        early_completions_.emplace_back(args.work, args.duration_ms);
+        if (early_completions_.size() > kMaxEarlyCompletions) {
+          early_completions_.pop_front();
+        }
+      }
       return;
     }
     auto op_id = id_it->second;
@@ -613,7 +636,7 @@ void FlightRecorderHook::onAbort() {
 void FlightRecorderHook::onPost(const PostHookArgs& args) {
   InflightOp retire_at_issue;
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     auto it = inflight_.find(args.op_id);
     if (it == inflight_.end()) {
       // Nothing was recorded for this op -- the backend records natively, the
@@ -627,6 +650,30 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
       // it names the op by this Work.
       it->second.work = args.work;
       work_ids_[args.work.get()] = args.op_id;
+      // Unless it already finished: a completion the backend pushed before this
+      // registration was stashed rather than dropped (see onCompletion), and
+      // now that the Work resolves to an op_id it can be replayed, keeping the
+      // backend's own duration.
+      std::optional<float> duration;
+      bool early = false;
+      for (auto e = early_completions_.begin(); e != early_completions_.end();
+           ++e) {
+        if (e->first == args.work.get()) {
+          duration = e->second;
+          early_completions_.erase(e);
+          early = true;
+          break;
+        }
+      }
+      if (inflight_.size() == work_ids_.size()) {
+        // Nothing is between its pre- and post-hook any more, so nothing left
+        // in the stash can ever be claimed.
+        early_completions_.clear();
+      }
+      lock.unlock();
+      if (early) {
+        onCompletion(CompletionHookArgs{args.work.get(), duration});
+      }
       return;
     }
     // Either there is no handle a completion could name (the hook contract

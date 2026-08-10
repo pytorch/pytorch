@@ -945,6 +945,77 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
         hook.remove()
 
+    def test_completion_arriving_before_registration_still_retires(self):
+        # A Work and its op_id are only ever seen together in the post-hook, so
+        # a backend that establishes completion before that runs has nothing to
+        # hand the callback to. Dropping it retires nothing and the collective
+        # reads "scheduled" for ever -- the false hang this feature exists to
+        # rule out -- so the completion has to be stashed and claimed.
+        #
+        # Constructed, not raced. Post-hooks fire in hook_id order and the
+        # flight recorder hook's ids start far above any hand-picked one, so
+        # the hook below runs first and holds the window open. It waits on a
+        # sentinel collective issued behind the target on the same stream: the
+        # backend retires that queue in order, so once the sentinel's entry is
+        # retired the target's completion has already been pushed -- into a
+        # post-hook that has not run yet, because it is waiting on this one.
+        if not self._push_completion:
+            self.skipTest("backend pushes no completion")
+        pg = self._init_pg()
+        pg._enable_collectives_timing()
+        hook = self._fr_hook(pg)
+        t = torch.ones(1024, device=self.device)
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        before = len(self._await_retired())
+        observed = {}
+
+        def hold_post_hook_open(args):
+            if args.work is None or observed.get("running"):
+                return
+            observed["running"] = True
+            try:
+                dist.all_reduce(torch.ones(8, device=self.device))
+                deadline = time.time() + 60
+                while time.time() < deadline:
+                    entries = self._hook_entries()
+                    if len(entries) > before + 1 and entries[before + 1]["retired"]:
+                        break
+                    time.sleep(0.05)
+                entries = self._hook_entries()
+                observed["target"] = entries[before]
+                observed["sentinel"] = entries[before + 1]
+            finally:
+                observed["running"] = False
+
+        pg.register_post_hook(1, hold_post_hook_open)
+        try:
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+        finally:
+            pg.unregister_post_hook(1)
+
+        # The completion really did arrive with no op_id to match it to: had the
+        # hook registered the Work first, the same push would have retired the
+        # entry before this snapshot was taken.
+        sentinel = observed["sentinel"]
+        self.assertTrue(sentinel["retired"], msg=str(sentinel))
+        target = observed["target"]
+        self.assertFalse(target["retired"], msg=str(target))
+        self.assertNotEqual(target["state"], "completed", msg=str(target))
+        # ... and the post-hook then claims it, rather than leaving a finished
+        # collective looking hung for the rest of the job.
+        entries = self._await_retired(before + 2)[before:]
+        self.assertEqual(len(entries), 2, msg=str(entries))
+        e = entries[0]
+        self.assertTrue(e["retired"], msg=str(e))
+        self.assertEqual(e["state"], "completed", msg=str(e))
+        self.assertGreater(e["time_discovered_completed_ns"], 0, msg=str(e))
+        # The backend's own measurement is kept, not recomputed or dropped.
+        self.assertIn("duration_ms", e, msg=str(e))
+        self.assertGreater(e["duration_ms"], 0.0, msg=str(e))
+        hook.remove()
+
     def test_no_recording_during_cuda_graph_capture(self):
         # A collective issued under capture does not run here, it runs at
         # replay, and its Work cannot be polled: querying a CUDA event recorded
@@ -1219,6 +1290,96 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
         }
         self.assertEqual(len(pg_ids), 2)
         fake_hook.remove()
+
+
+@unittest.skipIf(
+    not TEST_CUDA or torch.cuda.device_count() < 2,
+    "default nccl backend tests require at least 2 GPUs",
+)
+@unittest.skipIf(not dist.is_backend_available("nccl"), "nccl backend is not available")
+class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
+    """The "nccl" name does not always build the same thing.
+
+    TORCH_DIST_USE_NCCL2 decides whether it is stock ProcessGroupNCCL, which
+    feeds a FlightRecorder by itself, or nccl2, which is invisible without the
+    hook. Whichever one the name resolved to is what the auto-attach has to
+    follow: skipping a group that turned out to be nccl2 leaves the default
+    backend with no flight recorder at all, and says nothing about it.
+    """
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        self._spawn_processes()
+
+    def tearDown(self):
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _entries(backend):
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=backend)
+        )
+        return trace.get("entries", [])
+
+    def _init_nccl(self, use_nccl2):
+        # Read once, where the backend is registered, which is the first time a
+        # group asks for "nccl" -- so it has to be set before init.
+        os.environ["TORCH_DIST_USE_NCCL2"] = use_nccl2
+        torch.cuda.set_device(self.rank)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timedelta(seconds=60),
+        )
+        pg = dist.group.WORLD
+        # The backend's own name, which is what decides whether it records
+        # itself. Asserting on it rather than on the env var is the point: the
+        # default this variable implies has changed before.
+        backend = pg._get_backend(torch.device("cuda", self.rank))
+        return pg, backend.name()
+
+    def test_nccl_name_built_on_nccl2_is_hooked(self):
+        pg, name = self._init_nccl("1")
+        self.assertEqual(name, "nccl2")
+        self.assertIn(pg, _world.pg_flight_recorder_hooks)
+
+        before = len(self._entries("nccl2"))
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
+        torch.cuda.synchronize()
+        self.assertEqual(
+            [e["profiling_name"] for e in self._entries("nccl2")[before:]],
+            ["nccl2:all_reduce"],
+        )
+
+    def test_nccl_name_built_on_stock_is_not_hooked(self):
+        pg, name = self._init_nccl("0")
+        self.assertEqual(name, "nccl")
+        self.assertNotIn(pg, _world.pg_flight_recorder_hooks)
+
+        before = len(self._entries("nccl"))
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
+        torch.cuda.synchronize()
+        # Nothing in the hook's instance, and the native recording that made
+        # the hook unnecessary is still there.
+        self.assertEqual(self._entries("nccl")[before:], [])
+        native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
+        names = [e["profiling_name"] for e in native.get("entries", [])]
+        self.assertIn("nccl:all_reduce", names)
 
 
 if __name__ == "__main__":

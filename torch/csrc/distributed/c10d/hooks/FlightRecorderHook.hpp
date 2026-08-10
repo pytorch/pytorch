@@ -52,6 +52,7 @@
 
 #pragma once
 
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -176,8 +177,12 @@ class TORCH_API FlightRecorderHook
   // by its Work, since op_id is assigned above the backend and a Work does not
   // carry it, and the post-hook is where the two are seen together. Kept in
   // step with inflight_ -- every entry here has a live entry there holding the
-  // Work.
+  // Work -- so inflight_.size() - work_ids_.size() is the number of ops sitting
+  // between their pre-hook and their post-hook.
   std::unordered_map<const Work*, int64_t> work_ids_;
+  // Completions that arrived before the post-hook could register their Work,
+  // waiting for it to claim them. Bounded; see onCompletion.
+  std::deque<std::pair<const Work*, std::optional<float>>> early_completions_;
 };
 
 } // namespace c10d

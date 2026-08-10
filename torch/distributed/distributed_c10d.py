@@ -835,6 +835,16 @@ def _register_builtin_nccl_backend() -> None:
         if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
         else _create_nccl_process_group
     )
+    # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
+    # which must skip a group only if every one of its backends feeds a
+    # FlightRecorder by itself: stock ProcessGroupNCCL does, nccl2 needs the
+    # hook. Derived from the creator picked above rather than re-read from the
+    # environment, which is only consulted here and could otherwise disagree
+    # with what was built.
+    if creator_fn is _create_nccl_process_group:
+        _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+    else:
+        _FR_SELF_RECORDING_BACKENDS.discard(Backend.NCCL)
     Backend.register_backend(
         Backend.NCCL,
         creator_fn,
@@ -2661,11 +2671,20 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
 # Backends that feed a FlightRecorder without any help: ProcessGroupGloo
 # unconditionally, ProcessGroupNCCL and ProcessGroupXCCL through their own
 # integrations. "fake" and "undefined" never communicate, so recording them is
-# pure noise. Everything else -- nccl2, mpi, ucc, out-of-tree plugins -- is
-# invisible to the flight recorder unless a hook is attached.
-_FR_SELF_RECORDING_BACKENDS = frozenset(
-    {Backend.GLOO, Backend.NCCL, Backend.XCCL, Backend.FAKE, Backend.UNDEFINED}
-)
+# pure noise. Everything else -- nccl2, nccl-lazy, mpi, ucc, out-of-tree
+# plugins -- is invisible to the flight recorder unless a hook is attached.
+#
+# Backend.NCCL is not in here by construction: which implementation the name
+# builds is a runtime choice, so _register_builtin_nccl_backend puts it in or
+# takes it out when it makes that choice, and this stays the single answer to
+# "does this backend record itself".
+_FR_SELF_RECORDING_BACKENDS = {
+    Backend.GLOO,
+    "nccl-legacy",
+    Backend.XCCL,
+    Backend.FAKE,
+    Backend.UNDEFINED,
+}
 
 
 def _maybe_attach_flight_recorder(
