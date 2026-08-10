@@ -2,12 +2,10 @@
 """Shared FX analysis and output planning for grouped GEMM epilogues."""
 
 import dataclasses
-import operator
 from collections.abc import Sequence
 from typing import Any
 
 import torch
-from torch._inductor import inductor_prims
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     local_reduce_compressed_shape,
@@ -15,6 +13,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
+    LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
     LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR,
@@ -27,22 +26,152 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_tensorssa_group_size,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
-    grouped_tensor_layout,
-    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
-    reduction_from_node,
-    squeeze_source_node,
     tensor_meta_shape,
-    unsupported_reduction_from_node,
-    view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
     GemmReductionGeometry,
+    GemmReductionPlan,
     iter_fx_node_inputs,
+    NormalizedGetItem,
+    NormalizedPrepareSoftmax,
+    NormalizedReduction,
+    NormalizedSqueeze,
+    NormalizedUnsupportedReduction,
+    NormalizedView,
 )
-from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    guarded_int,
+    normalize_shape,
+    statically_known_equal,
+    statically_known_shape_equal,
+)
 from torch.utils._ordered_set import OrderedSet
+
+
+def _is_inferred_reshape_dim(value: Any) -> bool:
+    """Return whether a reshape dimension is the literal inferred-size marker."""
+    return isinstance(value, int) and value == -1
+
+
+def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
+    return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
+        kept_size, source_size
+    )
+
+
+def _guard_grouped_reshape_group(
+    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    """Specialize a backed group dimension used to recognize a grouped reshape."""
+    if len(shape) != 3:
+        return shape
+    for group_index, kept_index in ((-1, 0), (-2, -1)):
+        if not _kept_dim_matches_source(shape[kept_index], source_shape[kept_index]):
+            continue
+        group_value = shape[group_index]
+        symbolic = (
+            group_value.meta.get("val")
+            if isinstance(group_value, torch.fx.Node)
+            else group_value
+        )
+        if not isinstance(symbolic, torch.SymInt):
+            continue
+        group = guarded_int(group_value)
+        if group is not None:
+            result = list(shape)
+            result[group_index] = group
+            return tuple(result)
+    return shape
+
+
+def _syntactic_grouped_tensor_layout(
+    shape: tuple[Any, ...],
+) -> GemmReductionGeometry | None:
+    """Match grouped-reshape syntax before validating source geometry."""
+    if len(shape) not in (3, 4):
+        return None
+    if (
+        isinstance(shape[-1], int)
+        and shape[-1] > 0
+        and _is_inferred_reshape_dim(shape[-2])
+    ):
+        return GemmReductionGeometry(group=shape[-1], axis=1)
+    if (
+        _is_inferred_reshape_dim(shape[-3])
+        and isinstance(shape[-2], int)
+        and shape[-2] > 0
+    ):
+        return GemmReductionGeometry(group=shape[-2], axis=0)
+    return None
+
+
+def _group_count_matches_selected_dim(
+    group_count: Any,
+    selected_size: Any,
+    group: int,
+    kept_size: Any,
+) -> bool:
+    """Match a group count, allowing -1 to infer the selected source dimension."""
+    if _is_inferred_reshape_dim(group_count):
+        return True
+    return statically_known_equal(group_count * group, selected_size) or (
+        not _is_inferred_reshape_dim(kept_size)
+        and statically_known_equal(group_count, selected_size // group)
+    )
+
+
+def _grouped_layout_matches_source_shape(
+    shape: tuple[Any, ...],
+    source_shape: tuple[Any, ...],
+    layout: GemmReductionGeometry,
+) -> bool:
+    """Require a 2-D GEMM output reshape to split exactly M or N."""
+    if len(shape) != 3:
+        return False
+
+    m, n = source_shape
+    match layout.axis, shape:
+        case 1, (kept_m, group_count, group) if group == layout.group:
+            return _kept_dim_matches_source(
+                kept_m, m
+            ) and _group_count_matches_selected_dim(group_count, n, group, kept_m)
+        case 0, (group_count, group, kept_n) if group == layout.group:
+            return _kept_dim_matches_source(
+                kept_n, n
+            ) and _group_count_matches_selected_dim(group_count, m, group, kept_n)
+        case _:
+            return False
+
+
+def grouped_tensor_layout(
+    shape: Any, source_shape: Any | None = None
+) -> GemmReductionGeometry | None:
+    """Recognize grouped M/N geometry, specializing backed group dimensions."""
+    shape = normalize_shape(shape)
+    if not isinstance(shape, tuple):
+        return None
+    if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
+        shape = normalize_shape(shape[0])
+    if source_shape is not None:
+        source_shape = normalize_shape(source_shape)
+        if isinstance(source_shape, tuple) and len(source_shape) == 2:
+            shape = _guard_grouped_reshape_group(shape, source_shape)
+            candidates = []
+            match shape:
+                case (*_, int(group)) if group > 0:
+                    candidates.append(GemmReductionGeometry(group=group, axis=1))
+            match shape:
+                case (*_, int(group), _) if group > 0:
+                    candidates.append(GemmReductionGeometry(group=group, axis=0))
+            for layout in candidates:
+                if _grouped_layout_matches_source_shape(shape, source_shape, layout):
+                    return layout
+            if _syntactic_grouped_tensor_layout(shape) is not None:
+                raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
+            return None
+    return _syntactic_grouped_tensor_layout(shape)
 
 
 FEED_MAIN_BINARY_FUNCTIONS = frozenset(
@@ -70,6 +199,7 @@ class GemmLocalReduceMatch:
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
     reduction_node: torch.fx.Node | None = None
+    reduction_type: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
@@ -85,16 +215,6 @@ class GemmLocalReduceMatch:
     ) -> "GemmOutputLocalReducePlan":
         """Bind this matched value to its output consumers."""
         return GemmOutputLocalReducePlan(self, store=store, feeds_main=feeds_main)
-
-    @property
-    def reduction_type(self) -> str | None:
-        """Return the primitive reduction kind represented by this match."""
-        reduction = (
-            reduction_from_node(self.reduction_node)
-            if self.reduction_node is not None
-            else None
-        )
-        return reduction[-1] if reduction is not None else None
 
     @classmethod
     def common(
@@ -187,13 +307,37 @@ class GemmOutputPlan:
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
 
+    @property
+    def reduction_plan(self) -> GemmReductionPlan | None:
+        """Finalize FX ownership metadata into the shared reduction contract."""
+        local_reduce = self.local_reduce
+        if local_reduce is None:
+            return None
+        match = local_reduce.match
+        reduction_type = match.reduction_type
+        if reduction_type is None:
+            return None
+        reduction_output = (
+            local_reduce.store.node.name if local_reduce.store is not None else None
+        )
+        return GemmReductionPlan(
+            reduction_output,
+            match.geometry.group,
+            match.geometry.axis,
+            reduction_type,
+            "identity",
+            self.output.name,
+            feeds_main=local_reduce.feeds_main,
+            feed_output=self.output.name if local_reduce.feeds_main else None,
+        )
+
 
 @dataclasses.dataclass
 class GemmLocalReduceAnalysis:
     """Collect grouped TensorSSA layouts and supported local-reduction matches.
 
     ``from_graph_module`` visits the FX graph in topological order. See
-    ``GroupedTensorSSALayout`` for the grouped layout attached to reshape and
+    ``GemmReductionGeometry`` for the grouped layout attached to reshape and
     pointwise nodes, and ``GemmLocalReduceMatch`` for each supported reduced
     value found from those layouts.
 
@@ -204,7 +348,7 @@ class GemmLocalReduceAnalysis:
     """
 
     graph: GemmEpilogueGraph
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout] = dataclasses.field(
+    grouped_tensors: dict[torch.fx.Node, GemmReductionGeometry] = dataclasses.field(
         default_factory=dict
     )
     matches: dict[torch.fx.Node, GemmLocalReduceMatch] = dataclasses.field(
@@ -228,39 +372,35 @@ class GemmLocalReduceAnalysis:
         """Record grouped layouts and local-reduction matches for one FX node."""
         if node.op != "call_function":
             return
-        view_args = view_or_reshape_args(node)
-        if view_args is not None:
-            source_node, shape = view_args
-            if self.propagate_local_reduce_match(node, source_node):
+        normalized = self.graph.normalized_nodes.get(node)
+        if isinstance(normalized, NormalizedView):
+            if self.propagate_local_reduce_match(node, normalized.source):
                 return
-            if self.bind_grouped_layout(node, shape, source_node):
+            if self.bind_grouped_layout(node, normalized.shape, normalized.source):
                 return
-        reduction = reduction_from_node(node)
-        if reduction is not None:
-            input_node, dim, _, dtype, _ = reduction
-            if self.bind_grouped_reduction(node, input_node, dim, dtype):
-                return
-        if node.target is inductor_prims.prepare_softmax_online:
-            input_node = node.args[0]
-            dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        elif isinstance(normalized, NormalizedReduction):
             if self.bind_grouped_reduction(
-                node, input_node, dim, raise_invalid_dims=False
+                node,
+                normalized.source,
+                normalized.dim,
+                normalized.dtype,
+                reduction_type=normalized.reduction_type,
             ):
                 return
-        unsupported_reduction = unsupported_reduction_from_node(node)
-        if unsupported_reduction is not None:
-            input_node = node.args[0]
-            if (
-                isinstance(input_node, torch.fx.Node)
-                and input_node in self.grouped_tensors
+        elif isinstance(normalized, NormalizedPrepareSoftmax):
+            if self.bind_grouped_reduction(
+                node,
+                normalized.source,
+                normalized.dim,
+                raise_invalid_dims=False,
             ):
-                raise local_reduce_unsupported_tensorssa_error(unsupported_reduction)
-        if self.propagate_local_reduce_match(node, squeeze_source_node(node)):
-            return
-        if node.target is operator.getitem and self.propagate_local_reduce_match(
-            node, node.args[0]
-        ):
-            return
+                return
+        elif isinstance(normalized, NormalizedUnsupportedReduction):
+            if normalized.source in self.grouped_tensors:
+                raise local_reduce_unsupported_tensorssa_error(normalized.target)
+        elif isinstance(normalized, (NormalizedSqueeze, NormalizedGetItem)):
+            if self.propagate_local_reduce_match(node, normalized.source):
+                return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
 
@@ -269,10 +409,10 @@ class GemmLocalReduceAnalysis:
         source_shape = (
             tensor_meta_shape(source) if isinstance(source, torch.fx.Node) else None
         )
-        layout = grouped_tensor_layout(shape, source_shape)
-        if layout is None or not isinstance(source, torch.fx.Node):
+        grouped_layout = grouped_tensor_layout(shape, source_shape)
+        if grouped_layout is None or not isinstance(source, torch.fx.Node):
             return False
-        self.grouped_tensors[node] = layout
+        self.grouped_tensors[node] = grouped_layout
         return True
 
     def propagate_local_reduce_match(self, node: torch.fx.Node, source: Any) -> bool:
@@ -292,6 +432,7 @@ class GemmLocalReduceAnalysis:
         dim: Any,
         dtype: Any = None,
         *,
+        reduction_type: str | None = None,
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
@@ -302,15 +443,16 @@ class GemmLocalReduceAnalysis:
             return False
         if dtype is not None:
             raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-        validate_local_reduce_tensorssa_group_size(layout.axis, layout.group_size)
+        validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
         if not layout.matches_reduction_dim(dim):
             if not raise_invalid_dims:
                 return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         self.matches[node] = GemmLocalReduceMatch(
             node,
-            GemmReductionGeometry(layout.group_size, layout.axis),
+            layout,
             reduction_node=node,
+            reduction_type=reduction_type,
         )
         return True
 
@@ -322,9 +464,7 @@ class GemmLocalReduceAnalysis:
         physical_grouped_nodes = OrderedSet(
             node
             for node, layout in self.grouped_tensors.items()
-            if layout.needs_physical_combine
-            and GemmReductionGeometry(layout.group_size, layout.axis)
-            in active_geometries
+            if layout.needs_physical_callbacks and layout in active_geometries
         )
         return any(
             node in physical_grouped_nodes
@@ -366,28 +506,28 @@ class GemmLocalReduceAnalysis:
         self,
         value: Any,
         grouped_source: torch.fx.Node,
-        layout: GroupedTensorSSALayout,
+        layout: GemmReductionGeometry,
     ) -> GemmLocalReduceMatch | None:
         """Find the grouped reduction that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
             return None
-        reduction = reduction_from_node(value)
-        if reduction is not None:
-            input_node, dim, keepdim, dtype, _ = reduction
-            if input_node is not grouped_source:
-                if self.graph.depends_on(input_node, grouped_source):
+        normalized = self.graph.normalized_nodes.get(value)
+        if isinstance(normalized, NormalizedReduction):
+            if normalized.source is not grouped_source:
+                if self.graph.depends_on(normalized.source, grouped_source):
                     raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             if (
-                dtype is not None
-                or not keepdim
-                or not layout.matches_reduction_dim(dim)
+                normalized.dtype is not None
+                or not normalized.keepdim
+                or not layout.matches_reduction_dim(normalized.dim)
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             return GemmLocalReduceMatch(
                 value,
-                GemmReductionGeometry(layout.group_size, layout.axis),
+                layout,
                 reduction_node=value,
+                reduction_type=normalized.reduction_type,
             )
         if not is_shape_preserving_pointwise_node(value):
             return None
@@ -436,9 +576,11 @@ class GemmLocalReduceAnalysis:
         if value in seen:
             return
         seen.add(value)
-        reduction = reduction_from_node(value)
-        if reduction is not None:
-            self.validate_hidden_feed_main_reduction_input(reduction[0], grouped_source)
+        normalized = self.graph.normalized_nodes.get(value)
+        if isinstance(normalized, NormalizedReduction):
+            self.validate_hidden_feed_main_reduction_input(
+                normalized.source, grouped_source
+            )
         for arg in iter_fx_node_inputs((value.args, value.kwargs)):
             self.validate_feed_main_source_reductions(
                 arg, grouped_source, selected_reduction, seen
@@ -452,10 +594,10 @@ class GemmLocalReduceAnalysis:
         """Preserve the one-physical-value ABI across recursive source matching."""
         if match is None:
             return None
-        reduction = reduction_from_node(match.value_node)
-        if reduction is not None and isinstance(reduction[0], torch.fx.Node):
+        normalized = self.graph.normalized_nodes.get(match.value_node)
+        if isinstance(normalized, NormalizedReduction):
             self.validate_feed_main_source_reductions(
-                source, reduction[0], match.value_node
+                source, normalized.source, match.value_node
             )
         return match
 
@@ -477,21 +619,20 @@ class GemmLocalReduceAnalysis:
         self,
         value: Any,
         grouped_source: torch.fx.Node,
-        layout: GroupedTensorSSALayout,
+        layout: GemmReductionGeometry,
     ) -> bool:
         """Return whether a candidate contains a grouped feed-main reduction."""
         if not isinstance(value, torch.fx.Node):
             return False
-        reduction = reduction_from_node(value)
-        if reduction is not None:
-            input_node, dim, keepdim, dtype, _ = reduction
+        normalized = self.graph.normalized_nodes.get(value)
+        if isinstance(normalized, NormalizedReduction):
             return (
-                dtype is None
-                and bool(keepdim)
-                and layout.matches_reduction_dim(dim)
+                normalized.dtype is None
+                and bool(normalized.keepdim)
+                and layout.matches_reduction_dim(normalized.dim)
                 and (
-                    input_node is grouped_source
-                    or self.graph.depends_on(input_node, grouped_source)
+                    normalized.source is grouped_source
+                    or self.graph.depends_on(normalized.source, grouped_source)
                 )
             )
         if not is_shape_preserving_pointwise_node(value):
@@ -512,24 +653,22 @@ class GemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        view_args = view_or_reshape_args(grouped_source)
-        if view_args is None:
+        normalized = self.graph.normalized_nodes.get(grouped_source)
+        if not isinstance(normalized, NormalizedView):
             return None
-        source_node, input_shape = view_args
-        if not isinstance(source_node, torch.fx.Node):
-            return None
-        layout = grouped_tensor_layout(input_shape, tensor_meta_shape(source_node))
+        source_node = normalized.source
+        layout = self.grouped_tensors.get(grouped_source)
         if layout is None:
             return None
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
-            if layout.group_size <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
                 # Intentional fallthrough: axis-1 feeds within one TensorSSA
                 # fragment lower as plain generated TensorSSA without a feed plan.
                 return None
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
-        validate_local_reduce_feed_main_capability(layout.axis, layout.group_size)
+        validate_local_reduce_feed_main_capability(layout.axis, layout.group)
         source_meta = source_node.meta.get("val")
         if (
             output_meta is not None
@@ -582,12 +721,11 @@ class GemmLocalReduceAnalysis:
         output: torch.fx.Node,
     ) -> GemmLocalReduceMatch | None:
         """Match feed-main reductions through trailing pointwise nodes."""
-        view_args = view_or_reshape_args(output)
-        if view_args is not None:
-            source, _ = view_args
-            if not isinstance(source, torch.fx.Node):
-                return None
-            return self.match_feed_main_source(source, output.meta.get("val"))
+        normalized = self.graph.normalized_nodes.get(output)
+        if isinstance(normalized, NormalizedView):
+            return self.match_feed_main_source(
+                normalized.source, output.meta.get("val")
+            )
         if not is_shape_preserving_pointwise_node(output):
             return None
         matches = [

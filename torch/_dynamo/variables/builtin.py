@@ -48,6 +48,7 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
+    raise_value_error,
     unimplemented,
     Unsupported,
     UserError,
@@ -80,7 +81,13 @@ from ..utils import (
     tensortype_to_dtype,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    GetSet,
+    Member,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
@@ -111,6 +118,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pylong_from_base,
     pynumber_absolute,
     pynumber_add,
     pynumber_float,
@@ -124,6 +132,7 @@ from .object_protocol import (
     pynumber_multiply,
     pynumber_negative,
     pynumber_positive,
+    pynumber_tobase,
     pysequence_check,
     pysequence_contains,
     python_constant_richcompare_impl,
@@ -382,6 +391,50 @@ class BaseBuiltinVariable(VariableTracker):
 
     _fn: Any = None
 
+    # Type attribute readers shared by BaseBuiltinVariable and BuiltinVariable.
+    # Each reader declines (returns None) when the wrapped callable is not a type,
+    # letting getattro_impl fall through to its dynamic getattr handling.
+    # CPython classification (Objects/typeobject.c):
+    #   __bases__ -> type_getsets[] type_get_bases (getset)
+    #   __base__  -> type_members[] {T_OBJECT, offsetof(tp_base), Py_READONLY}
+    #   __flags__ -> type_members[] {T_ULONG, offsetof(tp_flags), Py_READONLY}
+    def _type_get_bases(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__bases__")
+        items = [
+            VariableTracker.build(tx, b, source and GetItemSource(source, i))
+            for i, b in enumerate(fn.__bases__)
+        ]
+        return variables.TupleVariable(items, source=source)
+
+    def _type_get_base(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__base__")
+        return VariableTracker.build(tx, fn.__base__, source)
+
+    def _type_get_flags(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__flags__")
+        return VariableTracker.build(tx, fn.__flags__, source)
+
+    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_members = {
+        "__base__": Member(_type_get_base, None),
+        "__flags__": Member(_type_get_flags, None),
+    }
+
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "BaseBuiltinVariable":
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
@@ -399,17 +452,12 @@ class BaseBuiltinVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Declarative type-attribute dispatch, mirroring the consultation at the
+        # top of VariableTracker.getattro_impl. Inlined here because this
+        # override keeps its own GetAttrVariable fallback instead of delegating
+        # to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
-        if isinstance(fn, type) and name in {"__bases__", "__base__", "__flags__"}:
-            if name == "__bases__":
-                bases = fn.__bases__
-                items = [
-                    VariableTracker.build(tx, b, source and GetItemSource(source, i))
-                    for i, b in enumerate(bases)
-                ]
-                return variables.TupleVariable(items, source=source)
-            return VariableTracker.build(tx, getattr(fn, name), source)
         attr = getattr(fn, name, None)
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
@@ -544,6 +592,19 @@ class BuiltinVariable(BaseBuiltinVariable):
     _nonvar_fields = {
         "fn",
         *VariableTracker._nonvar_fields,
+    }
+
+    # __name__ -> type_getsets[] type_get_name (getset). Unlike the type-attribute
+    # readers on BaseBuiltinVariable, BuiltinVariable exposes __name__ for any
+    # wrapped callable (not just types), so it never declines.
+    def _builtin_type_get_name(
+        self: "BuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        source = self.source and AttrSource(self.source, "__name__")
+        return VariableTracker.build(tx, self.fn.__name__, source)
+
+    tp_getset = {
+        "__name__": GetSet(_builtin_type_get_name, None),
     }
 
     @classmethod
@@ -1836,6 +1897,24 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
+        if (
+            name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+            and len(args) == 2
+            and not kwargs
+            and isinstance(self.fn, type)
+            and args[0].is_python_constant()
+            and args[1].is_python_constant()
+        ):
+            # Unbound rich-comparison dunder, e.g. complex.__eq__(1+1j, 2).
+            # Invoke only the left type's slot on the constants, mirroring
+            # CPython (returns NotImplemented rather than falling back to the
+            # reflected operation when the operands are incompatible).
+            lval = args[0].as_python_constant()
+            if isinstance(lval, self.fn):
+                return ConstantVariable.create(
+                    getattr(self.fn, name)(lval, args[1].as_python_constant())
+                )
+
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name, None)
             if resolved_fn in str_methods:
@@ -1898,14 +1977,34 @@ class BuiltinVariable(BaseBuiltinVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        arg: VariableTracker,
+        base: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        return pynumber_int(tx, arg)
+        if base is None:
+            return pynumber_int(tx, arg)
+        return pylong_from_base(tx, arg, base)
 
     def call_float(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return pynumber_float(tx, arg)
+
+    def call_bin(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 2)
+
+    def call_oct(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 8)
+
+    def call_hex(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 16)
 
     def call_bool(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -1958,16 +2057,37 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
     def _call_min_max(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        key: VariableTracker | None = None,
+        default: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        if len(args) == 1:
-            items = unpack_iterable(tx, args[0])
+        name = self.fn.__name__
+        if len(args) == 0:
+            raise_type_error(tx, f"{name} expected at least 1 argument, got 0")
+
+        # `default` is keyword-only and only valid with a single iterable arg.
+        positional = len(args) > 1
+        if positional and default is not None:
+            raise_type_error(
+                tx,
+                f"Cannot specify a default for {name}() with multiple positional arguments",
+            )
+
+        if key is not None and key.is_constant_none():
+            key = None
+
+        items = list(args) if positional else unpack_iterable(tx, args[0])
+
+        if len(items) == 0:
+            if default is not None:
+                return default
+            raise_value_error(tx, f"{name}() iterable argument is empty")
+
+        if key is None:
             return self._call_min_max_seq(tx, items)
-        elif len(args) == 2:
-            return self._call_min_max_binary(tx, args[0], args[1])
-        elif len(args) > 2:
-            return self._call_min_max_seq(tx, list(args))
-        return None
+        return self._call_min_max_seq_with_key(tx, items, key)
 
     def _call_min_max_seq(
         self, tx: "InstructionTranslatorBase", items: list[VariableTracker]
@@ -1978,6 +2098,40 @@ class BuiltinVariable(BaseBuiltinVariable):
             return items[0]
 
         return functools.reduce(functools.partial(self._call_min_max_binary, tx), items)  # type: ignore[arg-type,return-value]
+
+    def _call_min_max_seq_with_key(
+        self,
+        tx: "InstructionTranslatorBase",
+        items: list[VariableTracker],
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # Mirror CPython builtin_min_max: compare on key(item) but return the
+        # original element, keeping the first extremal element on ties (only
+        # replace on a strict comparison). Like list.sort, comparisons are done
+        # through Dynamo and must fold to a compile-time constant, so Tensor and
+        # SymInt keys graph break.
+        keyvals = [key.call_function(tx, [item], {}) for item in items]
+        best_item, best_key = items[0], keyvals[0]
+        for item, keyval in zip(items[1:], keyvals[1:]):
+            left, right = (best_key, keyval) if self.fn is max else (keyval, best_key)
+            cmp = BuiltinVariable(operator.lt).call_function(tx, [left, right], {})
+            if not cmp.is_python_constant():
+                unimplemented(
+                    gb_type="min/max with non-constant key",
+                    context=str(keyval),
+                    explanation=(
+                        f"Cannot compute {self.fn.__name__}() whose key comparison is "
+                        f"not a compile-time constant. Key type: {keyval.python_type()}. "
+                        f"Most notably, Tensor or SymInt keys are unsupported, but ints work."
+                    ),
+                    hints=[
+                        "Use something else as the key.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            if cmp.as_python_constant():
+                best_item, best_key = item, keyval
+        return best_item
 
     def _call_min_max_binary(
         self,
@@ -2625,18 +2779,11 @@ class BuiltinVariable(BaseBuiltinVariable):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Declarative type-attribute dispatch (__name__, __bases__, __base__,
+        # __flags__), mirroring the consultation at the top of
+        # VariableTracker.getattro_impl. Inlined because this override keeps its
+        # own object / GetAttrVariable handling below instead of delegating.
         source = self.source and AttrSource(self.source, name)
-        if name == "__name__":
-            return VariableTracker.build(tx, self.fn.__name__, source)
-        if isinstance(self.fn, type) and name in {"__bases__", "__base__", "__flags__"}:
-            if name == "__bases__":
-                bases = self.fn.__bases__
-                items = [
-                    VariableTracker.build(tx, b, source and GetItemSource(source, i))
-                    for i, b in enumerate(bases)
-                ]
-                return variables.TupleVariable(items, source=source)
-            return VariableTracker.build(tx, getattr(self.fn, name), source)
         if self.fn is object:
             # for object, we can just directly read the attribute
             try:
@@ -3441,6 +3588,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
+                variables.DequeVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
