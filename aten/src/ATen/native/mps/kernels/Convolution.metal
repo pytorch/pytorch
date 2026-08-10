@@ -303,6 +303,54 @@ kernel void conv1d_dw(
        output_index] = (T)accumulator;
 }
 
+template <typename T, bool CHECK_BOUNDS>
+kernel void conv1d_dw_vec(
+    device const T* input [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant Conv1dDwParams& params [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 position [[thread_position_in_grid]]) {
+  const int output_start = int(position.x) * conv1d_dw_outputs_per_thread;
+  const int channel = int(position.y);
+  const int batch = int(position.z);
+  const float initial = params.has_bias ? (float)bias[channel] : 0.0f;
+  float accumulators[conv1d_dw_outputs_per_thread];
+#pragma unroll
+  for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
+    accumulators[lane] = initial;
+  }
+  device const T* input_row = input +
+      ((int64_t)batch * params.input_channels + channel) * params.input_length;
+  for (int kernel_index = 0; kernel_index < params.kernel_size;
+       ++kernel_index) {
+    const int input_start =
+        output_start - params.padding + kernel_index * params.dilation;
+    const float weight_value =
+        (float)weight[(int64_t)channel * params.kernel_size + kernel_index];
+#pragma unroll
+    for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
+      const int input_index = input_start + lane;
+      if IF_CONSTEXPR (!CHECK_BOUNDS) {
+        accumulators[lane] += (float)input_row[input_index] * weight_value;
+      } else if (input_index >= 0 && input_index < params.input_length) {
+        accumulators[lane] += (float)input_row[input_index] * weight_value;
+      }
+    }
+  }
+  const int64_t output_row =
+      ((int64_t)batch * params.input_channels + channel) * params.output_length;
+#pragma unroll
+  for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
+    const int output_index = output_start + lane;
+    if IF_CONSTEXPR (!CHECK_BOUNDS) {
+      output[output_row + output_index] = (T)accumulators[lane];
+    } else if (output_index < params.output_length) {
+      output[output_row + output_index] = (T)accumulators[lane];
+    }
+  }
+}
+
 // DHWIO copy of an OIDHW weight view; ATen's generic permute copy is
 // launch-bound at typical weight sizes, a flat kernel is ~10x faster.
 template <typename T>
@@ -330,16 +378,38 @@ kernel void conv_weight_to_dhwio(
            kernel_width_index * params.width_stride];
 }
 
-#define INSTANTIATE_CONV1D_DW(DT)                                     \
-  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>( \
-      device const DT*,                                               \
-      device const DT*,                                               \
-      device DT*,                                                     \
-      constant Conv1dDwParams&,                                       \
-      device const DT*,                                               \
-      uint3);                                                         \
-  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void     \
-  conv_weight_to_dhwio<DT>(                                           \
+static_assert(
+    conv1d_dw_outputs_per_thread == 8,
+    "CONV1D_DW_OUTPUTS_PER_THREAD_STR must match conv1d_dw_outputs_per_thread");
+
+#define INSTANTIATE_CONV1D_DW(DT)                                       \
+  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>(   \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
+                       "_" #DT)]] kernel void                           \
+  conv1d_dw_vec<DT, true>(                                              \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
+                       "_valid_" #DT)]] kernel void                     \
+  conv1d_dw_vec<DT, false>(                                             \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void       \
+  conv_weight_to_dhwio<DT>(                                             \
       device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);
 
 INSTANTIATE_CONV1D_DW(float)

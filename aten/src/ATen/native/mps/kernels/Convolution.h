@@ -1,6 +1,11 @@
 #pragma once
 #include <c10/metal/common.h>
 
+// Eight adjacent outputs reuse each loaded depthwise weight while retaining
+// enough threads to saturate the GPU for the measured Conv1d workloads.
+C10_METAL_CONSTEXPR int32_t conv1d_dw_outputs_per_thread = 8;
+#define CONV1D_DW_OUTPUTS_PER_THREAD_STR "8"
+
 struct Conv1dDwParams {
   int32_t input_channels;
   int32_t input_length;

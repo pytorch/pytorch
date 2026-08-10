@@ -14194,6 +14194,98 @@ class TestViewOpsMPS(TestCaseMPS):
             self.assertEqual(x.view(6).shape, [6])
 
 class TestConvolutionMPS(TestCaseMPS):
+    @staticmethod
+    def _conv1d_tolerance(dtype, reduction_size):
+        # Scale the established bounds by the square root of the accumulated terms.
+        reference_reduction_size = 7 * 7
+        max_tolerance = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
+        return max_tolerance * math.sqrt(reduction_size / reference_reduction_size)
+
+    @parametrize("column_major_weight", [False, True], name_fn=lambda value: "column_weight" if value else "weight")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_nlc_input(self, dtype, column_major_weight):
+        input_tensor = torch.randn(2, 7, 257).to(dtype).float()
+        weight = torch.randn(33, 7, 3).to(dtype).float()
+        bias = torch.randn(33).to(dtype).float()
+        expected = F.conv1d(input_tensor, weight, bias, padding=1)
+
+        mps_input = input_tensor.transpose(1, 2).contiguous().to(device="mps", dtype=dtype).transpose(1, 2)
+        if column_major_weight:
+            mps_weight = weight.transpose(1, 2).contiguous().to(device="mps", dtype=dtype).transpose(1, 2)
+        else:
+            mps_weight = weight.to(device="mps", dtype=dtype)
+        actual = F.conv1d(mps_input, mps_weight, bias.to(device="mps", dtype=dtype), padding=1)
+
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+        self.assertTrue(actual.transpose(1, 2).is_contiguous())
+
+    def test_conv2d_h1_channels_last_output(self):
+        input_tensor = torch.randn(2, 7, 1, 257).contiguous(memory_format=torch.channels_last)
+        weight = torch.randn(33, 7, 1, 3)
+        expected = F.conv2d(input_tensor, weight, padding=(0, 1))
+        actual = F.conv2d(input_tensor.to("mps"), weight.to("mps"), padding=(0, 1))
+
+        self.assertEqual(actual.cpu(), expected)
+        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+
+    @parametrize(
+        "kernel_size,stride,dilation,input_length",
+        [(2, 2, 1, 2), (2, 2, 1, 3), (7, 1, 9, 55)],
+        name_fn=lambda kernel_size, stride, dilation, input_length: f"k{kernel_size}_s{stride}_d{dilation}_l{input_length}",
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda value: "bias" if value else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_single_output(self, dtype, with_bias, kernel_size, stride, dilation, input_length):
+        input_tensor = torch.randn(2, 7, input_length).to(dtype).float()
+        weight = torch.randn(33, 7, kernel_size).to(dtype).float()
+        bias = torch.randn(33).to(dtype).float() if with_bias else None
+        expected = F.conv1d(input_tensor, weight, bias, stride=stride, dilation=dilation)
+        actual = F.conv1d(
+            input_tensor.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            dilation=dilation,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @parametrize(
+        "input_length,padding",
+        [(257, 27), (118, 0)],
+        name_fn=lambda input_length, padding: "checked" if padding else "valid_vec8",
+    )
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_single_channel_depthwise(self, dtype, input_length, padding):
+        input_tensor = torch.randn(2, 1, input_length).to(dtype).float()
+        weight = torch.randn(1, 1, 7).to(dtype).float()
+        bias = torch.randn(1).to(dtype).float()
+        expected = F.conv1d(input_tensor, weight, bias, padding=padding, dilation=9)
+        actual = F.conv1d(
+            input_tensor.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            bias.to(device="mps", dtype=dtype),
+            padding=padding,
+            dilation=9,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @parametrize(
+        "kernel_size,stride,padding,dilation",
+        [
+            (1, 1 << 32, 1 << 32, 1),
+            (3, torch.iinfo(torch.int32).max, torch.iinfo(torch.int32).max, torch.iinfo(torch.int32).max),
+        ],
+        name_fn=lambda kernel_size, stride, padding, dilation: "parameter" if stride > torch.iinfo(torch.int32).max else "index",
+    )
+    def test_conv1d_parameter_and_index_int32_overflow(self, kernel_size, stride, padding, dilation):
+        input_tensor = torch.ones(1, 1, 1, device="mps")
+        weight = torch.ones(1, 1, kernel_size, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "signed 32-bit"):
+            F.conv1d(input_tensor, weight, stride=stride, padding=padding, dilation=dilation)
+
     @unittest.skipIf(MACOS_VERSION < 26.2, "MPP Conv1d requires macOS 26.2 or newer")
     @parametrize(
         "kernel_size,stride,dilation,padding",

@@ -12,10 +12,12 @@
 #include <ATen/ops/mm.h>
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
+#include <c10/util/TypeCast.h>
 #include <fmt/format.h>
 
 #include <algorithm>
 #include <limits>
+#include <string_view>
 
 namespace at::native {
 
@@ -275,21 +277,21 @@ static bool conv1d_direct_metal_eligible(const Tensor& input_t,
   }
   const int64_t input_channels_per_group = input_channels / groups;
   Conv3DParams params{};
-  params.conv2d.N = static_cast<int32_t>(input_t.size(0));
-  params.conv2d.C_in = static_cast<int32_t>(input_channels);
-  params.conv2d.C_out = static_cast<int32_t>(output_channels);
+  params.conv2d.N = c10::checked_convert<int32_t>(input_t.size(0), "batch size");
+  params.conv2d.C_in = c10::checked_convert<int32_t>(input_channels, "input channels");
+  params.conv2d.C_out = c10::checked_convert<int32_t>(output_channels, "output channels");
   params.conv2d.H = 1;
-  params.conv2d.W = static_cast<int32_t>(input_length);
+  params.conv2d.W = c10::checked_convert<int32_t>(input_length, "input length");
   params.conv2d.outH = 1;
-  params.conv2d.outW = static_cast<int32_t>(output_length);
+  params.conv2d.outW = c10::checked_convert<int32_t>(output_length, "output length");
   params.conv2d.kH = 1;
-  params.conv2d.kW = static_cast<int32_t>(weight_t.size(3));
+  params.conv2d.kW = c10::checked_convert<int32_t>(weight_t.size(3), "kernel size");
   params.conv2d.sH = 1;
-  params.conv2d.sW = static_cast<int32_t>(stride);
+  params.conv2d.sW = c10::checked_convert<int32_t>(stride, "stride");
   params.conv2d.dH = 1;
-  params.conv2d.dW = static_cast<int32_t>(dilation);
-  params.conv2d.C_in_per_group = static_cast<int32_t>(input_channels_per_group);
-  params.conv2d.C_out_per_group = static_cast<int32_t>(output_channels / groups);
+  params.conv2d.dW = c10::checked_convert<int32_t>(dilation, "dilation");
+  params.conv2d.C_in_per_group = c10::checked_convert<int32_t>(input_channels_per_group, "input channels per group");
+  params.conv2d.C_out_per_group = c10::checked_convert<int32_t>(output_channels / groups, "output channels per group");
   params.D = params.outD = params.kD = params.sD = params.dD = 1;
   Conv3dMppSpecialization specialization;
   specialization.dtype = scalarToMetalTypeString(input_t);
@@ -299,13 +301,27 @@ static bool conv1d_direct_metal_eligible(const Tensor& input_t,
   specialization.stride_width = params.conv2d.sW;
   specialization.dilation_depth = specialization.dilation_height = 1;
   specialization.dilation_width = params.conv2d.dW;
-  specialization.src_channels = input_channels_per_group <= 64 ? static_cast<int>(input_channels_per_group) : -1;
-  specialization.src_width = static_cast<int>(std::max<int64_t>(input_length, 16384));
+  specialization.src_channels = input_channels_per_group <= 64
+      ? c10::checked_convert<int>(input_channels_per_group, "input channels per group")
+      : -1;
+  specialization.src_width = c10::checked_convert<int>(std::max<int64_t>(input_length, 16384), "source width");
   specialization.src_height = 16384;
   specialization.has_bias = has_bias;
   specialization.out_ncdhw = output_t.is_contiguous();
   specialization.grouped = groups > 1;
-  return conv3d_mpp_pipeline(specialization, select_conv3d_mpp_tile(params, groups)) != nil;
+  const auto tile = select_conv3d_mpp_tile(params, groups);
+  const int64_t padded_output_channels =
+      c10::metal::ceil_div(output_channels / groups, int64_t(tile.output_channels)) * tile.output_channels;
+  const int64_t padded_output_width =
+      c10::metal::ceil_div(output_length, int64_t(tile.output_width)) * tile.output_width;
+  const int64_t useful_outputs = output_channels / groups * output_length;
+  // At least half the padded tile is useful for catalog shapes. Below one
+  // eighth, padding dominates and Graph/matmul wins on every measured probe.
+  constexpr int64_t max_padded_output_ratio = 8;
+  if (padded_output_channels * padded_output_width > useful_outputs * max_padded_output_ratio) {
+    return false;
+  }
+  return conv3d_mpp_pipeline(specialization, tile) != nil;
 }
 
 static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
@@ -511,6 +527,31 @@ static void conv3d_pointwise_matmul(const Tensor& input,
   }
 }
 
+// A no-padding Conv1d with one output position is a matrix multiplication over
+// the dilated input window.
+static void conv1d_single_output_matmul(const Tensor& input,
+                                        const Tensor& weight,
+                                        const std::optional<Tensor>& bias_opt,
+                                        int64_t dilation,
+                                        const Tensor& output) {
+  const int64_t batch_size = input.size(0);
+  const int64_t input_channels = input.size(1);
+  const int64_t output_channels = weight.size(0);
+  const int64_t kernel_size = weight.size(3);
+  const auto input_3d = input.contiguous().squeeze(2);
+  const auto window = input_3d.as_strided({batch_size, input_channels, kernel_size},
+                                          {input_3d.stride(0), input_3d.stride(1), dilation});
+  const auto input_matrix = window.reshape({batch_size, input_channels * kernel_size});
+  const auto weight_matrix = weight.contiguous().reshape({output_channels, input_channels * kernel_size});
+  auto output_matrix = output.view({batch_size, output_channels});
+  if (bias_opt && bias_opt->defined()) {
+    const auto bias = bias_opt->scalar_type() == output.scalar_type() ? *bias_opt : bias_opt->to(output.scalar_type());
+    at::addmm_out(output_matrix, bias, input_matrix, weight_matrix.t());
+  } else {
+    at::mm_out(output_matrix, input_matrix, weight_matrix.t());
+  }
+}
+
 // conv as unfold(im2col) + matmul; weight OIDHW flattens to output channels x reduction size.
 static void conv3d_im2col_matmul(const Tensor& input,
                                  const Tensor& weight,
@@ -544,8 +585,33 @@ static void conv3d_im2col_matmul(const Tensor& input,
                    .permute({0, 4, 1, 2, 3}));
 }
 
-// Depthwise conv1d on the (N, C, 1, L) view4d form; one thread per output
-// element, memory-bound, no layout transform.
+static bool conv1d_indexing_fits_int32(int64_t kernel_size,
+                                       int64_t stride,
+                                       int64_t padding,
+                                       int64_t dilation,
+                                       int64_t max_output_index) {
+  constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();
+  const auto max_output_offset = max_output_index * stride;
+  const auto max_kernel_offset = (kernel_size - 1) * dilation;
+  return max_output_offset <= max_int32 && max_kernel_offset <= max_int32 &&
+      max_output_offset - padding + max_kernel_offset <= max_int32;
+}
+
+static bool conv1d_dw_indexing_fits_int32(const Tensor& weight_t,
+                                          int64_t stride,
+                                          int64_t padding,
+                                          int64_t dilation,
+                                          const Tensor& output_t) {
+  const auto output_length = output_t.size(3);
+  const auto vectorized = stride == 1 && output_length >= conv1d_dw_outputs_per_thread;
+  const auto max_output_index = vectorized
+      ? c10::metal::ceil_div(output_length, int64_t(conv1d_dw_outputs_per_thread)) * conv1d_dw_outputs_per_thread - 1
+      : output_length - 1;
+  return conv1d_indexing_fits_int32(weight_t.size(3), stride, padding, dilation, max_output_index);
+}
+
+// Depthwise Conv1d on the (N, C, 1, L) view4d form; each vectorized thread
+// computes adjacent outputs directly in NCL without a layout transform.
 static void conv1d_dw_forward(const Tensor& input_t,
                               const Tensor& weight_t,
                               const std::optional<Tensor>& bias_opt,
@@ -563,16 +629,24 @@ static void conv1d_dw_forward(const Tensor& input_t,
     bias = bias_opt->scalar_type() == dtype ? bias_opt->contiguous() : bias_opt->to(dtype).contiguous();
   }
   Conv1dDwParams params;
-  params.input_channels = static_cast<int32_t>(input_t.size(1));
-  params.input_length = static_cast<int32_t>(input_t.size(3));
-  params.output_length = static_cast<int32_t>(output_t.size(3));
-  params.batch_size = static_cast<int32_t>(input_t.size(0));
-  params.kernel_size = static_cast<int32_t>(weight_t.size(3));
-  params.stride = static_cast<int32_t>(stride);
-  params.padding = static_cast<int32_t>(padding);
-  params.dilation = static_cast<int32_t>(dilation);
+  params.input_channels = c10::checked_convert<int32_t>(input_t.size(1), "input channels");
+  params.input_length = c10::checked_convert<int32_t>(input_t.size(3), "input length");
+  params.output_length = c10::checked_convert<int32_t>(output_t.size(3), "output length");
+  params.batch_size = c10::checked_convert<int32_t>(input_t.size(0), "batch size");
+  params.kernel_size = c10::checked_convert<int32_t>(weight_t.size(3), "kernel size");
+  params.stride = c10::checked_convert<int32_t>(stride, "stride");
+  params.padding = c10::checked_convert<int32_t>(padding, "padding");
+  params.dilation = c10::checked_convert<int32_t>(dilation, "dilation");
   params.has_bias = has_bias;
-  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv1d_dw_{}", scalarToMetalTypeString(input_t)));
+  const bool vectorized = stride == 1 && params.output_length >= conv1d_dw_outputs_per_thread;
+  const bool valid_vectorized = vectorized && padding == 0 && params.output_length % conv1d_dw_outputs_per_thread == 0;
+  using namespace std::string_view_literals;
+  static_assert(conv1d_dw_outputs_per_thread == 8, "Conv1d depthwise kernel names encode the output width");
+  const auto variant = valid_vectorized ? "_vec8_valid"sv : (vectorized ? "_vec8"sv : ""sv);
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv1d_dw{}_{}", variant, scalarToMetalTypeString(input_t)));
+  const auto output_threads =
+      vectorized ? c10::metal::ceil_div(params.output_length, conv1d_dw_outputs_per_thread) : params.output_length;
+  const auto threads_per_threadgroup = std::min(output_threads, 256);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -580,8 +654,8 @@ static void conv1d_dw_forward(const Tensor& input_t,
       getMPSProfiler().beginProfileKernel(pipeline, "conv1d_dw", {contiguous_input, contiguous_weight});
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, contiguous_input, contiguous_weight, output_t, params, bias ? *bias : contiguous_input);
-      [encoder dispatchThreads:MTLSizeMake(params.output_length, params.input_channels, params.batch_size)
-          threadsPerThreadgroup:MTLSizeMake(std::min(params.output_length, 256), 1, 1)];
+      [encoder dispatchThreads:MTLSizeMake(output_threads, params.input_channels, params.batch_size)
+          threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
       getMPSProfiler().endProfileKernel(pipeline);
     }
   });
@@ -743,14 +817,38 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t =
-      at::empty(input_shape.has_value() ? input_shape.value()
-                                        : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
-                input->scalar_type(),
-                std::nullopt,
-                kMPS,
-                std::nullopt,
-                is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  const auto output_size = input_shape.has_value()
+      ? input_shape->vec()
+      : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation);
+  if (is1DConv) {
+    constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();
+    bool fits_int32 = input_t.size(0) <= max_int32 && input_t.size(1) <= max_int32 && input_t.size(3) <= max_int32 &&
+        weight_t.size(0) <= max_int32 && weight_t.size(1) <= max_int32 && weight_t.size(3) <= max_int32 &&
+        output_size[0] <= max_int32 && output_size[1] <= max_int32 && output_size[3] <= max_int32 &&
+        stride[1] <= max_int32 && padding[1] <= max_int32 && dilation[1] <= max_int32 && groups <= max_int32;
+    if (fits_int32 && output_size[3] > 0) {
+      fits_int32 = conv1d_indexing_fits_int32(weight_t.size(3), stride[1], padding[1], dilation[1], output_size[3] - 1);
+    }
+    TORCH_CHECK(fits_int32,
+                "MPS Conv1d dimensions, parameters, and index math must fit in the signed 32-bit range, but got input ",
+                input_t.sizes(),
+                ", weight ",
+                weight_t.sizes(),
+                ", stride ",
+                stride[1],
+                ", padding ",
+                padding[1],
+                ", dilation ",
+                dilation[1],
+                ", and groups ",
+                groups);
+  }
+  auto output_t = at::empty(output_size,
+                            input->scalar_type(),
+                            std::nullopt,
+                            kMPS,
+                            std::nullopt,
+                            is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -783,12 +881,15 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
 
   if (is1DConv) {
-    constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-    const bool is_depthwise = groups > 1 && groups == input_t.size(1) && weight_t.size(0) == groups;
-    const bool use_depthwise_metal =
-        is_depthwise && output_t.is_contiguous() && input_t.size(3) <= kInt32Max && output_t.size(3) <= kInt32Max;
+    const bool is_depthwise = groups == input_t.size(1) && weight_t.size(0) == groups;
+    const bool use_depthwise_metal = is_depthwise && output_t.is_contiguous() &&
+        conv1d_dw_indexing_fits_int32(weight_t, stride[1], padding[1], dilation[1], output_t);
     if (use_depthwise_metal) {
       conv1d_dw_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], output_t);
+      return output_t;
+    }
+    if (groups == 1 && input_t.size(1) > 0 && output_t.size(3) == 1 && padding[1] == 0) {
+      conv1d_single_output_matmul(input_t, weight_t, bias_opt, dilation[1], output_t);
       return output_t;
     }
     // unit depth axis: reuse the conv3d routing (pointwise / im2col / direct)
