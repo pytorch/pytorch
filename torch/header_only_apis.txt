@@ -52,10 +52,13 @@ complex
 is_complex
 scalar_value_type
 
-# ATen/NumericUtils.h, c10/util/generic_math.h
+# c10/util/generic_math.h
 div_floor_floating
 div_floor_integer
+
+# torch/headeronly/util/NumericUtils.h
 _isnan
+_isinf
 
 # ATen/core/PhiloxRNGEngine.h
 Philox4_32
