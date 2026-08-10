@@ -2137,6 +2137,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt(x), fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_symint_explicit_dunder_index(self):
+        # Explicit s.__index__() on a SymInt binds int.__index__ (a C slot
+        # wrapper) as a method-wrapper whose call must dispatch to the
+        # nb_index slot model (specializing the symbol with a guard), not
+        # to SymNodeVariable.call_method's generic proxy path.
+        def fn(x):
+            s = x.size(0)
+            return x.sum() + s.__index__()
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        x = torch.randn(5)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_explicit_method_wrapper_call_constant_folds(self):
+        # Explicit dunder calls binding C slot wrappers on constant types
+        # must keep constant-folding through call_method when the VT has no
+        # dedicated slot impl (str subscript/concat, int.__bool__).
+        def fn(x):
+            a = "abc".__getitem__(1)
+            b = "ab".__add__("cd")
+            c = (7).__bool__()
+            d = (7).__index__()
+            return x + 1, a, b, c, d
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_index_int_subclass_fast_path(self):
+        # _PyNumber_Index returns int/int-subclass items via the
+        # PyLong_Check fast path without consulting nb_index, so an
+        # __index__ override on an int subclass must be ignored when the
+        # instance is used as an index.
+        class IntSubWithOverride(int):
+            def __index__(self):
+                return 2
+
+        def fn(x, lst, idx):
+            return x + lst[idx]
+
+        x = torch.zeros(1)
+        lst = [10, 20, 30, 40, 50, 60]
+        idx = IntSubWithOverride(5)
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x, lst, idx), fn(x, lst, idx))
+
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):

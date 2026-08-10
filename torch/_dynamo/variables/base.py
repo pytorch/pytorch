@@ -1045,7 +1045,7 @@ class SlotDef:
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Call the impl via the wrapper, passing self, tx, and args."""
-        func = getattr(type(vt), self.impl)
+        func = getattr(type(vt.realize()), self.impl)
         return self.wrapper(vt, tx, func, args, kwargs)
 
 
@@ -1653,6 +1653,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def lookup_slotdefs(self, name: str) -> SlotDef | None:
+        return self._slotdefs.get(name)
 
     def method_flags_type(self) -> type:
         """Type whose CPython ml_flags define this VT's tp_methods arities

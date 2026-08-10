@@ -4255,7 +4255,10 @@ class MethodWrapperVariable(VariableTracker):
                 descriptor = cast(Any, method_wrapper.__self__)
                 return args[0].getattro_impl(tx, descriptor.__name__)
 
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        sd = self.obj.lookup_slotdefs(self.descriptor.__name__)
+        if sd is None:
+            return self.obj.call_method(tx, self.descriptor.__name__, args, kwargs)
+        return sd(self.obj, tx, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
