@@ -37,6 +37,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    kpack_supported,
     mfma_kdim,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
@@ -1554,6 +1555,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         self.default_num_stages = get_backend_num_stages()
 
+        kpack_choices = [1, 2] if kpack_supported() else [1]
+
         self.mm_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 16, 16, 256, self.default_num_stages, 4, group_m=4, waves_per_eu=2
@@ -1632,7 +1635,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         # Architecture-aware default kpack for flex configs
@@ -1720,7 +1723,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
@@ -1744,7 +1747,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
             if BLOCK_N1 % BLOCK_M1 == 0
             and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
@@ -1758,27 +1761,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
-
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        # these cause AMD compile to crash
-        pruned_configs = [
-            c
-            for c in configs
-            if not (
-                (
-                    getattr(c, "matrix_instr_nonkdim", 0) == 2
-                    and getattr(c, "kpack", 0) == 2
-                )
-                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
-            )
-        ]
-        return pruned_configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1809,17 +1793,17 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
-            kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            kpack: int = getattr(conf, "kpack", get_default_kpack())
             kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim) or matrix_instr_nonkdim
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
-                or conf.block_k < kpack * kdim
+                or (kpack > 1 and conf.block_k < kpack * kdim)
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                #  block_k must supply at least `kpack` whole MFMA K-steps
-                #  (kpack * kdim) to avoid miscompiled operand packing
+                #  kpack > 1 is honored only on gfx942; block_k must then supply
+                #  kpack whole MFMA K-steps (kpack * kdim) or packing miscompiles
                 continue
 
             # Construct key for finding duplicate configs

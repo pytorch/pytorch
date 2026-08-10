@@ -1857,18 +1857,27 @@ def get_tma_workspace_arg(
     )
 
 
-def get_default_kpack(block_k: int = 16) -> int:
+def kpack_supported() -> bool:
+    # kpack > 1 is honored only on gfx90a/gfx942. 
+    # It is deprecated starting from gfx950 (compiler forces it to 1)
+    if not torch.version.hip:
+        return False
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    return "gfx90a" in arch or "gfx942" in arch
+
+
+def get_default_kpack() -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
-        return 1
-    return 2
+    if kpack_supported():
+        return 2
+    return 1
 
 
-# MFMA K-extent (kdim) for the CDNA "16x16" and "32x32" MMA families, keyed by
-# (element_byte_width, matrix_instr_nonkdim). Values from the gfx942/gfx950
-# V_MFMA_* ISA table.
-_MFMA_KDIM = {
+# K-extent (kdim) of the CDNA MFMA instruction Triton selects, keyed by
+# (element_byte_width, matrix_instr_nonkdim). On gfx90a fp8 is
+# emulated with f16, so it lands on the same K-extent as int8.
+_MFMA_KDIM_CDNA3 = {
     # nonkdim == 16 : 16x16x{K}
     (4, 16): 4,  # f32      -> 16x16x4
     (2, 16): 16,  # f16/bf16 -> 16x16x16
@@ -1879,16 +1888,31 @@ _MFMA_KDIM = {
     (1, 32): 16,  # f8/i8    -> 32x32x16
 }
 
+_MFMA_KDIM_CDNA2 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 16,  # f8/i8    -> 16x16x16
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 8,  # f8/i8    -> 32x32x8
+}
+
 
 def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
-    """K-extent of the selected MFMA instruction.
-
-    Returns None if the (dtype_size, matrix_instr_nonkdim) pair is unknown, so
-    callers can fall back to a conservative bound. Byte width disambiguates every
-    supported case except tf32/xf32 (both 4-byte); callers that care about tf32
-    must key on the real dtype instead.
-    """
-    return _MFMA_KDIM.get((dtype_size, matrix_instr_nonkdim))
+    """MFMA K-extent for the current CDNA arch, None for an unknown
+    (dtype_size, nonkdim) pair. Only gfx90a/gfx942 are distinguished since
+    kpack > 1 (the sole consumer) is limited to those archs."""
+    if not torch.version.hip:
+        return None
+    table = _MFMA_KDIM_CDNA3
+    if "gfx90a" in torch.cuda.get_device_properties(0).gcnArchName:
+        return _MFMA_KDIM_CDNA2.get((dtype_size, matrix_instr_nonkdim))
+    elif "gfx942" in torch.cuda.get_device_properties(0).gcnArchName: 
+        return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
+    else:
+        return None
 
 
 def _use_template_for_gpu(

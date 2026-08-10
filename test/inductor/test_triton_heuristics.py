@@ -522,6 +522,48 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(len(configs), expected_count)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @parametrize("dtype_size", [0, 2])
+    def test_rocm_prune_block_k_underfills_mfma(self, dtype_size):
+        # A config that declares kpack > 1 but whose block_k is smaller than 
+        # kpack * kdim underfills the packed MFMA operand and is miscompiled,
+        # so it must be pruned.
+        if not torch.version.hip:
+            self.skipTest("ROCm-specific MFMA config pruning")
+        from torch._inductor.heuristics.template.triton import (
+            GemmConfig,
+            ROCmConfigHeuristic,
+            ROCmGemmConfig,
+        )
+
+        def count(mm_configs, dsize):
+            h = ROCmConfigHeuristic()
+            h.should_scale_configs = False
+            h.mm_configs = mm_configs
+            return len(
+                list(h.get_mm_configs()(1, 256, 128, dtype_size=dsize, op_name="mm"))
+            )
+
+        underfilled = ROCmGemmConfig(
+            16, 64, 16, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+        )
+        valid = ROCmGemmConfig(
+            16, 64, 32, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+        )
+        # block_k=16 < kpack(2) * kdim(16) -> pruned; block_k=32 -> kept.
+        self.assertEqual(count([underfilled], dtype_size), 0)
+        self.assertEqual(count([valid], dtype_size), 1)
+
+        # Plain GemmConfig lists (int8 / scaled_mm) are still routed through
+        # ROCmConfigHeuristic, so they inherit the arch default kpack (2 on
+        # gfx90a/gfx942) and are subject to the same prune: block_k=16 underfills
+        # the default kpack and is dropped. gfx950 defaults kpack to 1, so nothing
+        # underfills there.
+        from torch._inductor.utils import kpack_supported
+
+        plain = [GemmConfig(64, 64, 16, 2, 4)]
+        self.assertEqual(count(plain, dtype_size), 0 if kpack_supported() else 1)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):
         def fn(x):
             return (x + 1).sum(dim=1)
