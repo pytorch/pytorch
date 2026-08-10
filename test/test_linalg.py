@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
 import numpy as np
 
@@ -1168,6 +1169,48 @@ class TestLinalg(TestCase):
                 self.assertEqual(got_cmp, exp_cmp, atol=atol, rtol=rtol,
                                  msg=f"det Hessian via {mode} is wrong for "
                                      "clustered singular values")
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_det_slogdet_solve_reverse_over_forward_classic_api(self, device, dtype):
+        # Regression test for PR #192667's reviewer-raised classic forward-AD
+        # path. torch.func inputs carry subclass wrappers, so they cannot show
+        # whether requires_grad keeps a JVP graph-connected to the primal.
+        A_values = torch.tensor([[1.3, 0.4], [-0.7, 0.9]], device=device, dtype=dtype)
+        V = torch.tensor([[0.2, -0.3], [0.6, 0.5]], device=device, dtype=dtype)
+        b = torch.tensor([1.0, -2.0], device=device, dtype=dtype)
+        c = torch.tensor([0.5, 1.3], device=device, dtype=dtype)
+
+        def trace_solve(A):
+            return torch.linalg.solve(A, V).diagonal(dim1=-2, dim2=-1).sum(-1)
+
+        ops = {
+            "det": (
+                torch.linalg.det,
+                lambda A: torch.linalg.det(A) * trace_solve(A),
+            ),
+            "slogdet": (
+                lambda A: torch.linalg.slogdet(A).logabsdet,
+                trace_solve,
+            ),
+            "solve": (
+                lambda A: c @ torch.linalg.solve(A, b),
+                lambda A: -(c @ torch.linalg.solve(A, V @ torch.linalg.solve(A, b))),
+            ),
+        }
+
+        for name, (jvp_fn, ref_fn) in ops.items():
+            A = A_values.detach().clone().requires_grad_()
+            with fwAD.dual_level():
+                dual_A = fwAD.make_dual(A, V)
+                _, tangent = fwAD.unpack_dual(jvp_fn(dual_A))
+            self.assertIsNotNone(tangent.grad_fn, msg=f"{name} tangent has no grad_fn")
+            g_test = torch.autograd.grad(tangent, A)[0]
+
+            A_ref = A_values.detach().clone().requires_grad_()
+            g_ref = torch.autograd.grad(ref_fn(A_ref), A_ref)[0]
+            self.assertEqual(g_test, g_ref, atol=1e-9, rtol=1e-7)
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack

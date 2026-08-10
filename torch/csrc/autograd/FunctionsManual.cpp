@@ -4699,8 +4699,11 @@ Tensor linalg_det_jvp(
   // carries a functorch wrapper, which is indistinguishable from a pending
   // higher-order differentiation. Only plain forward-mode AD (make_dual
   // without functorch) reaches the fast saved-LU path below.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
   Tensor AinvE;
-  if (A.requires_grad() || areAnyTensorSubclassLike({A, dA})) {
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA})) {
     AinvE = at::linalg_solve(A, dA);
   } else {
     auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
@@ -4820,8 +4823,11 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
   // carries a functorch wrapper indistinguishable from a pending higher-order
   // differentiation. Plain forward-mode AD (make_dual without functorch)
   // keeps the fast LU path.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
   Tensor trAinvE;
-  if (A.requires_grad() || areAnyTensorSubclassLike({A, dA})) {
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA})) {
     trAinvE = at::linalg_solve(A, dA).diagonal(0, -2, -1).sum(-1);
   } else {
     trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
@@ -6582,8 +6588,11 @@ Tensor linalg_solve_jvp(
   // this branch: the primal still carries a functorch wrapper that is
   // indistinguishable from a pending higher-order differentiation. Plain
   // forward-mode AD (make_dual without functorch) keeps the fast LU path.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
   Tensor dX_;
-  if (A.requires_grad() || areAnyTensorSubclassLike({A, dA, dB})) {
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA, dB})) {
     dX_ = at::linalg_solve(A, dB_ - R_, left);
   } else {
     dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
