@@ -20,7 +20,11 @@ import types
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test, xfailIfPy314Plus
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+    xfailIfPy314Plus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +216,8 @@ class RaisesDuringIter:
 
 class _ContainsBase:
     """Base test class for __contains__ protocol with parameterized types."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     thetype = None  # Override in subclass
     data = [1, 2, 3]
@@ -461,6 +467,8 @@ class RangeContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
 class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
     """Test __contains__ that returns non-bool truthy/falsy values."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -490,6 +498,8 @@ class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
 class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):
     """Tests for objects with neither __iter__ nor __contains__"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -516,6 +526,8 @@ class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):
 
 class RaisesDuringIterTest(torch._dynamo.test_case.TestCase):
     """Tests for iterators that raise exceptions during iteration"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -545,6 +557,8 @@ class RaisesDuringIterTest(torch._dynamo.test_case.TestCase):
 class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
     """Tests for __contains__ that raises TypeError"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -573,6 +587,8 @@ class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
 
 class RangeContainsMiscTest(torch._dynamo.test_case.TestCase):
     """Specific tests for range __contains__ protocol"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -660,6 +676,8 @@ class SetInSetTest(torch._dynamo.test_case.TestCase):
     not hashable.  Ref: Objects/setobject.c::set_contains.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -716,6 +734,8 @@ class ContainsOrderTest(torch._dynamo.test_case.TestCase):
     must be observable.  Ref: Objects/listobject.c::list_contains.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -751,6 +771,8 @@ class DictViewContainsTest(torch._dynamo.test_case.TestCase):
     - values: linear scan comparing each stored value (PySequence_Contains).
     Ref: Objects/dictobject.c.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @make_dynamo_test
     def test_keys_contains(self):
@@ -829,6 +851,8 @@ class ContainsNonBool:
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
     """slot_sq_contains lookup semantics (Objects/typeobject.c)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @make_dynamo_test
     def test_contains_none_is_not_a_container(self):
