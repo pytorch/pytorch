@@ -4,11 +4,6 @@ name: Better Benchmark B200
 on:
   schedule:
     - cron: 0 7 * * *
-  # Remove this trigger after validating changes to the benchmark workload.
-  pull_request:
-    paths:
-      - .github/workflows/better-benchmark-b200.yml
-      - .ci/pytorch/test.sh
   workflow_dispatch:
 
 concurrency:
