@@ -1,12 +1,12 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 18311da46430caef6ae4ebbbc953b884c5865e71..27e57f991c593e3e58d01e34ff9efc8f10d5812b 100644
+index 16ad60f14157eb74749af97acdd2a32d334ad060..1b97bd87ef2a55edd2a937612df42267c3c8764d 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -1051,0 +1052 @@ class EpiMod:
+@@ -1054,0 +1055 @@ class EpiMod:
 +                        swap_ab=swap_ab,
-@@ -1084,0 +1086 @@ class EpiMod:
+@@ -1087,0 +1089 @@ class EpiMod:
 +                    swap_ab=swap_ab,
-@@ -1133,0 +1136 @@ class EpiMod:
+@@ -1136,0 +1139 @@ class EpiMod:
 +                        swap_ab=swap_ab,
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
 index 5cc96cfaa41933b9cf939fbc12c784ab1b4618d6..d8174e0aaeaf0088704597a1b42734013331eec7 100644
@@ -198,7 +198,7 @@ index e9b803889fc75ae02fb661836a8949d366d6b7f7..6427d45c45c88b4d926f5a05f56c71c8
 +        semantic_value_key(fn.__defaults__, seen, force_source=False),
 +        semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac461a6f113 100644
+index 052df3a75497c07e0ea2949a64df162a86c6a529..e7e010b1415799d995c47b01e437cc85295137b4 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -112,0 +113 @@ import operator
@@ -317,40 +317,23 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +                    f"{self.output_layout.carrier_ndim}"
 +                )
 +        elif value.ndim not in (2, 3):
-@@ -564,0 +631,48 @@ class GroupedReduceBase(EpiOp):
-+    def host_validate(
-+        self,
-+        value,
-+        *,
-+        m,
-+        n,
-+        tile_M,
-+        tile_N,
-+        batch,
-+        varlen_m,
-+        swap_ab=False,
-+        **_,
-+    ):
+@@ -578 +644 @@ class GroupedReduceBase(EpiOp):
+-        """Validate compressed output geometry against the GEMM problem."""
 +        """Validate caller-owned carrier geometry against the GEMM problem."""
+@@ -584 +650,4 @@ class GroupedReduceBase(EpiOp):
+-            raise ValueError(f"{self.name}: compressed aux buffer is required")
++            kind = (
++                "compressed aux buffer" if self.output_layout is None else "output-layout carrier"
++            )
++            raise ValueError(f"{self.name}: {kind} is required")
+@@ -598 +667,14 @@ class GroupedReduceBase(EpiOp):
+-        expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
 +        if self.output_layout is None:
++            expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
++            actual = tuple(value.shape)
++            if actual != expected:
++                raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
 +            return
-+        if value is None:
-+            raise ValueError(f"{self.name}: output-layout carrier is required")
-+        if varlen_m:
-+            raise ValueError(f"{self.name}: output layouts do not support varlen_m")
-+        self.host_arg_key(value)
-+        dim = m if self.axis == 0 else n
-+        physical_axis = 1 - self.axis if swap_ab else self.axis
-+        tile = tile_M if physical_axis == 0 else tile_N
-+        if dim % self.group:
-+            raise ValueError(
-+                f"{self.name}: group {self.group} must divide the grouped dim "
-+                f"{dim} (axis={self.axis})"
-+            )
-+        if tile % self.group or self.group > tile:
-+            raise ValueError(
-+                f"{self.name}: group {self.group} must divide the CTA tile extent {tile}"
-+            )
 +        rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
 +        expected = tuple(
 +            self.output_layout.carrier_shape_fn(
@@ -359,16 +342,15 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +                cols,
 +            )
 +        )
-+        actual = tuple(value.shape)
-+        if actual != expected:
+@@ -601 +683,4 @@ class GroupedReduceBase(EpiOp):
+-            raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
 +            raise ValueError(
 +                f"{self.name}: {self.output_layout.name} carrier must have shape "
 +                f"{expected}, got {actual}"
 +            )
-+
-@@ -569 +682,0 @@ class GroupedReduceBase(EpiOp):
+@@ -607 +691,0 @@ class GroupedReduceBase(EpiOp):
 -        groups = cute.sym_int()
-@@ -570,0 +684,10 @@ class GroupedReduceBase(EpiOp):
+@@ -608,0 +693,10 @@ class GroupedReduceBase(EpiOp):
 +        if self.output_layout is not None:
 +            rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
 +            shape = self.output_layout.fake_shape_fn(fctx.l, rows, cols)
@@ -379,7 +361,7 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +                divisibility=1,
 +            )
 +        groups = cute.sym_int()
-@@ -583,0 +707,9 @@ class GroupedReduceBase(EpiOp):
+@@ -621,0 +716,9 @@ class GroupedReduceBase(EpiOp):
 +        if self.output_layout is not None:
 +            tensor = self.output_layout.tensor_fn(tensor, gemm.a_transposed)
 +            assert cute.rank(tensor) == 3
@@ -389,7 +371,7 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +                else (gemm.caller_n, gemm.caller_m // self.group)
 +            )
 +            return {self.name: _GroupedOutputLayoutParams(tensor, logical_extent, logical_groups)}
-@@ -733,0 +866,7 @@ class GroupedReduceBase(EpiOp):
+@@ -771,0 +875,7 @@ class GroupedReduceBase(EpiOp):
 +        if const_expr(self.output_layout is not None):
 +            logical_extent = param.logical_extent
 +            logical_groups = param.logical_groups
@@ -397,7 +379,7 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +        else:
 +            logical_extent = None
 +            logical_groups = None
-@@ -749,2 +888,7 @@ class GroupedReduceBase(EpiOp):
+@@ -787,2 +897,7 @@ class GroupedReduceBase(EpiOp):
 -            limit_groups = mReduce.shape[1]
 -            limit = min(varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M, tile_M)
 +            if const_expr(self.output_layout is not None):
@@ -407,7 +389,7 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +                logical_extent = varlen_manager.len_m(batch_idx)
 +                limit_groups = cute.size(mReduce, mode=[1])
 +            limit = min(logical_extent - tile_coord_mnkl[0] * tile_M, tile_M)
-@@ -753,2 +897,7 @@ class GroupedReduceBase(EpiOp):
+@@ -791,2 +906,7 @@ class GroupedReduceBase(EpiOp):
 -            limit_groups = mReduce.shape[0]
 -            limit = min(cute.size(mReduce, mode=[1]) - tile_coord_mnkl[1] * tile_N, tile_N)
 +            if const_expr(self.output_layout is not None):
@@ -417,7 +399,7 @@ index 527b4427189cb50db093913da3ae5e0656407c51..d840ba99b6656ae0fe193bbd70b09ac4
 +                logical_extent = cute.size(mReduce, mode=[1])
 +                limit_groups = cute.size(mReduce, mode=[0])
 +            limit = min(logical_extent - tile_coord_mnkl[1] * tile_N, tile_N)
-@@ -929,97 +1077,0 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -967,97 +1086,0 @@ class GroupedLocalReduce(GroupedReduceBase):
 -class Blocked128x4GroupedLocalReduce(GroupedLocalReduce):
 -    """Axis-1 grouped sink stored directly into a padded cuBLAS 128x4 carrier.
 -

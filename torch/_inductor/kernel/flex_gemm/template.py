@@ -78,7 +78,7 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
-        tensorwise: Whether the generated function consumes a complete TensorSSA fragment.
+        fragmentwise: Whether the generated function consumes a complete TensorSSA fragment.
         tuned: Whether QuACK should autotune this call.
     """
 
@@ -94,7 +94,7 @@ class FlexGemmEpilogueConfig:
     aux_out_indices: tuple[int, ...]
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
-    tensorwise: bool
+    fragmentwise: bool
     tuned: bool
 
 
@@ -217,7 +217,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         """Render captured tensor and aux-output kwargs for runtime dispatch."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
         kwargs = [
-            f", tensorwise={config.tensorwise!r}",
+            f", fragmentwise={config.fragmentwise!r}",
             f", tuned={config.tuned!r}",
         ]
         if config.quack_config_constraints:
