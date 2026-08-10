@@ -53,14 +53,17 @@ which will handle all the rough edges of the C API for the user.
 ### Python interop shims
 
 `torch/csrc/stable/pyobject.h` converts between Python objects and their
-`torch::stable` equivalents: `tensor_from_pyobject` / `tensor_to_pyobject` for
-converting between `torch::stable::Tensor` in C++ and `torch.Tensor` in Python,
-`dtype_from_pyobject` / `dtype_to_pyobject` for `ScalarType` and `torch.dtype`,
-and `device_from_pyobject` / `device_to_pyobject` for `torch::stable::Device`
-and `torch.device`. `is_tensor_pyobject` is a cheap probe for whether a Python
-object is a `torch.Tensor` (or a subclass), for type-checking before
-`tensor_from_pyobject` (which errors on non-tensors). Like the rest of the
-stable ABI, an extension using them can just link `libtorch`.
+`torch::stable` equivalents:
+
+- `tensor_from_pyobject` / `tensor_to_pyobject`: `torch.Tensor` <-> `torch::stable::Tensor`
+- `dtype_from_pyobject` / `dtype_to_pyobject`: `torch.dtype` <-> `torch::headeronly::ScalarType`
+- `device_from_pyobject` / `device_to_pyobject`: `torch.device` <-> `torch::stable::Device`
+- `is_tensor_pyobject`: a cheap probe for whether a Python object is a
+  `torch.Tensor` (or a subclass), for type-checking before
+  `tensor_from_pyobject` (which errors on non-tensors)
+
+Like the rest of the stable ABI, an extension using them can just link
+`libtorch`.
 
 Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
 runtime and must be called with the GIL held. If you call them from a context that
