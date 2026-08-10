@@ -107,13 +107,27 @@ class TestExportJobs(unittest.TestCase):
 
 class TestArch(unittest.TestCase):
     def test_archs_from_cuda_arch_list(self):
-        # TORCH_CUDA_ARCH_LIST -> the Blackwell EXPORT_SMS subset;
-        # named/malformed/+PTX entries and unsupported arches drop out.
+        # TORCH_CUDA_ARCH_LIST -> the EXPORTABLE_ARCHES subset; named,
+        # malformed, +PTX and non-exportable entries drop out.
         f = export.archs_from_cuda_arch_list
         self.assertEqual(f("7.5 8.9"), [])
         self.assertEqual(f("9.0a;10.0a"), ["sm_100a"])
         self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_100"])
-        self.assertEqual(f("Hopper 10.3a"), ["sm_103a"])
+        # Both spellings of a CC are separate nvcc targets, and both are
+        # exportable: CI passes "10.0a", the wheel builds pass "10.0".
+        self.assertEqual(f("10.0"), ["sm_100"])
+        # 10.3 is not exportable while the runtime gate is major-only.
+        self.assertEqual(f("Hopper 10.3a"), [])
+
+    def test_archs_from_cuda_arch_list_dedups(self):
+        # "10.0;10.0+PTX" names one arch twice. Without dedup the result
+        # reads as multi-arch downstream: nested <out>/<arch>/ layout the
+        # one-level CMake globs do not walk, and a --jobs 1 hard exit.
+        f = export.archs_from_cuda_arch_list
+        self.assertEqual(f("10.0;10.0+PTX"), ["sm_100"])
+        self.assertEqual(f("10.0a 10.0a"), ["sm_100a"])
+        # Distinct spellings are distinct targets, so both survive.
+        self.assertEqual(f("10.0;10.0a"), ["sm_100", "sm_100a"])
 
     def test_collect_jobs_respects_declaration_archs(self):
         # A declaration pinning ARCHS gets no jobs for other arches; an

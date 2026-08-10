@@ -251,12 +251,14 @@ def _run_job(job) -> str:
 
 
 def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
-    """TORCH_CUDA_ARCH_LIST -> sm strings the DSL toolchains accept,
-    restricted to EXPORT_SMS.
+    """TORCH_CUDA_ARCH_LIST -> the sm strings from it that are
+    EXPORTABLE_ARCHES, order-preserving and deduplicated.
 
     "9.0a;10.0a" (or space-separated) -> ["sm_100a"]. Named entries
     ("Hopper") and +PTX suffixes are not translated -- callers should
-    pass numeric lists (CI does)."""
+    pass numeric lists (CI does). Dedup matters: "10.0;10.0+PTX" names
+    one arch twice, and a repeated entry would otherwise read as
+    multi-arch downstream (nested artifact layout, --jobs > 1)."""
     out = []
     for entry in arch_list.replace(";", " ").split():
         entry = entry.removesuffix("+PTX")
@@ -269,18 +271,39 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
         if not minor_num.isdigit():
             continue
         sm = f"sm_{int(parts[0]) * 10 + int(minor_num)}{suffix}"
-        if sm in EXPORT_SMS:
+        if sm in EXPORTABLE_ARCHES and sm not in out:
             out.append(sm)
     return out
 
 
-# Architectures the standard build exports AOT kernels for: Blackwell
-# only, for now. Entries outside this set are skipped (not failed), so
-# a mixed arch list ("7.5 9.0a 10.0a") exports just the Blackwell
-# subset and other builds proceed without artifacts. Single-arch also
-# keeps the flat artifacts layout the embedded link globs (multi-arch
-# nests per-arch trees, which the link does not walk).
-EXPORT_SMS = ("sm_100", "sm_100a", "sm_103", "sm_103a")
+# Arch allow-list for the AUTOMATIC export path: which entries of the main
+# build's TORCH_CUDA_ARCH_LIST are ELIGIBLE for AOT kernels. Blackwell only,
+# for now. A filter, never a build list -- it cannot cause an export, only
+# permit one, and an explicit `--arch` bypasses it entirely (so a dev can
+# hand-export for any arch a declaration claims). Consequences:
+#
+#   * an arch list with no eligible entry ("7.5 9.0") exports NOTHING and
+#     stage 2 skips silently, leaving a normal artifact-free build;
+#   * a mixed list ("7.5 9.0a 10.0a") exports just the eligible subset.
+#
+# Both spellings of a CC are listed because they are distinct nvcc targets
+# and different builds use different ones for the SAME hardware: "10.0a"
+# (arch-conditional, what tcgen05/wgmma need) in b200-native-aot.yml, plain
+# "10.0" in every other Blackwell job and in the shipped manywheel lists.
+# Omitting either makes those builds silently export nothing.
+#
+# NOT the same set as decl.py's _DEFAULT_ARCHS or a declaration's ARCHS,
+# which say what the KERNELS support (sm_90+); this says what the standard
+# build SHIPS. Keeping it to one selected arch per build also preserves the
+# flat artifacts layout the embedded CMake globs walk (multi-arch nests
+# per-arch trees, which they do not).
+#
+# sm_103/sm_103a are deliberately absent: no CI or release arch list names
+# 10.3, sm_100 SASS is forward-compatible to CC 10.3, and _arch_gate only
+# compares the CUDA major -- so an sm_103 artifact would pass the gate on a
+# 10.0 device and then fail the module load instead of declining. Re-add
+# them together with a major+minor gate.
+EXPORTABLE_ARCHES = ("sm_100", "sm_100a")
 
 
 def main() -> None:
@@ -326,7 +349,7 @@ def main() -> None:
         else:
             print(
                 "TORCH_CUDA_ARCH_LIST contains no AOT-exportable arch "
-                f"(supported: {' '.join(EXPORT_SMS)}); nothing to export"
+                f"(exportable: {' '.join(EXPORTABLE_ARCHES)}); nothing to export"
             )
             return
     archs = args.arch if args.arch else [None]
