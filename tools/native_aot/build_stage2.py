@@ -21,7 +21,7 @@ is missing, so the standard build NEVER hard-depends on the DSL stack:
   * DSL runtime not importable (nvidia_cutlass_dsl or tvm_ffi, the
     same pair torch/_native/cutedsl_utils.py gates the JIT layer on)
   * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
-    for now -- see export.EXPORT_SMS); on-device export runs when the
+    for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
     arch list is unset and a supported GPU is present
 
 A failure AFTER the skip checks is a real error and fails the build:
@@ -100,7 +100,8 @@ def should_run() -> bool:
         if not export_mod.archs_from_cuda_arch_list(arch_list):
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "
-                f"exportable arch; supported: {' '.join(export_mod.EXPORT_SMS)})"
+                f"exportable arch; exportable: "
+                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
             )
             return False
     elif not _torch_probe("torch.cuda.is_available()"):

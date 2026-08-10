@@ -10,6 +10,7 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -122,6 +123,9 @@ def scan(
             the final carry of the scan operation with same pytree structure as init.
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
+            If the scan dimension has size 0, ``final_carry`` equals ``init`` unchanged and each output leaf has
+            size 0 along ``dim``. The gradient of ``final_carry`` with respect to ``init`` is the identity
+            (not zero), since the body is never called and the carry passes through untouched.
 
     Restrictions:
         - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
@@ -178,13 +182,9 @@ def scan(
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
         if any(x.ndim <= d for x in lxs):
-            raise RuntimeError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
-        if any(x.shape[d] == 0 for x in lxs):
-            raise RuntimeError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
+            raise RuntimeError("All xs leaves must have at least 'dim + 1' dimensions")
+        if any(x.shape[d] != lxs[0].shape[d] for x in lxs[1:]):
+            raise RuntimeError("All xs leaves must have the same scan dimension size")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -347,6 +347,8 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         num_elems = xs[0].shape[dim]
         num_init_leaves = len(init)
 
+        proto_xs = [first_slice_copy(x, dim) for x in xs]
+
         # Process element 0 to infer output shapes for pre-allocation
         # AND produce the first real result in a single call.  The previous
         # approach used first_slice_copy() for shape inference and then
@@ -357,7 +359,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             call_operator(
                 operator,
                 *carry,
-                *[elem.select(dim, 0) for elem in xs],
+                *proto_xs,
                 *additional_inputs,
             ),
             num_init_leaves,
@@ -382,6 +384,12 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         idxs = [
             torch.ones_like(e, dtype=torch.int64).unsqueeze(0) for e in out_0_masked
         ]
+
+        if num_elems == 0:
+            outs_expanded = [
+                outs.pop(0) if out_m else None for out_m in out_tensor_mask
+            ]
+            return (*init, *outs_expanded)
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
@@ -887,7 +895,7 @@ class ScanAutogradImpl:
             )
             return flat_grads
 
-        single_step_bw_xs = pytree.tree_map(lambda t: t[0], bw_xs)
+        single_step_bw_xs = pytree.tree_map(first_slice_copy, bw_xs)
         bw_single_step_gm = materialize_as_graph(
             bw_single_step_wrapper,
             tuple(
@@ -938,7 +946,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
             hop_partitioned_graph: HopPartitionedGraph = (
                 HopGraphMinCutPartitioner.create_partitioned_graph(
                     combine_fn,
-                    (*init, *[x[0] for x in xs], *additional_inputs),
+                    (*init, *[first_slice_copy(x) for x in xs], *additional_inputs),
                     always_recompute_complex_exprs=True,
                 )
             )
@@ -1053,8 +1061,6 @@ def scan_functionalize(
 def scan_batch_rule(
     interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
-
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
     )
@@ -1148,10 +1154,16 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)])
-        for leave_ind in range(num_leaves)
-    ]
+    if len(result_flat) == 0:
+        results = [
+            torch.empty([0] + list(e.shape), dtype=e.dtype, device=e.device)
+            for e in dummy_out_leaves
+        ]
+    else:
+        results = [
+            torch.stack([e[leave_ind] for e in op(result_flat)])
+            for leave_ind in range(num_leaves)
+        ]
     # Match scan semantics: move the scan dim from 0 to the user-specified dim
     # when the output has enough dimensions.
     results = [torch.movedim(r, 0, dim) if dim < r.ndim else r for r in results]
