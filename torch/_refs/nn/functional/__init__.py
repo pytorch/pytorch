@@ -751,6 +751,7 @@ def _nll_loss_nd(
 
     flat_target = torch.flatten(target)
     ignore_classes_mask = torch.eq(flat_target, ignore_index)
+    safe_target = torch.where(ignore_classes_mask, 0, flat_target)
 
     # TODO: Enable data-dependent checks with debug mode
     # TODO: This check does not work with FakeTensor inputs; See Issue #85834
@@ -772,7 +773,7 @@ def _nll_loss_nd(
     class_weight = (
         torch.scalar_tensor(1, dtype=input.dtype, device=input.device)
         if weight is None
-        else weight[flat_target]
+        else weight[safe_target]
     )
     current_weight = torch.where(
         ignore_classes_mask,
@@ -783,11 +784,11 @@ def _nll_loss_nd(
     if input.ndim == 1:
         # implicit batch size = 1
         # input (1 batch size, C classes)
-        loss = -input[target] * current_weight
+        loss = -input[safe_target] * current_weight
     elif input.ndim == 2:
         # input (N batch size, C classes)
         batch_size = input.shape[0]
-        loss = -input[torch.arange(batch_size), target] * current_weight
+        loss = -input[torch.arange(batch_size), safe_target] * current_weight
     else:
         # 3D case (N batch size, C classes, K dimensions)
         # input (N batch size, C classes, K)
@@ -797,7 +798,8 @@ def _nll_loss_nd(
         indices = torch.arange(numel)
         bdx = indices // extent
         kdx = indices % extent
-        loss = -input[bdx, flat_target, kdx] * current_weight
+        loss = -input[bdx, safe_target, kdx] * current_weight
+    loss = torch.where(ignore_classes_mask, 0, loss)
     loss = torch.reshape(loss, target.shape)
 
     if reduction == "none":
