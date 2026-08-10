@@ -20,6 +20,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM100OrLater,
+    SM120OrLater,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
