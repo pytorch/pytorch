@@ -466,11 +466,13 @@ class TestLibtorchAgnostic(TestCase):
         for dev in (
             torch.device("cpu"),
             torch.device("meta"),
+            torch.device("cuda"),  # no index: must not come back as cuda:0
             torch.device("cuda", 1),  # constructing the object needs no GPU
         ):
             out = libtorch_agnostic._interop.device_roundtrip(dev)
             self.assertIsInstance(out, torch.device)
             self.assertEqual(out, dev)
+            self.assertEqual(out.index, dev.index)
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 14)
