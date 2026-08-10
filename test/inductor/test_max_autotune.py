@@ -5789,9 +5789,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         with mock.patch(
             "torch.utils._triton._has_triton_amd_tdm_device", return_value=True
         ) as supports_tdm:
-            self.assertTrue(
-                has_triton_amd_tdm_device("gfx1250:sramecc+:xnack-")
-            )
+            self.assertTrue(has_triton_amd_tdm_device("gfx1250:sramecc+:xnack-"))
         supports_tdm.assert_called_once_with("gfx1250")
 
     def test_tdm_template_rejects_descriptor_shapes_exceeding_int32(self):
