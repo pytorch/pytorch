@@ -116,7 +116,7 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
   TORCH_CHECK(
       channel >= 0,
       "channel for barrier(), put_signal() and wait_signal() ",
-      "must be greater than 0 (got ",
+      "must be non-negative (got ",
       channel,
       ")");
   const size_t num_channels =
