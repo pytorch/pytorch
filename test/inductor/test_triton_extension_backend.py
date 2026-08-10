@@ -303,7 +303,6 @@ instantiate_device_type_tests(
     TritonExtensionBackendAcceleratorTests,
     globals(),
     except_for=None if TRITON_HAS_CPU else "cpu",
-    allow_mps=True,
     allow_xpu=True,
 )
 
