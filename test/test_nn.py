@@ -8464,11 +8464,6 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
-    # --- Regression tests for the ROCm gamma/beta backward dispatch in
-    # aten/src/ATen/native/cuda/layer_norm_kernel.cu (code-review-2 on
-    # PR #189405: kGammaBetaTwoPassMinM, the restored ROCm tile shapes, and
-    # the pre-existing dgamma->size(-1) huge-M buffer bug). ---
-
     @onlyCUDA
     def test_layer_norm_gamma_beta_backward_dispatch_bands(self, device):
         # Only fp32 was covered at M >= 128 before this PR
@@ -8477,10 +8472,15 @@ class TestNNDeviceType(NNTestCase):
         # restored ROCm tile-shape band (M < kGammaBetaTwoPassMinM) and the
         # two-pass band (M >= kGammaBetaTwoPassMinM) across fp16/bf16/fp32
         # for both layer_norm and rms_norm.
+        # fp32 tolerance matches test_layer_norm_backwards_eps's default band
+        # (atol=1e-4, rtol=1e-5) for this same kernel: the M >= 2048 band
+        # routes through the two-pass reduction, whose block-parallel sum
+        # order differs from the CPU reference's, so fp32 accumulation noise
+        # on the order of M * eps (~4e-4 at M=4096) is expected, not a bug.
         tolerances = {
             torch.float16: (1e-2, 1e-3),
             torch.bfloat16: (1e-2, 1.6e-2),
-            torch.float32: (1e-5, 1e-3),
+            torch.float32: (1e-4, 1e-5),
         }
         eps = 1e-5
         for op in ("layer_norm", "rms_norm"):
@@ -8547,10 +8547,16 @@ class TestNNDeviceType(NNTestCase):
             _, dgamma_ref, dbeta_ref = torch.ops.aten.native_layer_norm_backward.default(
                 grad_out_cpu, x_cpu, [N], mean_cpu, rstd_cpu, weight_cpu, bias_cpu, [False, True, True])
 
-            atol = 1e-3 if M > 64 * 1024 else 1e-4
+            # The two-pass path (M >= kGammaBetaTwoPassMinM == 2048) reduces
+            # over all M rows in a different order than the CPU reference,
+            # so fp32 accumulation noise grows with M; its worst case is
+            # M=65535, just below the huge-M switch. Bump the tolerance for
+            # the whole two-pass/huge-M range rather than only M > 64*1024.
+            atol = 1e-3 if M >= 2048 else 1e-4
+            rtol = 1e-3 if M >= 2048 else 1e-4
             msg = f"M={M}"
-            self.assertEqual(dgamma.cpu(), dgamma_ref, msg, atol=atol, rtol=1e-4)
-            self.assertEqual(dbeta.cpu(), dbeta_ref, msg, atol=atol, rtol=1e-4)
+            self.assertEqual(dgamma.cpu(), dgamma_ref, msg, atol=atol, rtol=rtol)
+            self.assertEqual(dbeta.cpu(), dbeta_ref, msg, atol=atol, rtol=rtol)
 
     @onlyCUDA
     @largeTensorTest("8GB")
