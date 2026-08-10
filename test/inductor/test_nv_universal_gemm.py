@@ -26,10 +26,12 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch.testing._internal.common_utils import (
+    dtype_name,
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import has_triton_reduction_ordering
 
 
 def _round_up(x, multiple):
@@ -1268,7 +1270,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             ((((N,), torch.float32),), True),
         ),
         name_fn=lambda case: "_and_".join(
-            f"{'x'.join(map(str, shape))}_{dtype}" for shape, dtype in case[0]
+            f"{'x'.join(map(str, sh))}_{dtype_name(dt)}" for sh, dt in case[0]
         ),
     )
     def test_scaled_mm_broadcast_epilogue_fusion(self, case):
@@ -1432,6 +1434,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
         self.assertIn("'local_reduce_out'", code)
+
+        if case == (1, "sum", 32):
+            if not has_triton_reduction_ordering():
+                self.skipTest("requires INNER_TREE Triton")
+            with config.patch({"numerics": "strict"}):
+                _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+            self.assertNotIn("'local_reduce_out'", strict_code)
+            self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
         m, n, k, group = 128, 128, 512, 32

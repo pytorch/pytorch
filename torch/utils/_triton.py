@@ -193,6 +193,19 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
+def has_triton_reduction_ordering() -> bool:
+    """Whether the available Triton exposes inner-tree reduction ordering."""
+    if has_triton_package():
+        try:
+            from triton.language import ReductionOrdering
+
+            return hasattr(ReductionOrdering, "INNER_TREE")
+        except ImportError:
+            pass
+    return False
+
+
+@functools.cache
 def has_triton() -> bool:
     if not has_triton_package():
         return False

@@ -1977,6 +1977,26 @@ class TestTestParametrization(TestCase):
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_name_fn_with_dot_raises(self):
+        # Dots in test names break unittest.TestLoader.loadTestsFromName, so
+        # instantiation should fail loudly rather than produce an unloadable test.
+        class TestParametrized(TestCase):
+            @parametrize("dtype", [torch.bfloat16], name_fn=str)
+            def test_bad_name(self, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'contains a "." character'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_subtest_name_with_dot_raises(self):
+        class TestParametrized(TestCase):
+            @parametrize("x", [subtest(1, name="a.b")])
+            def test_bad_name(self, x):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'contains a "." character'):
+            instantiate_parametrized_tests(TestParametrized)
+
     def test_reparametrize(self):
 
         def include_is_even_arg(test_name, param_kwargs):
@@ -2157,6 +2177,18 @@ class TestTestParametrizationDeviceType(TestCase):
         ]
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
+
+    def test_name_fn_with_dot_raises(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("dtype", [torch.bfloat16], name_fn=str)
+            def test_bad_name(self, device, dtype):
+                pass
+
+        locals_dict = dict(locals())
+        with self.assertRaisesRegex(RuntimeError, 'contains a "." character'):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
     def test_empty_param_names(self, device):
         # If no param names are passed, ensure things still work without parametrization.
@@ -2622,6 +2654,7 @@ class TestImports(TestCase):
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.scatter_add",  # depends on cutlass
+                           "torch._native.ops.sum.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass

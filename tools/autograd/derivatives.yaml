@@ -635,19 +635,19 @@
   result: self_t.zero_()
 
 - name: erf(Tensor self) -> Tensor
-  self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+  self: M_2_SQRTPI * exp(-(self.pow(2))) * grad
   result: auto_element_wise
 
 - name: erfc(Tensor self) -> Tensor
-  self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+  self: -M_2_SQRTPI * exp(-(self.pow(2))) * grad
   result: auto_element_wise
 
 - name: special_erfcx(Tensor self) -> Tensor
-  self: (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
+  self: (2.0 * self * result - M_2_SQRTPI) * grad
   result: auto_element_wise
 
 - name: erfinv(Tensor self) -> Tensor
-  self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
+  self: (M_PI_4 * M_2_SQRTPI) * exp(self.erfinv().pow(2)) * grad
   result: auto_element_wise
 
 - name: exp(Tensor self) -> Tensor
@@ -975,7 +975,7 @@
   result: auto_element_wise
 
 - name: log10(Tensor self) -> Tensor
-  self: grad / (self.conj() * 2.3025850929940456)
+  self: grad / (self.conj() * M_LN10)
   result: auto_element_wise
 
 - name: log1p(Tensor self) -> Tensor
@@ -983,7 +983,7 @@
   result: auto_element_wise
 
 - name: log2(Tensor self) -> Tensor
-  self: grad / (self.conj() * 0.6931471805599453)
+  self: grad / (self.conj() * M_LN2)
   result: auto_element_wise
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
@@ -1482,11 +1482,11 @@
   result: auto_element_wise
 
 - name: special_ndtri(Tensor self) -> Tensor
-  self: grad * std::sqrt(2 * M_PI) * (result.square() / 2).exp()
+  self: grad * (M_PI_2 * M_SQRT2 * M_2_SQRTPI) * (result.square() * 0.5).exp()
   result: auto_element_wise
 
 - name: special_log_ndtr(Tensor self) -> Tensor
-  self: grad / std::sqrt(2 * M_PI) * (result + self.pow(2) / 2).neg().exp()
+  self: grad * (M_2_SQRTPI * M_SQRT2 * 0.25) * (result + self.pow(2) * 0.5).neg().exp()
   result: auto_element_wise
 
 # [Note: Sometimes view derivatives]
