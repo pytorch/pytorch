@@ -88,8 +88,7 @@ constexpr bool kCuDNNFrontendSupportsD256 = false;
 // (4) the previous priority order (default) is restored
 bool priority_order_init_ = false;
 
-// TODO(eqy): more benchmarking to determine whether this should include sm86/89
-// Needs to be kept in-sync with test_fused_chocie in test_transformers.py
+// Needs to be kept in-sync with test_fused_sdp_choice in test_transformers.py
 bool check_prefer_cudnn_attention() {
   static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
   if (!prefer_cudnn) {
@@ -104,9 +103,12 @@ bool check_prefer_cudnn_attention() {
     auto major = dprops->major;
 #if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
     auto minor = dprops->minor;
-    return cudnn_version > 91500 && (major == 9 || major == 10) && (!minor || minor == 3);
+    return cudnn_version > 91500 &&
+        ((major == 8 && (minor == 6 || minor == 9)) ||
+         ((major == 9 || major == 10) && (!minor || minor == 3)));
 #else
-    return cudnn_version > 91500 && (major == 9 || major == 10);
+    return cudnn_version > 91500 &&
+        ((major == 8 && (minor == 6 || minor == 9)) || major == 9 || major == 10);
 #endif
   } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
