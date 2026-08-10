@@ -27,6 +27,16 @@ TEST(TorchPyObjectConversion, NoopErrorsWithoutLibtorchPython) {
   aoti_torch_delete_tensor_object(ath);
 }
 
+TEST(TorchPyObjectConversion, IsTensorNoopErrorsWithoutLibtorchPython) {
+  // The no-op errors (rather than answering false): a silent false would mask
+  // libtorch_python not being loaded.
+  int dummy = 0;
+  bool is_tensor_out = false;
+  EXPECT_EQ(
+      torch_is_tensor_pyobject(&dummy, &is_tensor_out), AOTI_TORCH_FAILURE);
+  EXPECT_FALSE(is_tensor_out);
+}
+
 TEST(TorchPyObjectConversion, DtypeNoopErrorsWithoutLibtorchPython) {
   int dummy = 0;
   int32_t dtype_out = -1;

@@ -35,6 +35,11 @@ namespace torch::detail {
 struct TORCH_API PyObjectConversionInterface {
   virtual ~PyObjectConversionInterface() = default;
 
+  // Whether obj is a Python torch.Tensor (or a subclass). A cheap probe for
+  // callers that want to type-check before tensor_from_pyobject (which errors
+  // on non-tensors). The GIL must be held.
+  virtual bool is_tensor_pyobject(PyObject* obj) const = 0;
+
   // Unpack a Python torch.Tensor (PyObject*) into an at::Tensor that shares the
   // underlying TensorImpl. The GIL must be held.
   virtual at::Tensor tensor_from_pyobject(PyObject* obj) const = 0;

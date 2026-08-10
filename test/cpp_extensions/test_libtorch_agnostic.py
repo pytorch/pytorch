@@ -430,6 +430,18 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 14)
+    def test_pyobject_is_tensor(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        is_tensor = libtorch_agnostic._interop.is_tensor
+        self.assertTrue(is_tensor(torch.randn(2, device=device)))
+        self.assertTrue(is_tensor(torch.nn.Parameter(torch.randn(2))))
+        self.assertFalse(is_tensor(1))
+        self.assertFalse(is_tensor(None))
+        self.assertFalse(is_tensor(torch.float32))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
     def test_pyobject_dtype_roundtrip(self, device):
         import libtorch_agn_2_14 as libtorch_agnostic
 
