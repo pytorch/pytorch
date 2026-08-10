@@ -136,7 +136,6 @@ static void where_kernel_mps(TensorIterator& iter) {
   const auto& condition = iter.input(0);
   const auto& self = iter.input(1);
   const auto& other = iter.input(2);
-  auto& out = iter.output(0);
   TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
               "Expected all tensors to be on the same device, but found at least two devices.");
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
@@ -149,72 +148,13 @@ static void where_kernel_mps(TensorIterator& iter) {
                 "where expected condition to be a boolean tensor, but got a tensor with dtype ",
                 condition.scalar_type());
   }
-  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
-
-  using namespace mps;
-  MPSStream* stream = getCurrentMPSStream();
-
-  // Empty output
-  if (out.numel() == 0) {
+  if (iter.output(0).numel() == 0) {
     return;
   }
-
-  Tensor out_;
-  if (needsGather(out)) {
-    out_ = out.contiguous();
-  }
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* conditionTensor_ = nil;
-    MPSGraphTensor* selfTensor_ = nil;
-    MPSGraphTensor* otherTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  MPSDataType conditionDataType = getMPSScalarType(condition.scalar_type());
-  MPSDataType selfDataType = getMPSScalarType(self.scalar_type());
-  MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
-
-  @autoreleasepool {
-    std::string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(cond_bool));
-      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, selfDataType, getMPSShape(self));
-      MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, otherDataType, getMPSShape(other));
-
-      MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:conditionTensor
-                                                     truePredicateTensor:selfTensor
-                                                    falsePredicateTensor:otherTensor
-                                                                    name:nil];
-
-      newCachedGraph->conditionTensor_ = conditionTensor;
-      newCachedGraph->selfTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder conditionPlaceholder = Placeholder(
-        cachedGraph->conditionTensor_, cond_bool, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, conditionDataType);
-    Placeholder selfPlaceholder =
-        Placeholder(cachedGraph->selfTensor_, self, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, selfDataType);
-    Placeholder otherPlaceholder =
-        Placeholder(cachedGraph->otherTensor_, other, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, otherDataType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
-                                                needsGather(out) ? out_ : out,
-                                                /*mpsShape=*/nullptr,
-                                                /*gatherTensorData=*/needsGather(out),
-                                                getMPSScalarType(out.scalar_type()));
-
-    auto feeds = dictionaryFromPlaceholders(conditionPlaceholder, selfPlaceholder, otherPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  if (needsGather(out)) {
-    out.copy_(out_);
-  }
+  // The ternary cast kernels read the condition through a runtime dtype
+  // switch, so bool (and the deprecated byte) conditions convert to the
+  // compute type as exact 0/1 without a materialized cast.
+  lib.exec_ternary_kernel(iter, "where");
 }
 
 static void isneginf_kernel_mps(TensorIteratorBase& iter) {

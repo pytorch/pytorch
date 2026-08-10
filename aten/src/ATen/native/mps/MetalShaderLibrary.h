@@ -192,7 +192,16 @@ class MetalShaderLibrary {
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
       const std::optional<c10::ScalarType> natural_output_dtype = std::nullopt,
       const std::optional<uint32_t> ilp_threshold = std::nullopt);
-  void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
+  // Ternary counterpart of exec_binary_kernel. `ilp_threshold` is strictly
+  // opt-in (std::nullopt disables the dense ILP flavor); there is no
+  // natural_output_dtype because no ternary consumer produces a fixed output
+  // dtype -- out= divergence rides the `_cast_{out}` instantiations instead.
+  void exec_ternary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
 
   template <typename T>
   void exec_unary_kernel_with_params(
