@@ -3050,6 +3050,18 @@ Arguments:
               "supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
               "(test whether the backend supports collective time estimation)")
+          .def(
+              "_start_time_estimate",
+              &::c10d::Backend::startTimeEstimate,
+              R"(Start estimating the duration of subsequent collectives.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_end_time_estimate",
+              &::c10d::Backend::endTimeEstimate,
+              R"(Stop estimating collectives and return their duration in microseconds.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
               &::c10d::Backend::supportsShrinking,
@@ -3800,10 +3812,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
-              "_start_time_estimate",
-              &::c10d::ProcessGroupNCCL::startTimeEstimate)
-          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
-          .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def(
@@ -4172,12 +4180,6 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_start_time_estimate",
-              &::c10d::nccl2::ProcessGroupNCCL::startTimeEstimate)
-          .def(
-              "_end_time_estimate",
-              &::c10d::nccl2::ProcessGroupNCCL::endTimeEstimate)
-          .def(
               "register_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
@@ -4229,12 +4231,6 @@ Returns:
           "get_error",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getError,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_start_time_estimate",
-          &::c10d::nccl2::ProcessGroupNCCLLazy::startTimeEstimate)
-      .def(
-          "_end_time_estimate",
-          &::c10d::nccl2::ProcessGroupNCCLLazy::endTimeEstimate)
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,

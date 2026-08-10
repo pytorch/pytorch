@@ -40,18 +40,6 @@ class TORCH_API ProcessGroupNCCLLazy
     return false;
   }
 
-  bool supportsTimeEstimation() const override {
-    return getPrimary()->supportsTimeEstimation();
-  }
-
-  void startTimeEstimate() {
-    getPrimary()->startTimeEstimate();
-  }
-
-  float endTimeEstimate() {
-    return getPrimary()->endTimeEstimate();
-  }
-
   ::c10d::ReconfigureHandle get_reconfigure_handle() const override {
     return ::c10d::Backend::get_reconfigure_handle();
   }

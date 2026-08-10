@@ -158,10 +158,7 @@ void ProcessGroupNCCL::startTimeEstimate() {
     ensureInitialized(device);
   }
   NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->groupStart(),
-      "NCCL GroupStart failed");
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 #else
   TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
 #endif
