@@ -28,23 +28,24 @@ __all__ = [
     "Stream",
     "StreamContext",
     "Event",
-    "empty_cache",
     "get_capabilities",
+    "release_unused_memory",
 ]
 
 
-def empty_cache() -> None:
-    r"""Release unused cached memory held by the built-in CPU allocator.
+def release_unused_memory() -> bool:
+    r"""Request that the built-in CPU allocator release unused memory.
 
-    This function asks mimalloc to release unused memory owned by the calling
-    thread. It does not release memory occupied by live tensors or cached pages
-    owned by other active threads. The operation can be expensive.
+    The operation can be expensive. It does not release memory occupied by live
+    tensors. The amount of memory released, if any, depends on the allocator and
+    the thread that owns the unused memory.
 
-    PyTorch enables mimalloc by default on Windows and non-Apple AArch64 builds.
-    This function is a no-op when PyTorch was built without mimalloc or when a
-    custom CPU allocator is active.
+    Returns:
+        ``True`` if the active built-in allocator supports an explicit release
+        request and the request was issued; ``False`` otherwise. A ``True``
+        result does not imply that any memory was released.
     """
-    torch._C._cpu._empty_cache()
+    return torch._C._cpu._release_unused_memory()
 
 
 @lru_cache(None)

@@ -15,10 +15,10 @@
 
     current_device
     current_stream
-    empty_cache
     get_capabilities
     is_available
     is_initialized
+    release_unused_memory
     synchronize
     stream
     set_device

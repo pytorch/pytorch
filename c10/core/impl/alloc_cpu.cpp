@@ -178,6 +178,8 @@ bool release_unused_cpu_memory() {
   mi_collect(true);
   return true;
 #else
+  // On Android, alloc_cpu uses the platform allocation branch even if
+  // USE_MIMALLOC is defined.
   return false;
 #endif
 }

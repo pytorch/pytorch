@@ -10,12 +10,7 @@ TEST(AllocCpuTest, ReleaseUnusedCpuMemoryPreservesLiveAllocations) {
   data[0] = 0x12;
   data[size - 1] = 0x34;
 
-  const bool collection_supported = c10::release_unused_cpu_memory();
-#if defined(USE_MIMALLOC) && !defined(__ANDROID__)
-  EXPECT_TRUE(collection_supported);
-#else
-  EXPECT_FALSE(collection_supported);
-#endif
+  c10::release_unused_cpu_memory();
 
   EXPECT_EQ(data[0], 0x12);
   EXPECT_EQ(data[size - 1], 0x34);

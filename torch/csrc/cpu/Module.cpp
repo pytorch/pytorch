@@ -11,10 +11,15 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cpu = m.def_submodule("_cpu", "cpu related pybind.");
-  cpu.def("_empty_cache", []() {
-    if (c10::GetCPUAllocator() != c10::GetDefaultCPUAllocator()) {
+  cpu.def("_release_unused_memory", []() {
+    const auto* allocator = c10::GetCPUAllocator();
+    // Both built-in allocators ultimately use c10::alloc_cpu/free_cpu. Other
+    // allocators may not use the allocator selected by the PyTorch build.
+    if (allocator != c10::GetDefaultCPUAllocator() &&
+        allocator != c10::GetDefaultMobileCPUAllocator()) {
       return false;
     }
+    py::gil_scoped_release no_gil;
     return c10::release_unused_cpu_memory();
   });
   cpu.def("_init_amx", at::cpu::init_amx);
