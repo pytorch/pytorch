@@ -12,6 +12,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     is_navi3_arch,
     parametrize,
     patch_test_members,
@@ -49,7 +50,7 @@ class MyModule3(torch.nn.Module):
         return output
 
 
-class TestDecomposeAddMM(torch.nn.Module):
+class _TestDecomposeAddMM(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -388,6 +389,8 @@ class TestDecomposeMemMM(TestCase):
             )
             counters.clear()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153736")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153735")
     @unittest.skip
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
     @parametrize("has_bias", [True, False])
@@ -481,7 +484,7 @@ class TestDecomposeMemMM(TestCase):
 
         counters.clear()
 
-        module = TestDecomposeAddMM().to(GPU_TYPE)
+        module = _TestDecomposeAddMM().to(GPU_TYPE)
         traced = torch.compile(module, dynamic=True)
         input = [bias, input, weight]
 
