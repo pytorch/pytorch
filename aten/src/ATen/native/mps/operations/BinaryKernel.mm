@@ -48,8 +48,8 @@ void binary_op_kernel(const std::string func_name,
   auto iter = TensorIteratorConfig()
                   .allow_cpu_scalars(true)
                   .add_output(output)
-                  .add_input(input)
-                  .add_input(other)
+                  .add_const_input(input)
+                  .add_const_input(other)
                   .check_all_same_dtype(false)
                   .promote_inputs_to_common_dtype(true)
                   .build();
@@ -106,6 +106,8 @@ static void logaddexp_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void logaddexp2_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isFloatingType(iter.common_dtype()), "\"logaddexp2_mps\" not implemented for '", iter.common_dtype(), "'");
   lib.exec_binary_kernel(iter, "logaddexp2");
 }
 
@@ -277,10 +279,12 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igamma_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igamma");
 }
 
 static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igammac_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igammac");
 }
 
@@ -313,10 +317,16 @@ static void bitwise_xor_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void bitwise_left_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_left_shift not implemented for ",
+                              iter.common_dtype());
   lib.exec_binary_kernel(iter, "bitwise_left_shift");
 }
 
 static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_right_shift not implemented for ",
+                              iter.common_dtype());
   lib.exec_binary_kernel(iter, "bitwise_right_shift");
 }
 

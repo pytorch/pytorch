@@ -171,7 +171,7 @@ class TestTyping(TestCase):
     @parametrize(
         "path",
         get_test_cases(PASS_DIR),
-        name_fn=lambda b: os.path.relpath(b, start=PASS_DIR),
+        name_fn=lambda b: os.path.splitext(os.path.relpath(b, start=PASS_DIR))[0],
     )
     def test_success(self, path) -> None:
         output_mypy = self.get_mypy_output()
@@ -183,7 +183,7 @@ class TestTyping(TestCase):
     @parametrize(
         "path",
         get_test_cases(FAIL_DIR),
-        name_fn=lambda b: os.path.relpath(b, start=FAIL_DIR),
+        name_fn=lambda b: os.path.splitext(os.path.relpath(b, start=FAIL_DIR))[0],
     )
     def test_fail(self, path):
         __tracebackhide__ = True
@@ -213,7 +213,9 @@ class TestTyping(TestCase):
 
             target_line = lines[lineno - 1]
             self.assertIn(
-                "# E:", target_line, f"Unexpected mypy output\n\n{errors[lineno]}"
+                "# E:",
+                target_line,
+                lambda msg: f"{msg}\nUnexpected mypy output\n\n{errors[lineno]}",
             )
             marker = target_line.split("# E:")[-1].strip()
             expected_error = errors.get(lineno)
@@ -222,7 +224,7 @@ class TestTyping(TestCase):
     @parametrize(
         "path",
         get_test_cases(REVEAL_DIR),
-        name_fn=lambda b: os.path.relpath(b, start=REVEAL_DIR),
+        name_fn=lambda b: os.path.splitext(os.path.relpath(b, start=REVEAL_DIR))[0],
     )
     def test_reveal(self, path):
         __tracebackhide__ = True
