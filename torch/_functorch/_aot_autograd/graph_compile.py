@@ -816,6 +816,485 @@ def _has_invoke_subgraph_node(gm: torch.fx.GraphModule):
     return False
 
 
+def _scan_sac_tags(joint_hop_gm: torch.fx.GraphModule) -> tuple[bool, bool]:
+    """Inspect the SAC recompute tags on a checkpoint region's forward nodes.
+
+    A region with a context_fn policy has its forward nodes (and their
+    decompositions) tagged node.meta["recompute"] by the policy's caching
+    dispatch mode during joint tracing (see trace_joint_graph_as_bwd), exactly as
+    the tag path / eager SAC do. Returns (has_save, has_cpu_offload):
+    has_save   -- any op is MUST_SAVE/PREFER_SAVE (the region is genuinely
+                  selective and the partitioner should honor the tags);
+    has_cpu_offload -- any op requests CPU offload, which this path can't emit and
+                  the caller rejects.
+    """
+    from torch.utils.checkpoint import CheckpointPolicy
+
+    _has_tag_is_forward = torch._functorch.partitioners._has_tag_is_forward
+    save = {CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE}
+    offload = {CheckpointPolicy.MUST_CPU_OFFLOAD, CheckpointPolicy.PREFER_CPU_OFFLOAD}
+    has_save = has_cpu_offload = False
+    for node in joint_hop_gm.graph.nodes:
+        if not _has_tag_is_forward(node):
+            continue
+        policy = node.meta.get("recompute")
+        if policy in save:
+            has_save = True
+        elif policy in offload:
+            has_cpu_offload = True
+    return has_save, has_cpu_offload
+
+
+def _force_save_rng(joint_hop_gm: torch.fx.GraphModule) -> tuple[bool, bool]:
+    """Force-save RNG ops in a checkpoint region so the backward doesn't re-draw.
+
+    RNG can't be recomputed naively: re-running it on the backward draws fresh
+    values (e.g. a different dropout mask), so the backward would use a different
+    mask than the forward -- silently wrong gradients. The standard partitioner
+    avoids this by functionalizing recomputed RNG (run_and_save_rng_state on the
+    forward / run_with_rng_state on the backward, sharing the drawn state). That
+    functionalization makes the forward and backward RNG ops structurally
+    different, which the shared-slice mechanism can't express (it needs fw/bw to
+    run the *same* GraphModule), so here we instead tag the RNG op (and its
+    getitems, e.g. native_dropout's mask) MUST_SAVE: drawn once on the forward,
+    saved, and consumed by the backward -- no re-draw, no drift. This runs before
+    default_partition, whose own RNG functionalization then sees nothing to do.
+
+    Collectives are intentionally left alone: recomputing a collective in an AC
+    region is standard, correct behavior (deterministic and symmetric across
+    ranks -- the expected communication cost of recompute), matching what the
+    standard partitioner does for user-annotated AC regions.
+
+    We only force-save *forward* RNG in the top-level joint graph (where
+    default_partition operates and where a forward op would otherwise be
+    recomputed); a backward RNG op is part of grad computation, not recomputed, so
+    it is left alone. RNG inside a nested subgraph module would be recomputed
+    atomically, so the caller rejects that. Returns (has_top_level_rng,
+    has_nested_rng).
+    """
+    from torch._prims.rng_prims import (
+        graphsafe_run_with_rng_state,
+        run_and_save_rng_state,
+        run_dtensor_rng_op,
+        run_with_rng_state,
+    )
+    from torch.utils.checkpoint import CheckpointPolicy
+
+    rng_hops = (
+        run_and_save_rng_state,
+        run_with_rng_state,
+        graphsafe_run_with_rng_state,
+        run_dtensor_rng_op,
+    )
+    is_rng_op = torch._functorch.partitioners.is_rng_op
+    _has_tag_is_forward = torch._functorch.partitioners._has_tag_is_forward
+
+    def _is_rng(n: torch.fx.Node) -> bool:
+        return n.op == "call_function" and (is_rng_op(n) or n.target in rng_hops)
+
+    has_top = False
+    for node in joint_hop_gm.graph.nodes:
+        if _is_rng(node) and _has_tag_is_forward(node):
+            has_top = True
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            for user in node.users:
+                if user.op == "call_function" and user.target is operator.getitem:
+                    user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+    has_nested = any(
+        _is_rng(n)
+        for m in joint_hop_gm.modules()
+        if isinstance(m, torch.fx.GraphModule) and m is not joint_hop_gm
+        for n in m.graph.nodes
+    )
+    return has_top, has_nested
+
+
+def _clear_sac_tags(joint_hop_gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """Strip SAC recompute tags so the partitioner saves everything.
+
+    Used for the whole-region recompute-as-call path (vanilla AC, a policy that
+    saves nothing, or the shared-slice fallback): with the tags removed
+    default_partition saves all backward-needed activations, which
+    _rewrite_bw_hop_to_recompute_fw then turns into a re-invoke of the forward.
+    """
+    for node in joint_hop_gm.graph.nodes:
+        node.meta.pop("recompute", None)
+        node.meta.pop("ac_graph_id", None)
+    return joint_hop_gm
+
+
+def _rewrite_bw_hop_to_recompute_fw(
+    new_bw_hop_gm: torch.fx.GraphModule,
+    new_fw_hop_gm: torch.fx.GraphModule,
+    fw_identifier: str,
+    num_primals: int,
+    num_fw_outputs: int,
+    num_saved: int,
+    num_sym: int,
+    num_tangents: int,
+) -> None:
+    """Turn a save-partitioned region backward into a recompute-as-call one.
+
+    The region is partitioned save-all, so new_fw_hop_gm outputs
+    (*fw_outs, *saved, *sym_nodes) and new_bw_hop_gm takes
+    (*sym_nodes, *saved, *tangents) -> (*grads), where `saved` is the
+    non-symint saved values (num_saved of them) and `sym_nodes` are the symints
+    (num_sym of them, always last). This pass relies on the forward's extra
+    outputs and the backward's leading inputs sharing that relative ordering.
+
+    We rewrite new_bw_hop_gm in place so it instead takes (*primals, *tangents)
+    and re-invokes new_fw_hop_gm(*primals) to regenerate (*saved, *sym_nodes)
+    internally. Because the forward subgraph is invoked from both the forward
+    graph and inside this backward subgraph, the two lower from the same
+    GraphModule (structurally identical kernels), so a recomputed reduction
+    matches the original forward (gh-186572), while only primals -- not
+    activations -- cross the outer fwd/bwd boundary.
+    """
+    from torch._higher_order_ops import invoke_subgraph
+
+    g = new_bw_hop_gm.graph
+    placeholders = g.find_nodes(op="placeholder")
+    # The bw signature must be exactly (*sym, *saved, *tangents). Extra placeholder
+    # classes (opaque objects, backward_state, bwd_seed_offset) would be silently
+    # misclassified as tangents, so fail loudly instead. bwd_seed_offset can't
+    # appear here: a region with RNG is force-saved and routed as selective, so it
+    # never reaches this whole-region recompute-as-call path.
+    if len(placeholders) != num_sym + num_saved + num_tangents:
+        raise AssertionError(
+            "recompute-as-call expected bw placeholders "
+            f"= {num_sym} sym + {num_saved} saved + {num_tangents} tangents, got "
+            f"{len(placeholders)} (unsupported placeholder class in the region)"
+        )
+    old_sym = placeholders[:num_sym]
+    old_saved = placeholders[num_sym : num_sym + num_saved]
+
+    fw_placeholders = new_fw_hop_gm.graph.find_nodes(op="placeholder")
+    if len(fw_placeholders) != num_primals:
+        raise AssertionError(
+            f"expected {num_primals} fw placeholders, got {len(fw_placeholders)}"
+        )
+    fw_out_vals = [
+        n.meta.get("val") if n is not None else None
+        for n in new_fw_hop_gm.graph.find_nodes(op="output")[0].args[0]
+    ]
+    if len(fw_out_vals) != num_fw_outputs + num_saved + num_sym:
+        raise AssertionError(
+            "recompute-as-call expected fw outputs "
+            f"= {num_fw_outputs} fw_outs + {num_saved} saved + {num_sym} sym, got "
+            f"{len(fw_out_vals)}"
+        )
+
+    new_bw_hop_gm.add_module("recompute_fw_subgraph", new_fw_hop_gm)
+
+    # New primal placeholders go at the very front (before existing placeholders).
+    new_primals = []
+    with g.inserting_before(placeholders[0]):
+        for i in range(num_primals):
+            p = g.placeholder(f"recompute_primal_{i}")
+            p.meta.update(copy.copy(fw_placeholders[i].meta))
+            new_primals.append(p)
+
+    # The re-invoke and getitems must come after all placeholders.
+    body_start = next(n for n in g.nodes if n.op != "placeholder")
+    with g.inserting_before(body_start):
+        get_attr_node = g.get_attr("recompute_fw_subgraph")
+        fw_call = g.call_function(
+            invoke_subgraph, args=(get_attr_node, fw_identifier, *new_primals)
+        )
+        fw_call.meta["val"] = tuple(fw_out_vals)
+        saved_gis = []
+        for j in range(num_saved):
+            gi = g.call_function(operator.getitem, args=(fw_call, num_fw_outputs + j))
+            gi.meta["val"] = fw_out_vals[num_fw_outputs + j]
+            saved_gis.append(gi)
+        sym_gis = []
+        for k in range(num_sym):
+            idx = num_fw_outputs + num_saved + k
+            gi = g.call_function(operator.getitem, args=(fw_call, idx))
+            gi.meta["val"] = fw_out_vals[idx]
+            sym_gis.append(gi)
+
+    for old, new in zip(old_sym, sym_gis):
+        old.replace_all_uses_with(new)
+    for old, new in zip(old_saved, saved_gis):
+        old.replace_all_uses_with(new)
+    for old in [*old_sym, *old_saved]:
+        g.erase_node(old)
+
+    g.eliminate_dead_code()
+    g.lint()
+    new_bw_hop_gm.recompile()
+
+
+def _splice_shared_slice_call(
+    parent_gm: torch.fx.GraphModule,
+    slice_gm: torch.fx.GraphModule,
+    identifier: str,
+    slice_out_vals: list[Any],
+    operands: list[torch.fx.Node],
+    replace: dict[str, torch.fx.Node],
+    slice_index: dict[str, int],
+    erase_names: set[str],
+    insert_after: torch.fx.Node,
+) -> None:
+    """Replace slice nodes in ``parent_gm`` with a call to the shared slice.
+
+    Inserts ``invoke_subgraph(slice_gm, identifier, *operands)`` after
+    ``insert_after``, swaps each node in ``replace`` for the corresponding getitem
+    of the call's output tuple, and erases every node named in ``erase_names``
+    (``replace`` plus multi-output op nodes whose getitems were replaced). Both
+    the forward and backward call the same ``slice_gm``, so the recomputed ops
+    lower from one GraphModule and cannot drift (gh-186572).
+    """
+    from torch._higher_order_ops import invoke_subgraph
+
+    g = parent_gm.graph
+    attr_name = f"{identifier}_mod"
+    parent_gm.register_module(attr_name, slice_gm)
+    with g.inserting_after(insert_after):
+        get_attr_node = g.get_attr(attr_name)
+    with g.inserting_after(get_attr_node):
+        call = g.call_function(
+            invoke_subgraph, args=(get_attr_node, identifier, *operands)
+        )
+        call.meta["val"] = tuple(slice_out_vals)
+    anchor = call
+    for name, tgt in replace.items():
+        idx = slice_index[name]
+        with g.inserting_after(anchor):
+            gi = g.call_function(operator.getitem, args=(call, idx))
+        gi.meta["val"] = slice_out_vals[idx]
+        tgt.replace_all_uses_with(gi)
+        anchor = gi
+    # Erase in reverse topological order so no node is erased before its users.
+    for n in reversed([n for n in g.nodes if n.name in erase_names]):
+        g.erase_node(n)
+
+
+def _extract_sac_shared_slice(
+    new_fw_hop_gm: torch.fx.GraphModule,
+    new_bw_hop_gm: torch.fx.GraphModule,
+    num_fw_outputs: int,
+    identifier: str,
+) -> bool:
+    """Share the recomputed forward slice of a selectively-checkpointed region.
+
+    ``default_partition`` (honoring the SAC recompute tags) already produced a
+    correct split: ``new_fw`` saves the MUST_SAVE activations and ``new_bw``
+    recomputes the rest inline. But those two copies of the recomputed forward
+    ops compile independently and can drift (gh-186572). This pass lifts the
+    recomputed (transient, i.e. not-saved) forward nodes into one shared slice
+    subgraph and makes both ``new_fw`` and ``new_bw`` invoke it, so the slice
+    lowers from a single GraphModule in forward and backward.
+
+    Returns True on success, False if the region isn't expressible as a single
+    shared slice (e.g. a saved value depends on a recomputed one, or a slice
+    input isn't available in the backward), in which case the caller falls back
+    to whole-region recompute-as-call.
+    """
+    fw_graph = new_fw_hop_gm.graph
+    bw_graph = new_bw_hop_gm.graph
+    bw_by_name = {n.name: n for n in bw_graph.nodes}
+    fw_out_node = fw_graph.find_nodes(op="output")[0]
+    fw_out_vals = list(fw_out_node.args[0])
+    saved_set = {n for n in fw_out_vals[num_fw_outputs:] if n is not None}
+
+    # The shared slice is only the forward ops the backward actually recomputes:
+    # transient (not-saved) forward nodes whose recomputed copy (matched by name)
+    # appears in new_bw. Transient ops that only feed the region output (never
+    # recomputed in the backward, e.g. the final elementwise of a norm) stay
+    # inline in new_fw. Pulling them into the slice would make the backward
+    # compute values it does not need and, worse, let Inductor reuse a saved
+    # input's buffer for those dead outputs -- corrupting the saved tensor.
+    bw_body_names = {
+        n.name for n in bw_graph.nodes if n.op not in ("placeholder", "output")
+    }
+    # get_attr (constants/params) are left inline in both fw and bw rather than
+    # lifted into the slice: they carry no drift risk and have no meta['val'] to
+    # return through the slice's flat output tuple.
+    s_nodes = [
+        n
+        for n in fw_graph.nodes
+        if n.op not in ("placeholder", "output", "get_attr")
+        and n not in saved_set
+        and n.name in bw_body_names
+    ]
+    if not s_nodes:
+        # Nothing the backward needs is recomputed, so there is no cross-graph
+        # copy to drift. Leave the partition as-is.
+        return True
+    s_set = set(s_nodes)
+
+    # Slice inputs: inputs to slice nodes from outside the slice (primals or saved
+    # values), in first-seen order for a stable signature.
+    s_inputs: list[torch.fx.Node] = []
+    seen: set[torch.fx.Node] = set()
+    for n in s_nodes:
+        for inp in n.all_input_nodes:
+            if inp not in s_set and inp not in seen:
+                seen.add(inp)
+                s_inputs.append(inp)
+
+    # Slice inputs must be recoverable in new_bw: only primals (placeholders) and
+    # saved values cross the fw/bw boundary. A get_attr (constant/param/nested
+    # module ref) consumed by a recomputed node is neither, so it lands here and
+    # forces a bail -- the region then falls back to whole-region recompute (or is
+    # rejected if it has force-saved RNG). Lifting such get_attrs into the slice is
+    # future work; it is rare (a recomputed op reading a lifted constant).
+    for inp in s_inputs:
+        if inp.op != "placeholder" and inp not in saved_set:
+            return False
+
+    # The slice becomes one node in new_fw. That is only valid if every slice
+    # input is defined before every consumer of a slice output; otherwise the
+    # contracted graph would be cyclic (a saved/region value interleaves with the
+    # recomputed slice). Detect via original node order and bail if so.
+    node_index = {n: i for i, n in enumerate(fw_graph.nodes)}
+    consumers = [
+        n
+        for n in fw_graph.nodes
+        if n not in s_set and any(inp in s_set for inp in n.all_input_nodes)
+    ]
+    if consumers:
+        first_consumer_idx = min(node_index[c] for c in consumers)
+        last_s_input_idx = max((node_index[i] for i in s_inputs), default=-1)
+        if last_s_input_idx >= first_consumer_idx:
+            return False
+
+    # Multi-output ops (tuple/list-valued) are kept in the slice body but never
+    # returned directly (invoke_subgraph outputs must be flat tensors/symints);
+    # their getitems carry the values.
+    def _is_tuple_val(n: torch.fx.Node) -> bool:
+        return isinstance(n.meta.get("val"), (tuple, list))
+
+    all_s_names = {n.name for n in s_nodes}
+    for n in s_nodes:
+        if not _is_tuple_val(n):
+            continue
+        # Forward: every getitem of a multi-output producer must be in the slice,
+        # else one shared slice can't express the region.
+        if any(u not in s_set for u in n.users):
+            return False
+        # Backward: the recomputed producer may have MORE getitem users than the
+        # forward (e.g. native_layer_norm / SDPA expose mean/rstd that only the
+        # op's own backward consumes). Those getitems are absent from the
+        # fw-derived slice, so erasing the producer in the backward would leave
+        # them dangling -- bail to whole-region recompute rather than crash.
+        bw_n = bw_by_name.get(n.name)
+        if bw_n is not None and any(u.name not in all_s_names for u in bw_n.users):
+            return False
+
+    # Values the slice returns: every slice node except the tuple producers.
+    s_out_nodes = [n for n in s_nodes if not _is_tuple_val(n)]
+
+    # Build the shared slice subgraph S: (s_inputs) -> (s_out_nodes).
+    s_graph = torch.fx.Graph()
+    env: dict[torch.fx.Node, torch.fx.Node] = {}
+    for inp in s_inputs:
+        p = s_graph.placeholder(inp.name)
+        p.meta = copy.copy(inp.meta)
+        env[inp] = p
+    for n in fw_graph.nodes:  # iterate in topological order
+        if n in s_set:
+            env[n] = s_graph.node_copy(n, lambda x: env[x])
+            env[n].meta = copy.copy(n.meta)
+    s_graph.output(tuple(env[n] for n in s_out_nodes))
+    s_graph.lint()
+    slice_gm = torch.fx.GraphModule(new_fw_hop_gm, s_graph)
+    slice_out_vals = [n.meta.get("val") for n in s_out_nodes]
+    slice_index = {n.name: i for i, n in enumerate(s_out_nodes)}
+    # Forward and backward call the *same* slice_gm object (so it lowers from one
+    # GraphModule -> no drift) but under distinct identifiers. A shared identifier
+    # would let Inductor's invoke_subgraph cache reuse the forward-specialized
+    # compilation for the backward call, whose saved-tensor operand can have a
+    # different layout -- silently corrupting the backward (mirrors AC
+    # recompute-as-call, which likewise uses a distinct backward identifier).
+    fw_slice_identifier = f"sac_slice_fw_{identifier}"
+    bw_slice_identifier = f"sac_slice_bw_{identifier}"
+
+    # Validate that the backward is expressible BEFORE mutating new_fw, so a bail
+    # returns with both graphs untouched (the caller then re-partitions a pristine
+    # copy for whole-region recompute). new_bw's recomputed slice nodes all follow
+    # its placeholders, so the call is inserted right after the last placeholder;
+    # its slice inputs must be the corresponding saved/primal placeholders.
+    bw_operands: list[torch.fx.Node] = []
+    for inp in s_inputs:
+        m = bw_by_name.get(inp.name)
+        # A slice input is a primal/saved value, which is a placeholder in the
+        # backward. If the name instead resolves to a recomputed body node the
+        # invariant is broken (the call would reference a not-yet-defined value);
+        # bail to whole-region recompute rather than emit an invalid graph.
+        if m is None or m.op != "placeholder":
+            return False
+        bw_operands.append(m)
+    bw_replace = {
+        name: bw_by_name[name]
+        for name in slice_index
+        if name in bw_by_name and bw_by_name[name].op != "placeholder"
+    }
+    bw_last_ph = None
+    for n in bw_graph.nodes:
+        if n.op == "placeholder":
+            bw_last_ph = n
+    if bw_replace and bw_last_ph is None:
+        return False
+
+    # Rewrite new_fw: replace the slice nodes with the shared-slice call, inserted
+    # after the last slice input (all inputs defined, before any consumer). With
+    # no external inputs (e.g. the slice is a recomputed factory like aten.ones),
+    # insert right after the last placeholder so the call precedes all consumers.
+    if s_inputs:
+        last_input = max(s_inputs, key=lambda n: node_index[n])
+    else:
+        fw_placeholders = fw_graph.find_nodes(op="placeholder")
+        last_input = (
+            fw_placeholders[-1] if fw_placeholders else next(iter(fw_graph.nodes))
+        )
+    _splice_shared_slice_call(
+        new_fw_hop_gm,
+        slice_gm,
+        fw_slice_identifier,
+        slice_out_vals,
+        operands=s_inputs,
+        replace={n.name: n for n in s_out_nodes},
+        slice_index=slice_index,
+        erase_names=all_s_names,
+        insert_after=last_input,
+    )
+
+    # Rewrite new_bw in place using the operands/placeholders validated above.
+    if bw_replace:
+        # bw_last_ph is non-None here (the bail above returns when bw_replace and
+        # it is None); re-assert to narrow the type.
+        if bw_last_ph is None:
+            raise AssertionError("bw_last_ph must not be None")
+        bw_erase = {
+            name
+            for name in all_s_names
+            if name in bw_by_name and bw_by_name[name].op != "placeholder"
+        }
+        _splice_shared_slice_call(
+            new_bw_hop_gm,
+            slice_gm,
+            bw_slice_identifier,
+            slice_out_vals,
+            operands=bw_operands,
+            replace=bw_replace,
+            slice_index=slice_index,
+            erase_names=bw_erase,
+            insert_after=bw_last_ph,
+        )
+
+    new_fw_hop_gm.graph.eliminate_dead_code()
+    new_fw_hop_gm.graph.lint()
+    new_fw_hop_gm.recompile()
+    new_bw_hop_gm.graph.eliminate_dead_code()
+    new_bw_hop_gm.graph.lint()
+    new_bw_hop_gm.recompile()
+    return True
+
+
 def run_joint_graph_passes_on_hops(
     joint_gm: torch.fx.GraphModule,
     joint_inputs: Any,
@@ -861,6 +1340,10 @@ def run_joint_graph_passes_on_hops(
     from torch._higher_order_ops.invoke_subgraph import (
         get_backward_nested_region_config,
     )
+
+    # Identifiers of checkpoint regions rewritten to recompute-as-call, so the
+    # restitch loop can pass primals+tangents (not saved tensors) to them.
+    recompute_ac_ids: set[str] = set()
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -995,6 +1478,18 @@ def run_joint_graph_passes_on_hops(
         new_hop_graphs[identifier].old_num_fw_inputs = num_fw_inputs
         new_hop_graphs[identifier].old_num_fw_outputs = num_fw_outputs
 
+        # Only rewrite checkpoint regions (marked by the front-door and
+        # propagated to node meta by invoke_subgraph) to recompute-as-call; leave
+        # nested_compile_region and other invoke_subgraph HOPs -- including any
+        # with their own partitioner config -- untouched.
+        # A checkpoint region (the front-door marked it) always recomputes via a
+        # shared-subgraph call. Recompute is coupled to the front-door rather than
+        # a separate flag, so enabling checkpoint_via_invoke_subgraph can't
+        # silently turn checkpoint into save-everything.
+        region_recompute = fw_hop_node.meta.get("custom", {}).get(
+            "_checkpoint_region", False
+        )
+
         # Step 1) - Get the `joint_hop_gm`. As mentioned earlier, the
         # backward graph is the joint graph.
         joint_hop_gm = getattr(joint_gm, node.args[0].target)
@@ -1008,13 +1503,78 @@ def run_joint_graph_passes_on_hops(
             joint_hop_gm, num_fw_inputs, num_fw_outputs
         )
 
+        # Selective activation checkpointing (SAC): a checkpoint region carrying a
+        # context_fn policy already had its forward nodes tagged
+        # node.meta["recompute"] by the policy's caching dispatch mode during
+        # joint tracing (see trace_joint_graph_as_bwd) -- the same mechanism the
+        # tag path and eager SAC use, so decompositions and HOPs are tagged too.
+        # Here we just read those tags: the partitioner honors them (save the
+        # MUST_SAVE ops, recompute the rest) and the recomputed slice is shared.
+        # `pristine_joint_hop_gm` is a tag-cleared copy for the whole-region
+        # recompute fallback (region not expressible as one shared slice).
+        region_is_selective = False
+        # Force-saved RNG can't be safely re-invoked, so a region containing it
+        # must go through the save+shared-slice path, never the whole-region
+        # recompute-as-call fallback.
+        region_has_forced_save_rng = False
+        pristine_joint_hop_gm: torch.fx.GraphModule | None = None
+        if region_recompute:
+            has_save, has_cpu_offload = _scan_sac_tags(joint_hop_gm)
+            if has_cpu_offload:
+                # CPU offload needs forward->CPU / backward->GPU transfers this
+                # path doesn't emit; reject rather than silently saving on device.
+                raise NotImplementedError(
+                    "checkpoint_via_invoke_subgraph does not support CPU-offload "
+                    "checkpoint policies (MUST_CPU_OFFLOAD / PREFER_CPU_OFFLOAD); "
+                    "use MUST_SAVE / PREFER_RECOMPUTE or disable the flag."
+                )
+            # (Effectful ops are rejected earlier, on the Dynamo-traced region body
+            # in CheckpointHigherOrderVariable, before the effectful op is lifted
+            # out of the graph the partitioner sees.)
+            # RNG can't be recomputed on the backward re-invoke (it would re-draw);
+            # force-save it (run once) rather than banning, matching the standard
+            # partitioner. RNG inside a nested subgraph can't be force-saved here.
+            has_top_rng, has_nested_rng = _force_save_rng(joint_hop_gm)
+            if has_nested_rng:
+                raise RuntimeError(
+                    "checkpoint_via_invoke_subgraph does not support RNG inside a "
+                    f"nested subgraph of the region (invoke_subgraph "
+                    f"{fw_hop_node.name}); move it out or disable the flag."
+                )
+            region_has_forced_save_rng = has_top_rng
+            # A region is routed through save + shared-slice (rather than
+            # whole-region recompute-as-call) when it selectively saves ops (a
+            # policy) or contains force-saved RNG.
+            region_is_selective = has_save or has_top_rng
+            if region_is_selective:
+                # Keep a tag-cleared copy for the shared-slice fallback.
+                pristine_joint_hop_gm = _clear_sac_tags(copy.deepcopy(joint_hop_gm))
+            else:
+                # Vanilla AC: clear any recompute tags so default_partition saves
+                # all and the whole-region recompute-as-call path takes over.
+                _clear_sac_tags(joint_hop_gm)
+
         # TODO: invoke_subgraph should track which of its inputs static indices
         # so it can propagate them to the partitioner (and use in cudagraphs)
         static_lifetime_input_indices: list[int] = []
 
-        used_hop_custom_partition, partition_fn = _get_partition_fn(
-            fw_hop_node, aot_config, default_partition_fn
-        )
+        if region_recompute:
+            # Partition checkpoint regions with default_partition so it respects
+            # the save/recompute tags (MUST_SAVE from a policy or force-saved RNG).
+            # Route through Inductor's partition_fn so joint-graph passes run first.
+            from torch._inductor.compile_fx import (
+                partition_fn as _inductor_partition_fn,
+            )
+
+            used_hop_custom_partition = False
+            partition_fn = functools.partial(
+                _inductor_partition_fn,
+                partitioner_fn_override=torch._functorch.partitioners.default_partition,
+            )
+        else:
+            used_hop_custom_partition, partition_fn = _get_partition_fn(
+                fw_hop_node, aot_config, default_partition_fn
+            )
 
         # Step 2) and 3) - Run joint graph passes and partitioner
         try:
@@ -1032,19 +1592,66 @@ def run_joint_graph_passes_on_hops(
             else:
                 raise
 
+        def _sym_saved_counts(fw_gm: torch.fx.GraphModule) -> tuple[int, int]:
+            outs = fw_gm.graph.find_nodes(op="output")[0].args[0]
+            extra = outs[num_fw_outputs:]
+            n_sym = len([n for n in extra if is_sym_node(n)])
+            return n_sym, len(extra) - n_sym
+
+        if region_is_selective:
+            # The partition already saves the MUST_SAVE ops and recomputes the
+            # rest. Share the recomputed slice between fw and bw so it lowers from
+            # one GraphModule and can't drift. If the region can't be expressed as
+            # a single shared slice, fall back to whole-region recompute on the
+            # untagged joint.
+            if not _extract_sac_shared_slice(
+                new_fw_hop_gm, new_bw_hop_gm, num_fw_outputs, identifier
+            ):
+                # Whole-region recompute-as-call would re-invoke the whole forward,
+                # re-drawing force-saved RNG -- unsafe. Such a region can't fall
+                # back, so reject rather than silently corrupt.
+                if region_has_forced_save_rng:
+                    raise RuntimeError(
+                        "checkpoint_via_invoke_subgraph: region with RNG cannot be "
+                        f"expressed as a shared recompute slice (invoke_subgraph "
+                        f"{fw_hop_node.name}); restructure it or disable the flag."
+                    )
+                region_is_selective = False
+                if pristine_joint_hop_gm is None:
+                    raise AssertionError("pristine_joint_hop_gm must not be None")
+                new_fw_hop_gm, new_bw_hop_gm = partition_fn(
+                    pristine_joint_hop_gm,
+                    [],
+                    num_fwd_outputs=num_fw_outputs,
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                )
+
         # Save the new forward and backward graph modules
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
         new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
 
         # Save the number of symints and saved tensors
-        new_fw_out_nodes = new_fw_hop_gm.graph.find_nodes(op="output")[0].args[0]
-        extra_outputs = new_fw_out_nodes[num_fw_outputs:]
-        symint_outputs = [n for n in extra_outputs if is_sym_node(n)]
+        new_num_sym_nodes, new_num_saved_nodes = _sym_saved_counts(new_fw_hop_gm)
+        new_hop_graphs[identifier].new_num_sym_nodes = new_num_sym_nodes
+        new_hop_graphs[identifier].new_num_saved_nodes = new_num_saved_nodes
 
-        new_hop_graphs[identifier].new_num_sym_nodes = len(symint_outputs)
-        new_hop_graphs[identifier].new_num_saved_nodes = len(extra_outputs) - len(
-            symint_outputs
-        )
+        if region_recompute and not region_is_selective:
+            recompute_ac_ids.add(identifier)
+            # Rewrite the backward to re-invoke the forward subgraph instead of
+            # consuming its saved activations (see helper docstring). The bw HOP
+            # node's args are (subgraph, identifier, *primals, *tangents), so the
+            # tangent count is what remains after the primals.
+            num_tangents = len(node.args) - 2 - num_fw_inputs
+            _rewrite_bw_hop_to_recompute_fw(
+                new_bw_hop_gm,
+                new_fw_hop_gm,
+                f"recompute_fw_{identifier}",
+                num_fw_inputs,
+                num_fw_outputs,
+                new_num_saved_nodes,
+                new_num_sym_nodes,
+                num_tangents,
+            )
 
         new_hop_graphs[identifier].partitioning_done = True
 
@@ -1204,16 +1811,24 @@ def run_joint_graph_passes_on_hops(
                 f"new_bw_hop_gm for identifier {identifier} must not be None"
             )
 
-        saved_tensor_nodes = extra_fw_outputs[:new_num_saved_nodes]
-        sym_nodes = extra_fw_outputs[new_num_saved_nodes:]
-
         num_primals = new_hop_graphs[identifier].old_num_fw_inputs
         if num_primals is None:
             raise AssertionError(
                 f"num_primals for identifier {identifier} must not be None"
             )
-        tangents = list(bw_node.args[2 + num_primals :])
-        operands = sym_nodes + saved_tensor_nodes + tangents
+
+        if identifier in recompute_ac_ids:
+            # new_bw_hop_gm was rewritten to take (*primals, *tangents) and
+            # re-invoke the forward subgraph internally to regenerate its
+            # activations -- so pass primals+tangents straight through (exactly
+            # bw_node's original operands). The forward's saved-tensor getitems
+            # (extra_fw_outputs) go unused here and are cleaned up by DCE.
+            operands = list(bw_node.args[2:])
+        else:
+            saved_tensor_nodes = extra_fw_outputs[:new_num_saved_nodes]
+            sym_nodes = extra_fw_outputs[new_num_saved_nodes:]
+            tangents = list(bw_node.args[2 + num_primals :])
+            operands = sym_nodes + saved_tensor_nodes + tangents
 
         # Insert the new_bw_hop_gm into the joint_gm
         with joint_gm.graph.inserting_after(bw_node):

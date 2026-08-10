@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import itertools
 import threading
 from collections import defaultdict
 from collections.abc import Callable
@@ -44,6 +45,12 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 invoke_subgraph_counter = 0
+
+# Unique per-checkpoint-region id, stamped as node.meta["ac_graph_id"] by the
+# SAC caching dispatch mode (see _checkpoint_context_fn handling in
+# trace_joint_graph_as_bwd) so the partitioner's cleanup_recompute_tags can order
+# save/recompute boundaries.
+_sac_ac_graph_id = itertools.count()
 
 
 # During the tracing of the joint graph, we construct this information. This is
@@ -275,9 +282,22 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
+        # Proxy is allowed because symbolically re-tracing a GraphModule replays
+        # its calls with proxies rather than values -- notably when unpickling a
+        # cached graph (_deserialize_graph_module), where rejecting them makes
+        # every cache load fail and silently disables caching for any graph
+        # holding an invoke_subgraph call.
         if not all(
             isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+                o,
+                (
+                    torch.Tensor,
+                    int,
+                    torch.SymInt,
+                    torch.Generator,
+                    FakeScriptObject,
+                    torch.fx.Proxy,
+                ),
             )
             or is_custom_class(type(o))
             for o in operands
@@ -626,6 +646,9 @@ def get_output_metadata(subgraph, *operands):
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
 
+    # The one signal a below-autograd trace can get wrong; see the check below.
+    has_tensor_out_without_grad = False
+
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
@@ -648,9 +671,24 @@ def get_output_metadata(subgraph, *operands):
             # Check if tensor requires grad from metadata
             if hasattr(val, "requires_grad") and not val.requires_grad:
                 output_metadata.indexes_with_no_grad.add(idx)
+                has_tensor_out_without_grad = True
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
+
+    # A tensor's requires_grad=False is unreliable when the subgraph was traced
+    # below autograd (make_fx detaches every output), and believing it builds the
+    # backward with zero tangents. Any recorded True means grad-ness was tracked,
+    # so only re-derive by execution when nothing claims grad yet an operand does.
+    if (
+        has_tensor_out_without_grad
+        and len(output_metadata.indexes_with_no_grad) == output_metadata.num_fw_outs
+        and any(
+            isinstance(operand, torch.Tensor) and operand.requires_grad
+            for operand in operands
+        )
+    ):
+        return _get_output_metadata_by_execution(subgraph, *operands)
 
     return output_metadata
 
@@ -714,6 +752,48 @@ def trace_joint_graph_as_bwd(
         fn = graph_with_interpreter
     else:
         fn = subgraph
+
+    # Selective activation checkpointing: if this is a checkpoint region carrying
+    # a context_fn policy, run the *forward* under the policy's caching dispatch
+    # mode so its ops -- and, crucially, the nodes they decompose into -- are
+    # tagged node.meta["recompute"] exactly as the tag path / eager SAC do (the
+    # mode stamps fx_traceback.current_meta, which decompositions inherit). The
+    # partitioner then honors those tags. Only the forward is wrapped; the joint's
+    # grad computation must stay untagged. The tags survive onto the joint graph
+    # this traces, which run_joint_graph_passes_on_hops partitions.
+    sg = (
+        subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
+    )
+    checkpoint_context_fn = None
+    if isinstance(sg, torch.fx.GraphModule) and hasattr(sg, "meta"):
+        checkpoint_context_fn = sg.meta.get("_checkpoint_context_fn")
+    if checkpoint_context_fn is not None:
+        fwd_ctx, recomp_ctx = checkpoint_context_fn()
+        # We only support the create_selective_checkpoint_contexts form, whose
+        # forward context is a _CachingTorchDispatchMode. For that form the second
+        # (recompute) context is a _CachedTorchDispatchMode that, in *eager* SAC,
+        # replays cached values so MUST_SAVE ops are not re-run -- a mechanism this
+        # path replaces structurally (the partitioner genuinely saves the MUST_SAVE
+        # ops; the shared slice recomputes only the rest), so recomp_ctx is
+        # correctly not entered here. An arbitrary custom context_fn's recompute
+        # context may carry semantics we can't reproduce, so reject it rather than
+        # silently drop it.
+        if not isinstance(fwd_ctx, _CachingTorchDispatchMode):
+            raise NotImplementedError(
+                "checkpoint_via_invoke_subgraph supports selective checkpointing "
+                "only via create_selective_checkpoint_contexts; a custom context_fn "
+                f"(forward context {type(fwd_ctx).__name__}) is not supported "
+                "because its recomputation context can't be preserved on this path."
+            )
+        del recomp_ctx
+        # Plumb a unique ac_graph_id so _CachingTorchDispatchMode tags every node
+        # (mirrors wrap.py's context_fn_with_graph_id).
+        fwd_ctx.ac_graph_id = next(_sac_ac_graph_id)
+        _fw_fn = fn
+
+        def fn(*args):
+            with fwd_ctx:
+                return _fw_fn(*args)
 
     # This joint_fn is inserted as the backward graph as is. This simplifies the
     # min-cut partitioner work later on.
@@ -1243,15 +1323,23 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
                     subgraph, subgraph_decomp_table=subgraph_decomp_table
                 )(*operands)
 
-        # Propagate nested_region_config from the original subgraph to the
-        # re-traced graph so it's available for regional compilation.
-        if (
-            isinstance(subgraph, torch.fx.GraphModule)
-            and hasattr(subgraph, "meta")
-            and "nested_region_config" in subgraph.meta
-            and "nested_region_config" not in graph.meta
-        ):
-            graph.meta["nested_region_config"] = subgraph.meta["nested_region_config"]
+        # Propagate region metadata from the original subgraph to the re-traced
+        # graph (which starts with empty meta) so it survives to the proxy node
+        # and the partitioner. nested_region_config drives regional compilation;
+        # _checkpoint_region marks a checkpoint region for recompute-as-call, and
+        # _checkpoint_context_fn is the SAC policy that trace_joint_graph_as_bwd
+        # runs the forward under (its caching dispatch mode tags save/recompute).
+        # Without this, downstream would rely on the incoming subgraph arg still
+        # carrying the meta -- re-propagate for parity with the tag path (see
+        # wrap.py after its own reenter_make_fx).
+        if isinstance(subgraph, torch.fx.GraphModule) and hasattr(subgraph, "meta"):
+            for key in (
+                "nested_region_config",
+                "_checkpoint_region",
+                "_checkpoint_context_fn",
+            ):
+                if key in subgraph.meta and key not in graph.meta:
+                    graph.meta[key] = subgraph.meta[key]
 
         from torch._guards import detect_fake_mode
 
@@ -1317,21 +1405,28 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # module (set by InvokeSubgraphAutogradOp.backward) but may be wrapped
     # by FunctionalizeCtxWrapper — unwrap to find it.
     nested_config = None
+    # Marks regions lowered from torch.utils.checkpoint (see the front-door in
+    # CheckpointHigherOrderVariable). Propagated to node meta so downstream
+    # passes (run_joint_graph_passes_on_hops) can scope AC-specific handling to
+    # checkpoint regions rather than all invoke_subgraph HOPs.
+    is_checkpoint_region = False
     orig_subgraph = (
         subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
     )
     for gm in (graph, orig_subgraph):
-        if (
-            isinstance(gm, torch.fx.GraphModule)
-            and hasattr(gm, "meta")
-            and "nested_region_config" in gm.meta
-        ):
-            nested_config = gm.meta["nested_region_config"]
-            break
+        if isinstance(gm, torch.fx.GraphModule) and hasattr(gm, "meta"):
+            if nested_config is None and "nested_region_config" in gm.meta:
+                nested_config = gm.meta["nested_region_config"]
+            if gm.meta.get("_checkpoint_region"):
+                is_checkpoint_region = True
 
     call_id = _current_invoke_subgraph_call_id()
 
-    if nested_config is not None or call_id is not None:
+    # The SAC context_fn is read from the subgraph's gm.meta (by
+    # trace_joint_graph_as_bwd, which runs the forward under it); it does not need
+    # to travel on node.meta. Only _checkpoint_region is propagated to node.meta so
+    # run_joint_graph_passes_on_hops can scope AC handling to checkpoint regions.
+    if nested_config is not None or call_id is not None or is_checkpoint_region:
         node = out_proxy.node
         if "custom" not in node.meta:
             node.meta["custom"] = {}
@@ -1339,6 +1434,8 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             node.meta["custom"]["nested_region_config"] = nested_config
         if call_id is not None:
             node.meta["custom"]["call_id"] = call_id
+        if is_checkpoint_region:
+            node.meta["custom"]["_checkpoint_region"] = True
 
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
