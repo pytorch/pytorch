@@ -515,6 +515,7 @@ def dispatch_gemm_act(
     # QuACK expects a leading batch dim; 2-D (non-batched) operands get one here.
     quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
     quack_b = quack_b.unsqueeze(0) if quack_b.ndim == 2 else quack_b
+    quack_out = quack_epilogue_arg(quack_out)
     quack_out = quack_out.unsqueeze(0) if quack_out.ndim == 2 else quack_out
     quack_aux_outs = tuple(quack_epilogue_arg(aux_out) for aux_out in quack_aux_outs)
     quack_aux_outs = tuple(
@@ -711,6 +712,14 @@ def gemm_epilogue(
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype
+    if (
+        output_contraction is None
+        and not expected_dtype.is_floating_point
+        and expected_dtype != torch.bool
+    ):
+        raise NotImplementedError(
+            "FlexGEMM generic main outputs support only floating-point and bool dtypes"
+        )
     effective_C = normalize_c(C, physical_output_shape, beta)
     if out is not None:
         check_matrix("out", out)
