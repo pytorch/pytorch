@@ -427,6 +427,20 @@ def getset_build(
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
+def unsupported_attr(name: str) -> Callable[..., VariableTracker | None]:
+    def graph_break(
+        vt: VariableTracker, tx: InstructionTranslatorBase
+    ) -> VariableTracker | None:
+        unimplemented(
+            gb_type="Unsupported attribute",
+            context=f"attr_unsupported {vt} {name}",
+            explanation=f"{type(vt).__name__} does not support attribute '{name}'",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
+    return graph_break
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
