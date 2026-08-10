@@ -537,7 +537,7 @@ class StreamVariable(StreamContextVariable):
         "record_event": Method(record_event),
     }
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from ..guards import GuardBuilder, install_guard
         from ..utils import cmp_name_to_op_mapping
         from .constant import ConstantVariable
@@ -662,7 +662,7 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
