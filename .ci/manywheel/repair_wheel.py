@@ -176,6 +176,12 @@ ROCM_SO_FILES: list[str] = [
     "librocroller.so",
 ]
 
+# hipFile only ships with ROCm 7.14 and later, where it is required.
+_version_file = Path(os.environ.get("ROCM_HOME", "/opt/rocm")) / ".info" / "version"
+_rocm_version = _version_file.read_text().strip() if _version_file.is_file() else ""
+if tuple(int(x) for x in _rocm_version.split(".")[:2] if x.isdigit()) >= (7, 14):
+    ROCM_SO_FILES.append("libhipfile.so")
+
 
 def rocm_os_deps() -> list[Path]:
     """OS-side runtime deps that must travel with ROCm wheels."""
