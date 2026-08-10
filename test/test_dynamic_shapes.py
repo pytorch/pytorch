@@ -27,6 +27,7 @@ from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _iterate_exprs,
+    canonicalize_bool_expr,
     DimConstraints,
     DimDynamic,
     expect_true,
@@ -760,6 +761,33 @@ def forward(self, x_1):
         self.assertTrue(i0 != s0)
         self.assertFalse(i0 > s0)
         self.assertFalse(i0 >= s0)
+
+    def test_unbacked_symbool_eq_expect_true(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symbool()
+        b = shape_env.create_unbacked_symbool()
+
+        expr = a == b
+
+        self.assertIsInstance(expr, torch.SymBool)
+        self.assertExpectedInline(str(expr.node.expr), """Eq(Eq(u0, 1), Eq(u1, 1))""")
+        self.assertTrue(expect_true(expr))
+        self.assertExpectedInline(
+            str(
+                {
+                    symbol: [ra.expr for ra in runtime_asserts]
+                    for symbol, runtime_asserts in shape_env.deferred_runtime_asserts.items()
+                }
+            ),
+            """{u1: [Eq(Eq(u0, 1), Eq(u1, 1))]}""",
+        )
+
+        implications = [
+            implication for implication, _ in shape_env.get_implications(expr.node.expr)
+        ]
+        self.assertTrue(any(isinstance(i, (sympy.Lt, sympy.Le)) for i in implications))
+        self.assertFalse(any(i.has(sympy.Gt, sympy.Ge) for i in implications))
+        self.assertTrue(all(i == canonicalize_bool_expr(i) for i in implications))
 
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
