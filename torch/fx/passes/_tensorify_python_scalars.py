@@ -12,6 +12,7 @@ import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import _is_tensorify_enabled, get_metrics_context
+from torch._inductor import inductor_prims
 from torch._prims_common import get_computation_dtype
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx._utils import lazy_format_graph_code
@@ -80,6 +81,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose"
 
 
 SUPPORTED_OPS = {
+    inductor_prims.fma: inductor_prims.fma,
     torch.ops.aten.mul.Tensor: torch.ops.aten.mul.Tensor,
     torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
