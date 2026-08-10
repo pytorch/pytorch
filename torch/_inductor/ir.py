@@ -12004,11 +12004,10 @@ class _WaitKernel(_CollectiveKernel):
         return read_writes
 
 
-# NB: recursive structure here reflects val_to_arg_str, avoid
-# calling free_unbacked_symbols on "exotic" types that don't get pexpr
-# treatment
+# NB: relationals reach constant_args via ShapeAsConstantBuffer and need symbol
+# scanning even though codegen_switch, rather than val_to_arg_str, emits them.
 def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+    if isinstance(s, (SymTypes, sympy.Basic)):
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
@@ -12024,7 +12023,7 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
 
 
 def maybe_free_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+    if isinstance(s, (SymTypes, sympy.Basic)):
         # This branch should be impossible in return position
         return free_symbols(s)
     elif isinstance(s, (tuple, list)):
