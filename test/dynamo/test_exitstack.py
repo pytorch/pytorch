@@ -4,7 +4,7 @@ import sys
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import HardwareClassification, make_dynamo_test
 
 
 @contextlib.contextmanager
@@ -18,6 +18,8 @@ def set_default_dtype(dtype):
 
 
 class TestExitStack(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.enable_trace_unittest
