@@ -98,7 +98,12 @@ from .dicts import (
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
-from .misc import CellVariable, NullVariable, StringFormatVariable
+from .misc import (
+    CellVariable,
+    check_no_unsafe_exception_inspection,
+    NullVariable,
+    StringFormatVariable,
+)
 from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
@@ -2893,6 +2898,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        for arg in itertools.chain((_format_string,), args, kwargs.values()):
+            check_no_unsafe_exception_inspection(arg)
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(format_string, list(args), kwargs)

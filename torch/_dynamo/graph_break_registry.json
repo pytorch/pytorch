@@ -1332,6 +1332,14 @@
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
       "Context": "str(raised_exception)",
+      "Explanation": "observed_exn_gb_explanation                                     + \" This graph break is unexpected.\"",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "Observed exception (EXCEPT_HANDLER)",
+      "Context": "str(raised_exception)",
       "Explanation": "observed_exn_gb_explanation                                 + \" This graph break is unexpected.\"",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
@@ -4204,6 +4212,16 @@
       "Gb_type": "C-level descriptor delete on user-defined object",
       "Context": "object={self}, name={name_str}, descriptor={descriptor}",
       "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2173": [
+    {
+      "Gb_type": "Fake RuntimeError inspection",
+      "Context": "inspect {self}",
+      "Explanation": "Dynamo observed a RuntimeError while running a fake tensor kernel, but fake tensor exception messages and args may differ from eager execution.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

@@ -3172,7 +3172,7 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = tuple(shape[0])
 
-    torch._check(
+    torch._check_user_error(
         len(shape) >= len(a.shape),
         lambda: "expand: the requested shape has too few dimensions!",
     )

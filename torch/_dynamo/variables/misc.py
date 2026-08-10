@@ -467,6 +467,7 @@ class TracebackVariable(VariableTracker):
         self,
         frame_summary: FrameSummaryVariable,
         tb_next: Union["TracebackVariable", ConstantVariable],
+        user_access_is_unsafe: bool = False,
         **kwargs: Any,
     ) -> None:
         # The traceback holds four attributes:
@@ -481,6 +482,7 @@ class TracebackVariable(VariableTracker):
         if tb_next is None:
             raise AssertionError("tb_next must not be None")
         self.tb_next = tb_next
+        self.user_access_is_unsafe = user_access_is_unsafe
 
     @classmethod
     def from_frame_summary(
@@ -494,7 +496,30 @@ class TracebackVariable(VariableTracker):
     def is_valid_traceback(obj: VariableTracker) -> bool:
         return istype(obj, TracebackVariable) or obj.is_constant_none()
 
+    def with_unsafe_user_access_guard(self) -> "TracebackVariable":
+        if self.user_access_is_unsafe:
+            return self
+        return TracebackVariable(
+            self.frame_summary,
+            self.tb_next,
+            user_access_is_unsafe=True,
+            source=self.source,
+            mutation_type=self.mutation_type,
+        )
+
+    def check_safe_to_inspect(self) -> None:
+        if self.user_access_is_unsafe:
+            unimplemented(
+                gb_type="Fake RuntimeError inspection",
+                context=f"inspect {self}",
+                explanation="Dynamo observed a RuntimeError while running a fake tensor "
+                "kernel, but fake tensor exception messages and args may differ "
+                "from eager execution.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
     def extract_tb(self) -> list[traceback.FrameSummary | FrameSummaryVariable]:
+        self.check_safe_to_inspect()
         if istype(self.tb_next, ConstantVariable):
             return [self.frame_summary]
         return [self.frame_summary] + self.tb_next.extract_tb()
@@ -517,6 +542,7 @@ class TracebackVariable(VariableTracker):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker:
+        self.check_safe_to_inspect()
         name = name_var.as_python_constant()
         if name == "tb_next":
             if not self.is_valid_traceback(val):
@@ -533,9 +559,11 @@ class TracebackVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def _get_tb_next(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
         return self.tb_next
 
     def _set_tb_next(self, tx: "InstructionTranslatorBase", val):
+        self.check_safe_to_inspect()
         if not self.is_valid_traceback(val):
             raise_observed_exception(TypeError, tx)
         if not isinstance(val, (TracebackVariable, ConstantVariable)):
@@ -550,7 +578,12 @@ class TracebackVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def _get_tb_lineno(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
         return self.frame_summary.getattro_impl(tx, "lineno")
+
+    def _get_frame_summary(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
+        return self.frame_summary
 
     # ref: CPython Objects/traceback.c tb_getsetters. `tb_next` is a getset with
     # getter+setter (tb_next_get / tb_next_set, which runs a reference-cycle
@@ -559,7 +592,7 @@ class TracebackVariable(VariableTracker):
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
         "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
+        "frame_summary": GetSet(_get_frame_summary),
     }
 
     # ref: CPython Objects/traceback.c tb_memberlist.
@@ -623,11 +656,44 @@ class ExceptionVariable(VariableTracker):
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
+        self.unsafe_to_inspect: bool = False
+        self.fake_tensor_explanation: str = ""
+
+    def mark_unsafe_to_inspect(
+        self,
+        fake_tensor_explanation: str = "",
+    ) -> None:
+        self.unsafe_to_inspect = True
+        self.fake_tensor_explanation = fake_tensor_explanation
+
+    def check_safe_to_inspect(self) -> None:
+        if self.unsafe_to_inspect:
+            unimplemented(
+                gb_type="Fake RuntimeError inspection",
+                context=f"inspect {self}",
+                explanation="Dynamo observed a RuntimeError while running a fake tensor "
+                "kernel, but fake tensor exception messages and args may differ "
+                "from eager execution.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def get_internal_traceback(self) -> VariableTracker:
+        return self.__traceback__
+
+    def get_user_traceback(self) -> VariableTracker:
+        tb = self.__traceback__
+        if self.unsafe_to_inspect and istype(tb, TracebackVariable):
+            return tb.with_unsafe_user_access_guard()
+        return tb
+
+    def set_internal_traceback(self, traceback_vt: VariableTracker) -> None:
+        self.__traceback__ = traceback_vt
 
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.check_safe_to_inspect()
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
@@ -753,6 +819,8 @@ class ExceptionVariable(VariableTracker):
     def _set_traceback(self, tx: "InstructionTranslatorBase", val):
         if not TracebackVariable.is_valid_traceback(val):
             raise_type_error(tx, "__traceback__ must be a traceback or None")
+        if istype(val, TracebackVariable):
+            val.check_safe_to_inspect()
         self.__traceback__ = val
         return variables.ConstantVariable.create(None)
 
@@ -770,6 +838,8 @@ class ExceptionVariable(VariableTracker):
         [tb] = args
         if not TracebackVariable.is_valid_traceback(tb):
             raise_type_error(tx, "__traceback__ must be a traceback or None")
+        if istype(tb, TracebackVariable):
+            tb.check_safe_to_inspect()
         self.__traceback__ = tb
         return self
 
@@ -800,7 +870,24 @@ class ExceptionVariable(VariableTracker):
         "__setstate__": Method(setstate),
     }
 
+    def _get_context(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
+        return self.__context__
+
+    def _get_cause(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
+        return self.__cause__
+
+    def _get_suppress_context(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
+        return self.__suppress_context__
+
+    def _get_traceback(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
+        return self.__traceback__
+
     def _get_args(self, tx: "InstructionTranslatorBase"):
+        self.check_safe_to_inspect()
         return VariableTracker.build(
             tx,
             tuple(self.args),
@@ -814,21 +901,20 @@ class ExceptionVariable(VariableTracker):
 
     tp_getset = {
         "__class__": GetSet(getset_build(lambda s: s.exc_type)),
-        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
-        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
-        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
+        "__context__": GetSet(_get_context, _set_context),
+        "__cause__": GetSet(_get_cause, _set_cause),
+        "__traceback__": GetSet(_get_traceback, _set_traceback),
         "args": GetSet(_get_args, _set_args),
     }
     # __suppress_context__ is a writable PyMemberDef on BaseException, not a
     # getset, so it lives in tp_members.
     tp_members = {
-        "__suppress_context__": Member(
-            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
-        ),
+        "__suppress_context__": Member(_get_suppress_context, _set_suppress_context),
     }
 
     def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
+        self.check_safe_to_inspect()
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
@@ -857,6 +943,7 @@ class ExceptionVariable(VariableTracker):
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
+        self.check_safe_to_inspect()
         return VariableTracker.build(tx, self.debug_repr())
 
 
@@ -921,6 +1008,36 @@ class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
     tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
+
+
+def check_no_unsafe_exception_inspection(
+    value: VariableTracker, _seen: set[int] | None = None
+) -> None:
+    # Container checks catch common formatting paths early; leaf exception
+    # guards still enforce safety if an exception is reached through another
+    # object shape.
+    if _seen is None:
+        _seen = set()
+    value_id = id(value)
+    if value_id in _seen:
+        return
+    _seen.add(value_id)
+
+    if isinstance(
+        value,
+        (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
+    ):
+        value.check_safe_to_inspect()
+    elif isinstance(value, variables.BaseListVariable):
+        for item in value.items:
+            check_no_unsafe_exception_inspection(item, _seen)
+    elif isinstance(value, variables.ConstDictVariable):
+        for key, item in value.items.items():
+            check_no_unsafe_exception_inspection(key.vt, _seen)
+            check_no_unsafe_exception_inspection(item, _seen)
+    elif isinstance(value, variables.SetVariable):
+        for item in value.set_items:
+            check_no_unsafe_exception_inspection(item.vt, _seen)
 
 
 class UnknownVariable(VariableTracker):
@@ -2220,6 +2337,8 @@ class StringFormatVariable(VariableTracker):
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        for arg in itertools.chain(sym_args, sym_kwargs.values()):
+            check_no_unsafe_exception_inspection(arg)
         if all(
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())

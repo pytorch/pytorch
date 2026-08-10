@@ -24,6 +24,8 @@ import typing
 import typing_extensions
 import warnings
 from collections.abc import Callable as _Callable, Sequence as _Sequence
+from contextlib import contextmanager as _contextmanager
+from contextvars import ContextVar as _ContextVar
 from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
@@ -2078,6 +2080,43 @@ def is_warn_always_enabled() -> builtins.bool:
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
 
+class _TorchCheckUserError(RuntimeError):
+    pass
+
+
+_torch_check_user_error_enabled = _ContextVar(
+    "torch_check_user_error_enabled", default=False
+)
+
+
+@_contextmanager
+def _enable_torch_check_user_error() -> typing.Generator[None, None, None]:
+    token = _torch_check_user_error_enabled.set(True)
+    try:
+        yield
+    finally:
+        _torch_check_user_error_enabled.reset(token)
+
+
+@_contextmanager
+def _suppress_torch_check_user_error() -> typing.Generator[None, None, None]:
+    """Prevent fake-only implementations from exposing nested validation errors."""
+    token = _torch_check_user_error_enabled.set(False)
+    try:
+        try:
+            yield
+        except _TorchCheckUserError as e:
+            if type(e) is not _TorchCheckUserError:
+                raise
+            args_descriptor = typing.cast(_Any, BaseException.__dict__["args"])
+            exception_args = args_descriptor.__get__(e, BaseException)
+            raise RuntimeError(*exception_args).with_traceback(
+                e.__traceback__
+            ) from None
+    finally:
+        _torch_check_user_error_enabled.reset(token)
+
+
 def _check_with(
     error_type: type[BaseException],
     cond: builtins.bool | SymBool,
@@ -2138,6 +2177,18 @@ def _check(
             dynamically constructed message. Default: ``None``
     """
     _check_with(RuntimeError, cond, message)
+
+
+def _check_user_error(
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
+) -> None:
+    """Core-only check for audited validation errors that mirror eager."""
+    _check_with(
+        _TorchCheckUserError if _torch_check_user_error_enabled.get() else RuntimeError,
+        cond,
+        message,
+    )
 
 
 @_deprecated(

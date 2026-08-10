@@ -4088,6 +4088,23 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def _is_missing_fake_impl_error(cause: BaseException) -> bool:
+    args_descriptor = cast(Any, BaseException.__dict__["args"])
+    exception_args = args_descriptor.__get__(cause, BaseException)
+    return (
+        len(exception_args) == 1
+        and type(exception_args[0]) is str
+        and "no fake impl registered" in exception_args[0]
+    )
+
+
+def _can_raise_fake_runtime_error_to_user(cause: BaseException) -> bool:
+    # Fake implementations and auxiliary real propagation can raise errors
+    # that eager execution would not. Only exact RuntimeErrors from audited
+    # core validation sites may select a user exception handler.
+    return type(cause) is torch._TorchCheckUserError
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4116,7 +4133,13 @@ def _get_fake_value_impl(
     from torch.utils._sympy.value_ranges import ValueRangeError
 
     from . import graph_break_hints
-    from .exc import unimplemented, Unsupported, UserError, UserErrorType
+    from .exc import (
+        raise_observed_exception,
+        unimplemented,
+        Unsupported,
+        UserError,
+        UserErrorType,
+    )
 
     op = node.op
 
@@ -4184,7 +4207,12 @@ def _get_fake_value_impl(
     try:
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
-        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
+        with (
+            fake_mode,
+            torch._enable_torch_check_user_error(),
+            enable_python_dispatcher(),
+            _use_eager_on_nested_compile(),
+        ):
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4304,7 +4332,7 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
-        elif "no fake impl registered" in str(cause) and _custom_op_fake_impl_pending(
+        elif _is_missing_fake_impl_error(cause) and _custom_op_fake_impl_pending(
             tx, node.target
         ):
             # A custom op was defined and register_fake'd inside the compiled
@@ -4330,19 +4358,26 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
+        elif _can_raise_fake_runtime_error_to_user(cause):
+            msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+            tx.output.remove_node(node)
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                unsafe_to_inspect=True,
+                fake_tensor_explanation=msg,
+            )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        from .exc import (
-            FakeTensorObservedException,
-            ObservedException,
-            raise_observed_exception,
+        _wrap_graph_break_with_torch_runtime_err(
+            lambda: unimplemented(
+                gb_type="RuntimeError when making fake tensor call",
+                context="",
+                explanation=msg,
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
         )
-
-        if not node.users:
-            tx.output.graph.erase_node(node)
-        try:
-            raise_observed_exception(RuntimeError, tx, args=[msg])
-        except ObservedException as e:
-            raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
+        raise AssertionError("should not reachable") from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
@@ -4402,10 +4437,29 @@ def run_node(
 
     with set_current_node(node):
 
+        def safe_exception_repr(e: Any) -> str:
+            if not isinstance(e, BaseException):
+                return repr(e)
+            args_descriptor = cast(Any, BaseException.__dict__["args"])
+            exception_args = args_descriptor.__get__(e, type(e))
+            if not exception_args:
+                args_repr = ""
+            elif all(type(arg) is str for arg in exception_args):
+                args_repr = ", ".join(repr(arg) for arg in exception_args)
+            else:
+                args_repr = "<non-string args>"
+            if type(e) is torch._TorchCheckUserError:
+                type_name = "RuntimeError"
+            else:
+                type_name = type.__dict__["__name__"].__get__(type(e), type)
+                if not isinstance(type_name, str):
+                    type_name = "<unknown type>"
+            return f"{type_name}({args_repr})"
+
         def make_error_message(e: Any) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
-                + repr(e)
+                + safe_exception_repr(e)
             )
 
         from .exc import Unsupported
