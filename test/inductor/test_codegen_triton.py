@@ -957,7 +957,7 @@ def helper(x):
             )
         )
 
-    def test_signature_of_float8_e4m3fn_uses_uint8_on_pre_sm89_cuda_inputs(self):
+    def test_signature_of_unsupported_cuda_fp8_uses_uint8_inputs(self):
         class FakeGraph:
             mutated_buffers = set()
 
@@ -976,16 +976,39 @@ def helper(x):
         )
         arg = TensorArg(name="in_ptr0", buffer="buf0", dtype=torch.float8_e4m3fn)
         out_arg = TensorArg(name="out_ptr0", buffer="buf0", dtype=torch.float8_e4m3fn)
+        fnuz_args = (
+            TensorArg(name="in_ptr1", buffer="buf1", dtype=torch.float8_e4m3fnuz),
+            TensorArg(name="in_ptr2", buffer="buf2", dtype=torch.float8_e5m2fnuz),
+        )
+        fnuz_out_args = (
+            TensorArg(name="out_ptr1", buffer="buf1", dtype=torch.float8_e4m3fnuz),
+            TensorArg(name="out_ptr2", buffer="buf2", dtype=torch.float8_e5m2fnuz),
+        )
+        fnuz_out_signatures = ("*fp8e4b8", "*fp8e5b16")
 
         with (
             patch.object(torch.version, "hip", None),
             V.set_graph_handler(FakeGraph()),
             patch.object(DeviceProperties, "create", return_value=props),
+            patch.object(
+                triton_utils,
+                "is_triton_fp8_dtype_supported",
+                return_value=False,
+            ),
         ):
             self.assertEqual(triton_utils.signature_of(arg, size_dtype=None), "*u8")
+            for fnuz_arg in fnuz_args:
+                self.assertEqual(
+                    triton_utils.signature_of(fnuz_arg, size_dtype=None), "*u8"
+                )
             self.assertEqual(
                 triton_utils.signature_of(out_arg, size_dtype=None), "*fp8e4nv"
             )
+            for fnuz_out_arg, signature in zip(fnuz_out_args, fnuz_out_signatures):
+                self.assertEqual(
+                    triton_utils.signature_of(fnuz_out_arg, size_dtype=None),
+                    signature,
+                )
 
         with (
             patch.object(torch.version, "hip", None),
@@ -993,10 +1016,19 @@ def helper(x):
             patch.object(
                 DeviceProperties, "create", return_value=props._replace(cc=89)
             ),
+            patch.object(
+                triton_utils,
+                "is_triton_fp8_dtype_supported",
+                return_value=False,
+            ),
         ):
             self.assertEqual(
                 triton_utils.signature_of(arg, size_dtype=None), "*fp8e4nv"
             )
+            for fnuz_arg in fnuz_args:
+                self.assertEqual(
+                    triton_utils.signature_of(fnuz_arg, size_dtype=None), "*u8"
+                )
 
     @inductor_config.patch("_use_fp64_for_unbacked_floats", True)
     @patch(

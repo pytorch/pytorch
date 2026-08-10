@@ -137,7 +137,7 @@ from .triton_utils import (
     should_unwrap_unspec_arg,
     signature_to_meta,
     use_block_ptr_enabled,
-    use_uint8_triton_storage_for_cuda_float8_e4m3fn,
+    use_uint8_triton_storage_for_cuda_fp8,
 )
 from .wrapper import SymbolicCallArg
 
@@ -1380,10 +1380,13 @@ class TritonOverrides(OpOverrides):
                 V.kernel.min_elem_per_thread,
             )
 
-        if src_dtype is not None and use_uint8_triton_storage_for_cuda_float8_e4m3fn(
-            src_dtype
-        ):
-            x = f"triton_helpers.fp8e4m3fn_to_float32({x})"
+        if src_dtype is not None and use_uint8_triton_storage_for_cuda_fp8(src_dtype):
+            helper = {
+                torch.float8_e4m3fn: "fp8e4m3fn_to_float32",
+                torch.float8_e4m3fnuz: "fp8e4m3fnuz_to_float32",
+                torch.float8_e5m2fnuz: "fp8e5m2fnuz_to_float32",
+            }[src_dtype]
+            x = f"triton_helpers.{helper}({x})"
             src_dtype = torch.float32
 
         if dtype == torch.bool:
@@ -4332,6 +4335,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             - other: Modified additional parameters string with boundary check options
         """
         check = indexing.boundary_check()
+        # Raw-byte FP8 loads spell zero padding as an integer.  Triton's block
+        # pointer and tensor descriptor APIs use the floating-point spelling
+        # for the same zero-padding semantics.
+        if other == ", other=0":
+            other = ", other=0.0"
         if isinstance(indexing, TensorDescriptorOptions):
             if check and other:
                 # The TMA API currently does not support padding values
@@ -4888,7 +4896,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
-        uses_uint8_storage = use_uint8_triton_storage_for_cuda_float8_e4m3fn(dtype, var)
+        uses_uint8_storage = use_uint8_triton_storage_for_cuda_fp8(dtype, var)
+        if uses_uint8_storage:
+            # The graph dtype remains FP8 so a following to_dtype can select
+            # the software decoder, but the load itself reads a *u8 argument.
+            dtype = torch.uint8
 
         if config.triton.enable_host_side_tma:
             if self._host_tma_non_materializable_buffers is None:

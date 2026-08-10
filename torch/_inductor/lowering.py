@@ -2781,6 +2781,42 @@ def _warn_complex_not_supported():
     )
 
 
+def _fnuz_conversion_leaves_floating_domain(node: torch.fx.Node) -> bool:
+    """Return whether floating dataflow produces a non-floating numeric tensor."""
+    pending = list(node.users)
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    while pending:
+        user = pending.pop()
+        if user in seen:
+            continue
+        seen.add(user)
+        if user.op == "output":
+            continue
+        # Higher-order operators can inline subgraphs whose intermediate
+        # dtypes are not represented by the outer node's metadata.  Keep the
+        # conversion materialized at that boundary so a hidden float-to-int
+        # cast cannot observe LLVM's target-dependent NaN conversion.
+        if isinstance(user.target, torch._ops.HigherOrderOperator):
+            return True
+        if "val" not in user.meta:
+            # Missing dtype metadata cannot prove that this branch stays in
+            # the floating domain. Keep the conversion materialized.
+            return True
+        tensor_values = [
+            value
+            for value in pytree.tree_leaves(user.meta["val"])
+            if isinstance(value, torch.Tensor)
+        ]
+        for value in tensor_values:
+            if not value.dtype.is_floating_point and value.dtype != torch.bool:
+                return True
+        # Boolean predicates do not perform a numeric NaN conversion.  Stop
+        # those branches so a later bool-to-int cast does not cause fallback.
+        if any(value.dtype.is_floating_point for value in tensor_values):
+            pending.extend(user.users)
+    return False
+
+
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch.Tensor, node=None):
@@ -2796,33 +2832,53 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
     if t.is_sparse:
         return True
 
+    # Keep these checks here because they are specific to Inductor/Triton.
     if not is_triton_fp8_dtype_supported(t.dtype, t.device):
-        from .codegen.triton_utils import (
-            use_uint8_triton_storage_for_cuda_float8_e4m3fn,
-        )
+        from .codegen.triton_utils import use_uint8_triton_storage_for_cuda_fp8
 
-        if not use_uint8_triton_storage_for_cuda_float8_e4m3fn(
-            t.dtype, device=t.device
-        ):
+        if not use_uint8_triton_storage_for_cuda_fp8(t.dtype, device=t.device):
             return True
 
-        # uint8 storage reinterprets fp8 bytes: allow bitcast, views, memory
-        # movement, and dequant (convert out of fp8)
+        # uint8 storage reinterprets fp8 bytes. Bitcasts, views, and memory
+        # movement preserve those bytes. CUDA scaled_mm only supports e4m3fn,
+        # while FNUZ inputs are limited to conversion into an ordinary float.
         if not node:
             return True
-        return not (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target
-            in (
-                aten.view.dtype,
-                aten.cat.default,
-                aten.clone.default,
-                aten._scaled_mm.default,
-                aten._scaled_mm_v2.default,
-                prims.convert_element_type.default,
+        if not isinstance(node.target, torch._ops.OpOverload):
+            return True
+        if node.target in (
+            aten.view.dtype,
+            aten.cat.default,
+            aten.clone.default,
+        ) or is_view(node.target):
+            return False
+        if t.dtype == torch.float8_e4m3fn and node.target in (
+            aten._scaled_mm.default,
+            aten._scaled_mm_v2.default,
+        ):
+            return False
+        if node.target == prims.convert_element_type.default:
+            if t.dtype == torch.float8_e4m3fn:
+                return False
+            dst_dtype = (
+                node.args[1] if len(node.args) >= 2 else node.kwargs.get("dtype")
             )
-            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
-        )
+            if dst_dtype not in (
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+            ):
+                return True
+            # Triton and eager CUDA differ when a NaN is converted to an
+            # integral dtype, and compiler scheduling can expose LLVM poison
+            # values.  This includes implicit casts in copy/scatter lowerings,
+            # so keep the original conversion on fallback if its floating
+            # dataflow reaches any non-floating numeric tensor.
+            if _fnuz_conversion_leaves_floating_domain(node):
+                return True
+            return False
+        return True
 
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
