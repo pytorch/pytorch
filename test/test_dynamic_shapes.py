@@ -39,6 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
     is_symbolic,
     rebind_unbacked,
+    resolve_unbacked_bindings,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_false,
@@ -67,8 +68,11 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
+    Max,
+    Min,
     Mod,
 )
+from torch.utils._sympy.value_ranges import ValueRangeError
 
 
 aten = torch.ops.aten
@@ -792,6 +796,168 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """u3""")
 
+    def test_rename_unbacked_to_unifies_unbacked_dest(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[orig], new)
+        self.assertEqual(shape_env.replacements[new], dest)
+
+    def test_rename_unbacked_to_keeps_first_binding_name(self):
+        shape_env = ShapeEnv()
+        first = shape_env.create_unbacked_symint().node.expr
+        second = shape_env.create_unbacked_symint().node.expr
+        replayed = shape_env.create_unbacked_symint().node.expr
+        path = (pytree.SequenceKey(0),)
+
+        shape_env._rename_unbacked_to(replayed, first)
+        shape_env._rename_unbacked_to(replayed, second)
+
+        self.assertEqual(shape_env.unbacked_renamings[replayed], first)
+        self.assertEqual(shape_env._find(second), first)
+        self.assertEqual(
+            resolve_unbacked_bindings(shape_env, {replayed: path}), {first: path}
+        )
+
+    def test_rename_unbacked_to_updates_binding_name_for_backed_dest(self):
+        shape_env = ShapeEnv()
+        first = shape_env.create_unbacked_symint().node.expr
+        second = shape_env.create_unbacked_symint().node.expr
+        replayed = shape_env.create_unbacked_symint().node.expr
+        path = (pytree.SequenceKey(0),)
+
+        shape_env._rename_unbacked_to(replayed, first)
+        shape_env._set_replacement(replayed, sympy.Integer(4), "test-setup")
+        shape_env._rename_unbacked_to(replayed, second)
+
+        self.assertEqual(shape_env.unbacked_renamings[replayed], second)
+        self.assertEqual(
+            resolve_unbacked_bindings(shape_env, {replayed: path}), {second: path}
+        )
+
+    def test_rename_unbacked_to_raises_on_disjoint_ranges(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint()
+        new = shape_env.create_unbacked_symint()
+        dest = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(dest, min=0, max=5)
+        _constrain_range_for_size(new, min=10, max=20)
+        shape_env._set_replacement(orig.node.expr, dest.node.expr, "test-setup")
+        with self.assertRaises(ValueRangeError):
+            shape_env._rename_unbacked_to(orig.node.expr, new.node.expr)
+
+    def test_rename_unbacked_to_preserves_existing_backed_replacement(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        backed = create_symint(shape_env, 4).node.expr
+        shape_env._set_replacement(new, backed, "test-setup")
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[orig], new)
+        self.assertEqual(shape_env.replacements[new], backed)
+        self.assertEqual(shape_env.replacements[dest], backed)
+
+    def test_rename_unbacked_to_unifies_existing_unbacked(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        other = shape_env.create_unbacked_symint().node.expr
+        shape_env._set_replacement(new, other, "test-setup")
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[orig], new)
+        self.assertEqual(shape_env.replacements[new], dest)
+        self.assertEqual(shape_env.replacements[other], dest)
+
+    def test_rename_unbacked_to_preserves_transitive_backed_replacement(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        other = shape_env.create_unbacked_symint().node.expr
+        dest = shape_env.create_unbacked_symint().node.expr
+        backed = create_symint(shape_env, 4).node.expr
+        shape_env._set_replacement(other, backed, "test-setup")
+        shape_env._set_replacement(new, other, "test-setup")
+        shape_env._set_replacement(orig, dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env._find(new), backed)
+        self.assertEqual(shape_env.replacements[other], backed)
+        self.assertEqual(shape_env.replacements[dest], backed)
+
+    def test_rename_unbacked_to_unifies_unbacked_alias_onto_backed_dest(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        alias = shape_env.create_unbacked_symint().node.expr
+        backed_dest = create_symint(shape_env, 4).node.expr
+        shape_env._set_replacement(new, alias, "test-setup")
+        shape_env._set_replacement(orig, backed_dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env._find(orig), backed_dest)
+        self.assertEqual(shape_env._find(new), backed_dest)
+        self.assertEqual(shape_env._find(alias), backed_dest)
+
+    def test_rename_unbacked_to_skips_range_widening_alias(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint()
+        new = shape_env.create_unbacked_symint()
+        alias = shape_env.create_unbacked_symint()
+        dest = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(new, min=0, max=100)
+        _constrain_range_for_size(alias, min=0, max=5)
+        _constrain_range_for_size(dest, min=0, max=20)
+        shape_env._set_replacement(new.node.expr, alias.node.expr, "test-setup")
+        shape_env._set_replacement(orig.node.expr, dest.node.expr, "test-setup")
+        shape_env._rename_unbacked_to(orig.node.expr, new.node.expr)
+        self.assertEqual(shape_env._find(new.node.expr), dest.node.expr)
+        self.assertEqual(shape_env._find(orig.node.expr), dest.node.expr)
+        self.assertNotIn(alias.node.expr, shape_env.replacements)
+
+    def test_rename_unbacked_to_unifies_two_backed_terminals(self):
+        shape_env = ShapeEnv()
+        orig = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        backed_dest = create_symint(shape_env, 4, duck=False).node.expr
+        backed_new = create_symint(shape_env, 4, duck=False).node.expr
+        shape_env._set_replacement(new, backed_new, "test-setup")
+        shape_env._set_replacement(orig, backed_dest, "test-setup")
+        shape_env._rename_unbacked_to(orig, new)
+        self.assertEqual(shape_env.replacements[new], backed_dest)
+        self.assertEqual(shape_env._find(orig), shape_env._find(new))
+
+    def test_rename_unbacked_to_unifies_on_double_propagation(self):
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                u = torch.unique(x)  # aten._unique2 -> unbacked count
+                return u.sum() + x.new_zeros(u.shape[0]).sum()
+
+        m = M()
+        inp = (torch.tensor([1, 1, 2, 3, 3]),)
+        ep = torch.export.export(m, inp)
+        gm = ep.module()
+        ph_vals = [
+            n.meta["val"]
+            for n in gm.graph.nodes
+            if n.op == "placeholder" and "val" in n.meta
+        ]
+        fm = detect_fake_mode(ph_vals)
+        self.assertIsNotNone(fm)
+        with fm:
+            PropagateUnbackedSymInts(gm).run(*ph_vals)
+            PropagateUnbackedSymInts(gm).run(*ph_vals)
+        # After the (previously-asserting) re-propagation, the exported program
+        # still runs and matches eager.
+        self.assertEqual(gm(*inp), m(*inp))
+
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
@@ -1319,6 +1485,69 @@ def forward(self, x_1):
                 gm = fx.GraphModule(tracer.root, tracer.graph)
                 self.assertEqual(gm(2, 3, 4), expected)
 
+    def test_build_proxy_for_pow(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles sympy.Pow.
+
+        sympy canonicalizes x * x into Pow(x, 2), so a reduction numel over a
+        tensor whose two dims duck-share a symbol becomes a nonlinear product
+        like s0 * s1**2. _build_proxy_for_sym_expr must rebuild it; without a
+        Pow handler the Pow factor has no proxy and get_proxy_slot raises
+        "is not tracked with proxy".
+        """
+        import sympy
+
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # Cover more than just the square: the exponent is passed straight to
+        # the handler, so any natural power must rebuild (s1**2, s1**3, ...).
+        for exp in (2, 3):
+            with self.subTest(exp=exp):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize the power away).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+
+                prod = u0 * u1**exp
+                self.assertTrue(prod.node.expr.has(sympy.Pow))
+
+                # Case 1: out=None must rebuild the Pow expr, not return None.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, prod.node.expr)
+                self.assertEqual(result.node.expr, prod.node.expr)
+
+                # Case 2: out=prod (the typical get_proxy_slot path). The rebuilt
+                # node must execute correctly: u0 * u1**exp with u0=2, u1=3.
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, prod.node.expr, out=prod)
+                out_proxy = tracer.symnode_tracker[prod].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3), 2 * 3**exp)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1327,6 +1556,25 @@ def forward(self, x_1):
                 torch.sym_max(1, torch.sym_max(257, u0)) == torch.sym_max(257, u0)
             )
         )
+
+    def test_min_max_simplify_with_value_ranges(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 <= 5)
+        torch._check(u1 >= 10)
+
+        u0_expr = u0.node.expr
+        u1_expr = u1.node.expr
+        self.assertEqual(shape_env.simplify(Min(u0_expr, 5)), u0_expr)
+        self.assertEqual(shape_env.simplify(Max(u1_expr, 10)), u1_expr)
+        self.assertEqual(shape_env.simplify(Min(u0_expr, u1_expr, 20)), u0_expr)
+        self.assertEqual(shape_env.simplify(Max(u1_expr, u0_expr, -1)), u1_expr)
+
+        u2 = shape_env.create_unbacked_symint()
+        u2_expr = u2.node.expr
+        self.assertEqual(shape_env.simplify(Min(u2_expr, 5)), Min(5, u2_expr))
+        self.assertEqual(shape_env.simplify(Max(u2_expr, 5)), Max(5, u2_expr))
 
     def test_numpy_sym_max(self):
         self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
@@ -3642,7 +3890,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"Size comparison should not cause recompilation.",
         )
 
@@ -3679,7 +3927,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"PythonMod padding should not cause recompilation.",
         )
 
@@ -7040,7 +7288,7 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertGreaterEqual(
             unbacked_count,
             4,
-            f"Expected at least 4 unbacked dims but found {unbacked_count}",
+            lambda msg: f"{msg}\nExpected at least 4 unbacked dims but found {unbacked_count}",
         )
 
 

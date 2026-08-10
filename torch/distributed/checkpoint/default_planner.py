@@ -47,6 +47,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _init_state_dict,
     _merge_delta_local_plans,
 )
+from torch.distributed.checkpoint.protocol import _is_checkpointable_tensor
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.tensor import DTensor
 
@@ -500,11 +501,16 @@ def create_default_local_load_plan(
         if (
             isinstance(md, TensorStorageMetadata)
             and getattr(obj, "size", None) is not None
-            and md.size != obj.size()
         ):
-            raise ValueError(
-                f"Size mismatch between saved {md.size} and current: {obj.size()} for {fqn}",
+            obj_size = (
+                torch.Size(obj.global_shape)
+                if _is_checkpointable_tensor(obj)
+                else obj.size()
             )
+            if md.size != obj_size:
+                raise ValueError(
+                    f"Size mismatch between saved {md.size} and current: {obj_size} for {fqn}",
+                )
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if isinstance(obj, DTensor):

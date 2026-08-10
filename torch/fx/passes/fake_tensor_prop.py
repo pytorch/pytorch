@@ -1,7 +1,7 @@
 from typing import Any
 
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
@@ -40,7 +40,6 @@ class FakeTensorProp(torch.fx.Interpreter):
 
     def run_node(self, n: Node) -> Any:
         from torch.fx.experimental.symbolic_shapes import (
-            _invalidate_unbacked_memos_for_replay,
             compute_unbacked_bindings,
             rebind_unbacked,
         )
@@ -77,15 +76,11 @@ class FakeTensorProp(torch.fx.Interpreter):
                 getattr(self.module, n.args[0].target), mode=self._mode
             ).propagate(*example_inputs)
 
-        if n.meta.get("unbacked_bindings"):
-            args, kwargs = self.fetch_args_kwargs_from_env(n)
-            _invalidate_unbacked_memos_for_replay(n, args, kwargs)
-
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
 
         def extract_val(obj: Any) -> Any:
-            if isinstance(obj, FakeTensor):
+            if is_fake_tensor(obj):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
@@ -114,5 +109,17 @@ class FakeTensorProp(torch.fx.Interpreter):
         return self.propagate_dont_convert_inputs(*fake_args)
 
     def propagate_dont_convert_inputs(self, *args: object) -> Any:
+        # In-place ops like shallow_copy_data_ can mutate fake_device on
+        # input FakeTensors during propagation. Save and restore so the
+        # caller's inputs are not permanently corrupted.
+        saved_devices = [
+            (a, a.fake_device)
+            for a in args
+            if isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        ]
         with self._mode:
-            return super().run(*args)
+            try:
+                return super().run(*args)
+            finally:
+                for fake, device in saved_devices:
+                    fake.fake_device = device

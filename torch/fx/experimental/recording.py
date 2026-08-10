@@ -156,7 +156,7 @@ class ShapeEnvEvent:
                 raise AssertionError(f"Node {x.name} not found in name_to_node")
             return name_to_node[x.name]
 
-        # Replaces the value of an specific argument by the result of fn.
+        # Replaces the value of a specific argument by the result of fn.
         def replacearg(index: int, key: str, fn: Callable[..., Any]) -> None:
             if index < len(args):
                 args[index] = fn(args[index])
