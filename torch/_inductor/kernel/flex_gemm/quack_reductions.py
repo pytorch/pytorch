@@ -296,19 +296,25 @@ def lower_view_or_reshape(
 ) -> Any | None:
     """Emit an analyzed view using grouped provenance."""
     source_node = normalized.source
-    if source_node in local_reduce_store_sources:
-        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
-        return _cute_arg(source_node, env)
     source = _cute_arg(source_node, env)
     grouped_layout = grouped_tensors.get(node)
-    if grouped_layout is not None:
-        if preserve_value_layout or grouped_layout not in active_grouped_layouts:
-            return source
+    if (
+        grouped_layout is not None
+        and not preserve_value_layout
+        and grouped_layout in active_grouped_layouts
+    ):
+        if source_node in local_reduce_store_sources:
+            local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
         return _generate_like(
             kernel,
             f"{source}.reshape({grouped_layout.tensorssa_shape(source)})",
             source,
         )
+    if source_node in local_reduce_store_sources:
+        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
+        return source
+    if grouped_layout is not None:
+        return source
     if source_node in grouped_tensors:
         return source
     return None

@@ -17,6 +17,7 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedSelect,
     NormalizedSplit,
     NormalizedSqueeze,
+    NormalizedToBlocked,
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
@@ -173,6 +174,8 @@ def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
             operation = f"split(size={split_size}, dim={dim})"
         case NormalizedSelect(dim=dim, index=index):
             operation = f"select(dim={dim}, index={index})"
+        case NormalizedToBlocked():
+            operation = "to_blocked"
         case NormalizedUnsupportedReduction():
             operation = f"unsupported_reduction({node.target})"
         case _:
@@ -201,7 +204,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
         lines.append("local_reduction: none")
     else:
         local_reduce = outputs.local_reduce
-        store = local_reduce.store
+        store = outputs.local_reduce_store
         consumers = []
         if local_reduce.feeds_main:
             consumers.append("main")
@@ -225,10 +228,13 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
             )
         )
         if store is not None:
+            layout = (
+                "dense" if store.output_layout is None else store.output_layout.value
+            )
             lines.extend(
                 (
                     f"  returned_as: {store.node.name}",
-                    "  output_layout: dense",
+                    f"  output_layout: {layout}",
                 )
             )
 
@@ -279,6 +285,7 @@ def format_flex_gemm_lowering_plan(
     aux_metas: Sequence[torch.Tensor],
     local_reduce_metas: Sequence[torch.Tensor],
     *,
+    local_reduce_layout: Any,
     swap_ab_alignment: int,
 ) -> str:
     """Render buffer allocation and runtime-ABI decisions."""
@@ -306,7 +313,10 @@ def format_flex_gemm_lowering_plan(
                 for index, meta in enumerate(local_reduce_metas)
             ),
         )
-        lines.append("  layout: dense")
+        layout = "dense" if local_reduce_layout is None else local_reduce_layout.value
+        lines.append(f"  layout: {layout}")
+        if local_reduce_layout is not None:
+            lines.append("  initialization: zero-filled at runtime when padded")
     else:
         lines.append("local_reduction_storage: (none)")
     return "\n".join(lines)
