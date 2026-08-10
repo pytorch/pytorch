@@ -17,7 +17,6 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
-import copy
 import dis
 import functools
 import glob
@@ -4476,18 +4475,6 @@ class ShapeEnv:
     def _has_branch_local_shape_refinement(self) -> bool:
         return bool(self._branch_local_shape_refinement_stack)
 
-    def _clone_for_branch(self) -> ShapeEnv:
-        """Copy the current reasoning state as an independent branch baseline."""
-        shape_env = copy.copy(self)
-        shape_env.should_record_events = False
-        shape_env.check_recorded_events = False
-        shape_env.is_recording = False
-        shape_env.tracked_fakes = None
-        shape_env.events = []
-        shape_env.fake_tensor_cache = {}
-        shape_env._branch_local_shape_refinement_stack = []
-        return copy.deepcopy(shape_env)
-
     def _has_branch_local_shape_refinement_snapshot(self) -> bool:
         return any(
             frame is not None for frame in self._branch_local_shape_refinement_stack
@@ -4524,6 +4511,10 @@ class ShapeEnv:
                     # so _set_replacement's global range checks do not apply.
                     if self.replacements.get(symbol) != replacement:
                         self.replacements[symbol] = replacement
+                        if symbol not in self.replacements_slocs:
+                            self.replacements_slocs[symbol] = self._get_sloc(
+                                "branch-local refinement"
+                            )
                         changed = True
                     break
 

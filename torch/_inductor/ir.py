@@ -56,6 +56,7 @@ from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
+from torch._native.ops.sum import inner_tree_plan
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -1397,11 +1398,16 @@ def get_reduction_combine_fn(
 
 @ir_dataclass
 class Reduction(Loops):
+    r"""IR node representing a reduction over one or more iteration dimensions."""
+
     reduction_ranges: Sequence[_IntLike]
     reduction_type: ReductionType
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
+    # Exact eager tile; rblock 1 is the split final stage.
+    strict_sum_multirow: bool = False
+    strict_sum_rblock: int | None = None
 
     def __str__(self) -> str:
         return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
@@ -1463,6 +1469,8 @@ class Reduction(Loops):
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
+            strict_sum_multirow=self.strict_sum_multirow,
+            strict_sum_rblock=self.strict_sum_rblock,
         )
 
     @staticmethod
@@ -1751,6 +1759,8 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
+        *,
+        strict_sum: bool = False,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -1797,7 +1807,81 @@ class Reduction(Loops):
                 ranges=list(ranges),
             )
 
-        if reduction_numel == 1:
+        strict_split = None
+        strict_sum_multirow = False
+        strict_sum_rblock = None
+        if strict_sum and reduction_hint in (
+            ReductionHint.DEFAULT,
+            ReductionHint.INNER,
+        ):
+            num_outputs = sympy_product(ranges)
+            if V.graph.sizevars.all_unbacked_explicitly_hinted(
+                [reduction_numel, num_outputs]
+            ):
+                guarded_reduction_numel = V.graph.sizevars.guard_int(reduction_numel)
+                vector_size = inner_tree_plan.vec_size(src_dtype.itemsize)
+                num_batches_ub = ceildiv(guarded_reduction_numel, 32 * vector_size)
+                int32_max = 2**31 - 1
+                indexing_safe = (
+                    guarded_reduction_numel <= int32_max
+                    and V.graph.sizevars.evaluate_expr(
+                        sympy.And(
+                            sympy.Gt(num_outputs, 0),
+                            sympy.Le(num_outputs, int32_max),
+                            sympy.Le(num_outputs * num_batches_ub, int32_max),
+                        ),
+                        fallback_value=False,
+                    )
+                )
+                if indexing_safe:
+                    strict_split = 1
+                    strict_sum_multirow = (
+                        guarded_reduction_numel
+                        <= vector_size * inner_tree_plan._K_MULTIROW_MAX_LOADS
+                    )
+                    if strict_sum_multirow:
+                        num_loads = ceildiv(guarded_reduction_numel, vector_size)
+                        num_loads = 1 << (num_loads - 1).bit_length()
+                        strict_sum_rblock = num_loads * vector_size
+                    else:
+                        params = inner_tree_plan.compute_inner_tree_params(
+                            guarded_reduction_numel,
+                            1,
+                            vector_size,
+                        )
+                        strict_sum_rblock = params.batch_total_elements
+                        if (
+                            params.num_batches > inner_tree_plan._K_TWO_KERNEL_THRESHOLD
+                            and guarded_reduction_numel % strict_sum_rblock == 0
+                        ):
+                            strict_split = params.num_batches
+        strict_sum = strict_split is not None
+
+        if strict_sum_multirow:
+            if strict_sum_rblock is None:
+                raise AssertionError("strict multirow sum requires a reduction block")
+            actual_reduction_numel = reduction_numel
+            original_inner_fn = inner_fn
+            default = cls.default_value(reduction_type, dst_dtype)
+
+            def padded_inner_fn(
+                index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+            ) -> OpsValue:
+                (rindex,) = reduction_index
+
+                index_dtype = dtype_from_size(actual_reduction_numel)
+                mask = ops.lt(
+                    ops.index_expr(rindex, index_dtype),
+                    ops.index_expr(actual_reduction_numel, index_dtype),
+                )
+                body = functools.partial(original_inner_fn, index, reduction_index)
+                return ops.masked(mask, body, default)
+
+            inner_fn = cast(Callable[..., Any], padded_inner_fn)
+            reduction_ranges = [sympy.Integer(strict_sum_rblock)]
+            reduction_numel = sympy.Integer(strict_sum_rblock)
+
+        if reduction_numel == 1 and not strict_sum:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
@@ -1819,6 +1903,7 @@ class Reduction(Loops):
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
+            and not strict_sum
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -1834,17 +1919,20 @@ class Reduction(Loops):
             )
 
         # triton doesn't support reduce to single element well, so break it up
-        hint, split = cls.num_splits(
-            device,
-            dst_dtype,
-            src_dtype,
-            inner_fn,
-            ranges,
-            reduction_ranges,
-            reduction_type,
-            reduction_numel,
-            input_node,
-        )
+        if strict_split is None:
+            hint, split = cls.num_splits(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                reduction_numel,
+                input_node,
+            )
+        else:
+            hint, split = ReductionHint.INNER, strict_split
 
         def _maybe_increase_split(split: int) -> int:
             # don't apply min_num_split constraint for static shape case.
@@ -1855,7 +1943,8 @@ class Reduction(Loops):
             else:
                 return split
 
-        split = _maybe_increase_split(split)
+        if strict_split is None:
+            split = _maybe_increase_split(split)
 
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
@@ -1898,6 +1987,7 @@ class Reduction(Loops):
                 split,
                 reduction_hint,
                 input_node,
+                strict_sum=strict_sum,
             )
 
             # Find the reduction that get split
@@ -1952,6 +2042,8 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
+                strict_sum_multirow=strict_sum_multirow,
+                strict_sum_rblock=strict_sum_rblock,
             )
         )
         return out
@@ -2138,6 +2230,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
+        strict_sum: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2160,6 +2253,7 @@ class Reduction(Loops):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
+            strict_sum=strict_sum,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -2188,6 +2282,7 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
+                strict_sum_rblock=1 if strict_sum else None,
             )
         )
 
@@ -2204,6 +2299,8 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         input_node: IRNode | None = None,
+        *,
+        strict_sum: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2235,6 +2332,7 @@ class Reduction(Loops):
             reduction_type,
             split,
             reduction_hint,
+            strict_sum,
         )
 
     @classmethod
@@ -3022,10 +3120,15 @@ class Scan(Loops):
         )
         scan_type = Scan
         if num_splits > 1:
-            supports_split = (
+            triton_supports_split = (
                 # pyrefly: ignore [unsupported-operation]
                 torch.version.hip is None or (has_triton and triton_version >= "3.3.0")
-            ) and (len(dtypes) == 1)
+            )
+            supports_split = (
+                triton_supports_split
+                and len(dtypes) == 1
+                and not torch.are_deterministic_algorithms_enabled()
+            )
             if not supports_split:
                 if can_fallback_to_aten:
                     # Fallback to ATen
@@ -5463,6 +5566,8 @@ class ComputedBuffer(OperationBuffer):
                 reduction_type=old_data.reduction_type,
                 src_dtype=old_data.src_dtype,
                 reduction_hint=old_data.reduction_hint,
+                strict_sum_multirow=old_data.strict_sum_multirow,
+                strict_sum_rblock=old_data.strict_sum_rblock,
             )
             self.data = new_data
             # this layout does not matter since we skip tl.store
@@ -6397,8 +6502,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-        assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101
+        if not isinstance(caller, NVUniversalGemmCaller):
+            raise AssertionError(f"expected NVUniversalGemmCaller, got {type(caller)}")
+        if self.layout != caller.layout:
+            raise AssertionError("Expected self.layout == caller.layout")
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -6416,9 +6523,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-        assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.get_size() == caller.layout.size  # noqa: S101
-        assert self.get_stride() == caller.layout.stride  # noqa: S101
+        if not isinstance(caller, NVUniversalGemmCaller):
+            raise AssertionError(f"expected NVUniversalGemmCaller, got {type(caller)}")
+        if self.get_size() != caller.layout.size:
+            raise AssertionError("Expected self.get_size() == caller.layout.size")
+        if self.get_stride() != caller.layout.stride:
+            raise AssertionError("Expected self.get_stride() == caller.layout.stride")
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller
@@ -6603,9 +6713,8 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - render: function that returns source code string
         """
         if epilogue_fn_code is not None:
-            assert epilogue_var_renames is not None, (  # noqa: S101
-                "epilogue_fn_code requires epilogue_var_renames"
-            )
+            if epilogue_var_renames is None:
+                raise AssertionError("epilogue_fn_code requires epilogue_var_renames")
 
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
@@ -9327,6 +9436,12 @@ class AssertScalar(ExternKernel):
     ) -> OrderedSet[sympy.Symbol]:
         return get_free_symbols(self.scalar, unbacked_only)
 
+    def _cpp_error_expr(self, escaped_msg: str) -> str:
+        """Return the C++ expression used to construct the exception message."""
+        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)), None)
+        symbol_str = f" + std::to_string({symbol})" if symbol is not None else ""
+        return f'"Expected {escaped_msg} but received "{symbol_str}'
+
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.scalar_asserts:
             return
@@ -9349,9 +9464,10 @@ class AssertScalar(ExternKernel):
                 .replace("\r", "\\r")
                 .replace("\t", "\\t")
             )
+            error_expr = self._cpp_error_expr(msg)
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("{msg}"); }}'
+                f"if (!({sizevar})) {{ throw std::runtime_error({error_expr}); }}"
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
@@ -9362,6 +9478,13 @@ class AssertScalar(ExternKernel):
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None
             wrapper.writeline(f"{self.get_name()} = None")
+
+
+class BranchAssertScalar(AssertScalar):
+    """An aten._assert_scalar produced by a user check in a HOP branch."""
+
+    def _cpp_error_expr(self, escaped_msg: str) -> str:
+        return f'"{escaped_msg}"'
 
 
 @ir_dataclass(frozen=False)
@@ -11028,25 +11151,6 @@ class Switch(ExternKernel):
         else:
             fake_pred = fx_pred
 
-        def _branch_refinement_context(
-            shape_env: ShapeEnv, branch: bool | None
-        ) -> AbstractContextManager[None]:
-            if branch is None or not isinstance(fake_pred, torch.SymBool):
-                return shape_env._branch_local_shape_refinement()
-
-            @contextlib.contextmanager
-            def ctx() -> Generator[None, None, None]:
-                with shape_env._branch_local_shape_refinement():
-                    expr = (
-                        fake_pred.node.expr
-                        if branch
-                        else sympy.Not(fake_pred.node.expr)
-                    )
-                    shape_env._assume_branch_local_shape_expr(expr)
-                    yield
-
-            return ctx()
-
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
             fake_tensors: Sequence[torch.Tensor],
@@ -11074,24 +11178,19 @@ class Switch(ExternKernel):
             # pyrefly: ignore [bad-return]
             return ret
 
-        if is_cond:
-            branches_to_lower = [
-                (0, branches[0], False),
-                (1, branches[1], True),
-            ]
-        else:
-            branches_to_lower = [
-                (branch_index, subgraph, None)
-                for branch_index, subgraph in enumerate(branches)
-            ]
-        for branch_index, subgraph, branch_truth in branches_to_lower:
+        from torch._higher_order_ops.cond import _branch_refinement_context
+
+        # Cond branches are stored in [false, true] order for selector codegen.
+        branch_truths: Sequence[bool | None] = (
+            (False, True) if is_cond else (None,) * len(branches)
+        )
+        for subgraph, branch_truth in zip(branches, branch_truths, strict=True):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
-                    shape_env=V.graph.sizevars.shape_env._clone_for_branch(),
                 )
                 branch_out_args = subgraph.graph_module.graph.output_node().args[0]
                 if not isinstance(branch_out_args, Sequence):
@@ -11101,7 +11200,7 @@ class Switch(ExternKernel):
                 ]
                 with V.set_graph_handler(subgraph.graph):
                     with _branch_refinement_context(
-                        subgraph.graph.sizevars.shape_env, branch_truth
+                        fake_pred, branch_truth, subgraph.graph.sizevars.shape_env
                     ):
                         subgraph.graph.run(*fake_operands)
                     # Force subgraph outputs to the expected strides from

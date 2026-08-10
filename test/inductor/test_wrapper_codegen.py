@@ -51,12 +51,16 @@ class TestPythonWrapperCodegen(TestCase):
 
         with V.set_graph_handler(graph):
             ir.AssertScalar(symbol > 0, message).codegen(wrapper)
+            ir.BranchAssertScalar(symbol > 0, message).codegen(wrapper)
 
         self.assertEqual(
             lines,
             [
+                'if (!(u0 > 0)) { throw std::runtime_error("Expected bad '
+                '\\"quoted\\" \\\\ check\\nnext\\rline\\ttab but received " + '
+                "std::to_string(u0)); }",
                 'if (!(u0 > 0)) { throw std::runtime_error("bad \\"quoted\\" '
-                '\\\\ check\\nnext\\rline\\ttab"); }'
+                '\\\\ check\\nnext\\rline\\ttab"); }',
             ],
         )
 

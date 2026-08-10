@@ -547,11 +547,11 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
         def fn(x: Any) -> None:
-            assert x, "msg"  # noqa: S101
+            assert x, "msg"  # noqa: S101  # function is to recognize assert statements in user code
     else:
 
         def fn(x: Any) -> None:
-            assert x  # noqa: S101
+            assert x  # noqa: S101  # function is to recognize assert statements in user code
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
@@ -3381,10 +3381,11 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
-                "LOAD_ATTR method variant should have been normalized by "
-                "remove_load_attr_method_variant in cleaned_instructions"
-            )
+            if inst.arg is None or inst.arg % 2 != 0:
+                raise AssertionError(
+                    "LOAD_ATTR method variant should have been normalized by "
+                    "remove_load_attr_method_variant in cleaned_instructions"
+                )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -4270,9 +4271,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
@@ -5065,12 +5064,7 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.call_method(
-                self,  # pyrefly: ignore[bad-argument-type]
-                "__setattr__",
-                [ConstantVariable.create("__annotations__"), attr],
-                {},
-            )
+            fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -5085,9 +5079,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
@@ -6143,17 +6135,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         sub_locals = None
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
-        except TypeError as e:
-            unimplemented(
-                gb_type="failed to bind arguments when attempting to inline",
-                context=f"func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; "
-                f"args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
-                explanation=f"Argument mismatch when attempting to trace function {func.get_name()}.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-                from_exc=e,
-            )
+        except variables.functions.BindArgsTypeError as e:
+            exc.raise_type_error(parent, msg=e.args[0])
 
         if sub_locals is None:
             raise AssertionError("expected sub_locals is not None to be true")

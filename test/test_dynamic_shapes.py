@@ -314,9 +314,11 @@ class TestPySymInt(TestCase):
         with shape_env._branch_local_shape_refinement():
             self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(b, 1)))
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
+            self.assertIn(b, shape_env.replacements_slocs)
 
         self.assertEqual(shape_env.replacements[a], b)
         self.assertNotIn(b, shape_env.replacements)
+        self.assertNotIn(b, shape_env.replacements_slocs)
         self.assertEqual(shape_env.simplify(a), b)
 
     def test_branch_local_shape_refinement_preserves_replacement_aliases(self):
@@ -339,14 +341,21 @@ class TestPySymInt(TestCase):
     def test_branch_local_shape_refinement_event_replay(self):
         shape_env = ShapeEnv(should_record_events=True)
         a = sympy.Symbol("a", integer=True, positive=True)
+        guarded = create_symint(shape_env, 2, duck=False)
+        guarded_expr = guarded.node.expr
 
         with shape_env._branch_local_shape_refinement():
             self.assertTrue(shape_env._assume_branch_local_shape_expr(sympy.Eq(a, 1)))
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
+            self.assertTrue(guard_bool(guarded == 2))
 
         replayed = replay_shape_env_events(shape_env.events)
         self.assertEqual(shape_env.simplify(a), a)
         self.assertEqual(replayed.simplify(a), a)
+        self.assertEqual(
+            [guard.expr for guard in shape_env.guards],
+            [sympy.Eq(guarded_expr, 2)],
+        )
         shape_env.check_equal(replayed)
 
     def test_branch_local_shape_refinement_preserves_divisibility(self):
@@ -432,6 +441,20 @@ class TestPySymInt(TestCase):
             self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
 
         self.assertEqual(shape_env.validator._target_exprs, target_exprs)
+
+    def test_assert_scalar_meta(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        value = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env):
+            torch.ops.aten._assert_scalar.default(value < 10, "bad value")
+
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+
+        with FakeTensorMode():
+            with self.assertRaisesRegex(RuntimeError, "Assertion is failed"):
+                torch.ops.aten._assert_scalar.default(False, "")
 
     def test_roundtrip(self):
         shape_env = ShapeEnv()

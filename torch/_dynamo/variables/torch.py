@@ -2795,66 +2795,52 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
                 raise_observed_exception(error_type, tx, args=[msg])
 
-            if isinstance(predicate_vt, SymNodeVariable):
-                sym_expr = predicate_vt.sym_num
+            sym_expr = (
+                predicate_vt.sym_num
+                if isinstance(predicate_vt, SymNodeVariable)
+                else None
+            )
+            if isinstance(sym_expr, torch.SymBool):
                 if tx.output.shape_env._has_branch_local_shape_refinement():
-                    if callable(message_eager):
-                        unimplemented(
-                            gb_type="Callable torch._check*() messages in HOP branches",
-                            context=str(message_vt),
-                            explanation=(
-                                "Callable torch._check*() messages cannot be preserved "
-                                "lazily in a compiled higher-order-operator branch."
-                            ),
-                            hints=[
-                                "Pass a constant message instead of a callable.",
-                                *graph_break_hints.SUPPORTABLE,
-                            ],
-                        )
-
-                    if error_type is not RuntimeError:
-                        unimplemented(
-                            gb_type="Non-RuntimeError torch._check*() in HOP branch",
-                            context=str(error_type),
-                            explanation=(
-                                "Specialized torch._check*() exception types cannot be "
-                                "preserved by a compiled higher-order-operator branch."
-                            ),
-                            hints=[
-                                "Use torch._check() if RuntimeError is acceptable.",
-                                *graph_break_hints.SUPPORTABLE,
-                            ],
-                        )
-
-                    assert_msg = (
-                        str(message_eager)
-                        if message_eager is not None
-                        else (
-                            "Expected cond to be True, but got False. (Could this error "
-                            "message be improved? If so, please report an enhancement "
-                            "request to PyTorch.) Runtime assertion failed for expression "
-                            f"{sym_expr.node.expr}"
-                        )
+                    static_expr = tx.output.shape_env._maybe_evaluate_static(
+                        sym_expr.node.expr
                     )
-                    assert_proxy = tx.output.create_proxy(
-                        "call_function",
-                        torch.ops.aten._assert_scalar.default,
-                        *proxy_args_kwargs(
-                            (
-                                predicate_vt,
-                                ConstantVariable.create(assert_msg),
+                    if static_expr is not None and bool(static_expr):
+                        return ConstantVariable.create(None)
+
+                    if not callable(message_eager) and error_type is RuntimeError:
+                        assert_msg = (
+                            str(message_eager)
+                            if message_eager is not None
+                            else (
+                                "Expected cond to be True, but got False. (Could this "
+                                "error message be improved? If so, please report an "
+                                "enhancement request to PyTorch.) Runtime assertion failed "
+                                f"for expression {sym_expr.node.expr}"
+                            )
+                        )
+                        assert_proxy = tx.output.create_proxy(
+                            "call_function",
+                            torch.ops.aten._assert_scalar.default,
+                            *proxy_args_kwargs(
+                                (
+                                    predicate_vt,
+                                    ConstantVariable.create(assert_msg),
+                                ),
+                                {},
                             ),
-                            {},
-                        ),
-                    )
-                    if isinstance(sym_expr, torch.SymBool):
+                        )
                         assert_proxy.node.meta["branch_local_assert_expr"] = (
                             sym_expr.node.expr
                         )
                         tx.output.shape_env._assume_branch_local_shape_expr(
                             sym_expr.node.expr
                         )
-                    return ConstantVariable.create(None)
+                        return ConstantVariable.create(None)
+
+                    # Preserve the existing proxy path below for callable messages
+                    # and specialized exception types. It cannot provide local
+                    # refinement, but it retains their established compiled behavior.
 
             predicate_proxy = predicate_vt.as_proxy()
 

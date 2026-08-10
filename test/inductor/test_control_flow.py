@@ -690,6 +690,42 @@ class CondTests(TestCase):
                 num_predicates=0,
             )
 
+    def test_cond_branch_inductor_guards_recompile(self):
+        def fn(pred, x):
+            def true_fn(x):
+                return torch.nn.functional.glu(x, dim=1)
+
+            def false_fn(x):
+                return torch.nn.functional.glu(-x, dim=1)
+
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
+
+        for frame_count, width in enumerate((12, 14, 16), start=1):
+            pred = torch.tensor(frame_count % 2 == 1)
+            x = torch.randn(3, width)
+            self.assertEqual(opt_fn(pred, x), fn(pred, x))
+            self.assertEqual(cnt.frame_count, frame_count)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cond_branch_fresh_unbacked_symbols(self):
+        def fn(pred, x):
+            def true_fn(x):
+                return torch.nonzero(x).sum()
+
+            def false_fn(x):
+                return torch.nonzero(-x).sum()
+
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        x = torch.tensor([[0.0, 1.0], [2.0, 0.0]])
+        for value in (True, False):
+            pred = torch.tensor(value)
+            self.assertEqual(opt_fn(pred, x), fn(pred, x))
+
     @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_shape_assert_branch_refinement(self, device):
@@ -768,7 +804,7 @@ class CondTests(TestCase):
 
     @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
-    def test_cond_shape_check_rejects_unsupported_error_type(self, device):
+    def test_cond_shape_check_specialized_error_type_fallback(self, device):
         def fn(x):
             def true_fn(x):
                 torch._check_value(x.shape[0] < 10, "bad value")
@@ -781,18 +817,17 @@ class CondTests(TestCase):
 
         x = torch.randn(8, 12, device=device)
         opt_fn = torch.compile(fn, dynamic=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Non-RuntimeError torch._check",
-        ):
-            opt_fn(x)
+        self.assertEqual(opt_fn(x), fn(x))
+
+        with self.assertRaisesRegex((ValueError, RuntimeError), "bad value"):
+            opt_fn(torch.randn(12, 12, device=device))
 
     @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
-    def test_cond_shape_check_rejects_callable_message(self, device):
+    def test_cond_shape_check_callable_message_fallback(self, device):
         def fn(x):
             def message():
-                raise RuntimeError("message evaluated during tracing")
+                return "bad callable message"
 
             def true_fn(x):
                 torch._check(x.shape[0] < 10, message)
@@ -805,11 +840,32 @@ class CondTests(TestCase):
 
         x = torch.randn(8, 12, device=device)
         opt_fn = torch.compile(fn, dynamic=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Callable torch._check",
-        ):
-            opt_fn(x)
+        self.assertEqual(opt_fn(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "bad callable message"):
+            opt_fn(torch.randn(12, 12, device=device))
+
+    @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_shape_check_static_predicates(self, device):
+        def fn(x):
+            def message():
+                raise AssertionError("statically true check evaluated its message")
+
+            def true_fn(x):
+                torch._check(x.shape[0] >= 0, message)
+                torch._check_value(x.shape[0] <= 16, "invalid size")
+                return x + 1
+
+            def false_fn(x):
+                return x - 1
+
+            return torch.cond(x.shape[1] > 1, true_fn, false_fn, (x,))
+
+        x = torch.randn(8, 12, device=device)
+        mark_unbacked(x, 0, min=0, max=16)
+        opt_fn = torch.compile(fn, dynamic=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     @decorateIf(requires_gpu, lambda params: params["device"] == GPU_TYPE)
     @parametrize("device", ["cpu", GPU_TYPE])
