@@ -117,7 +117,10 @@ def initialize_lazy_module(
                         s.node.hint if isinstance(s, torch.SymInt) else s
                         for s in fake.shape
                     ]
-                    assert all(isinstance(s, int) for s in shape), shape  # noqa: S101
+                    if not all(isinstance(s, int) for s in shape):
+                        raise AssertionError(
+                            f"expected all shape entries to be int, got {shape}"
+                        )
                     return torch.empty(  # pyrefly: ignore[no-matching-overload]
                         shape, dtype=fake.dtype, device=fake.device
                     )
