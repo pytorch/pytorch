@@ -79,6 +79,30 @@ Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automa
 When the user asks you to commit or amend, run `lintrunner -a` before creating
 the commit. Fix any lint errors it reports, then commit.
 
+## Never silence S101 with a noqa
+
+Ruff's S101 (`Use of assert detected`) must be fixed by rewriting the assert,
+never by adding `# noqa: S101`. The lint message itself suggests the noqa; ignore
+that suggestion. Plain `assert` is stripped by `python -O`, so a suppressed
+assert is a check that silently does nothing in an optimized run.
+
+```python
+# Bad - silences the rule; the check disappears under `python -O`
+assert isinstance(x, Foo)  # noqa: S101
+
+# Good
+if not isinstance(x, Foo):
+    raise AssertionError(f"expected Foo, got {type(x)}")
+```
+
+Preserve the original message when there is one (`assert cond, msg` ->
+`if not cond: raise AssertionError(msg)`); otherwise synthesize a short one that
+names what was expected and shows the actual value. Invert the condition rather
+than wrapping it in `not (...)` when there is a clean inverse (`is not None` ->
+`is None`, `in` -> `not in`, `==` -> `!=`). Do not invert `<`/`>`/`<=`/`>=` on
+floats: `not (a < b)` is not `a >= b` when a value is NaN, so keep those as
+`if not (a < b)`.
+
 # Git
 
 This refines the Bash tool's `# Git` guidance to "branch first" when on the
