@@ -1549,7 +1549,7 @@ class TestFusibleNodeOverlap(InductorTestCase):
         self.assertEqual(len(scheduler.collective_info), 1)
 
 
-class TestOverlapSchedulingNoMemoryLimit(TestCase):
+class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
     """Test overlap scheduling without a memory-increase limit."""
 
     @classmethod
@@ -1580,6 +1580,7 @@ class TestOverlapSchedulingNoMemoryLimit(TestCase):
             return all_gather @ w
 
         gm = make_fx(func, tracing_mode="fake")(torch.randn(8, 16), torch.randn(16, 16))
+        counters.clear()
 
         with (
             patch(
@@ -1595,6 +1596,10 @@ class TestOverlapSchedulingNoMemoryLimit(TestCase):
                 max_memory_increase_gb=None,
                 max_memory_increase_ratio=None,
             )
+        FileCheck().check("%all_gather_into_tensor").check("%wait_tensor").check(
+            "%mm"
+        ).run(str(gm.graph))
+        self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
     def test_no_memory_limit_prefetches_across_compute_gap(self):
         from torch._inductor.fx_passes.overlap_scheduling import (
@@ -1629,8 +1634,10 @@ class TestOverlapSchedulingNoMemoryLimit(TestCase):
                 gm,
                 max_memory_increase_gb=None,
                 max_memory_increase_ratio=None,
-                pre_bucketing_fsdp_collectives=False,
             )
+        FileCheck().check("%all_gather_into_tensor").check("%mm").check("%mm_1").run(
+            str(gm.graph)
+        )
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])

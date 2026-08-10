@@ -524,14 +524,13 @@ class OverlapScheduler:
             self.allowed_peak_memory_bytes = self.original_peak_memory + (
                 memory_increase_bytes or 0
             )
+            self.memory_tracker: MemoryTracker | None
             self.memory_tracker = MemoryTracker(self.graph)
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
-            # Zero baselines make projected <= sys.maxsize, so this budget check is vacuous.
-            # The always-configured in-flight limit remains active.
-            self.original_mem_before_compute_index = [0] * len(self.compute_nodes)
-            self.memory_tracker = MemoryTracker(self.graph)
+            # sys.maxsize makes budget checks vacuous; the in-flight limit remains active.
+            self.memory_tracker = None
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
@@ -642,7 +641,7 @@ class OverlapScheduler:
             return False
 
         # check current mem
-        if (
+        if self.memory_tracker is not None and (
             self.memory_tracker.current_memory_bytes + size
             > self.allowed_peak_memory_bytes
         ):
@@ -659,6 +658,9 @@ class OverlapScheduler:
             # Check 1: Would cumulative prefetch exceed in-flight limit?
             if (cumulative_prefetch + size) > self.max_in_flight_bytes:
                 return True
+
+            if self.memory_tracker is None:
+                continue
 
             # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
             baseline_mem = self.original_mem_before_compute_index[compute_idx]
@@ -934,7 +936,7 @@ class OverlapScheduler:
             elif _schedulable_wait_node(node):
                 # Defer exposed waits until hidden or over memory budget
                 info = self.collective_info[self.wait_to_start[node]]
-                over_budget = (
+                over_budget = self.memory_tracker is not None and (
                     self.memory_tracker.current_memory_bytes
                     > self.allowed_peak_memory_bytes
                 )
@@ -1140,14 +1142,14 @@ class OverlapScheduler:
             raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
-        self.memory_tracker.schedule_node(node)
-
-        log.debug(
-            "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
-            node.name,
-            self.memory_tracker.get_current_memory_bytes(),
-            len(self.scheduled),
-        )
+        if self.memory_tracker is not None:
+            self.memory_tracker.schedule_node(node)
+            log.debug(
+                "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
+                node.name,
+                self.memory_tracker.get_current_memory_bytes(),
+                len(self.scheduled),
+            )
 
         for user in node.users:
             self.in_degree[user] -= 1
@@ -1616,23 +1618,24 @@ class OverlapScheduler:
             potentially_hidden_collectives
         )
         counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
-        counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+        if self.memory_tracker is not None:
+            counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
 
-        log.info(
-            "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
-            "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
-            "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
-            "wasted_compute_ms=%.2f",
-            len(exposed),
-            len(bad_exposed),
-            len(potentially_hidden_collectives),
-            self.original_peak_memory,
-            self.memory_tracker.peak_memory,
-            total_exposed,
-            hideable_exposed_ms,
-            total_potential_exposed,
-            self.wasted_compute,
-        )
+            log.info(
+                "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
+                "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
+                "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
+                "wasted_compute_ms=%.2f",
+                len(exposed),
+                len(bad_exposed),
+                len(potentially_hidden_collectives),
+                self.original_peak_memory,
+                self.memory_tracker.peak_memory,
+                total_exposed,
+                hideable_exposed_ms,
+                total_potential_exposed,
+                self.wasted_compute,
+            )
 
         self.reorder_graph()
 
