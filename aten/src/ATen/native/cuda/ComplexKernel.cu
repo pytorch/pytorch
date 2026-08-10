@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -20,12 +21,17 @@ void complex_kernel_cuda(TensorIterator& iter) {
 }
 
 void polar_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(0), "polar_cuda", [&]() {
-    gpu_kernel(
-      iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
-        return c10::complex<scalar_t>(a * std::cos(b), a * std::sin(b));
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kHalf, iter.input_dtype(0), "polar_cuda", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
+              return c10::complex<scalar_t>(
+                  static_cast<scalar_t>(opmath_t(a) * std::cos(opmath_t(b))),
+                  static_cast<scalar_t>(opmath_t(a) * std::sin(opmath_t(b))));
+            });
       });
-  });
 }
 
 } // anonymous namespace

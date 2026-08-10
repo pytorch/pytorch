@@ -227,7 +227,7 @@ class _LazyTritonCompileKickoffLine(DeferredLineBase):
     def __call__(self) -> str | None:
         return self.line if self.lazy_kernel_names else None
 
-    def _new_line(self, line: str) -> Self:
+    def _new_line(self, line: str) -> _LazyTritonCompileKickoffLine:
         return _LazyTritonCompileKickoffLine(self.lazy_kernel_names, line)
 
 
@@ -1197,6 +1197,12 @@ class CppWrapperGpu(CppWrapperCpu):
     def _ensure_aoti_stream_helpers_emitted(self) -> None:
         if self._aoti_stream_helpers_emitted:
             return
+        # The stream/event helpers in streams.h are CUDA-specific (cudaEvent_t,
+        # cudaStream_t, cudaEventRecord, ...). Guarding here on the device type
+        # prevents the CUDA-only symbols from being emitted into XPU generated
+        # code, where SYCL in-order queues handle event ordering implicitly.
+        if self.device == "xpu":
+            return
         self._aoti_stream_helpers_emitted = True
         with open(
             os.path.join(os.path.dirname(__file__), "aoti_runtime", "streams.h")
@@ -1271,6 +1277,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def _emit_stream_op_inline(self, kernel_name: str | None, args: list[str]) -> bool:
         if kernel_name is None or not V.graph.aot_mode:
+            return False
+        if self.device == "xpu":
             return False
         if kernel_name in AOTI_UNSUPPORTED_STREAM_OP_REASONS:
             raise NotImplementedError(

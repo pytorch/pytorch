@@ -1614,13 +1614,18 @@ after that, stage 2 alone suffices for kernel and hook changes.
 Notes:
 
 * `--jobs` defaults to the torch build's own parallelism (`MAX_JOBS`, then
-  `CMAKE_BUILD_PARALLEL_LEVEL`, then CPU count). `--jobs 1` forces serial.
-  Compiles run on a **spawn** pool, one pool per arch: never fork after CUDA
-  init, and `CUTE_DSL_ARCH` is cached per process at first read.
-* `--arch sm_X sm_Y` with `--jobs 1` is a hard error for that reason.
+  `CMAKE_BUILD_PARALLEL_LEVEL`, then half the CPU count). `--jobs 1` forces
+  serial. Compiles run on a single **forkserver** pool covering every
+  `(point, arch)` job; plain `fork` would hand workers the parent's dead CUDA
+  context.
+* Any number of arches works at any `--jobs`, including `--jobs 1`: the arch
+  is per-compile state, so one process can export for several arches.
 * With an explicit `--arch`, export never touches the CUDA driver (CuTeDSL via
-  `CUTE_DSL_ARCH`, Triton via a fixed-target driver), so kernels build on
-  GPU-less machines.
+  the `--gpu-arch` compile option, Triton via a fixed-target driver), so
+  kernels build on GPU-less machines. CuTeDSL needs one cheap kernel-free
+  compile first to initialize its JIT engine, or `export_to_c` fails with
+  `Failed to dump object file with PIC relocation`; see
+  `tools/native_aot/cutedsl_warmup.py`.
 * Export is idempotent: a point is skipped when a sidecar records the same spec
   **and** the recorded source closure still matches the tree. Edit a kernel and
   the affected points re-export without `--force`.
@@ -1788,8 +1793,9 @@ Build tooling (`tools/native_aot/`):
 
 | file | role |
 | ---- | ---- |
-| `decl.py` | the declaration contract (module docstring), the `AotDeclaration` protocol, `decl_id`, and the validating loader / discovery. Stdlib-only: torchgen and the export tool load it by file path. |
-| `export.py` | stage-2 export driver: grid fan-out, spawn pool, per-point compile via the toolchain, sidecars, staleness (`sources_current`), `EXPORTABLE_ARCHES`, `archs_from_cuda_arch_list`. |
+| `decl.py` | the declaration contract you program against (module docstring). Re-exports the mechanism from `torchgen/native_aot_decl.py`, which is where the `AotDeclaration` protocol, `decl_id`, and the validating loader / discovery actually live: the wheel ships `torchgen` but not `tools/`, and installed torchgen must load declarations out of tree. |
+| `export.py` | stage-2 export driver: grid fan-out, one forkserver pool over all `(point, arch)` jobs, per-point compile via the toolchain, sidecars, staleness (`sources_current`), sidecar integrity, `EXPORTABLE_ARCHES`, `archs_from_cuda_arch_list`. |
+| `cutedsl_warmup.py` | one kernel-free `cute.compile` per process, so `export_to_c` works for any `--gpu-arch` (its own module: `from __future__ import annotations` would stringify the jit annotation). |
 | `toolchains.py` | one class per DSL: build-result validation, compile/export, launcher codegen; `TOOLCHAINS` registry. |
 | `gen_aot_lib.py` | declarations + sidecars -> `aot_<decl_id>_<key>.cpp`: arch gate, prelude, dispatch chain, stub registration, covers op; `precomputed_args`, `covers_signature`, orphan cleanup. |
 | `build_stage2.py` | the driver: skip ladder, export, generate, targeted `torch_cuda` relink, copy into the installed torch, optional wheel patch. |
@@ -1799,6 +1805,8 @@ Codegen (stage 1):
 | file | role |
 | ---- | ---- |
 | `torchgen/native_aot.py` | discovery + validation (`parse_native_aot_manifests`, `validate_native_aot_manifests`) and the three emitters (`gen_stub_declaration`, `gen_stub_definition`, `gen_stub_consultation`). |
+| `torchgen/native_aot_decl.py` | the declaration mechanism: `AotDeclaration`, `decl_id_for_op`/`decl_id`, `load_by_path`, `load_declarations`, `discover_declarations`. Surfaced to authors as `tools/native_aot/decl.py`. |
+| `torchgen/native_aot_spec_grid.py` | `expand_specs`: the grid cross-product, shared by export and runtime coverage. |
 | `torchgen/gen.py` | wiring: the `--native-aot-ops-dir` flag, per-key manifest filtering, and writing `NativeAotStubs.{h,cpp}`. |
 | `torchgen/dest/register_dispatch_key.py` | the call site: replaces `op.impl(...)` with the consultation in the structured wrapper, and adds the stubs include for CUDA. |
 | `aten/src/ATen/templates/NativeAotStubs.{h,cpp}` | the stub header/source templates. |
