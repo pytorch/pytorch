@@ -6154,50 +6154,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
-    def _emit_recursive_split(
-        self,
-        expr: str,
-        names: Sequence[str],
-        shape: Sequence[sympy.Expr | int | str],
-        dtype: torch.dtype,
-    ) -> None:
-        """Split a trailing axis into ``len(names)`` lanes.
-
-        ``tl.split`` only ever yields two values, so a factor above 2 is built
-        as a binary tree. Float8 goes through uint8 because ``tl.split`` does
-        not accept fp8 operands.
-        """
-        factor = len(names)
-        assert factor > 1 and factor & (factor - 1) == 0  # noqa: S101
-        is_float8 = dtype in TRITON_FLOAT8_DTYPES
-        if factor == 2:
-            if not is_float8:
-                self.compute.writeline(f"{', '.join(names)} = tl.split({expr})")
-                return
-            raw_parts = tuple(
-                self.cse.newvar(dtype=torch.uint8, shape=shape[:-1]) for _ in names
-            )
-            self.compute.writeline(
-                f"{', '.join(map(str, raw_parts))} = tl.split({expr})"
-            )
-            for raw_part, name in zip(raw_parts, names):
-                self.compute.writeline(
-                    f"{name} = {raw_part}.to({triton_type(dtype)}, bitcast=True)"
-                )
-            return
-        half = factor // 2
-        split_shape = (*shape[:-1], half, 2)
-        part_shape = (*shape[:-1], half)
-        split_dtype = torch.uint8 if is_float8 else dtype
-        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
-        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
-        self.compute.writeline(
-            f"{even}, {odd} = tl.split("
-            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
-        )
-        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
-        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
-
     def _bitcast_reshape_expr(
         self,
         value: CSEVariable,
@@ -6214,26 +6170,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value: CSEVariable,
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
-        permute_dims: Sequence[int] | None = None,
     ) -> None:
-        """Split ``value`` into the lanes named by ``part_names``.
+        """Reshape ``value`` to expose the lane axis, then split it.
 
-        ``tl.split`` can only divide the trailing axis in two. Interleaved lanes
-        reshape directly to a trailing lane axis; contiguous lanes reshape the
-        lane axis before the child extent, then use ``permute_dims`` to move it
-        to the end.
+        ``tl.split`` can only divide the trailing axis in two, so the caller
+        reshapes ``[..., n]`` to ``[..., n // factor, factor]`` first; the lane
+        axis has to be trailing before the split can see it.
 
         float8 goes through uint8 because Triton's ``tl.split`` does not accept
         fp8 operands.
         """
         dtype = value.dtype
         assert dtype is not None  # noqa: S101
-        expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
-        split_shape: Sequence[sympy.Expr | int | str] = reshape_shape
-        if permute_dims is not None:
-            expr = f"tl.permute({expr}, ({', '.join(map(str, permute_dims))}))"
-            split_shape = tuple(reshape_shape[i] for i in permute_dims)
-        self._emit_recursive_split(expr, part_names, split_shape, dtype)
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        value_expr = str(value)
+        if is_float8:
+            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
+        reshaped = self._reshape_expr(value, reshape_shape, value_expr=value_expr)
+        if not is_float8:
+            self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
+            return
+        raw_part_names = [f"{name}_uint8" for name in part_names]
+        self.compute.writeline(f"{', '.join(raw_part_names)} = tl.split({reshaped})")
+        for raw_name, part_name in zip(raw_part_names, part_names):
+            self.compute.writeline(
+                f"{part_name} = {raw_name}.to({triton_type(dtype)}, bitcast=True)"
+            )
 
     def emit_broadcast_via_reshape(
         self,
