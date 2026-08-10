@@ -4,36 +4,33 @@ import math
 import os
 import shutil
 import tempfile
+import unittest
 
 import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
-
-
-try:
-    import pydot  # noqa: F401
-
-    HAS_PYDOT = True
-except ImportError:
-    HAS_PYDOT = False
-
-
-HAS_DOT = shutil.which("dot") is not None
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 
 
 class TestGraphTransformObserver(TestCase):
-    def test_sdpa_rewriter(self):
-        if not (
-            HAS_CUDA_AND_TRITON
-            and PLATFORM_SUPPORTS_FUSED_ATTENTION
-            and HAS_PYDOT
-            and HAS_DOT
-        ):
-            return
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipUnless(PLATFORM_SUPPORTS_FUSED_ATTENTION, "Requires fused attention")
+    def test_sdpa_rewriter(self, device):
+        if shutil.which("dot") is None:
+            self.skipTest("Requires dot")
+        try:
+            import pydot  # noqa: F401
+        except ImportError:
+            self.skipTest("Requires pydot")
 
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -52,9 +49,9 @@ class TestGraphTransformObserver(TestCase):
         compiled_fn = torch.compile(dot_prod_attention, fullgraph=True)
 
         tensor_shape = (4, 2, 16, 32)
-        q = torch.randn(tensor_shape, device="cuda")
-        k = torch.randn(tensor_shape, device="cuda")
-        v = torch.randn(tensor_shape, device="cuda")
+        q = torch.randn(tensor_shape, device=device)
+        k = torch.randn(tensor_shape, device=device)
+        v = torch.randn(tensor_shape, device=device)
         compiled_fn(q, k, v)
 
         found_input_svg = False
@@ -68,6 +65,9 @@ class TestGraphTransformObserver(TestCase):
 
         self.assertTrue(found_input_svg)
         self.assertTrue(found_output_svg)
+
+
+instantiate_device_type_tests(TestGraphTransformObserver, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
