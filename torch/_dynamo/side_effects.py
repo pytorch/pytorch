@@ -756,6 +756,16 @@ class SideEffects:
             mutation_type_cls=AttributeMutationExisting,
         )
 
+    def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
+        """Register a sourceless VT (e.g. a synthetic exception) as a new
+        attribute-mutation object so its attribute mutations are codegen'd.
+        Keyed by the VT's id since there is no backing Python object."""
+        if id(variable) in self.id_to_variable:
+            return
+        variable.mutation_type = AttributeMutationNew()
+        self.id_to_variable[id(variable)] = variable
+        self.keepalive.append(variable)
+
     def track_object_new(
         self,
         cls_source: Source | None,
@@ -797,9 +807,9 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
-        elif issubclass(user_cls, collections.OrderedDict):
-            variable_cls = variables.OrderedDictVariable
         elif issubclass(user_cls, dict):
+            # Includes collections.OrderedDict and its subclasses; the
+            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
@@ -1207,6 +1217,14 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif isinstance(var, variables.ExceptionVariable):
+                # Exceptions cannot be built via object.__new__ (CPython rejects
+                # it), so reconstruct() constructs by calling the type. Cache
+                # the result so later references load the single instance; any
+                # __dict__ attributes replay in codegen_update_mutated.
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
