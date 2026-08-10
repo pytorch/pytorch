@@ -30,9 +30,9 @@
 
 namespace at::native { namespace {
 
-// gcc-13 ICEs auto-vectorizing the vec_base.h Vectorized<T> emulation under fixed-length SVE. 
+// gcc-13 ICEs auto-vectorizing the vec_base.h Vectorized<T> emulation under fixed-length SVE.
 // The barebones unsigned types have no SVE specialization, so they are the ones that land on that path.
-// Not every 13.x build is affected, so the bound covers the series rather than a point release. 
+// Not every 13.x build is affected, so the bound covers the series rather than a point release.
 // Remove once the aarch64 wheels require gcc-14 or newer.
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14 && \
     (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE128))
