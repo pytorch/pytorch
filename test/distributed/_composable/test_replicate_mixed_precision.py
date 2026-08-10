@@ -267,8 +267,12 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
                 (z, t, r),
                 (v, torch.ones_like(t), torch.zeros_like(r)),
             )
-            self.assertEqual(fsdp_out, ref_out, msg=f"iter {iter_idx}")
-            self.assertEqual(fsdp_tangent, ref_tangent, msg=f"iter {iter_idx}")
+            self.assertEqual(
+                fsdp_out, ref_out, msg=lambda msg: f"{msg}\niter {iter_idx}"
+            )
+            self.assertEqual(
+                fsdp_tangent, ref_tangent, msg=lambda msg: f"{msg}\niter {iter_idx}"
+            )
 
             fsdp_target = v - (t - r) * fsdp_tangent
             ref_target = v - (t - r) * ref_tangent
@@ -278,7 +282,9 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             # the JVP tangent output, not only through the primal output.
             fsdp_loss = fsdp_loss + fsdp_tangent.square().mean()
             ref_loss = ref_loss + ref_tangent.square().mean()
-            self.assertEqual(fsdp_loss, ref_loss, msg=f"iter {iter_idx}")
+            self.assertEqual(
+                fsdp_loss, ref_loss, msg=lambda msg: f"{msg}\niter {iter_idx}"
+            )
 
             fsdp_loss.backward()
             optim.step()
@@ -374,10 +380,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
                 # Use reduce-scatter -> all-gather to implement all-reduce
                 # since for world size >2, bf16 all-reduce and reduce-scatter
                 # have numeric differences
-                sharded_grad = funcol.reduce_scatter_tensor(
+                sharded_grad = funcol.reduce_scatter_single(
                     param_grad, scatter_dim=0, reduceOp="avg", group=group
                 )  # bf16 reduction
-                param.grad = funcol.all_gather_tensor(
+                param.grad = funcol.all_gather_single(
                     sharded_grad, gather_dim=0, group=group
                 ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
