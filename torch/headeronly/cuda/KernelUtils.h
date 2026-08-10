@@ -20,7 +20,7 @@
 #define NATIVE_ZERO_BF16 __int2bfloat16_rz(0)
 #endif
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 // fastSpecializedAtomicAdd (and fastAtomicAdd) are an optimization
 // that speed up half-precision atomics.  The situation with half
@@ -154,7 +154,7 @@ __device__ __forceinline__ void fastAtomicAdd(
   }
 }
 
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 // ATOMICADD/NATIVE_ZERO_BF16 are only expanded above; don't leak them.
 #undef ATOMICADD
