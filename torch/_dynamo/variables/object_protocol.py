@@ -883,6 +883,22 @@ def pynumber_index(
     return result
 
 
+def pynumber_tobase(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, base: int
+) -> VariableTracker | None:
+    """Mirrors PyNumber_ToBase (bin/oct/hex dispatch).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1653-L1666
+
+    Resolves __index__ (raising TypeError if absent), then formats the
+    resulting int in the requested base. Returns None (graph break) when the
+    index result is not a Python constant.
+    """
+    index = pynumber_index(tx, obj)
+    format_fn = {2: bin, 8: oct, 16: hex}[base]
+    return ConstantVariable.create(format_fn(index.as_python_constant()))
+
+
 def pyiter_next(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":

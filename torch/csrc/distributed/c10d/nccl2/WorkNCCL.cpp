@@ -26,6 +26,8 @@ WorkNCCL::WorkNCCL(
     const std::vector<at::Tensor>& inputTensors)
     : inputTensors_(inputTensors),
       comm_(comm),
+      reconfigure_uuid_(comm->reconfigure_uuid_),
+      blocking_wait_(comm->blocking_wait_),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       work_start_time_(std::chrono::steady_clock::now()),
@@ -44,6 +46,8 @@ WorkNCCL::WorkNCCL(
     at::Tensor inputTensor)
     : inputTensor_(std::move(inputTensor)),
       comm_(comm),
+      reconfigure_uuid_(comm->reconfigure_uuid_),
+      blocking_wait_(comm->blocking_wait_),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       work_start_time_(std::chrono::steady_clock::now()),
@@ -232,7 +236,7 @@ void WorkNCCL::synchronizeInternal() {
   // clear and both ranks spin forever). Skip while the stream is capturing a
   // CUDA graph: cudaStreamSynchronize is illegal during capture and the
   // captured work is replayed on-device where a host sync is meaningless.
-  if (hostBlocking_ &&
+  if (hostBlocking_ && !blocking_wait_ &&
       !c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
     C10_CUDA_CHECK(cudaStreamSynchronize(current_stream));
   }
@@ -257,9 +261,11 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
     return true;
   }
 
-  if (timeout != kNoTimeout) {
+  const auto wait_timeout =
+      timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout);
+  if (blocking_wait_ || wait_timeout.has_value()) {
     while (true) {
-      WorkStatus current = checkStatus(timeout);
+      WorkStatus current = checkStatus(wait_timeout);
       if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
           current == WorkStatus::ERROR) {
         break;
@@ -268,8 +274,15 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
     }
   }
 
-  WorkStatus current =
-      timeout == kNoTimeout ? checkStatus() : checkStatus(timeout);
+  WorkStatus current = checkStatus(wait_timeout);
+  if (blocking_wait_ &&
+      (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR)) {
+    comm_->handleBlockingWaitFailure(current, reconfigure_uuid_);
+  }
+  if (blocking_wait_) {
+    // Blocking-wait mode has no watchdog to drain completed work.
+    comm_->workq_.garbageCollect();
+  }
   if (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) {
     std::rethrow_exception(exception());
   }
