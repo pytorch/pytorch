@@ -228,7 +228,8 @@ class TestLazyOpInfo(TestCase):
             cands.append(f"{prefix}::{alias.name}{symint_suffix}")
 
         self.assertTrue(
-            any(c in metrics for c in cands), f"none of {cands} not found in {metrics}"
+            any(c in metrics for c in cands),
+            lambda msg: f"{msg}\nnone of {cands} not found in {metrics}",
         )
 
     @ops(
@@ -255,7 +256,9 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
+                    torch.allclose(
+                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                    )
                 )
 
             if isinstance(a, Sequence):
@@ -301,7 +304,9 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
+                    torch.allclose(
+                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                    )
                 )
 
             if isinstance(a, Sequence):

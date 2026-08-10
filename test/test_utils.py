@@ -10,9 +10,10 @@ import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -33,6 +34,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    skipIfRocmVersionAtLeast,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
@@ -399,7 +401,18 @@ class TestCheckpoint(TestCase):
     @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
         _acc = torch.accelerator.current_accelerator()
-        _device_type = _acc.type  # type: ignore[union-attr]
+        if _acc is None:
+            self.skipTest("current_accelerator() not supported")
+
+        _device_type = _acc.type
+
+        # Functional check: verify memory tracking actually works on this backend
+        test_tensor = torch.zeros(1024, device=_device_type)
+        torch.accelerator.synchronize()
+        if torch.accelerator.memory_allocated() == 0:
+            del test_tensor
+            self.skipTest(f"{_device_type} does not support memory_allocated tracking")
+        del test_tensor
 
         def _do_test(fn, should_free):
             stats: list[int] = []
@@ -769,6 +782,8 @@ class TestAssert(TestCase):
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
+    # The standalone binary cannot resolve librocprofiler-sdk.so.1 in CI.
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()
         try:
@@ -1024,6 +1039,57 @@ class TestTryImport(TestCase):
         self.assertIsNone(missing_module)
 
 
+class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
+        def nvsmi(_query):
+            raise FileNotFoundError("nvidia-smi")
+
+        triton = types.ModuleType("triton")
+        triton_testing = types.ModuleType("triton.testing")
+        cast(Any, triton_testing).nvsmi = nvsmi
+        cast(Any, triton).testing = triton_testing
+
+        pynvml = types.ModuleType("pynvml")
+        cast(Any, pynvml).NVML_CLOCK_SM = 1
+        calls = []
+
+        def nvmlDeviceGetMaxClockInfo(handle, clock_type):
+            calls.append(("max_clock", handle, clock_type))
+            return 1980
+
+        def nvmlShutdown():
+            calls.append("shutdown")
+
+        cast(Any, pynvml).nvmlDeviceGetMaxClockInfo = nvmlDeviceGetMaxClockInfo
+        cast(Any, pynvml).nvmlShutdown = nvmlShutdown
+
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.dict(
+                    sys.modules,
+                    {
+                        "triton": triton,
+                        "triton.testing": triton_testing,
+                        "pynvml": pynvml,
+                    },
+                ),
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "_get_pynvml_handler", return_value="handle"
+                ) as get_pynvml_handler,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1980)
+                get_pynvml_handler.assert_called_once_with()
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+        self.assertEqual(
+            calls,
+            [("max_clock", "handle", 1), "shutdown"],
+        )
+
+
 @deprecated()
 def _deprecated_api(x, y=15):
     return x + y
@@ -1070,6 +1136,50 @@ class TestDeviceLazyInit(TestCase):
 instantiate_device_type_tests(
     TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
 )
+
+
+class TestEnv(TestCase):
+    def test_getenv_matches_os(self):
+        for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
+            self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
+
+    def test_setenv_roundtrip(self):
+        name = "TORCH_TEST_SETENV_VAR"
+        torch._utils.setenv(name, "hello")
+        self.assertEqual(torch._utils.getenv(name), "hello")
+
+    def test_setenv_overwrite(self):
+        name = "TORCH_TEST_SETENV_OVERWRITE"
+        torch._utils.setenv(name, "first")
+        torch._utils.setenv(name, "second", overwrite=False)
+        self.assertEqual(torch._utils.getenv(name), "first")
+        torch._utils.setenv(name, "second")
+        self.assertEqual(torch._utils.getenv(name), "second")
+
+    def test_unsetenv(self):
+        name = "TORCH_TEST_UNSETENV"
+        torch._utils.setenv(name, "gone")
+        self.assertEqual(torch._utils.getenv(name), "gone")
+        torch._utils.unsetenv(name)
+        self.assertIsNone(torch._utils.getenv(name))
+
+    def test_os_environ_hook(self):
+        name = "TORCH_TEST_ENVIRON_HOOK"
+        torch._utils.install_os_environ_hook()
+        try:
+            os.environ[name] = "hooked"
+            # Both the cached os.environ dict and c10 observe the write.
+            self.assertEqual(os.environ.get(name), "hooked")
+            self.assertEqual(torch._utils.getenv(name), "hooked")
+            del os.environ[name]
+            self.assertIsNone(os.environ.get(name))
+            self.assertIsNone(torch._utils.getenv(name))
+            # Idempotent while installed.
+            torch._utils.install_os_environ_hook()
+        finally:
+            torch._utils.remove_os_environ_hook()
+        # After removal os.putenv is restored, so it is no longer our hook.
+        self.assertIsNot(os.putenv, torch._utils._torch_putenv)
 
 
 if __name__ == "__main__":
