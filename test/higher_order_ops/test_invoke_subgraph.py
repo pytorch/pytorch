@@ -104,6 +104,39 @@ class TestInvokeSubgraph(TestCase):
         num_hops = len([n for n in joint.graph.nodes if n.target is hop])
         self.assertEqual(num_hops, 2)
 
+    def test_graph_module_pickle_roundtrip(self):
+        # Unpickling a GraphModule re-traces it symbolically, replaying calls with
+        # Proxy operands -- the path the FX/AOTAutograd caches load through. The
+        # region must come back as the *same* invoke_subgraph call, not inlined:
+        # a graph that silently flattens on reload loses the shared subgraph (and
+        # with it the no-drift guarantee) while still counting as a cache hit.
+        import pickle
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def gn(x, y):
+            return (torch.sigmoid(torch.matmul(x, y)),)
+
+        subgraph = make_fx(gn)(torch.randn(4, 4), torch.randn(4, 4))
+        hop = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            (out,) = hop(subgraph, "subgraph_0", x, y)
+            return out
+
+        gm = make_fx(fn)(torch.randn(4, 4), torch.randn(4, 4))
+        reloaded = pickle.loads(pickle.dumps(gm))
+
+        def count_hops(g):
+            return len([n for n in g.graph.nodes if n.target is hop])
+
+        self.assertEqual(count_hops(gm), 1)
+        self.assertEqual(count_hops(reloaded), 1)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        self.assertEqual(gm(x, y), reloaded(x, y))
+
     def test_simple(self):
         def gn(x, y):
             return torch.mul(x, y)

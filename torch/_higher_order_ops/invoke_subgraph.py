@@ -275,9 +275,22 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
+        # Proxy is allowed because symbolically re-tracing a GraphModule replays
+        # its calls with proxies rather than values -- notably when unpickling a
+        # cached graph (_deserialize_graph_module), where rejecting them makes
+        # every cache load fail and silently disables caching for any graph
+        # holding an invoke_subgraph call.
         if not all(
             isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+                o,
+                (
+                    torch.Tensor,
+                    int,
+                    torch.SymInt,
+                    torch.Generator,
+                    FakeScriptObject,
+                    torch.fx.Proxy,
+                ),
             )
             or is_custom_class(type(o))
             for o in operands
