@@ -57,6 +57,9 @@ class CUDACombinedScheduling(BaseScheduling):
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
 
+    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+        return self._triton_scheduling.has_sub_parent_epilogue(nodes)
+
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
             return self._cutlass_scheduling
@@ -106,12 +109,6 @@ class CUDACombinedScheduling(BaseScheduling):
                 return False
             return self._nv_universal_gemm_scheduling.can_fuse_vertical(node1, node2)
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
-
-    def can_fuse_nested_reduction_append(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        # Fused nested reductions are Triton-only, so skip the template ladder.
-        return self._triton_scheduling.can_fuse_nested_reduction_append(node1, node2)
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -190,8 +187,8 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_mix_order_reduction(self, node):
         return self._triton_scheduling.codegen_mix_order_reduction(node)
 
-    def codegen_nested_reduction(self, node):
-        return self._triton_scheduling.codegen_nested_reduction(node)
+    def codegen_staged_reduction(self, node):
+        return self._triton_scheduling.codegen_staged_reduction(node)
 
     def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
         return self._triton_scheduling.codegen_node(node)
