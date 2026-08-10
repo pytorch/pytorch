@@ -45,6 +45,13 @@ Tensor& max_unpooling2d_forward_out_cpu(
 
   auto oheight = output_size[0];
   auto owidth = output_size[1];
+  TORCH_CHECK(
+      oheight >= 0 && owidth >= 0,
+      "max_unpooling2d(): output_size must contain non-negative spatial dimensions, but got output_size=(",
+      oheight,
+      ", ",
+      owidth,
+      ")");
 
   auto memory_format = self_.suggest_memory_format();
   auto self = self_.contiguous(memory_format);
@@ -119,6 +126,15 @@ static void max_unpooling3d_shape_check(
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
+  TORCH_CHECK(
+      oT >= 0 && oH >= 0 && oW >= 0,
+      "max_unpooling3d(): output_size must contain non-negative spatial dimensions, but got output_size=(",
+      oT,
+      ", ",
+      oH,
+      ", ",
+      oW,
+      ")");
 
   int dimw = 3;
   int dimh = 2;
