@@ -80,7 +80,6 @@ test_failures = {
     "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
     ),
-    "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
