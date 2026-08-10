@@ -215,30 +215,34 @@ class NbBoolTests(TestCase):
                 return self
 
         def fn(a, obj):
-            if obj:
-                return a + 1
-            return a - 1
+            try:
+                if obj:
+                    return a + 1
+                return a - 1
+            except TypeError as e:
+                return str(e)
 
         x = torch.rand(4)
-        compiled = torch.compile(fn, backend="eager")
-        with self.assertRaisesRegex(
-            TypeError, "__bool__ should return bool, returned MyObj"
-        ):
-            compiled(x, MyObj())
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        out = compiled(x, MyObj())
+        self.assertTrue(type(out) is str)
+        self.assertEqual(out, fn(x, MyObj()))
 
     def test_bool_user_defined_object_raises_typeerror(self):
         class Baz(int):
             def __bool__(self):
                 return self
 
-        @torch.compile(backend="eager")
         def fn(obj):
-            return bool(obj)
+            try:
+                bool(obj)
+            except TypeError as e:
+                return str(e)
 
-        with self.assertRaisesRegex(
-            TypeError, "__bool__ should return bool, returned Baz"
-        ):
-            fn(Baz())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        out = opt_fn(Baz())
+        self.assertTrue(type(out) is str)
+        self.assertEqual(fn(Baz()), out)
 
     # --- Blocked slot: __bool__ = None ---
 

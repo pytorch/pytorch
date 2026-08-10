@@ -1,31 +1,21 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import shutil
 import tempfile
 import unittest
 
-
-TOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "native_aot")
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(
-        name, os.path.join(TOOLS_DIR, f"{name}.py")
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load module {name}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+# Ordinary package imports, like every other tools test (CI runs
+# `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
+# scope torch-free precisely so this works: the Test tools job runs in the
+# linter image, which has no built torch.
+from tools.native_aot import build_stage2, export, gen_aot_lib, toolchains
 
 
-build_stage2 = _load("build_stage2")
-export = _load("export")
-gen_aot_lib = _load("gen_aot_lib")
-toolchains = _load("toolchains")
+_TOOLS_FILE = os.path.abspath(toolchains.__file__)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 
 SIDECAR = {
@@ -97,12 +87,85 @@ class TestExportJobs(unittest.TestCase):
             self.assertFalse(export._job_needed(job, force=False))
 
     def test_run_job_is_module_level(self):
-        # The spawn pool pickles the job function by qualified name; a
-        # closure or nested function would break only at --jobs > 1.
+        # The pool pickles the job function by qualified name; a closure
+        # or nested function would break only at --jobs > 1.
         # (A real pickle round-trip needs export importable by module
         # name, which this by-path test harness can't provide.)
         self.assertEqual(export._run_job.__qualname__, "_run_job")
         self.assertEqual(export.export_point.__qualname__, "export_point")
+
+    def test_pool_never_forks_after_cuda_init(self):
+        # Plain "fork" gives workers a dead CUDA context (measured:
+        # is_initialized() False, allocation fails, no exception) because
+        # the parent initializes CUDA before the pool starts.
+        self.assertNotEqual(export.POOL_START_METHOD, "fork")
+        self.assertIn(export.POOL_START_METHOD, ("forkserver", "spawn"))
+
+    def test_cutedsl_export_passes_gpu_arch(self):
+        # The arch must reach the compiler as a --gpu-arch OPTION, not as
+        # process state: that is what lets one worker serve several
+        # arches. Appended to any builder-supplied options, never
+        # replacing them. Stubs cute.compile/export_to_c because this
+        # suite runs in the linter image, which has no DSL installed.
+        import sys
+        import types
+        import unittest.mock as mock
+
+        seen = {}
+
+        def fake_compile(fn, *args, **kwargs):
+            seen["options"] = kwargs.get("options")
+            return types.SimpleNamespace(export_to_c=lambda **kw: None)
+
+        fake_cute = types.ModuleType("cutlass.cute")
+        fake_cute.compile = fake_compile
+        fake_cutlass = types.ModuleType("cutlass")
+        fake_cutlass.cute = fake_cute
+        tc = toolchains.CuteDslToolchain()
+        with (
+            mock.patch.dict(
+                sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
+            ),
+            mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
+        ):
+            for opts, want in (
+                (None, "--gpu-arch sm_90a"),
+                ("--enable-assertions", "--enable-assertions --gpu-arch sm_90a"),
+            ):
+                b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+                if opts:
+                    b["options"] = opts
+                tc.export(b, "/tmp", arch="sm_90a")
+                self.assertEqual(seen["options"], want)
+            # No arch: builder options pass through untouched (the
+            # detect-from-device path must not inject --gpu-arch).
+            tc.export(
+                {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
+            )
+            self.assertIsNone(seen["options"])
+
+    def test_pool_preload_stays_fork_safe(self):
+        # The forkserver's server process is the fork PARENT for every
+        # worker, so only modules that are inert in a fork parent may be
+        # preloaded. Importing torch initializes no CUDA state; cutlass
+        # and triton would build DSL/driver state in the parent that every
+        # worker then inherits, which is what this pins down.
+        self.assertEqual(export.POOL_PRELOAD, ("torch",))
+
+    def test_json_normal_matches_sidecar_round_trip(self):
+        # _json_normal replaces a json.dumps/loads pair, so it must agree
+        # with one exactly: any divergence makes a spec mismatch its own
+        # sidecar and re-export forever.
+        point = {
+            "dtype": "float32",
+            "in_dtypes": ("float32", "bfloat16"),
+            "N": 4096,
+            "tma": True,
+        }
+        self.assertEqual(export._json_normal(point), json.loads(json.dumps(point)))
+        self.assertEqual(
+            export._json_normal(point)["in_dtypes"], ["float32", "bfloat16"]
+        )
 
 
 class TestArch(unittest.TestCase):
@@ -155,15 +218,6 @@ class TestArch(unittest.TestCase):
         self.assertEqual(len(hopper), 0)
         self.assertEqual(len(on_device), 1)
 
-    def test_sm_number_parsing(self):
-        tc = toolchains.Toolchain
-        self.assertEqual(tc._sm_number("sm_90a"), 90)
-        self.assertEqual(tc._sm_number("sm_100"), 100)
-        with self.assertRaises(ValueError):
-            tc._sm_number("90a")
-        with self.assertRaises(ValueError):
-            tc._sm_number("sm_90b")
-
     def test_multi_arch_jobs_nest_per_arch(self):
         # Multi-arch fan-out nests <out>/<arch>/<decl_id>; single arch
         # (or default None) keeps the flat layout.
@@ -209,6 +263,44 @@ class TestArch(unittest.TestCase):
             gen_aot_lib._arch_gate(Pinned, [{"arch": "sm_80"}])
 
 
+class TestSidecarIntegrity(unittest.TestCase):
+    """The sidecar is written after the artifacts, so it is the commit
+    marker: absent means not-yet-exported, corrupt or orphaned means the
+    tree cannot be trusted."""
+
+    def test_empty_dir_is_fine(self):
+        # A clean build (or a newly added spec point) has no sidecar and
+        # no artifacts; it must export, not fail.
+        with tempfile.TemporaryDirectory() as d:
+            export._check_no_orphan_artifacts(d)
+
+    def test_artifacts_without_sidecar_are_fatal(self):
+        # An export that died between compiling and writing the sidecar.
+        # The CMake globs link *.o by pattern, so an undescribed orphan
+        # would otherwise be linked silently.
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k_f32.o"), "w").close()
+            with self.assertRaisesRegex(RuntimeError, "no sidecar"):
+                export._check_no_orphan_artifacts(d)
+
+    def test_artifacts_with_sidecar_are_fine(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k.o"), "w").close()
+            with open(os.path.join(d, "k.json"), "w") as f:
+                json.dump({"prefix": "k"}, f)
+            export._check_no_orphan_artifacts(d)
+
+    def test_unreadable_sidecar_is_fatal(self):
+        # Present but unparsable: corruption, not an interrupted run.
+        # Re-exporting would paper over it (and --force skips the check).
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "k.json")
+            with open(path, "w") as f:
+                f.write("{truncated")
+            with self.assertRaisesRegex(RuntimeError, "could not be read"):
+                export._read_sidecar(path)
+
+
 class TestSpecExpansion(unittest.TestCase):
     def test_cross_product(self):
         pts = export.expand_specs(
@@ -240,7 +332,7 @@ class TestLauncherGeneration(unittest.TestCase):
         # Lazy module load + wrapper call with all tensor structs.
         self.assertIn("c10::call_once(fakeop_f32_n1024_k8_loaded", src)
         self.assertIn(
-            "cute_dsl_fakeop_f32_n1024_k8_wrapper(&fakeop_f32_n1024_k8_module, &mX_s, &mOut_s, stream)",
+            "cute_dsl_fakeop_f32_n1024_k8_wrapper(&fakeop_f32_n1024_k8_module, &mX_s, &mOut_s,",
             src,
         )
 
@@ -255,13 +347,16 @@ class TestScalarArgs(unittest.TestCase):
         src = gen_aot_lib.gen_launcher(sidecar)
         # Scalars appear after tensors in both the params and the call,
         # matching the exported wrapper's argument order.
-        self.assertIn("const at::Tensor& mX, float alpha, cudaStream_t stream", src)
-        self.assertIn("(&fakeop_f32_n1024_k8_module, &mX_s, alpha, stream)", src)
+        self.assertIn("const at::Tensor& mX, float alpha, c10::Stream stream", src)
+        self.assertIn("(&fakeop_f32_n1024_k8_module, &mX_s, alpha,", src)
+        # The shared contract carries a device-agnostic c10::Stream; the
+        # body narrows it to the raw handle the C ABI takes.
+        self.assertIn("c10::cuda::CUDAStream(stream).stream()", src)
 
     def test_no_scalar_args_unchanged(self):
         src = gen_aot_lib.gen_launcher(SIDECAR)
         self.assertIn(
-            "const at::Tensor& mX, const at::Tensor& mOut, cudaStream_t stream", src
+            "const at::Tensor& mX, const at::Tensor& mOut, c10::Stream stream", src
         )
 
 
@@ -290,6 +385,46 @@ class _FakeDecl:
     @staticmethod
     def cpp_launch(spec, launch_fn):
         return f"{launch_fn}(self, out, at::cuda::getCurrentCUDAStream());"
+
+
+class TestInt32SizeGate(unittest.TestCase):
+    # The DSL's exported ABI carries int32_t shape slots while aten sizes
+    # are int64_t, so the generated gate must DECLINE oversized dims
+    # rather than let the launcher's static_cast truncate them.
+    def test_gate_covers_plain_and_optional_tensors(self):
+        gate = gen_aot_lib._int32_size_gate(
+            "const at::Tensor & self, int64_t k, "
+            "const std::optional<at::Tensor>& values"
+        )
+        # Plain tensor: unconditional scan.
+        self.assertIn("self.sizes().begin()", gate)
+        # Optional tensor: has_value() guarded, arrow deref.
+        self.assertIn("values.has_value()", gate)
+        self.assertIn("values->sizes().begin()", gate)
+        # Declines, never truncates.
+        self.assertIn("return false;", gate)
+        # Non-tensor params contribute nothing.
+        self.assertNotIn(" k", gate.replace("_naot", ""))
+
+    def test_gate_empty_without_tensors(self):
+        self.assertEqual(gen_aot_lib._int32_size_gate("int64_t k, bool largest"), "")
+
+    def test_gate_emitted_into_both_stub_and_covers(self):
+        # Both the stub prelude and cpp_covers get it: coverage must not
+        # claim a shape the stub will refuse.
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [sidecar],
+            "const at::Tensor & self, int64_t k",
+        )
+        self.assertIn("inline bool _naot_dim_too_big", src)
+        # _FakeDecl has no cpp_covers, so only the stub gate is emitted.
+        # The covers side is covered by test_gate_covers_plain_and_optional.
+        self.assertEqual(src.count("// Size gate:"), 1)
+        self.assertIn("self.sizes().begin()", src)
 
 
 class TestAotSourceGeneration(unittest.TestCase):
@@ -419,10 +554,47 @@ class TestReadOnlyInputs(unittest.TestCase):
         ]
         src = gen_aot_lib.gen_launcher(sc)
         self.assertIn("mX_s.data = const_cast<void*>(mX.const_data_ptr());", src)
-        self.assertIn("mOut_s.data = mOut.data_ptr();", src)
+        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
 
 
 class TestSourceStaleness(unittest.TestCase):
+    def test_closure_covers_shared_declaration_machinery(self):
+        # The grid expander and the validating loader decide which spec
+        # points exist and what a declaration means, so editing them
+        # changes what an artifact MEANS. They live in torchgen (outside
+        # the tools/*.py glob) and arrive by ordinary import, so only the
+        # sys.modules half of the closure can catch them -- which used to
+        # filter on "torch._native" alone and silently missed them.
+        # Compared by basename: an editable install can resolve torchgen
+        # to a different checkout than REPO, and relpath then yields a
+        # ../.. traversal rather than the tidy repo-relative path.
+        names = {os.path.basename(p) for p in export.source_closure()}
+        for want in (
+            "native_aot_spec_grid.py",
+            "native_aot_decl.py",
+            "toolchains.py",
+        ):
+            self.assertIn(want, names, f"{want} must invalidate artifacts")
+
+    def test_closure_survives_sys_modules_mutation(self):
+        # source_closure hashes files while walking sys.modules, and
+        # hashing imports hashlib lazily -- so on a cold interpreter the
+        # walk mutates the dict it is iterating and raises "dictionary
+        # changed size during iteration". Force that ordering by having
+        # the hash step import a module that is definitely not loaded yet.
+        import sys
+        import unittest.mock as mock
+
+        real_hash = export._file_hash
+
+        def hash_and_import(path):
+            importlib.import_module("wave")  # stdlib, unlikely to be loaded
+            return real_hash(path)
+
+        sys.modules.pop("wave", None)
+        with mock.patch.object(export, "_file_hash", hash_and_import):
+            export.source_closure()
+
     def test_sources_current_roundtrip(self):
         # A sidecar whose recorded closure matches the tree is current;
         # editing any recorded file (or recording none) makes it stale.
@@ -484,7 +656,7 @@ class TestToolchainRegistry(unittest.TestCase):
     def test_cmake_globs_cover_all_toolchains(self):
         # The embedded link block in caffe2/CMakeLists.txt must glob every
         # artifact pattern the toolchains emit (it cannot import this file).
-        cmake_path = os.path.join(TOOLS_DIR, "..", "..", "caffe2", "CMakeLists.txt")
+        cmake_path = os.path.join(REPO, "caffe2", "CMakeLists.txt")
         with open(cmake_path) as f:
             cmake = f.read()
         for tc in toolchains.TOOLCHAINS.values():
