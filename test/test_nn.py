@@ -13877,7 +13877,44 @@ if __name__ == '__main__':
         # input/weight matmuls), so the cap is generally tighter than
         # the input/weight caps for the same combo.
         expected_linear_bias_grad_max_ulp_diff = 0
-        if prob_target:
+        # input-grad ``grad_error`` tolerance, in units of eps (feps = 3 eps);
+        # a few lower-precision-matmul legs need a touch more headroom.
+        input_grad_err_mult = 3
+        if prob_target and none_reduction:
+            # prob + reduction='none' (per-sample loss + recompute backward).
+            # Caps are drift trip-wires (~2-3x observed); grad_error is the
+            # correctness guard. Observed maxima (input_grad / weight) from a
+            # CPU + A100 + CI sweep: fp32 cpu 149/58, mps 37/77, cuda+rocm
+            # 43/9; fp16 compact mps 285/14, cpu/cuda/rocm 93/23; bf16 compact
+            # cuda/rocm 5/2; fp16/bf16 accurate ~0 everywhere.
+            expected_max_ulp_diff = 8
+            if dtype == torch.float32:
+                if "cpu" in device:
+                    expected_input_grad_max_ulp_diff = 384  # x86_64 149
+                    expected_weight_grad_max_ulp_diff = 160  # x86_64 58
+                elif "mps" in device:
+                    expected_input_grad_max_ulp_diff = 128  # 37
+                    expected_weight_grad_max_ulp_diff = 192  # m1 77 (m2 49)
+                    # MPS fp32 matmul rounds the dense recompute to ~3.3*eps
+                    # (CI: input-grad err 3.99e-7); allow 5*eps headroom.
+                    input_grad_err_mult = 5
+                else:  # cuda / rocm
+                    expected_input_grad_max_ulp_diff = 128  # cuda 34, rocm 43
+                    expected_weight_grad_max_ulp_diff = 32  # 9
+            elif _resolved_policy == "accurate":
+                expected_input_grad_max_ulp_diff = 4
+                expected_weight_grad_max_ulp_diff = 4
+            elif dtype == torch.bfloat16:  # compact, bf16
+                expected_input_grad_max_ulp_diff = 16  # cuda/rocm 5
+                expected_weight_grad_max_ulp_diff = 8  # cuda/rocm 2
+            elif "mps" in device:  # compact, fp16 -- mps fp16 matmul is looser
+                expected_input_grad_max_ulp_diff = 512  # mps 285
+                expected_weight_grad_max_ulp_diff = 64  # mps 14
+            else:  # compact, fp16 (cpu / cuda / rocm)
+                expected_input_grad_max_ulp_diff = 192  # cpu 93
+                expected_weight_grad_max_ulp_diff = 64  # cpu 23, cuda/rocm 5
+            expected_linear_bias_grad_max_ulp_diff = 0
+        elif prob_target:
             # Probability-target caps with the near-zero ULP floor (see
             # ``grad_max_ulp``). fp32 takes the all-input-dtype path, so
             # its caps are policy-independent and the ULP counts run larger
@@ -14018,6 +14055,7 @@ if __name__ == '__main__':
 
         eta = torch.finfo(dtype).eps
         feps = torch.finfo(dtype).eps * 3
+        input_grad_err_tol = eta * input_grad_err_mult
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
@@ -14189,7 +14227,7 @@ if __name__ == '__main__':
                     maximal_linear_bias_grad_err = err
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
-        self.assertLessEqual(maximal_input_grad_err, feps,
+        self.assertLessEqual(maximal_input_grad_err, input_grad_err_tol,
                              msg=lambda msg: f"{msg}\nworst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
                              msg=lambda msg: f"{msg}\nworst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
@@ -14700,6 +14738,30 @@ if __name__ == '__main__':
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             prob_target=True)
 
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @dtypes(torch.float32)
+    def test_linear_cross_entropy_loss_prob_target_none_reduction(
+        self, device, dtype, acc_policy
+    ):
+        # reduction='none' probability-target leg: per-sample prob loss +
+        # recompute backward against the fp64 reference. See the prob_target
+        # none_reduction cap block in _test_linear_cross_entropy_loss.
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy,
+            prob_target=True, none_reduction=True)
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    def test_linear_cross_entropy_loss_prob_target_none_reduction_with_acc_dtype(
+        self, device, dtype, acc_policy
+    ):
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy,
+            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
+            prob_target=True, none_reduction=True)
+
     @parametrize_test("acc_policy", ["auto", "compact", "accurate"])
     def test_linear_cross_entropy_prob_large_vocab_fp16_denom(self, device, acc_policy):
         # Regression: the softmax denominator sum_v exp(shifted) sums
@@ -14791,12 +14853,18 @@ if __name__ == '__main__':
         (grad_target,) = torch.autograd.grad(out, [target_g])
         self.assertGreater(grad_target.norm().item(), 0.0)
 
-        # reduction='none' with a probability target: falls back.
-        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+        # reduction='none' with a probability target: now chunks (no fallback).
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
             out = nn.functional.linear_cross_entropy(
                 inp, lw, target, reduction="none", options=options,
             )
+        self.assertFalse(ws, "prob+none unexpectedly fell back to the reference")
         self.assertEqual(out.shape, (N,))
+        ref = nn.functional.cross_entropy(
+            nn.functional.linear(inp, lw), target, reduction="none",
+        )
+        self.assertEqual(out, ref)
 
         # dtype mismatch: falls back (the reference type-promotes, so
         # the loss carries the promoted dtype).
