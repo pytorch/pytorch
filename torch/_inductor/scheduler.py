@@ -4292,6 +4292,10 @@ class FusedNestedReductions(FusedStagedReduction):
             if append is None:
                 raise AssertionError("nested append plan was lost before fusion")
             grouped_node, stage = append
+        # This internal fusion bypasses Scheduler.fuse_two_nodes.
+        self.scheduler.node_to_mempool[grouped_node] = (
+            self.scheduler.node_to_mempool.get(self.node2)
+        )
         return FusedNestedReductions(self.node1, grouped_node, stage)
 
 
