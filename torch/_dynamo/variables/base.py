@@ -1669,6 +1669,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "source",
         "source_location",
         "mutation_type",
+        "has_untrusted_source_alias",
         "parents_tracker",
         "user_code_variable_name",
         "dict_vt",
@@ -3151,11 +3152,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
         dict_vt: variables.DunderDictVariable | None = None,
+        has_untrusted_source_alias: bool = False,
     ) -> None:
         super().__init__()
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
+        # Set when source deduplication aliases this tracker with a mutable
+        # SkipGuardSource. Identity analysis must then remain conservative even
+        # if the tracker's primary source is otherwise guardable.
+        self.has_untrusted_source_alias = has_untrusted_source_alias
         # Carried so clone() round-trips the cached __dict__ view.
         self.dict_vt = dict_vt
 

@@ -560,7 +560,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # EnumType, etc.) that don't override __getattribute__ use
         # type.__getattribute__ which is the algorithm we implement below.
         metacls = type(self.value)
-        if metacls is not type and "__getattribute__" in metacls.__dict__:
+        if (
+            metacls is not type
+            and inspect.getattr_static(metacls, "__getattribute__")
+            is not type.__getattribute__
+        ):
             unimplemented(
                 gb_type="Custom metaclass with __getattribute__",
                 context=f"type({self.value}) = {metacls}",
@@ -659,6 +663,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.TupleVariable(items, source=source)
         if name == "__base__":
             return VariableTracker.build(tx, self.value.__base__, source)
+        get_fn = inspect.getattr_static(type(meta_attr), "__get__", None)
+        if isinstance(meta_attr, property) or isinstance(get_fn, types.FunctionType):
+            return variables.GetAttrVariable(
+                self, name, source=source, deferred_runtime_getattr=True
+            )
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
         resolved = type.__getattribute__(self.value, name)
@@ -812,7 +821,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         # User-defined descriptor with Python __get__.
         # For torch-internal classes or attributes in the class's own __dict__,
-        # defer descriptor invocation to runtime via VariableTracker.build to
+        # defer descriptor invocation to runtime via GetAttrVariable to
         # avoid compile-time side effects (e.g. deprecation warnings from
         # _ClassPropertyDescriptor on torch.FloatStorage.dtype).
         get_fn = inspect.getattr_static(type(cls_attr), "__get__", None)
@@ -822,7 +831,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 or self.value.__module__.startswith("torch.")
                 or self.value.__module__ == "torch"
             ):
-                return VariableTracker.build(tx, cls_attr, source)
+                return variables.GetAttrVariable(
+                    self, name, source=source, deferred_runtime_getattr=True
+                )
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
         # TODO(tp_descr_get) - C-level descriptors not matched above (e.g.

@@ -519,6 +519,34 @@ class SkipGuardSource(ChainedSource):
         return "{0}"
 
 
+@dataclass_with_cached_hash(frozen=True)
+class TrustedSkipGuardSource(ChainedSource):
+    """A source whose identity may be folded without a runtime guard.
+
+    The wrapped value is trusted to remain stable for the lifetime of a
+    compiled frame.
+    """
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.base.reconstruct(codegen)
+
+    @property
+    def _name_template(self) -> str:
+        return "{0}"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class GuardedIdentitySource(ChainedSource):
+    """A reconstructible source whose identity is explicitly guarded."""
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.base.reconstruct(codegen)
+
+    @property
+    def _name_template(self) -> str:
+        return "{0}"
+
+
 class TensorProperty(enum.Enum):
     SIZE = 0
     STRIDE = 1
@@ -1431,10 +1459,24 @@ def is_from_defaults(source: Source) -> bool:
 
 @functools.lru_cache
 def is_from_skip_guard_source(source: Source) -> bool:
-    if isinstance(source, SkipGuardSource):
+    if isinstance(source, (SkipGuardSource, TrustedSkipGuardSource)):
         return True
 
     if isinstance(source, ChainedSource):
         return is_from_skip_guard_source(source.base)
+
+    return False
+
+
+@functools.lru_cache
+def is_from_untrusted_skip_guard_source(source: Source) -> bool:
+    if isinstance(source, SkipGuardSource):
+        return True
+
+    if isinstance(source, TrustedSkipGuardSource):
+        return False
+
+    if isinstance(source, ChainedSource):
+        return is_from_untrusted_skip_guard_source(source.base)
 
     return False

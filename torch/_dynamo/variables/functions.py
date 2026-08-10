@@ -1855,7 +1855,7 @@ class UserMethodVariable(UserFunctionVariable):
     }
 
     def get_real_python_backed_value(self) -> Any:
-        return self.fn
+        return NO_SUCH_SUBOBJ
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -4215,8 +4215,10 @@ class MethodWrapperVariable(VariableTracker):
         "__self__": Member(lambda s, tx: s.obj),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # Descriptor lookup creates a fresh wrapper object. Materializing one
+        # here would not recover the Python object represented by this VT.
+        return NO_SUCH_SUBOBJ
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()

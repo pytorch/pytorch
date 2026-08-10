@@ -1593,6 +1593,7 @@ class LambdaVariable(VariableTracker):
 
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
+        "deferred_runtime_getattr",
         "name",
         "py_type",
         *VariableTracker._nonvar_fields,
@@ -1603,6 +1604,7 @@ class GetAttrVariable(VariableTracker):
         obj: VariableTracker,
         name: str,
         py_type: type | None = None,
+        deferred_runtime_getattr: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1613,6 +1615,10 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
         self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
+        # Identity analysis must leave this lookup to runtime rather than invoke
+        # a Python descriptor while tracing. Other operations may still resolve
+        # the attribute through their normal semantics.
+        self.deferred_runtime_getattr = deferred_runtime_getattr
 
     def python_type(self) -> type:
         if self.py_type is not None:
@@ -3003,6 +3009,11 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    _nonvar_fields = {
+        "weakref_source",
+        *VariableTracker._nonvar_fields,
+    }
+
     def python_type(self) -> type:
         return weakref.ref
 
@@ -3020,17 +3031,25 @@ class WeakRefVariable(VariableTracker):
         callback_source = source and AttrSource(source, "__callback__")
         callback_vt = VariableTracker.build(tx, callback, callback_source)
         referent = weakref_value()
+        weakref_source = source
         source = source and WeakRefCallSource(source)
         referent_vt = VariableTracker.build(tx, referent, source)
         options["source"] = source
-        return WeakRefVariable(referent_vt, callback_vt, **options)
+        return WeakRefVariable(
+            referent_vt, callback_vt, weakref_source=weakref_source, **options
+        )
 
     def __init__(
-        self, referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
+        self,
+        referent_vt: VariableTracker,
+        callback_vt: VariableTracker,
+        weakref_source: Source | None = None,
+        **options: Any,
     ) -> None:
         super().__init__(**options)
         self.referent_vt = referent_vt
         self.callback_vt = callback_vt
+        self.weakref_source = weakref_source
 
     def call_function(
         self,

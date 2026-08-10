@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import inspect
 import sys
 import types
 import typing
@@ -35,10 +36,32 @@ from ..exc import (
     UnhandledDescriptorError,
     unimplemented,
 )
-from ..source import AttrSource, Source
+from ..guards import GuardBuilder, install_guard
+from ..source import (
+    AttrSource,
+    CellContentsSource,
+    ConstDictKeySource,
+    ContextVarGetSource,
+    DefaultsSource,
+    DictGetItemSource,
+    GetItemSource,
+    GlobalSource,
+    GuardedIdentitySource,
+    is_from_skip_guard_source,
+    is_from_untrusted_skip_guard_source,
+    LocalSource,
+    NNModuleSource,
+    NonSerializableSetGetItemSource,
+    Source,
+    TrustedSkipGuardSource,
+    TypeDictSource,
+    TypeMROSource,
+    TypeSource,
+)
 from ..utils import istype
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     AttrMutationKind,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
@@ -48,10 +71,18 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from torch._guards import Guard
+
     from ..symbolic_convert import InstructionTranslatorBase
 
 
+# Py_TPFLAGS_IMMUTABLETYPE: type attributes cannot be set or deleted.
+# https://docs.python.org/3/c-api/typeobj.html#c.Py_TPFLAGS_IMMUTABLETYPE
+_PY_TPFLAGS_IMMUTABLETYPE = 1 << 8
+
+
 def vt_identity_compare(
+    tx: "InstructionTranslatorBase",
     left: VariableTracker,
     right: VariableTracker,
 ) -> "VariableTracker | None":
@@ -60,43 +91,731 @@ def vt_identity_compare(
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
+    # An unguarded source can be canonicalized with another source that points
+    # to the same object while tracing, even though the two runtime sources can
+    # later diverge. Check that provenance before relying on VT identity.
+    if left.has_untrusted_source_alias or right.has_untrusted_source_alias:
+        return None
+    if (
+        left.source is not None and is_from_untrusted_skip_guard_source(left.source)
+    ) or (
+        right.source is not None and is_from_untrusted_skip_guard_source(right.source)
+    ):
+        return None
+
     if left is right:
         return ConstantVariable.create(True)
 
-    left_val = left.get_real_python_backed_value()
-    right_val = right.get_real_python_backed_value()
+    from .misc import GetAttrVariable
+
+    if (isinstance(left, GetAttrVariable) and left.deferred_runtime_getattr) or (
+        isinstance(right, GetAttrVariable) and right.deferred_runtime_getattr
+    ):
+        return None
+
+    def uses_default_metaclass_getattribute(cls: type[object]) -> bool:
+        return (
+            inspect.getattr_static(type(cls), "__getattribute__", NO_SUCH_SUBOBJ)
+            is type.__getattribute__
+        )
+
+    def stable_class_attr_value(cls: type[object], name: str) -> object:
+        if not uses_default_metaclass_getattribute(cls):
+            return NO_SUCH_SUBOBJ
+
+        metacls = type(cls)
+        for base in type.__getattribute__(metacls, "__mro__"):
+            namespace = type.__getattribute__(base, "__dict__")
+            if name in namespace:
+                meta_attr = namespace[name]
+                meta_attr_type = type(meta_attr)
+                if (
+                    inspect.getattr_static(meta_attr_type, "__set__", NO_SUCH_SUBOBJ)
+                    is not NO_SUCH_SUBOBJ
+                    or inspect.getattr_static(
+                        meta_attr_type, "__delete__", NO_SUCH_SUBOBJ
+                    )
+                    is not NO_SUCH_SUBOBJ
+                ):
+                    return NO_SUCH_SUBOBJ
+                break
+
+        value = NO_SUCH_SUBOBJ
+        for base in type.__getattribute__(cls, "__mro__"):
+            namespace = type.__getattribute__(base, "__dict__")
+            if name in namespace:
+                value = namespace[name]
+                break
+        if value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+
+        if type(value) is staticmethod:
+            return value.__get__(None, cls)
+        if type(value) is classmethod:
+            return NO_SUCH_SUBOBJ
+
+        if type(value) in (
+            types.FunctionType,
+            property,
+            types.GetSetDescriptorType,
+            types.MemberDescriptorType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ) or (
+            inspect.getattr_static(type(value), "__get__", NO_SUCH_SUBOBJ)
+            is NO_SUCH_SUBOBJ
+        ):
+            return value
+
+        # An arbitrary descriptor can run user code both during tracing and in
+        # an ID guard. Even a repeated lookup that returns the same object does
+        # not prove that the descriptor is side-effect free.
+        return NO_SUCH_SUBOBJ
+
+    def resolve_source_value(source: Source) -> object:
+        try:
+            return tx.output.resolve_source_value(source)
+        except (AttributeError, IndexError, KeyError, NameError):
+            return NO_SUCH_SUBOBJ
+
+    pending_guards: list[Guard] = []
+
+    def queue_guard(source: Source, guard_type: typing.Any) -> bool:
+        try:
+            pending_guards.append(source.make_guard(guard_type))
+        except NotImplementedError:
+            return False
+        return True
+
+    def guarded_result(value: bool) -> ConstantVariable:
+        install_guard(*pending_guards)
+        return ConstantVariable.create(value)
+
+    def source_identity_value_from_source(source: object) -> object:
+        if isinstance(
+            source,
+            (
+                GlobalSource,
+                LocalSource,
+                TypeSource,
+                NNModuleSource,
+                CellContentsSource,
+                DefaultsSource,
+                DictGetItemSource,
+                ConstDictKeySource,
+                GetItemSource,
+                NonSerializableSetGetItemSource,
+                GuardedIdentitySource,
+                TrustedSkipGuardSource,
+                ContextVarGetSource,
+            ),
+        ):
+            return resolve_source_value(source)
+        return NO_SUCH_SUBOBJ
+
+    def source_identity_value(var: VariableTracker) -> object:
+        source = var.source
+        if source is None:
+            return NO_SUCH_SUBOBJ
+        if isinstance(source, DictGetItemSource) and isinstance(
+            source.base, TypeDictSource
+        ):
+            owner = source_identity_value_from_source(source.base.base)
+            if isinstance(owner, type) and isinstance(source.index, str):
+                source_value = source_identity_value_from_source(source)
+                if stable_class_attr_value(owner, source.index) is source_value:
+                    return source_value
+                return NO_SUCH_SUBOBJ
+        if isinstance(source, AttrSource):
+            base = resolve_source_value(source.base)
+            if base is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            if isinstance(base, type):
+                value = stable_class_attr_value(base, source.member)
+                if value is not NO_SUCH_SUBOBJ:
+                    return value
+                return NO_SUCH_SUBOBJ
+            if source.member in ("__func__", "__name__", "__objclass__"):
+                base_value = source_identity_value_from_source(source.base)
+                if base_value is not NO_SUCH_SUBOBJ:
+                    return resolve_source_value(source)
+            static_value = inspect.getattr_static(base, source.member, NO_SUCH_SUBOBJ)
+            if static_value is not NO_SUCH_SUBOBJ:
+                resolved_value = resolve_source_value(source)
+                if static_value is resolved_value:
+                    return resolved_value
+                if (
+                    type(static_value) is types.MemberDescriptorType
+                    and type(base).__dict__.get(source.member) is static_value
+                ):
+                    return resolved_value
+        return source_identity_value_from_source(source)
+
+    def member_descriptor_source(source: object) -> Source | None:
+        if not isinstance(source, AttrSource):
+            return None
+        base = resolve_source_value(source.base)
+        if base is NO_SUCH_SUBOBJ:
+            return None
+        static_value = inspect.getattr_static(base, source.member, NO_SUCH_SUBOBJ)
+        if (
+            type(static_value) is types.MemberDescriptorType
+            and type(base).__dict__.get(source.member) is static_value
+        ):
+            return DictGetItemSource(
+                TypeDictSource(TypeSource(source.base)), source.member
+            )
+        return None
+
+    def source_guarded_value(var: VariableTracker) -> tuple[object, bool, bool]:
+        if var.source is not None:
+            source_value = source_identity_value(var)
+            if source_value is not NO_SUCH_SUBOBJ:
+                return (
+                    source_value,
+                    not is_from_skip_guard_source(var.source),
+                    False,
+                )
+            value = var.get_real_python_backed_value()
+            if value is not NO_SUCH_SUBOBJ and (
+                value is None
+                or value is True
+                or value is False
+                or value is Ellipsis
+                or isinstance(value, enum.Enum)
+                or isinstance(
+                    var,
+                    (
+                        variables.UserDefinedClassVariable,
+                        variables.BaseBuiltinVariable,
+                    ),
+                )
+            ):
+                return value, not is_from_skip_guard_source(var.source), False
+            return NO_SUCH_SUBOBJ, False, False
+
+        # A sourceless getattr can still depend on mutable state outside the
+        # trace (for example, a lookup through super() and its class MRO).
+        # Without a source there is no way to guard that lookup, so do not use
+        # its current value to resolve an identity comparison.
+        if isinstance(var, GetAttrVariable):
+            return NO_SUCH_SUBOBJ, False, False
+
+        value = var.get_real_python_backed_value()
+        if value is not NO_SUCH_SUBOBJ:
+            return value, False, False
+
+        return NO_SUCH_SUBOBJ, False, True
+
+    def install_identity_guard(var: VariableTracker, needs_guard: bool) -> bool:
+        if not needs_guard:
+            return True
+        if var.source is None:
+            return True
+        if (
+            isinstance(var.source, AttrSource)
+            and resolve_source_value(var.source.base) is NO_SUCH_SUBOBJ
+        ):
+            return False
+        if isinstance(var.source, AttrSource) and var.source.member == "__func__":
+            base_value = source_identity_value_from_source(var.source.base)
+            if base_value is not NO_SUCH_SUBOBJ:
+                if not queue_guard(var.source.base, GuardBuilder.ID_MATCH):
+                    return False
+        descriptor_source = member_descriptor_source(var.source)
+        if descriptor_source is not None:
+            if not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
+                return False
+        guard_type = var.get_id_guard_type()
+        if guard_type is None:
+            return True
+        if not queue_guard(var.source, guard_type):
+            return False
+        return True
+
+    def install_identity_guard_for_false_compare(
+        var: VariableTracker, needs_guard: bool, other_value: object
+    ) -> bool:
+        # Tensor inputs already get tensor/type guards. For a proven
+        # tensor-vs-non-tensor identity mismatch, pinning the tensor's object id
+        # would force a recompile for every new tensor argument.
+        if var.is_tensor() and not isinstance(other_value, torch.Tensor):
+            return True
+        return install_identity_guard(var, needs_guard)
+
+    def queue_type_guard(var: VariableTracker, needs_guard: bool) -> bool:
+        if not needs_guard or var.source is None:
+            return True
+        return queue_guard(var.source, GuardBuilder.TYPE_MATCH)
+
+    left_val, left_needs_guard, left_absent = source_guarded_value(left)
+    right_val, right_needs_guard, right_absent = source_guarded_value(right)
     left_known = left_val is not NO_SUCH_SUBOBJ
     right_known = right_val is not NO_SUCH_SUBOBJ
 
-    if left_known and right_known:
-        return (
-            ConstantVariable.create(True)
-            if left_val is right_val
-            else ConstantVariable.create(False)
+    # Local import avoids a module cycle with variables.functions.
+    from .functions import (
+        BoundBuiltinMethodVariable,
+        MethodWrapperVariable,
+        UserMethodVariable,
+    )
+    from .misc import TracebackVariable, WeakRefVariable
+    from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+    def is_stable_builtin_function(var: VariableTracker) -> bool:
+        return isinstance(var, BoundBuiltinMethodVariable) and isinstance(
+            var.descriptor, types.BuiltinFunctionType
         )
+
+    def install_user_method_lookup_guards(var: UserMethodVariable) -> bool:
+        source_fn = var.source_fn
+        if source_fn is None:
+            return False
+        guard_sources = [source_fn]
+        if isinstance(source_fn, AttrSource) and source_fn.member == "__func__":
+            guard_sources.append(source_fn.base)
+        for source in guard_sources:
+            if not queue_guard(source, GuardBuilder.ID_MATCH):
+                return False
+        return True
+
+    def is_fresh_bound_c_method(
+        var: BoundBuiltinMethodVariable | MethodWrapperVariable,
+    ) -> bool:
+        return (
+            isinstance(var.source, AttrSource)
+            and var.obj.source is not None
+            and var.source.base == var.obj.source
+            and var.source.member == var.descriptor.__name__
+        )
+
+    def install_instance_shadow_guard(
+        source: Source,
+        name: str,
+        obj: object,
+        descriptor: object,
+    ) -> bool:
+        if hasattr(descriptor, "__set__") or not hasattr(obj, "__dict__"):
+            return True
+        if name in obj.__dict__:
+            return False
+        if not queue_guard(
+            source, partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
+        ):
+            return False
+        return True
+
+    def descriptor_source_by_walking_mro(
+        cls: type[object],
+        cls_source: Source,
+        name: str,
+        expected_descriptor: object,
+    ) -> Source | None:
+        """Build an MRO descriptor source while buffering all required guards."""
+        for idx, klass in enumerate(type.__getattribute__(cls, "__mro__")):
+            namespace = type.__getattribute__(klass, "__dict__")
+            if name not in namespace:
+                continue
+            if namespace[name] is not expected_descriptor:
+                return None
+
+            mro_source = TypeMROSource(cls_source)
+            for absent_idx in range(1, idx):
+                absent_class_source = GetItemSource(mro_source, absent_idx)
+                absent_dict_source = TypeDictSource(absent_class_source)
+                if not queue_guard(
+                    absent_dict_source,
+                    partial(GuardBuilder.DICT_NOT_CONTAINS, key=name),
+                ):
+                    return None
+
+            owner_source = cls_source if idx == 0 else GetItemSource(mro_source, idx)
+            return DictGetItemSource(TypeDictSource(owner_source), name)
+        return None
+
+    def has_immutable_descriptor_lookup(
+        obj_type: type[object], name: str, expected_descriptor: object
+    ) -> bool:
+        for cls in type.__getattribute__(obj_type, "__mro__"):
+            if not (
+                type.__getattribute__(cls, "__flags__") & _PY_TPFLAGS_IMMUTABLETYPE
+            ):
+                return False
+            namespace = type.__getattribute__(cls, "__dict__")
+            if name in namespace:
+                return namespace[name] is expected_descriptor
+        return False
+
+    def install_bound_c_method_lookup_guards(
+        var: BoundBuiltinMethodVariable | MethodWrapperVariable,
+    ) -> bool:
+        name = var.descriptor.__name__
+        if not is_fresh_bound_c_method(var) and var.obj.source is None:
+            try:
+                obj_type = var.obj.python_type()
+            except NotImplementedError:
+                obj_type = None
+            if (
+                isinstance(obj_type, type)
+                and type.__getattribute__(obj_type, "__dictoffset__") == 0
+                and has_immutable_descriptor_lookup(obj_type, name, var.descriptor)
+            ):
+                # Instances cannot shadow the descriptor, and the immutable
+                # MRO prefix cannot change the lookup from Python.
+                return True
+        if (
+            not is_fresh_bound_c_method(var)
+            and isinstance(var.obj, UserDefinedObjectVariable)
+            and var.obj.source is None
+            and not tx.output.side_effects.has_pending_mutation_of_attr(
+                var.obj,
+                name,
+                (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+            )
+            and not tx.output.side_effects.has_pending_mutation_of_attr(
+                var.obj, "__dict__", AttrMutationKind.GENERIC_SETATTR
+            )
+            and (
+                not hasattr(var.obj.value, "__dict__")
+                or name not in var.obj.value.__dict__
+            )
+        ):
+            if var.obj.cls_source is not None:
+                class_attr_source = AttrSource(var.obj.cls_source, name)
+                if resolve_source_value(class_attr_source) is not var.descriptor:
+                    return False
+                descriptor_source = descriptor_source_by_walking_mro(
+                    type(var.obj.value),
+                    var.obj.cls_source,
+                    name,
+                    var.descriptor,
+                )
+                if (
+                    descriptor_source is None
+                    or resolve_source_value(descriptor_source) is not var.descriptor
+                ):
+                    return False
+                if not queue_guard(
+                    class_attr_source, GuardBuilder.ID_MATCH
+                ) or not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
+                    return False
+                return True
+
+            if not isinstance(var.obj.mutation_type, AttributeMutationNew):
+                return False
+            if (
+                inspect.getattr_static(var.obj.value_type, name, NO_SUCH_SUBOBJ)
+                is not var.descriptor
+            ):
+                return False
+            return True
+
+        if not is_fresh_bound_c_method(var):
+            return False
+        obj_source = var.obj.source
+        if obj_source is None:
+            return False
+        if isinstance(var.descriptor, types.ClassMethodDescriptorType):
+            if not isinstance(var.obj, UserDefinedClassVariable):
+                return False
+            descriptor_source = descriptor_source_by_walking_mro(
+                var.obj.value,
+                obj_source,
+                var.descriptor.__name__,
+                var.descriptor,
+            )
+            if (
+                descriptor_source is None
+                or resolve_source_value(descriptor_source) is not var.descriptor
+            ):
+                return False
+            if var.descriptor.__name__ not in var.obj.value.__dict__:
+                if not queue_guard(
+                    TypeDictSource(obj_source),
+                    partial(
+                        GuardBuilder.DICT_NOT_CONTAINS,
+                        key=var.descriptor.__name__,
+                    ),
+                ):
+                    return False
+        else:
+            obj = resolve_source_value(obj_source)
+            if obj is NO_SUCH_SUBOBJ:
+                return False
+            if not install_instance_shadow_guard(
+                obj_source, var.descriptor.__name__, obj, var.descriptor
+            ):
+                return False
+            descriptor_source = AttrSource(
+                TypeSource(obj_source), var.descriptor.__name__
+            )
+            if resolve_source_value(descriptor_source) is not var.descriptor:
+                return False
+        if not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
+            return False
+        return True
+
+    def fresh_descriptor_getattr_info(
+        var: VariableTracker,
+    ) -> tuple[Source, object, Source, object] | None:
+        if not isinstance(var, GetAttrVariable):
+            return None
+        if (
+            not isinstance(var.source, AttrSource)
+            or var.obj.source is None
+            or var.source.base != var.obj.source
+            or var.source.member != var.name
+        ):
+            return None
+
+        base = resolve_source_value(var.source.base)
+        if base is NO_SUCH_SUBOBJ:
+            return None
+        if "__getattribute__" in type(base).__dict__:
+            return None
+
+        descriptor = inspect.getattr_static(base, var.name, NO_SUCH_SUBOBJ)
+        if not isinstance(
+            descriptor, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
+            return None
+
+        resolved = resolve_source_value(var.source)
+        if not isinstance(resolved, (types.BuiltinMethodType, types.MethodWrapperType)):
+            return None
+
+        descriptor_source = AttrSource(TypeSource(var.source.base), var.name)
+        if resolve_source_value(descriptor_source) is not descriptor:
+            return None
+        return var.source.base, base, descriptor_source, descriptor
+
+    def fresh_builtin_classmethod_getattr_info(
+        var: VariableTracker,
+    ) -> tuple[object, Source | None] | None:
+        if not isinstance(var, GetAttrVariable):
+            return None
+        base_source = None
+        if var.source is not None:
+            if not isinstance(var.source, AttrSource) or var.source.member != var.name:
+                return None
+            base_source = var.source.base
+            base = resolve_source_value(base_source)
+        else:
+            try:
+                base = var.obj.as_python_constant()
+            except NotImplementedError:
+                return None
+        if not isinstance(base, type) or base.__module__ != "builtins":
+            return None
+
+        descriptor = inspect.getattr_static(base, var.name, NO_SUCH_SUBOBJ)
+        if not isinstance(descriptor, types.ClassMethodDescriptorType):
+            return None
+        resolved = getattr(base, var.name)
+        if not isinstance(resolved, types.BuiltinMethodType):
+            return None
+        return descriptor, base_source
+
+    def install_builtin_classmethod_getattr_guard(
+        info: tuple[object, Source | None],
+    ) -> bool:
+        _, base_source = info
+        if base_source is None:
+            return True
+        if not queue_guard(base_source, GuardBuilder.ID_MATCH):
+            return False
+        return True
+
+    def install_descriptor_getattr_guards(
+        info: tuple[Source, object, Source, object],
+        name: str,
+    ) -> bool:
+        base_source, base, descriptor_source, descriptor = info
+        if not install_instance_shadow_guard(base_source, name, base, descriptor):
+            return False
+        if not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
+            return False
+        return True
+
+    def install_known_value_guard(var: VariableTracker) -> bool:
+        value, needs_guard, absent = source_guarded_value(var)
+        if value is NO_SUCH_SUBOBJ:
+            return absent
+        return install_identity_guard(var, needs_guard)
+
+    def install_weakref_type_guard(var: WeakRefVariable) -> bool:
+        if var.weakref_source is None:
+            return True
+        if not queue_guard(var.weakref_source, GuardBuilder.TYPE_MATCH):
+            return False
+        return True
+
+    if left_val is None and isinstance(right, WeakRefVariable):
+        if not install_weakref_type_guard(right):
+            return None
+        return guarded_result(False)
+    if right_val is None and isinstance(left, WeakRefVariable):
+        if not install_weakref_type_guard(left):
+            return None
+        return guarded_result(False)
+
+    if (
+        left_known
+        and right_known
+        and (is_stable_builtin_function(left) or is_stable_builtin_function(right))
+    ):
+        if left_val is right_val:
+            if not install_identity_guard(
+                left, left_needs_guard
+            ) or not install_identity_guard(right, right_needs_guard):
+                return None
+            return guarded_result(True)
+        if not install_identity_guard_for_false_compare(
+            left, left_needs_guard, right_val
+        ) or not install_identity_guard_for_false_compare(
+            right, right_needs_guard, left_val
+        ):
+            return None
+        return guarded_result(False)
+
+    left_getattr_info = fresh_descriptor_getattr_info(left)
+    right_getattr_info = fresh_descriptor_getattr_info(right)
+    left_builtin_classmethod_getattr = fresh_builtin_classmethod_getattr_info(left)
+    right_builtin_classmethod_getattr = fresh_builtin_classmethod_getattr_info(right)
+    bound_method_types = (
+        UserMethodVariable,
+        BoundBuiltinMethodVariable,
+        MethodWrapperVariable,
+    )
+    if (
+        isinstance(left, bound_method_types)
+        or isinstance(right, bound_method_types)
+        or left_getattr_info is not None
+        or right_getattr_info is not None
+        or left_builtin_classmethod_getattr is not None
+        or right_builtin_classmethod_getattr is not None
+    ):
+        if isinstance(
+            left, UserMethodVariable
+        ) and not install_user_method_lookup_guards(left):
+            return None
+        if isinstance(
+            right, UserMethodVariable
+        ) and not install_user_method_lookup_guards(right):
+            return None
+        if isinstance(
+            left, (BoundBuiltinMethodVariable, MethodWrapperVariable)
+        ) and not install_bound_c_method_lookup_guards(left):
+            return None
+        if isinstance(
+            right, (BoundBuiltinMethodVariable, MethodWrapperVariable)
+        ) and not install_bound_c_method_lookup_guards(right):
+            return None
+        if left_getattr_info is not None and not install_descriptor_getattr_guards(
+            left_getattr_info,
+            left.name,  # type: ignore[union-attr]
+        ):
+            return None
+        if right_getattr_info is not None and not install_descriptor_getattr_guards(
+            right_getattr_info,
+            right.name,  # type: ignore[union-attr]
+        ):
+            return None
+        if (
+            left_builtin_classmethod_getattr is not None
+            and not install_builtin_classmethod_getattr_guard(
+                left_builtin_classmethod_getattr
+            )
+        ):
+            return None
+        if (
+            right_builtin_classmethod_getattr is not None
+            and not install_builtin_classmethod_getattr_guard(
+                right_builtin_classmethod_getattr
+            )
+        ):
+            return None
+        if (
+            not isinstance(left, bound_method_types)
+            and left_getattr_info is None
+            and left_builtin_classmethod_getattr is None
+            and not install_known_value_guard(left)
+        ):
+            return None
+        if (
+            not isinstance(right, bound_method_types)
+            and right_getattr_info is None
+            and right_builtin_classmethod_getattr is None
+            and not install_known_value_guard(right)
+        ):
+            return None
+        return guarded_result(False)
+
+    # Mutable containers created during tracing: VT identity = Python identity.
+    from .dicts import ConstDictVariable
+    from .lists import ListVariable
+    from .sets import SetVariable
+
+    container_types = (ConstDictVariable, ListVariable, SetVariable, TracebackVariable)
+    if (isinstance(left, container_types) and left.source is None) or (
+        isinstance(right, container_types) and right.source is None
+    ):
+        return ConstantVariable.create(False)
+
+    # A concrete identity proof must take precedence over tracker type
+    # metadata. A tracker whose python_type() is imprecise must not turn two
+    # references to the same Python object into a false identity result.
+    if left_known and right_known and left_val is right_val:
+        if not install_identity_guard(
+            left, left_needs_guard
+        ) or not install_identity_guard(right, right_needs_guard):
+            return None
+        return guarded_result(True)
+
+    # Different Python types can never be the same object. Check this before
+    # the concrete-value path so type-disjoint comparisons do not acquire
+    # unnecessary object-identity guards. The source types still need guards:
+    # e.g. a class attribute can be rebound to an object of the other type.
+    # A GetAttrVariable that could not be resolved safely may change both
+    # value and type when external lookup state changes. The specialized
+    # descriptor cases above have already installed their lookup guards.
+    if (isinstance(left, GetAttrVariable) and not left_known and not left_absent) or (
+        isinstance(right, GetAttrVariable) and not right_known and not right_absent
+    ):
+        return None
+
+    try:
+        if left.python_type() is not right.python_type():
+            queued_before_type_proof = len(pending_guards)
+            if queue_type_guard(left, left_needs_guard) and queue_type_guard(
+                right, right_needs_guard
+            ):
+                return guarded_result(False)
+            del pending_guards[queued_before_type_proof:]
+    except NotImplementedError:
+        pass
+
+    if left_known and right_known:
+        if not install_identity_guard_for_false_compare(
+            left, left_needs_guard, right_val
+        ) or not install_identity_guard_for_false_compare(
+            right, right_needs_guard, left_val
+        ):
+            return None
+        return guarded_result(False)
 
     # One side has a concrete backing object, the other doesn't — they can't
     # be the same object.
     if left_known != right_known:
-        return ConstantVariable.create(False)
-
-    # Objects created during tracing: VT identity = Python identity.
-    from .dicts import ConstDictVariable
-    from .lists import ListVariable
-    from .misc import TracebackVariable
-    from .sets import SetVariable
-
-    if isinstance(
-        left, (ConstDictVariable, ListVariable, SetVariable, TracebackVariable)
-    ):
-        return ConstantVariable.create(False)
-
-    # Different Python types can never be the same object.
-    try:
-        if left.python_type() is not right.python_type():
-            return ConstantVariable.create(False)
-    except NotImplementedError:
-        pass
+        if not (left_absent or right_absent):
+            return None
+        if not install_identity_guard_for_false_compare(
+            left, left_needs_guard, right_val
+        ) or not install_identity_guard_for_false_compare(
+            right, right_needs_guard, left_val
+        ):
+            return None
+        return guarded_result(False)
 
     # Different exception types are never identical.
     if (
@@ -1732,7 +2451,7 @@ def object_richcompare(
     - ordering
     """
     if op == "__eq__":
-        identity = vt_identity_compare(self, other)
+        identity = vt_identity_compare(tx, self, other)
         if identity is not None and identity.as_python_constant():
             return ConstantVariable.create(True)
         return ConstantVariable.create(NotImplemented)
@@ -1839,7 +2558,7 @@ def generic_richcompare(
 
     # Step 4: fallback
     if op in ("__eq__", "__ne__"):
-        identity = vt_identity_compare(v, w)
+        identity = vt_identity_compare(tx, v, w)
         if identity is not None:
             if op == "__ne__":
                 return ConstantVariable.create(not identity.as_python_constant())
@@ -1876,7 +2595,7 @@ def generic_richcompare_bool(
     """
     if op not in ("__eq__", "__ne__"):
         raise AssertionError(f"generic_richcompare_bool only supports eq/ne, got {op}")
-    identity = vt_identity_compare(v, w)
+    identity = vt_identity_compare(tx, v, w)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")
     return generic_richcompare(tx, v, w, op)

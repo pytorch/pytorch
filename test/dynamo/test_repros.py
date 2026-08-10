@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 # Owner(s): ["module: dynamo"]
 import collections
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import functools
@@ -14,6 +15,7 @@ import importlib
 import inspect
 import itertools
 import logging
+import operator
 import os
 import random
 import sys
@@ -44,6 +46,7 @@ import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
+from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -55,6 +58,9 @@ from torch._dynamo.testing import (
     skipIfNotPy312,
     skipIfPy312,
 )
+from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.object_protocol import vt_identity_compare
+from torch._guards import tracing, TracingContext
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import (
@@ -104,6 +110,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+_GLOBAL_TENSOR_FOR_IS_TEST = None
 
 HAS_MSGSPEC = importlib.util.find_spec("msgspec")
 if HAS_MSGSPEC:
@@ -8558,6 +8565,671 @@ SavedForBackwardsAOTOutput(idx=5)""",
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_is_with_type_source(self):
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if type(Foo) is type:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_member_descriptor_source(self):
+        @dataclasses.dataclass
+        class Config:
+            value: typing.Any
+
+        field = dataclasses.fields(Config)[0]
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if field.type is typing.Any:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        field.type = int
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_is_with_world_metaclass_property_source(self):
+        if not torch.distributed.is_available():
+            self.skipTest("torch.distributed is not available")
+
+        from torch.distributed.distributed_c10d import GroupMember
+
+        class FakeProcessGroup:
+            def __init__(self, rank_value):
+                self.rank_value = rank_value
+
+            def rank(self):
+                return 0
+
+        sentinel = FakeProcessGroup(1.0)
+        other = FakeProcessGroup(3.0)
+        old_world = GroupMember.WORLD
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if GroupMember.WORLD is sentinel:
+                return x + 1.0 + GroupMember.WORLD.rank_value
+            return x + 2.0 + GroupMember.WORLD.rank_value
+
+        try:
+            GroupMember.WORLD = sentinel
+            result = f(torch.tensor(0.0))
+            self.assertEqual(result.item(), 2.0)
+
+            sentinel.rank_value = 2.0
+            result = f(torch.tensor(0.0))
+            self.assertEqual(result.item(), 3.0)
+            self.assertEqual(counter.frame_count, 2)
+
+            GroupMember.WORLD = other
+            result = f(torch.tensor(0.0))
+            self.assertEqual(result.item(), 5.0)
+            self.assertEqual(counter.frame_count, 3)
+        finally:
+            GroupMember.WORLD = old_world
+
+    def test_is_with_metaclass_property_graph_break(self):
+        sentinel = object()
+        raw_value = object()
+        state = {"count": 0}
+
+        class Meta(type):
+            @property
+            def marker(cls):
+                state["count"] += 1
+                return sentinel
+
+        class Holder(metaclass=Meta):
+            marker = raw_value
+
+        def f(x):
+            if Holder.marker is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        result = torch.compile(f, backend="eager")(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+        self.assertEqual(state["count"], 1)
+
+        state["count"] = 0
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+        self.assertEqual(state["count"], 0)
+
+    def test_is_with_side_effecting_descriptor_graph_break(self):
+        state = {"count": 0}
+
+        class Descriptor:
+            def __get__(self, obj, owner=None):
+                state["count"] += 1
+                return self
+
+        descriptor = Descriptor()
+
+        class Holder:
+            marker = descriptor
+
+        def f(x):
+            if Holder.marker is descriptor:
+                return x + 1.0
+            return x + 2.0
+
+        result = torch.compile(f, backend="eager")(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+        self.assertEqual(state["count"], 1)
+
+        state["count"] = 0
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+        self.assertEqual(state["count"], 0)
+
+    def test_is_with_custom_metaclass_getattribute_graph_break(self):
+        sentinel = object()
+        raw_value = 1
+
+        class MetaBase(type):
+            def __getattribute__(cls, name):
+                if name == "marker":
+                    return sentinel
+                return super().__getattribute__(name)
+
+        class Meta(MetaBase):
+            pass
+
+        class Holder(metaclass=Meta):
+            marker = raw_value
+
+        def f(x):
+            if Holder.marker is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        x = torch.tensor(0.0)
+        self.assertEqual(f(x).item(), 1.0)
+        self.assertEqual(torch.compile(f, backend="eager")(x).item(), 1.0)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    def test_is_with_function_default_source(self):
+        sentinel = object()
+        other = object()
+        counter = CompileCounter()
+
+        def with_default(x, initial=sentinel):
+            if initial is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            return with_default(x)
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        with_default.__defaults__ = (other,)
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_is_with_contextvar_source(self):
+        sentinel = object()
+        other = object()
+        value = contextvars.ContextVar("identity_test", default=sentinel)
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if value.get() is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        self.assertEqual(f(torch.tensor(0.0)).item(), 1.0)
+
+        token = value.set(other)
+        try:
+            self.assertEqual(f(torch.tensor(0.0)).item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            value.reset(token)
+
+    def test_is_with_skip_guard_source_graph_break(self):
+        sentinel = {}
+        other = {}
+
+        def target():
+            pass
+
+        old_annotations = target.__annotations__
+        target.__annotations__ = sentinel
+
+        def f(x):
+            if target.__annotations__ is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        def reversed_f(x):
+            if sentinel is target.__annotations__:
+                return x + 1.0
+            return x + 2.0
+
+        try:
+            opt_f = torch.compile(f, backend="eager")
+            self.assertEqual(opt_f(torch.tensor(0.0)).item(), 1.0)
+
+            target.__annotations__ = other
+            self.assertEqual(opt_f(torch.tensor(0.0)).item(), 2.0)
+
+            target.__annotations__ = sentinel
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+            ):
+                torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+
+            torch._dynamo.reset()
+            opt_reversed_f = torch.compile(reversed_f, backend="eager")
+            self.assertEqual(opt_reversed_f(torch.tensor(0.0)).item(), 1.0)
+
+            target.__annotations__ = other
+            self.assertEqual(opt_reversed_f(torch.tensor(0.0)).item(), 2.0)
+        finally:
+            target.__annotations__ = old_annotations
+
+    def test_known_identity_precedes_tracker_type_proof(self):
+        value = object()
+
+        class KnownValueVariable(VariableTracker):
+            def __init__(self, py_type):
+                super().__init__()
+                self.value = value
+                self.py_type = py_type
+
+            def get_real_python_backed_value(self):
+                return self.value
+
+            def python_type(self):
+                return self.py_type
+
+        left = KnownValueVariable(object)
+        right = KnownValueVariable(str)
+        with tracing(TracingContext(None)):
+            result = vt_identity_compare(mock.Mock(), left, right)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.as_python_constant())
+
+    def test_is_with_fresh_bound_builtin_method_source(self):
+        class Foo:
+            pass
+
+        obj = Foo()
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        obj.__reduce_ex__ = None
+        try:
+            result = f(torch.tensor(0.0))
+            self.assertEqual(result.item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            del obj.__reduce_ex__
+
+        Foo.__reduce_ex__ = None
+        try:
+            result = f(torch.tensor(0.0))
+            self.assertEqual(result.item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            del Foo.__reduce_ex__
+
+    def test_is_with_unresolvable_bound_builtin_source_graph_breaks(self):
+        class Foo:
+            pass
+
+        obj = Foo()
+
+        def f(x):
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        resolve_source_value = OutputGraph.resolve_source_value
+
+        def fail_to_resolve_obj(output_graph, source):
+            value = resolve_source_value(output_graph, source)
+            if value is obj:
+                raise KeyError(source.name)
+            return value
+
+        with (
+            mock.patch.object(OutputGraph, "resolve_source_value", fail_to_resolve_obj),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+            ),
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+
+    def test_is_with_constant_fresh_builtin_method_source(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            reductor = getattr(torch.float32, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_method_wrapper_source(self):
+        class Foo:
+            pass
+
+        obj = Foo()
+        sentinel = object()
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            wrapper = obj.__str__
+            if wrapper is not wrapper:
+                return x + 3.0
+            if obj.__str__ is obj.__str__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        obj.__str__ = sentinel
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_deepcopy_recursive_user_object(self):
+        class Node:
+            pass
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            a = Node()
+            b = Node()
+            a.b = b
+            b.a = a
+            copy.deepcopy(a)
+            return x + 1.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def has_reductor(x):
+            obj = Node()
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = has_reductor(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Node.__reduce_ex__ = None
+        try:
+            result = has_reductor(torch.tensor(0.0))
+            self.assertEqual(result.item(), 2.0)
+            self.assertEqual(counter.frame_count, 3)
+        finally:
+            del Node.__reduce_ex__
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def shadows_reductor(x):
+            obj = Node()
+            obj.__reduce_ex__ = None
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = shadows_reductor(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_is_with_new_class_bound_builtin_method(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def has_reductor(x):
+            class Node:
+                pass
+
+            obj = Node()
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = has_reductor(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def deepcopy_recursive(x):
+            class Node:
+                pass
+
+            a = Node()
+            b = Node()
+            a.b = b
+            b.a = a
+            copy.deepcopy(a)
+            return x + 1.0
+
+        result = deepcopy_recursive(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_sourceless_container_and_dunder_dict(self):
+        class Holder:
+            pass
+
+        holder = Holder()
+        holder.value = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            y = {"value": 1}
+            if y is not holder.__dict__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_tensor_and_sentinel_does_not_recompile(self):
+        sentinel = object()
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if x is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        result = f(torch.tensor(1.0))
+        self.assertEqual(result.item(), 3.0)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_is_with_user_object_and_sentinel_does_not_recompile(self):
+        sentinel = object()
+        counter = CompileCounter()
+
+        class Payload:
+            pass
+
+        class Holder:
+            def __init__(self):
+                self.item = Payload()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(holder, x):
+            if holder.item is sentinel:
+                return x + 1.0
+            return x + 2.0
+
+        self.assertEqual(f(Holder(), torch.tensor(0.0)).item(), 2.0)
+        self.assertEqual(f(Holder(), torch.tensor(1.0)).item(), 3.0)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_is_with_symnode_and_non_none_constant_graph_breaks(self):
+        sentinel = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t, out):
+            y = t.item()
+            if y is sentinel:
+                return out + 1
+            return out + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            f(torch.tensor(1), torch.tensor(0))
+
+    def test_is_with_symnodes_graph_breaks(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t, out):
+            left = t.item()
+            right = t.item()
+            if left is right:
+                return out + 1
+            return out + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            f(torch.tensor(1), torch.tensor(0))
+
+    def test_is_not_with_symnodes_graph_breaks(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t, out):
+            left = t.item()
+            right = t.item()
+            if left is not right:
+                return out + 1
+            return out + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+        ):
+            f(torch.tensor(1), torch.tensor(0))
+
+    def test_is_with_treespec_class_identity(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            left = pytree.tree_structure((x,))
+            right = pytree.tree_structure((x,))
+            if left == right:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_frozenset_reduce_ex(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            copied = copy.deepcopy(frozenset((1, 2)))
+            return x + len(copied)
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_sourceless_heap_type_spoofing_builtin(self):
+        class FakeBuiltin:
+            __slots__ = ()
+
+        FakeBuiltin.__module__ = "builtins"
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            obj = FakeBuiltin()
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        self.assertEqual(f(torch.tensor(0.0)).item(), 1.0)
+
+        FakeBuiltin.__reduce_ex__ = None
+        try:
+            self.assertEqual(f(torch.tensor(0.0)).item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            del FakeBuiltin.__reduce_ex__
+
+    def test_is_with_sourceless_super_getattr_graph_break(self):
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        def f(x):
+            obj = B()
+            reductor = getattr(super(B, obj), "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        opt_f = torch.compile(f, backend="eager")
+        self.assertEqual(opt_f(torch.tensor(0.0)).item(), 1.0)
+
+        A.__reduce_ex__ = None
+        try:
+            self.assertEqual(opt_f(torch.tensor(0.0)).item(), 2.0)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+            ):
+                torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+        finally:
+            del A.__reduce_ex__
+
+    def test_is_with_enum_new_member(self):
+        class Color(Enum):
+            RED = 1
+
+        if not hasattr(Color, "_new_member_"):
+            self.skipTest("Enum._new_member_ is not available on this Python version")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if Color._new_member_ is not object.__new__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_object_init_subclass(self):
+        class Color(Enum):
+            RED = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if Color.__init_subclass__ is not object.__init_subclass__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_repeated_object_init_subclass(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if object.__init_subclass__ is object.__init_subclass__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
     def test_tensor_size_hasattr(self):
         def fn(x):
             if hasattr(x, "size"):
@@ -8802,6 +9474,333 @@ SavedForBackwardsAOTOutput(idx=5)""",
         grid2 = torch.rand(2, 11, 7, 2) * 2 - 1
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_operator_is_with_source_aliases(self):
+        shared = tuple(range(2))
+        alias = shared
+        distinct = tuple(range(2))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if not operator.is_(shared, alias):
+                return x + 10.0
+            if operator.is_(shared, distinct):
+                return x + 20.0
+            return x + 1.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        alias = distinct
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 10.0)
+
+    def test_inherited_c_descriptor_identity(self):
+        class DictSubclass(dict):
+            pass
+
+        class Plain:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if DictSubclass.get is dict.get and Plain.__hash__ is object.__hash__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_mutated_class_attr_tensor(self):
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if DictSubclass.get is x:
+                return x + 1.0
+            return x + 2.0
+
+        x = torch.tensor(0.0)
+        result = f(x)
+        self.assertEqual(result.item(), 2.0)
+
+        DictSubclass.get = x
+        result = f(x)
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_tensor_result_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            y = x.contiguous()
+            if y is x:
+                return x + 1.0
+            return x + 2.0
+
+        x = torch.tensor(0.0)
+        result = f(x)
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_weakref_source(self):
+        class Holder:
+            pass
+
+        holder = Holder()
+        ref = weakref.ref(holder)
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if ref is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        ref = None
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_is_with_mutated_tensor_alias_source(self):
+        global _GLOBAL_TENSOR_FOR_IS_TEST
+        _GLOBAL_TENSOR_FOR_IS_TEST = torch.tensor(0.0)
+
+        try:
+            counter = CompileCounter()
+
+            @torch.compile(backend=counter)
+            def f(x):
+                if x is _GLOBAL_TENSOR_FOR_IS_TEST:
+                    return x + 1.0
+                return x + 2.0
+
+            old_global_tensor = _GLOBAL_TENSOR_FOR_IS_TEST
+            result = f(old_global_tensor)
+            self.assertEqual(result.item(), 1.0)
+
+            _GLOBAL_TENSOR_FOR_IS_TEST = torch.tensor(0.0)
+            result = f(old_global_tensor)
+            self.assertEqual(result.item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+
+            result = f(_GLOBAL_TENSOR_FOR_IS_TEST)
+            self.assertEqual(result.item(), 1.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            _GLOBAL_TENSOR_FOR_IS_TEST = None
+
+    def test_is_with_unsafe_instance_attr_source(self):
+        class Holder:
+            pass
+
+        holder = Holder()
+        left = object()
+        right = object()
+        holder.item = left
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if holder.item is right:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        holder.item = right
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_is_with_descriptor_sources_from_class_dict(self):
+        class Foo:
+            __slots__ = ("slot",)
+
+            @property
+            def prop(self):
+                return 1
+
+        old_property = Foo.__dict__["prop"]
+        old_slot = Foo.__dict__["slot"]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if Foo.prop is old_property and Foo.slot is old_slot:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Foo.prop = property(lambda self: 2)
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        sentinel = object()
+
+        class WeirdProperty(property):
+            def __get__(self, obj, owner=None):
+                return sentinel
+
+        class Weird:
+            attr = WeirdProperty(lambda self: None)
+
+        old_attr = Weird.__dict__["attr"]
+
+        @torch.compile(backend="eager")
+        def g(x):
+            if Weird.attr is old_attr:
+                return x + 1.0
+            return x + 2.0
+
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_mutated_staticmethod_source(self):
+        class Foo:
+            @staticmethod
+            def method():
+                pass
+
+        old_method = Foo.method
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if Foo.method is old_method:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Foo.method = staticmethod(
+            types.FunctionType(
+                old_method.__code__,
+                old_method.__globals__,
+                old_method.__name__,
+            )
+        )
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        class Bar:
+            @staticmethod
+            def method():
+                pass
+
+        old_bar_method = Bar.method
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            if Bar.method is old_bar_method:
+                return x + 1.0
+            return x + 2.0
+
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Bar.method = classmethod(old_bar_method)
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_fresh_bound_method_source(self):
+        class Foo:
+            def method(self):
+                pass
+
+        obj = Foo()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if obj.method is obj.method:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_mutated_classmethod_sources(self):
+        class Foo:
+            @classmethod
+            def method(cls):
+                pass
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if Foo.method is Foo.method:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        old_method = Foo.method
+        Foo.method = old_method
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+        self.assertEqual(counter.frame_count, 2)
+
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager")
+        def g(x):
+            if DictSubclass.fromkeys is DictSubclass.fromkeys:
+                return x + 1.0
+            return x + 2.0
+
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        old_fromkeys = DictSubclass.fromkeys
+        DictSubclass.fromkeys = old_fromkeys
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_getset_descriptor_objclass_identity(self):
+        # GetSetDescriptor.__objclass__ should preserve identity with the class
+        # under torch.compile. This is needed for inspect.getattr_static (and
+        # therefore inspect.signature) to work on callable class instances.
+        class Foo:
+            pass
+
+        desc = Foo.__dict__["__dict__"]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if desc.__objclass__ is Foo:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_inspect_signature_callable_class(self):
+        # inspect.signature should work on callable class instances under
+        # torch.compile, needed by flex_attention's _get_mod_type.
+        class MyCallable:
+            def __call__(self, b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+        obj = MyCallable()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            sig = inspect.signature(obj)
+            num_params = sum(
+                1
+                for p in sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+            )
+            return x + num_params
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 4.0)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -9826,46 +10825,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         res1 = fn(b)
         res2 = cfunc(b_)
         self.assertEqual(res1, res2)
-
-    def test_getset_descriptor_objclass_identity(self):
-        # GetSetDescriptor.__objclass__ should preserve identity with the class
-        # under torch.compile. This is needed for inspect.getattr_static (and
-        # therefore inspect.signature) to work on callable class instances.
-        class Foo:
-            pass
-
-        desc = Foo.__dict__["__dict__"]
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            if desc.__objclass__ is Foo:
-                return x + 1.0
-            return x + 2.0
-
-        result = f(torch.tensor(0.0))
-        self.assertEqual(result.item(), 1.0)
-
-    def test_inspect_signature_callable_class(self):
-        # inspect.signature should work on callable class instances under
-        # torch.compile, needed by flex_attention's _get_mod_type.
-        class MyCallable:
-            def __call__(self, b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-        obj = MyCallable()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            sig = inspect.signature(obj)
-            num_params = sum(
-                1
-                for p in sig.parameters.values()
-                if p.default is inspect.Parameter.empty
-            )
-            return x + num_params
-
-        result = f(torch.tensor(0.0))
-        self.assertEqual(result.item(), 4.0)
 
     def test_enum_with_class_values(self):
         from enum import Enum

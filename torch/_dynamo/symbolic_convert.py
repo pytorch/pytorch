@@ -138,8 +138,8 @@ from .source import (
     GlobalWeakRefSource,
     LocalCellSource,
     LocalSource,
-    SkipGuardSource,
     Source,
+    TrustedSkipGuardSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -6441,7 +6441,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if is_stdlib(fglobals_value):
             # Users don't inplace mutate a stdlib attribute (like inspect,
             # collections), skip guards that originate from the stdlib modules.
-            global_source = SkipGuardSource(global_source)  # type: ignore[assignment]
+            global_source = TrustedSkipGuardSource(global_source)  # type: ignore[assignment]
 
         return fglobals_value, fglobals_vt, global_source
 
