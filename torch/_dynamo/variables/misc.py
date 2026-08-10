@@ -76,13 +76,11 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
-    GetSet,
     getset_build,
     getset_read,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
-    unsupported_attr,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -532,13 +530,13 @@ class TracebackVariable(VariableTracker):
             self.tb_next = val
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "tb_next":
             return self.tb_next
         elif name == "tb_lineno":
-            return self.frame_summary.getattro_impl(tx, "lineno")
+            return self.frame_summary.tp_getattro_impl(tx, "lineno")
         elif name == "frame_summary":
             return self.frame_summary
         elif name == "tb_lasti":
@@ -548,7 +546,7 @@ class TracebackVariable(VariableTracker):
                 explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -740,7 +738,7 @@ class ExceptionVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
@@ -765,7 +763,7 @@ class ExceptionVariable(VariableTracker):
             # to the generic lookup that finds nothing means the attribute is
             # genuinely absent -- match CPython's BaseException tp_getattro
             # (PyObject_GenericGetAttr) and raise AttributeError.
-            return super().getattro_impl(tx, name)
+            return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
             raise_observed_exception(
                 AttributeError,
@@ -818,12 +816,12 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "value":
             return self.value
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -846,12 +844,12 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in self._attrs:
             return self._attrs[name]
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
@@ -2662,12 +2660,12 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if name == "name":
             return ConstantVariable.create(self.cv_obj.name)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class RandomClassVariable(VariableTracker):

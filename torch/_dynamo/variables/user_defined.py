@@ -4345,16 +4345,16 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
     # are members/getsets; delegate each to the wrapped base exception VT.
     tp_members = {
-        "args": Member(lambda s, tx: s._base_vt.getattro_impl(tx, "args")),
-        "__cause__": Member(lambda s, tx: s._base_vt.getattro_impl(tx, "__cause__")),
+        "args": Member(lambda s, tx: s._base_vt.tp_getattro_impl(tx, "args")),
+        "__cause__": Member(lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__cause__")),
         "__context__": Member(
-            lambda s, tx: s._base_vt.getattro_impl(tx, "__context__")
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__context__")
         ),
         "__suppress_context__": Member(
-            lambda s, tx: s._base_vt.getattro_impl(tx, "__suppress_context__")
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__suppress_context__")
         ),
         "__traceback__": Member(
-            lambda s, tx: s._base_vt.getattro_impl(tx, "__traceback__")
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__traceback__")
         ),
     }
 
@@ -4422,7 +4422,7 @@ class InspectVariable(UserDefinedObjectVariable):
     ) -> VariableTracker | None:
         redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
         if name in redirects:
-            return super().getattro_impl(tx, redirects[name])
+            return super().tp_getattro_impl(tx, redirects[name])
         return None
 
     def _parameters(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
@@ -5126,7 +5126,7 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable):
         # covered by the _base_methods call_method delegation; route it to the
         # DequeVariable which tracks maxlen on the base deque.
         if self._base_vt is not None:
-            return self._base_vt.getattro_impl(tx, "maxlen")
+            return self._base_vt.tp_getattro_impl(tx, "maxlen")
         return None
 
     # ref: deque_getset[] in CPython Modules/_collectionsmodule.c; maxlen is a
