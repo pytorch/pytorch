@@ -99,12 +99,12 @@ struct XPUEvent {
         " does not match recording stream's device ",
         stream.device_index(),
         ".");
-#if SYCL_COMPILER_VERSION >= 20260200
+
     if (reusable_) {
+#if SYCL_COMPILER_VERSION >= 20260200
       syclex::enqueue_signal_event(stream.queue(), *event_);
-    }
 #endif
-    if (!reusable_) {
+    } else {
       reassignEvent(stream.queue());
     }
 
@@ -118,13 +118,12 @@ struct XPUEvent {
 
   void block(const XPUStream& stream) {
     if (isCreated()) {
-#if SYCL_COMPILER_VERSION >= 20260200
       if (reusable_) {
+#if SYCL_COMPILER_VERSION >= 20260200
         sycl::ext::oneapi::experimental::enqueue_wait_event(
             stream.queue(), *event_);
-      }
 #endif
-      if (!reusable_) {
+      } else {
         std::vector<sycl::event> event_list{event()};
         // Make this stream wait until event_ is completed.
         stream.queue().ext_oneapi_submit_barrier(event_list);
