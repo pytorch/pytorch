@@ -259,7 +259,7 @@ class ConstantVariable(VariableTracker):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
     ) -> VariableTracker:
         from .object_protocol import type_implements_mp_subscript
@@ -282,15 +282,13 @@ class ConstantVariable(VariableTracker):
         return member
 
     def sq_concat_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
+        self, tx: InstructionTranslatorBase, other: VariableTracker
     ) -> VariableTracker:
         from .object_protocol import type_implements_sq_concat
 
         if type_implements_sq_concat(type(self.value)) and other.is_python_constant():
             try:
-                return ConstantVariable.create(
-                    self.value + other.as_python_constant()
-                )
+                return ConstantVariable.create(self.value + other.as_python_constant())
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         return super().sq_concat_impl(tx, other)

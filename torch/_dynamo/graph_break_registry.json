@@ -5584,6 +5584,16 @@
       ]
     }
   ],
+  "GB8364": [
+    {
+      "Gb_type": "Missing bool_impl override",
+      "Context": "bool_impl {self}",
+      "Explanation": "{type(self).__name__} does not implement bool_impl. Add a bool_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB1824": [
     {
       "Gb_type": "torch.switch: unsupported branch return type",
