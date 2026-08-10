@@ -42,22 +42,22 @@ class Platform:
         return e
 
 
-# Overrides for the PLATFORM_SUPPORTS_* flags that the descriptor cannot let
-# common_cuda compute for itself. Everything else is deliberately absent: those
-# predicates read only torch.cuda.get_device_capability and the SM* LazyVals, all
-# of which collector.apply_descriptor patches, so they self-heal to the right
-# value for the simulated capability. Re-deriving them here would be a second
-# copy of common_cuda's truth table, free to drift without anything noticing.
+# Overrides for the PLATFORM_SUPPORTS_* flags that common_cuda cannot compute for
+# itself under a descriptor. Everything else is deliberately absent: those
+# predicates read only torch.cuda.get_device_capability and the SM* LazyVals,
+# which collector.apply_descriptor patches, so they self-heal for the simulated
+# capability. Re-deriving them here would be a second copy of common_cuda's truth
+# table, free to drift without anything noticing -- which is exactly what happened
+# to PLATFORM_SUPPORTS_FP8_GROUPED_GEMM.
 def _cuda_caps(capability: tuple[int, int], rocm: bool) -> dict[str, bool]:
     return {
-        # A plain bool, not a LazyVal: frozen at common_cuda import time, when the
-        # descriptor has hidden the GPU, so it cannot self-heal.
+        # Plain bools, not LazyVals, so they are fixed when common_cuda is imported
+        # -- which apply_descriptor does before patching torch.cuda.is_available.
+        # Derivable in principle; it needs that ordering changed first.
         "PLATFORM_SUPPORTS_FUSED_SDPA": not rocm,
         "PLATFORM_SUPPORTS_CK_SDPA": rocm,
-        # Read the build, not the device: torch.__config__.show() / cusparselt.
-        "PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM": capability >= (10, 0) and not rocm,
-        "PLATFORM_SUPPORTS_FP8_SPARSE": False,
-        # Probe the driver via green_contexts._ensure_supported().
+        # Probe the host driver via green_contexts._ensure_supported(), which says
+        # nothing about a simulated platform.
         "PLATFORM_SUPPORTS_GREEN_CONTEXT": False,
         "PLATFORM_SUPPORTS_WORKQUEUE_CONFIG": False,
     }
