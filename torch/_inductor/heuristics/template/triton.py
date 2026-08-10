@@ -7,7 +7,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -2152,6 +2152,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2761,29 +2762,21 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 return False
         return True
 
-    @staticmethod
-    def _generate_autows_configs() -> list[BaseConfig]:
-        """autoWS configs for DEFAULT search. Placeholder pending benchmark data."""
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        """The Blackwell persistent set crossed with the autoWS-specific knobs."""
+        base = cast(list[BlackwellGPUGemmConfig], self.blackwell_persistent_mm_configs)
         return [
-            BlackwellGPUGemmConfig(
-                block_m=block_m,
-                block_n=block_n,
-                block_k=64,
+            dataclasses.replace(
+                cfg,
                 # 2-CTA caps the pipeline at 2 stages (see _autows_constraints_ok)
-                num_stages=2 if two_ctas else 3,
-                num_warps=8,
-                group_m=8,
-                epilogue_subtile=epilogue_subtile,
+                num_stages=2 if two_ctas else cfg.num_stages,
                 use_meta_ws=True,
-                data_partition_factor=data_partition_factor,
-                separate_epilogue_store=True,
-                two_ctas=two_ctas,
-                warp_specialize=True,
                 flatten=False,
+                separate_epilogue_store=True,
+                data_partition_factor=data_partition_factor,
+                two_ctas=two_ctas,
             )
-            for block_m in [128, 256]
-            for block_n in [128, 256]
-            for epilogue_subtile in [1, 2, 4]
+            for cfg in base
             for data_partition_factor in [1, 2]
             for two_ctas in [False, True]
         ]

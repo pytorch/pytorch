@@ -8,7 +8,6 @@ from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
     BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
-    BlackwellTMATemplateConfigMixin,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
@@ -752,13 +751,14 @@ class TestBlackwellAutoWSConfigs(TestCase):
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
             addmm_heuristic = CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic()
 
-        mixin = BlackwellTMATemplateConfigMixin
-        self.assertEqual(heuristic.mm_configs, mixin._generate_autows_configs())
+        self.assertEqual(heuristic.mm_configs, heuristic._generate_autows_configs())
         # addmm shares the autoWS set rather than its own non-autoWS configs
-        self.assertEqual(addmm_heuristic.mm_configs, mixin._generate_autows_configs())
+        self.assertEqual(
+            addmm_heuristic.mm_configs, heuristic._generate_autows_configs()
+        )
         self.assertEqual(
             len(heuristic.exhaustive_configs),
-            len(mixin._generate_autows_exhaustive_configs()),
+            len(heuristic._generate_autows_exhaustive_configs()),
         )
         for cfg in heuristic.mm_configs:
             self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
