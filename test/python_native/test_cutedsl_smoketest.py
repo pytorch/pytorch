@@ -15,6 +15,7 @@ import unittest
 import torch
 from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.utils.dlpack import ReadOnlyTensorWrapper
 
 
 try:
@@ -794,6 +795,115 @@ class TestCuteDSLSmoketest(TestCase):
 
         ref = torch.layer_norm(x, (N,), weight, bias, eps)
         torch.testing.assert_close(y, ref, atol=1e-3, rtol=1e-3)
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not TEST_CUDA, "CUDA required")
+class TestCuteDSLReadOnlyWrapper(TestCase):
+    """ReadOnlyTensorWrapper interop with cuteDSL.
+
+    The tvm-ffi exchange path is the supported route: it goes through the const
+    DLPack C exchange API, exports via const_data_ptr() (so a copy-on-write
+    tensor is not materialized) and advertises DLPACK_FLAG_BITMASK_READ_ONLY.
+    """
+
+    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    def test_readonly_wrapper_tvm_ffi_kernel(self):
+        _host, from_dlpack = _build_elementwise_add()
+        import cutlass.cute as cute
+
+        M, N = 128, 128
+        a = torch.randn(M, N, device="cuda", dtype=torch.float32)
+        b = torch.randn(M, N, device="cuda", dtype=torch.float32)
+        c = torch.zeros(M, N, device="cuda", dtype=torch.float32)
+
+        # Lazily clone the read-only inputs so we can assert they stay
+        # copy-on-write across the kernel launch.
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        # const_data_ptr() is the exported pointer and does not materialize COW;
+        # _data_address would only match when storage_offset() == 0.
+        a_addr = a_cow.const_data_ptr()
+        b_addr = b_cow.const_data_ptr()
+
+        a_cute = from_dlpack(
+            ReadOnlyTensorWrapper(a_cow), enable_tvm_ffi=True
+        ).mark_layout_dynamic()
+        b_cute = from_dlpack(
+            ReadOnlyTensorWrapper(b_cow), enable_tvm_ffi=True
+        ).mark_layout_dynamic()
+        c_cute = from_dlpack(c, enable_tvm_ffi=True).mark_layout_dynamic()
+
+        # Wrapping read-only inputs must not materialize the COW tensors.
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertEqual(a_cow.const_data_ptr(), a_addr)
+        self.assertEqual(b_cow.const_data_ptr(), b_addr)
+
+        compiled = cute.compile(_host, a_cute, b_cute, c_cute)
+        compiled(a_cute, b_cute, c_cute)
+        torch.cuda.synchronize()
+
+        torch.testing.assert_close(c, a + b)
+
+        # And still copy-on-write after the launch (kernel reads device memory).
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertEqual(a_cow.const_data_ptr(), a_addr)
+        self.assertEqual(b_cow.const_data_ptr(), b_addr)
+
+    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    def test_readonly_wrapper_routes_to_const_exchange_api(self):
+        # tvm-ffi / cuteDSL discover __dlpack_c_exchange_api__ on the type. The
+        # wrapper must expose the const (read-only) API rather than the default.
+        import ctypes
+
+        get = ctypes.pythonapi.PyCapsule_GetPointer
+        get.restype = ctypes.c_void_p
+        get.argtypes = [ctypes.py_object, ctypes.c_char_p]
+
+        def _ptr(capsule):
+            return get(capsule, b"dlpack_exchange_api")
+
+        self.assertEqual(
+            _ptr(ReadOnlyTensorWrapper.__dlpack_c_exchange_api__),
+            _ptr(torch._C._const_dlpack_exchange_api()),
+        )
+        self.assertNotEqual(
+            _ptr(ReadOnlyTensorWrapper.__dlpack_c_exchange_api__),
+            _ptr(torch._C._dlpack_exchange_api()),
+        )
+
+    # NOTE: The non-tvm-ffi (bare PyCapsule) path is intentionally NOT exercised
+    # against cuteDSL here. cuteDSL's DLTensorWrapper mis-parses the *versioned*
+    # DLPack struct (DLManagedTensorVersioned) and crashes
+    # ("LLVM ERROR: SmallVector unable to grow" / segfault) on a garbage size,
+    # which would take down the whole test process. This is independent of the
+    # read-only flag: a versioned-but-writable capsule (read_only=False) crashes
+    # identically, while an unversioned capsule is consumed fine. read_only
+    # requires the versioned protocol, so the bare path is unusable for cuteDSL
+    # until cuteDSL fixes its versioned-struct parsing. The capsule itself is
+    # valid (numpy and torch consume the versioned read-only capsule correctly;
+    # see test_dlpack.py). The tvm-ffi path avoids this entirely by going
+    # through the C exchange API rather than parsing a capsule.
+    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    def test_readonly_wrapper_bare_capsule_is_valid(self):
+        # Verify the wrapper's bare (non-tvm-ffi) capsule is a well-formed,
+        # read-only, copy-on-write-preserving export -- the thing cuteDSL's bare
+        # path *would* receive -- without handing it to cuteDSL.
+        a = torch.randn(8, device="cuda", dtype=torch.float32)
+        a_cow = a._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        addr = a_cow.const_data_ptr()
+
+        # This is exactly the call cuteDSL's bare path makes: __dlpack__(stream=-1).
+        back = torch.from_dlpack(ReadOnlyTensorWrapper(a_cow))
+
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertEqual(a_cow.const_data_ptr(), addr)
+        torch.testing.assert_close(back, a)
 
 
 if __name__ == "__main__":

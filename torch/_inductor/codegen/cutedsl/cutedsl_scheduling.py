@@ -126,13 +126,16 @@ class CuteDSLScheduling(BaseScheduling):
         """
         Codegen a CuteDSL template. Currently doesn't support fusion.
         """
-        assert self.is_cutedsl_template(template_node), (
-            "Template node passed to CuteDSLScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a CuteDSLTemplateBuffer"
-        )
+        if not self.is_cutedsl_template(template_node):
+            raise AssertionError(
+                "Template node passed to CuteDSLScheduling.codegen_template must be a "
+                "SchedulerNode that wraps a CuteDSLTemplateBuffer"
+            )
         # TODO remove when supported
-        assert not epilogue_nodes, "CuteDSL doesn't support epilogue fusion yet"
-        assert not prologue_nodes, "CuteDSL doesn't support prologue fusion yet"
+        if epilogue_nodes:
+            raise AssertionError("CuteDSL doesn't support epilogue fusion yet")
+        if prologue_nodes:
+            raise AssertionError("CuteDSL doesn't support prologue fusion yet")
 
         template_node = cast(SchedulerNode, template_node)
         ctb: CuteDSLTemplateBuffer = cast(CuteDSLTemplateBuffer, template_node.node)
@@ -197,9 +200,53 @@ class CuteDSLScheduling(BaseScheduling):
         device = ctb.layout.device
         device_index = device.index if device.index is not None else 0
 
-        return {
+        import torch
+
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+
+        metadata: dict[str, object] = {
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
             "device_index": device_index,
+            "device_capability": device_capability,
         }
+
+        hw_info = self._build_hw_info(kernel)
+        if hw_info is not None:
+            metadata["hw_info"] = hw_info
+
+        return metadata
+
+    @staticmethod
+    def _build_hw_info(kernel) -> tuple[int, int] | None:
+        """Compute (sm_count, max_active_clusters) in the main process.
+
+        Reads CLUSTER_M/N from kernel template kwargs and queries
+        HardwareInfo so subprocess workers never touch CUDA driver APIs.
+        Returns None if CUTLASS is unavailable or the template has no cluster config.
+        """
+        template_kwargs = getattr(kernel, "_template_kwargs", None)
+        if template_kwargs is None:
+            return None
+
+        cluster_m = template_kwargs.get("CLUSTER_M")
+        cluster_n = template_kwargs.get("CLUSTER_N")
+        if cluster_m is None or cluster_n is None:
+            return None
+
+        try:
+            import cutlass.utils
+
+            cluster_product = int(cluster_m) * int(cluster_n)
+            hw = cutlass.utils.HardwareInfo()
+            sm_count = hw.get_max_active_clusters(1)
+            max_active_clusters = hw.get_max_active_clusters(cluster_product)
+            return (sm_count, max_active_clusters)
+        except Exception:
+            log.debug(
+                "Could not compute hw_info for CuTe DSL precompile", exc_info=True
+            )
+            return None
