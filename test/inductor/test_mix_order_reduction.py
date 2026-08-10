@@ -12,7 +12,7 @@ from torch._inductor import metrics, utils
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest, skipXPUIf
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
