@@ -325,7 +325,9 @@ class TestFloat8Dtype(TestCase):
                 actual = fp32_pt_e8m0_fp32.item()
 
                 self.assertEqual(
-                    expected, actual, f"expected: {expected}, actual: {actual}"
+                    expected,
+                    actual,
+                    lambda msg: f"{msg}\nexpected: {expected}, actual: {actual}",
                 )
 
     @dtypes(*FLOAT8_DTYPES)

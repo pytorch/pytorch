@@ -97,6 +97,7 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph) -> int:
             combined = graph.call_function(
                 inductor_prims.rand_eager_offsets, (offs, device)
             )
+            combined.meta.update(offsets[0].meta)
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
                     [len(offsets), 2], device=device, dtype=torch.int64
@@ -142,6 +143,7 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
     for device, seeds in device_seeds.items():
         with graph.inserting_before(seeds[0]):
             combined = graph.call_function(inductor_prims.seeds, (len(seeds), device))
+            combined.meta.update(seeds[0].meta)
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
                     [len(seeds)], device=device, dtype=torch.int64
@@ -191,6 +193,8 @@ def replace_random(
     pin_memory=None,
 ):
     if generator is not None:
+        return
+    if pin_memory:
         return
 
     def replacement(size):
@@ -249,6 +253,9 @@ def replace_randint(
     layout=None,
     pin_memory=None,
 ):
+    if pin_memory:
+        return
+
     def replacement(low, high, size):
         result = inductor_prims.randint(low, high, size, inductor_prims.seed(device))
         return result.to(dtype)
