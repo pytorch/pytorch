@@ -884,6 +884,8 @@ class MixOrderReductionTest(TestBase):
         mock_node_1.get_device.return_value.type = "cuda"
         mock_node_1.is_reduction.return_value = True
         mock_node_2.is_reduction.return_value = True
+        mock_node_1.has_strict_sum.return_value = False
+        mock_node_2.has_strict_sum.return_value = False
 
         from torch._inductor.utils import OrderedSet
 
@@ -953,6 +955,8 @@ class MixOrderReductionTest(TestBase):
         mock_node_1.get_device.return_value.type = "cuda"
         mock_node_1.is_reduction.return_value = True
         mock_node_2.is_reduction.return_value = True
+        mock_node_1.has_strict_sum.return_value = False
+        mock_node_2.has_strict_sum.return_value = False
 
         from torch._inductor.utils import OrderedSet
 
