@@ -190,6 +190,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     }
   }
 
+  // Experimental. Forward a temporary timeout extension to every backend.
+  virtual void addEphemeralTimeout(const std::chrono::milliseconds& timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->addEphemeralTimeout(timeout);
+    }
+  }
+
   int64_t incrementSplitCount() {
     return splitCounter_++;
   }

@@ -1135,14 +1135,16 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     on an nccl2 group raised "NCCL host communicator for group ... not found".
     """
 
+    backend_name = "nccl2"
+
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Eager nccl2 communicator init via device_id, mirroring
-        # NCCLSymmetricMemoryTest but with backend="nccl2".
+        # Eager communicator init via device_id, mirroring
+        # NCCLSymmetricMemoryTest.
         if rdvz_file is None:
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
@@ -1150,7 +1152,7 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
         torch.cuda.set_device(device)
         store = c10d.FileStore(rdvz_file, world_size)
         c10d.init_process_group(
-            backend="nccl2",
+            backend=cls.backend_name,
             world_size=world_size,
             rank=rank,
             store=store,
@@ -1163,15 +1165,13 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
     @skip_if_lt_x_gpu(2)
-    def test_nccl_symmem_rendezvous_nccl2(self):
+    def test_nccl_symmem_rendezvous(self):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
-        # Confirm the intended path: an nccl2 PG + the NCCL symm-mem backend (the
-        # only backend that resolves the group's host comm via NCCLDevCommManager).
-        self.assertEqual(c10d.get_backend(c10d.group.WORLD), "nccl2")
+        # Confirm the intended path: a torchcomms PG + the NCCL symm-mem backend.
+        self.assertEqual(c10d.get_backend(c10d.group.WORLD), self.backend_name)
         self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
-        # Initialize the nccl2 communicator (published to NCCLDevCommManager via
-        # the comm-registration hook) before rendezvous looks it up.
+        # Publish the communicator before rendezvous looks it up.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -1185,6 +1185,10 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
         self.assertEqual(
             result, torch.full_like(result, (self.world_size - 1) * self.world_size / 2)
         )
+
+
+class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
+    backend_name = "nccl-lazy"
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")

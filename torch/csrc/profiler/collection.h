@@ -145,6 +145,7 @@ using jit_stack_t = std::vector<std::string>;
 using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
+using typed_metadata_t = std::unordered_map<std::string, c10::IValue>;
 using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
 
 // Mirrors `libkineto::GenericTraceActivity::Flow`. Used during post processing
@@ -386,6 +387,7 @@ struct ExtraFields<EventType::Kineto> {
   std::weak_ptr<Result> linked_activity_;
   std::string metadata_json_;
   extra_meta_t extra_meta_;
+  typed_metadata_t typed_metadata_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {

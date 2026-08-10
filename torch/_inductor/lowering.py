@@ -62,6 +62,7 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
+from torch.utils._triton import has_triton_reduction_ordering
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -757,13 +758,12 @@ def make_pointwise(
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # Use FMA for add-with-alpha on CUDA floating-point.
-                # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
+                # Use FMA for add-with-alpha on Triton GPU floating-point.
+                # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
                     inp_device = inputs[0].get_device()
                     if (
                         inputs[0].get_dtype().is_floating_point
-                        and not torch.version.hip
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
@@ -2792,7 +2792,32 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if not is_triton_fp8_dtype_supported(t.dtype, t.device):
-        return True
+        from .codegen.triton_utils import (
+            use_uint8_triton_storage_for_cuda_float8_e4m3fn,
+        )
+
+        if not use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+            t.dtype, device=t.device
+        ):
+            return True
+
+        # uint8 storage reinterprets fp8 bytes: allow bitcast, views, memory
+        # movement, and dequant (convert out of fp8)
+        if not node:
+            return True
+        return not (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target
+            in (
+                aten.view.dtype,
+                aten.cat.default,
+                aten.clone.default,
+                aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
+                prims.convert_element_type.default,
+            )
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
+        )
 
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
@@ -2829,6 +2854,8 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
     if node is not None and node.target in supported_complex_views and t.is_complex():
         return False
     if unsupported_input_tensor(t, node):
+        return True
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -6314,9 +6341,12 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     window_size = h_kernel_max * w_kernel_max
-    if window_size > 25:
+    if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_avg_pool2d(x, output_size)
+
+    h_kernel_max = V.graph.sizevars.guard_int(h_kernel_max)
+    w_kernel_max = V.graph.sizevars.guard_int(w_kernel_max)
 
     def start_index(index, out_dim, inp_dim):
         return FloorDiv((index * inp_dim), out_dim)
@@ -7314,7 +7344,10 @@ def _make_reduction_inner(
 
 
 def make_reduction(
-    reduction_type: ReductionType, override_return_dtype=None
+    reduction_type: ReductionType,
+    override_return_dtype=None,
+    *,
+    strict_sum: bool = False,
 ) -> Callable[..., TensorBox]:
     def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
@@ -7332,7 +7365,12 @@ def make_reduction(
             override_return_dtype=override_return_dtype,
             reduction_type=reduction_type,
         )
-        result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
+        result = Reduction.create(
+            reduction_type=reduction_type,
+            input_node=x,
+            strict_sum=strict_sum,
+            **kwargs,
+        )
         if isinstance(
             result.data.data,  # type: ignore[attr-defined, attr-type, union-attr]
             Reduction,
@@ -7857,14 +7895,80 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
+def _strict_sum_layout_eligible(axis, dtype) -> bool:
+    current_node = V.graph.current_node
+    if (
+        current_node is None
+        or config.numerics != "strict"
+        or current_node.target != aten.sum.dim_IntList
+        or dtype is not None
+        or axis is None
+        or not has_triton_reduction_ordering()
+    ):
+        return False
+    dims = [axis] if isinstance(axis, int) else list(axis)
+    if len(dims) != 1:
+        return False
+
+    fx_input = current_node.args[0]
+    if not isinstance(fx_input, torch.fx.Node):
+        return False
+    value = fx_input.meta.get("val")
+    if not isinstance(value, torch.Tensor) or value.dtype not in {
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    }:
+        return False
+    if (
+        not value.is_cuda
+        or torch.version.hip is not None
+        or not is_triton(value.device)
+    ):
+        return False
+
+    dim = dims[0] + value.ndim if dims[0] < 0 else dims[0]
+    if not 0 <= dim < value.ndim:
+        return False
+    sizes = [convert_symint_to_expr(size) for size in value.shape]
+    strides = [convert_symint_to_expr(stride) for stride in value.stride()]
+    sizevars = V.graph.sizevars
+    outer = [
+        (size, stride)
+        for i, (size, stride) in enumerate(zip(sizes, strides))
+        if i != dim and not sizevars.statically_known_equals(size, 1)
+    ]
+    collapsible = all(
+        sizevars.statically_known_equals(slow_stride, fast_stride * fast_size)
+        for (_, slow_stride), (fast_size, fast_stride) in itertools.pairwise(outer)
+    )
+    if sizevars.statically_known_equals(sizes[dim], 1):
+        if not outer:
+            return sizevars.statically_known_equals(strides[0], 1) and all(
+                sizevars.statically_known_equals(stride, 0)
+                or sizevars.statically_known_equals(stride, 1)
+                for stride in strides[1:]
+            )
+        return collapsible and sizevars.statically_known_equals(outer[-1][1], 1)
+    if not sizevars.statically_known_equals(strides[dim], 1):
+        return False
+    if any(
+        not sizevars.statically_known_true(sympy.Gt(stride, 1)) for _, stride in outer
+    ):
+        return False
+    return collapsible
+
+
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    strict_sum = _strict_sum_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("sum", override_return_dtype=dtype)
+    fn = make_reduction("sum", override_return_dtype=dtype, strict_sum=strict_sum)
     return fn(x, axis, keepdims, dtype=dtype)
 
 
@@ -8379,13 +8483,14 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
 
-    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
-    we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
+    integer types we fall back to regular arithmetic since FMA doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
-    rounding behavior.
+    rounding behavior. On ROCm, mul_rn falls back to regular multiplication since
+    libdevice.mul_rn is not available; the FMA itself (tl.fma) is still used.
     """
     dtype = get_promoted_dtype(
         self,
@@ -8398,7 +8503,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
@@ -8455,11 +8559,13 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
     For value=1: self + tensor1 / tensor2 (no FMA needed, just add the division)
     For value!=1: fma(value, div_rn(tensor1, tensor2), self)
 
-    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
-    we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
+    integer types we fall back to regular arithmetic since FMA doesn't support integers.
 
     We use div_rn (round-to-nearest division) to force proper rounding, preventing
     Triton from fusing operations in ways that change the rounding behavior.
+    div_rn emits triton.language.div_rn on both CUDA and ROCm (unlike mul_rn, which
+    falls back to regular multiplication on ROCm where libdevice.mul_rn is unavailable).
     """
     dtype = get_promoted_dtype(
         self,
@@ -8472,11 +8578,9 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
@@ -8486,15 +8590,12 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
-        # Compute tensor1 / tensor2 first
-        # Use div_rn for round-to-nearest division on CUDA to match eager behavior
         if use_fma:
             t1_div_t2 = ops.div_rn(t1_val, t2_val)
         else:
             t1_div_t2 = ops.truediv(t1_val, t2_val)
 
         if value == 1:
-            # For value=1, just add the division result (no FMA needed)
             return ops.add(self_val, t1_div_t2)
 
         # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
@@ -8504,10 +8605,8 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
             value_expr = ops.constant(value, dtype)
 
         if use_fma:
-            # Use FMA for floating-point types for better precision
             return ops.fma(value_expr, t1_div_t2, self_val)
         else:
-            # Fall back to regular arithmetic for integer types
             return ops.add(self_val, ops.mul(value_expr, t1_div_t2))
 
     return Pointwise.create(
@@ -9405,25 +9504,6 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
-    # An effectful op may retain its tensor inputs in state that inductor cannot
-    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
-    # must outlive the op and never be reused for another buffer. We pin the
-    # inputs of every ORDERED op intentionally rather than only those that can
-    # actually retain them: some (aten::_print, aten::_linalg_check_errors) don't,
-    # so this slightly over-pins. There is no reliable "retains inputs" signal to
-    # scope this to: retention happens inside the op's implementation, so it is
-    # not exposed by the schema (even queue_push, which stashes its input, reports
-    # alias_info=None), the EffectType enum only encodes ordering, and a
-    # ScriptObject argument merely triggers the default effect (effects can be
-    # registered manually on any op, so it is neither necessary nor precise).
-    # Under-pinning would silently miscompile by recycling a buffer the op still
-    # holds, so the bounded over-pinning is the intended tradeoff for correctness.
-    if effect_type:
-        for arg in pytree.tree_leaves((args, kwargs)):
-            if isinstance(arg, TensorBox):
-                arg.realize()
-                V.graph.never_reuse_buffers.add(arg.get_name())
-
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9453,9 +9533,7 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = (
-                    new_op.get_operation_name()
-                )  # pyrefly: ignore[missing-attribute]
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (

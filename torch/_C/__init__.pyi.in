@@ -1495,6 +1495,7 @@ _has_mkldnn: _bool
 _has_mkldnn_acl: _bool
 _has_cudnn: _bool
 _has_cusparselt: _bool
+_has_gds: _bool
 has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 default_generator: Generator

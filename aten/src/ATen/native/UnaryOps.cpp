@@ -249,7 +249,7 @@ TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
 }
 
 TORCH_META_FUNC(neg)(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
@@ -844,7 +844,7 @@ Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
 Tensor positive(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
   return self;
 }
 

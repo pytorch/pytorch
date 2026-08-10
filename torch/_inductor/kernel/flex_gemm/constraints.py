@@ -126,6 +126,30 @@ LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
+FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
+    "FlexGEMM output contractions do not compose with aux outputs, local "
+    "reductions, C, alpha/beta, or batched GEMMs yet"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR = (
+    "FlexGEMM output contractions currently support only numeric [1, 1] and "
+    "[M, 1] captured tensors"
+)
+FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR = (
+    "FlexGEMM concat-layout output contractions do not compose with grouped "
+    "reductions because concat layout permutes accumulator columns"
+)
+FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
+    "FlexGEMM concat-layout output contractions require B's output dimension to "
+    "be non-contiguous, as in linear weight.t()"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: contracted output shape must equal the "
+    "physical GEMM output shape with N divided by the contraction group"
+)
+FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: main output shape must equal the physical "
+    "GEMM output shape"
+)
 
 
 def statically_known_multiple(value: Any, divisor: int) -> bool:
@@ -381,6 +405,86 @@ def flex_gemm_local_reduce_config_error(
     return (
         f"{LOCAL_REDUCE_CONFIG_ERROR}; requested group={group}, "
         f"max supported group={max_group} for axis={axis}"
+    )
+
+
+# NOTE [Non-shape-preserving FlexGEMM outputs]
+# FlexGEMM normally returns one value per physical GEMM accumulator. Output
+# contraction is the current exception: it exposes grouped physical N values to
+# the ordinary FX epilogue, requires the main expression to consume the complete
+# group, and stores one logical value per group. Interleaved groups use
+# ``view(M, logical_N, group)``; chunked groups use
+# ``view(M, group, logical_N)`` or ``split(logical_N, dim=-1)``. This covers
+# SwiGLU-like pointwise combinations without claiming to support arbitrary slices,
+# permutations, expansions, or M-axis contraction.
+#
+# Numeric ``[1, 1]`` and ``[M, 1]`` captures are N-invariant. QuACK loads their
+# one value per epilogue thread and lets generated pointwise code broadcast it in
+# either the physical or contracted layout. N-varying ``[1, N]`` and ``[M, N]``
+# captures need the same concat-to-interleave mapping as B for chunked outputs.
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputContraction:
+    """Describe the contraction in NOTE [Non-shape-preserving FlexGEMM outputs].
+
+    Attributes:
+        group: Number of physical N values contracted into each logical output.
+        chunked: Whether group values are contiguous N chunks rather than interleaved.
+    """
+
+    group: int
+    chunked: bool = False
+
+    def __post_init__(self) -> None:
+        if self.group <= 0:
+            raise ValueError("output-contraction group must be positive")
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        """Return the QuACK ABI tag that interleaves chunked B columns."""
+        return ("B",) if self.chunked else ()
+
+    def validate_quack(self, device_capacity: int) -> None:
+        if device_capacity == 12:
+            raise NotImplementedError(
+                "FlexGEMM output contractions are not yet supported on SM120"
+            )
+        if device_capacity not in (10, 11):
+            raise NotImplementedError(
+                "FlexGEMM output contractions are currently validated only on "
+                "SM100 and SM110"
+            )
+        if self.group == 2 or (
+            self.group == 4 and not self.chunked and device_capacity == 10
+        ):
+            return
+        raise NotImplementedError(
+            "FlexGEMM output-contraction stores support group 2 on SM100 and "
+            "SM110, plus interleaved group 4 on SM100"
+        )
+
+
+def output_contraction_capture_supported(kind: str, is_boolean: bool) -> bool:
+    """Return whether output-contraction codegen can broadcast a captured tensor."""
+    return kind in ("scalar", "col") and not is_boolean
+
+
+def output_contraction_config_supported(config: Any, n: Any) -> bool:
+    """Return whether a config has validated output-contraction store ownership.
+
+    Keep the physical M/N orientation, one CTA per cluster along N, and require
+    the physical N tile not to exceed the problem. Admit only M-cluster families
+    whose row ownership has been validated: a single M CTA or the wide-M two-CTA
+    layout. Multiple N tiles and partial final tiles are supported by the ordinary
+    tile scheduler and store predicates.
+    """
+    supported_m_cluster = config.cluster_m == 1 or (
+        config.tile_m == 256 and config.cluster_m == 2
+    )
+    return (
+        not config.swap_ab
+        and supported_m_cluster
+        and config.cluster_n == 1
+        and statically_known(config.tile_n <= n)
     )
 
 

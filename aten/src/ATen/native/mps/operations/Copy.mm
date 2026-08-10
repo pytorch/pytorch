@@ -5,6 +5,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Copy.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
 #include <ATen/ops/imag.h>
@@ -85,6 +86,64 @@ static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, b
   });
   if (profile_id) {
     getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE);
+  }
+}
+
+template <typename I>
+static void exec_inner_contiguous_scatter(const Tensor& input,
+                                          const Tensor& output,
+                                          uint64_t slice_bytes,
+                                          uint64_t out_stride_bytes,
+                                          uint64_t off_bytes) {
+  const uint64_t nbytes = input.nbytes();
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(getMTLBufferStorage(input),
+                                                          getMTLBufferStorage(output),
+                                                          input,
+                                                          output,
+                                                          nbytes,
+                                                          /*non_blocking=*/true,
+                                                          /*usesBlitter=*/false);
+  auto* kernel = lib.getCachedKernelFunctionPtr(
+      fmt::format("inner_contiguous_scatter{}", mtlIdxSuffix(std::is_same_v<I, uint32_t>)));
+  constexpr uint64_t max_chunk = 0x80000000; // 2GB, so chunk_bytes fits the uint32 nbytes field
+  StridedBlockParams<I> params;
+  params.slice_bytes = static_cast<I>(slice_bytes);
+  params.out_stride_bytes = static_cast<I>(out_stride_bytes);
+  params.off_bytes = static_cast<I>(off_bytes);
+  kernel->runCommandBlock([&] {
+    kernel->startEncoding();
+    kernel->setArg(0, input);
+    kernel->setArg(1, output);
+    for (uint64_t base = 0; base < nbytes;) {
+      params.chunk_base = static_cast<I>(base);
+      params.nbytes = static_cast<uint32_t>(std::min(max_chunk, nbytes - base));
+      kernel->setArg(2, params);
+      kernel->dispatch((params.nbytes + 15) / 16);
+      base += params.nbytes;
+    }
+  });
+  if (profile_id) {
+    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE);
+  }
+}
+
+void inner_contiguous_scatter_mps(const Tensor& input,
+                                  const Tensor& output,
+                                  uint64_t slice_bytes,
+                                  uint64_t out_stride_bytes,
+                                  uint64_t off_bytes) {
+  if (input.nbytes() == 0) { // nothing to copy; also avoids a slice_bytes==0 divide below
+    return;
+  }
+  // Largest byte index the kernel addresses on either side; use a 64-bit index
+  // only when it can't fit a 32-bit one.
+  const uint64_t num_slices = (input.nbytes() + slice_bytes - 1) / slice_bytes;
+  const uint64_t max_out = off_bytes + (num_slices ? (num_slices - 1) * out_stride_bytes + slice_bytes : 0);
+  const uint64_t bound = std::max<uint64_t>(input.nbytes(), max_out);
+  if (bound > std::numeric_limits<uint32_t>::max()) {
+    exec_inner_contiguous_scatter<uint64_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
+  } else {
+    exec_inner_contiguous_scatter<uint32_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
   }
 }
 

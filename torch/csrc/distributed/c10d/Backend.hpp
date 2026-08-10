@@ -94,6 +94,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     ~Options() override = default;
     Options(const Options&) = default;
 
+    // Returns an independent copy, preserving the concrete type.
+    // ProcessGroup::splitGroup()/mergeRemoteGroup() clone the options they
+    // hand to a child backend: getBackendOptions() returns the parent's live
+    // options_, and split()/merge() implementations mutate what they are given
+    // (group_name, timeout, global_ranks_in_group, split_color, ...), so
+    // sharing one object corrupts the parent. A subclass that adds fields must
+    // override this or it would be sliced; ProcessGroup detects a sliced clone
+    // and falls back to sharing rather than handing a backend the wrong type.
+    virtual c10::intrusive_ptr<Options> clone() const {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::chrono::milliseconds timeout;
 
     // backend name
@@ -178,6 +190,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " does not support setting timeout; the new value is ignored");
   }
 
+  // Experimental. Adds `timeout` to the timeout assigned to work created after
+  // this call. Work already created retains its assigned timeout. The extension
+  // remains active for all later work until the first work created after this
+  // call completes. Multiple calls accumulate; each extension expires
+  // independently when its first subsequent work completes. Unsupported
+  // backends intentionally ignore temporary timeout extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
+
   // Fault Tolerance / Reconfigure API
   //
   // Backends that support dynamic membership override these.
@@ -209,7 +230,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Backends that support one-sided operations advertise it via supportsWindow
   // and return a concrete c10d::Window from new_window. The optional tensor, if
-  // provided, is registered with the new window.
+  // provided, is registered with the new window. new_window is collective: all
+  // ranks in the backend must call it in the same order.
   virtual bool supportsWindow() const {
     return false;
   }

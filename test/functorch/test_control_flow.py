@@ -4738,6 +4738,190 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
+    def test_scan_length_validation_pass(self):
+        def add(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        xs = torch.arange(4, dtype=torch.float32)
+        result = scan(add, init, xs, length=4)
+        expected = _fake_scan(add, init, xs)
+        self.assertEqual(result, expected)
+
+    def test_scan_length_validation_mismatch(self):
+        def add(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        xs = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length=3.*does not match xs size.*4"
+        ):
+            scan(add, init, xs, length=3)
+
+    def test_scan_length_negative_raises(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length must be a non-negative integer"
+        ):
+            scan(body, init, None, length=-1)
+
+    def test_scan_xs_empty_tuple_length_eager(self):
+        # Empty pytree xs (()) is treated the same as xs=None when length is given.
+        def body(c, x):
+            if x is not None:
+                raise RuntimeError(f"expected x to be None, got {x}")
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        carry, ys = scan(body, init, (), length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
+
+    @parametrize("length", [4, 0])
+    def test_scan_xs_none_length_body_uses_x_raises(self, length):
+        # combine_fn that dereferences x must raise regardless of length.
+        def bad_body(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            (RuntimeError, TypeError), r"unsupported operand type.*NoneType"
+        ):
+            scan(bad_body, init, None, length=length)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("output", ["tensor", "none"])
+    @parametrize("autograd", [False, True])
+    def test_scan_xs_none_length(self, compile_mode, output, autograd):
+        if output == "tensor":
+
+            def body(c, x):
+                return torch.sin(c), torch.sin(c).clone()
+        else:
+
+            def body(c, x):  # noqa: E306
+                return torch.sin(c), None
+
+        init = torch.tensor(0.5, requires_grad=autograd)
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        if output == "none" and autograd:
+            # None ys + autograd is not yet supported; pin the limitation so this
+            # starts failing (and prompts an update) once support is added.
+            with self.assertRaises(RuntimeError):
+                result = scan_fct(body, init, None, length=3)
+                torch.autograd.grad(result[0], init, torch.ones_like(result[0]))
+            return
+
+        result = scan_fct(body, init, None, length=3)
+        result_exp = _fake_scan(body, init, None, length=3)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (init,))
+
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_make_fx_none_output(self):
+        def body(c, x):
+            return torch.sin(c), None
+
+        init = torch.tensor(0.5)
+        gm = make_fx(lambda i: scan(body, i, None, length=3))(init)
+        result = gm(init)
+        result_exp = _fake_scan(body, init, None, length=3)
+        self.assertEqual(result, result_exp)
+
+    @parametrize("output", ["tensor", "none"])
+    def test_scan_xs_none_length_zero(self, output):
+        if output == "tensor":
+
+            def body(c, x):
+                return c, (c * 2).clone()
+
+            init = torch.tensor([1.0, 2.0, 3.0])
+            carry, ys = scan(body, init, None, length=0)
+            self.assertEqual(carry, init)
+            self.assertEqual(ys.shape, torch.Size([0, 3]))
+            self.assertEqual(ys.dtype, init.dtype)
+        else:
+
+            def body(c, x):  # noqa: E306
+                return c + 1.0, None
+
+            init = torch.tensor(0.0)
+            carry, ys = scan(body, init, None, length=0)
+            self.assertEqual(carry, init)
+            self.assertIsNone(ys)
+        expected = _fake_scan(body, init, None, length=0)
+        self.assertEqual((carry, ys), expected)
+
+    @skipIfNoDynamoSupport
+    @parametrize("output", ["tensor", "none"])
+    def test_scan_xs_none_length_zero_compile(self, output):
+        if output == "tensor":
+
+            def body(c, x):
+                return c, (c * 2).clone()
+
+            init = torch.tensor([1.0, 2.0, 3.0])
+        else:
+
+            def body(c, x):  # noqa: E306
+                return c + 1.0, None
+
+            init = torch.tensor(0.0)
+
+        @torch.compile(fullgraph=True)
+        def f(i):
+            return scan(body, i, None, length=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"scan\(\) with length=0 and no xs tensors is not supported under torch\.compile",
+        ):
+            f(init)
+
+    def test_scan_xs_none_length_vmap(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        batch_init = torch.arange(3, dtype=torch.float32)
+        batched_carry, batched_ys = torch.vmap(lambda i: scan(body, i, None, length=4))(
+            batch_init
+        )
+        self.assertEqual(batched_carry, batch_init + 4.0)
+        expected_ys = torch.stack([batch_init + k for k in range(1, 5)], dim=1)
+        self.assertEqual(batched_ys, expected_ys)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_dynamic_compile(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cc = CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cc, fullgraph=True, dynamic=True)
+        def f(i, length):
+            return scan(body, i, None, length=length)
+
+        r4 = f(init, 4)
+        self.assertEqual(r4, (torch.tensor(4.0), torch.tensor([1.0, 2.0, 3.0, 4.0])))
+        r6 = f(init, 6)
+        self.assertEqual(
+            r6, (torch.tensor(6.0), torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+        )
+        f(init, 4)  # should hit cache, no new compilation
+        self.assertEqual(cc.frame_count, 1)
+
 
 class AssociativeScanModels:
     @staticmethod

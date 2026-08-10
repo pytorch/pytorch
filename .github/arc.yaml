@@ -94,15 +94,10 @@ runner_mapping:
   linux.aws.h100.4: l-x86iamx-88-900-h100-4                         # 4 GPUs
   linux.aws.h100.8: l-bx86iamx-176-1800-h100-8                      # 8 GPUs (bare metal)
 
-  # ---- x86 GPU — B200 (p6 family) ----
-
-  linux.dgx.b200: l-x86iamx-22-225-b200                             # p6-b200.48xlarge (1 GPU)
-
   # ---- Partner hardwares ----
 
-  # 8-GPU B200 has OSDC runners, but not enough capacity there yet, so keep it as
-  # a passthrough for now: OSDC builds can run while tests stay on the existing
-  # linux.dgx.b200.8 runner until OSDC capacity is available.
+  # No B200 capacity on OSDC.
+  linux.dgx.b200: linux.dgx.b200
   linux.dgx.b200.8: linux.dgx.b200.8
   linux.idc.xpu: linux.idc.xpu
   linux.client.xpu: linux.client.xpu
@@ -132,4 +127,3 @@ meta_only_runners:
   - linux.aws.h100
   - linux.aws.h100.4
   - linux.aws.h100.8
-  - linux.dgx.b200

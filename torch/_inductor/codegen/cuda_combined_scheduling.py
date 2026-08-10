@@ -183,9 +183,10 @@ class CUDACombinedScheduling(BaseScheduling):
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
             template_node
         ):
-            assert not prologue_nodes, (  # noqa: S101
-                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
-            )
+            if prologue_nodes:
+                raise AssertionError(
+                    "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+                )
             return self._nv_universal_gemm_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )

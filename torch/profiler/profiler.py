@@ -299,11 +299,15 @@ class _KinetoProfile:
             # graph's one-time instantiate(); the per-window ProfilerObserver registers it
             # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
             if self._custom_profiler_config.get("enable_graph_dependencies"):
-                from torch.profiler._cupti._graph_deps import (
-                    arm_graph_dependency_recording,
-                )
+                from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
 
-                arm_graph_dependency_recording()
+                _GraphDependencyRecorder().arm()
+            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
+            # the recorder reads each graph's event nodes at its one-time instantiate().
+            if self._custom_profiler_config.get("enable_event_node_ids"):
+                from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+                _EventNodeRecorder().arm()
         elif "cupti_monitor_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cupti_monitor_async_export is only supported with the cupti_monitor "
@@ -357,8 +361,13 @@ class _KinetoProfile:
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # GPU environment counters (power/clock/thermal/cooling) are periodically
+                # sampled; opt-in since the sampling adds overhead.
+                enable_environment_counters=bool(
+                    self._custom_profiler_config.get("enable_environment_counters")
+                ),
                 # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
-                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # feature, opt-in like the env counters. The metrics are per-profile
                 # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
                 enable_pm_sampling=bool(
                     self._custom_profiler_config.get("enable_pm_sampling")
@@ -368,6 +377,16 @@ class _KinetoProfile:
                 # instantiate + arrow rendering); off unless the config requests them.
                 enable_graph_dependencies=bool(
                     self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
+                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
+                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
+                # CUDA_EVENT record kind.
+                enable_event_node_ids=bool(
+                    self._custom_profiler_config.get("enable_event_node_ids")
+                ),
+                # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+                pftrace_compression_level=int(
+                    self._custom_profiler_config.get("pftrace_compression_level", 1)
                 ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
@@ -898,9 +917,6 @@ class profile(_KinetoProfile):
         custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
             invoked once per profiling cycle. Defaults to a random UUID; retrieve via
             :meth:`get_trace_id`.
-        use_cuda (bool):
-            .. deprecated:: 1.8.1
-                use ``activities`` instead.
 
     .. note::
         Use :func:`~torch.profiler.schedule` to generate the callable schedule.
@@ -1012,31 +1028,13 @@ class profile(_KinetoProfile):
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
-        # deprecated:
-        use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        # Extract activities for the use_cuda deprecation check.
         if activities is not None:
-            activities_set: set[ProfilerActivity] = set()
-            for item in activities:
-                if isinstance(item, ProfilerActivity):
-                    activities_set.add(item)
-                elif isinstance(item, dict):
-                    activities_set.update(item.keys())
+            activities_set, _ = _parse_activities(activities)
         else:
             activities_set = supported_activities()
-        if use_cuda is not None:
-            warn(
-                "`use_cuda` is deprecated, use `activities` argument instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if use_cuda:
-                activities_set.add(ProfilerActivity.CUDA)
-            elif ProfilerActivity.CUDA in activities_set:
-                activities_set.remove(ProfilerActivity.CUDA)
         if len(activities_set) == 0:
             raise AssertionError("No valid profiler activities found")
 

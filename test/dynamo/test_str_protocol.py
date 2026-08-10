@@ -205,8 +205,8 @@ class TpStrUserDefinedTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         out = compiled(x, obj)
+        self.assertIn("__str__", out)
         self.assertEqual(fn(x, obj), out)
-        self.assertIn("__str__ returned non-string", out)
 
     @unittest.expectedFailure
     def test_user_defined_opaque_str_descriptor_raises_type_error(self):

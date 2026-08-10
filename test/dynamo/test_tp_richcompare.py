@@ -1899,6 +1899,33 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
         self.assertEqual(result, expected)
 
+    def test_unbound_builtin_cmp_dunder(self):
+        """type.__cmp__(a, b) invokes only the left type's slot (may be
+        NotImplemented) rather than the full comparison protocol."""
+
+        def fn():
+            return (
+                complex.__eq__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, 2 + 2j),
+                complex.__eq__(1 + 1j, 2),
+                complex.__ne__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, None),
+                complex.__lt__(1 + 1j, 2 + 2j),
+                int.__eq__(1, 1),
+                int.__lt__(1, 2),
+                int.__eq__(1, None),
+                float.__eq__(1.0, 2.0),
+                float.__lt__(1.0, 2.0),
+                str.__eq__("a", "a"),
+                bool.__eq__(True, 1),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(len(expected), len(result))
+        for e, r in zip(expected, result):
+            self.assertIs(r, e)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

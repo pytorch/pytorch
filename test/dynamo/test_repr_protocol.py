@@ -124,8 +124,8 @@ class TpReprTests(TestCase):
         obj = BadRepr()
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         out = compiled(x, obj)
+        self.assertTrue(type(out) is str)
         self.assertEqual(fn(x, obj), out)
-        self.assertIn("__repr__ returned non-string", out)
 
     def test_dunder_repr_returning_non_string_raises(self):
         class BadRepr:

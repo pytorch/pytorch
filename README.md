@@ -423,7 +423,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a Docker version >= 23.0
 
-The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
+The Dockerfile is supplied to build images with CUDA 12.6 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default, as the Dockerfile uses system Python.
 

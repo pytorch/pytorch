@@ -712,25 +712,32 @@ kernel void conv3d_mpp(
       GNAME,                          \
       GROUPED)
 
-#define INSTANTIATE_CONV3D_MPP_STANDARD(KD, KH, KW, SZ, SY, SX, CNAME, SRCC) \
-  INSTANTIATE_CONV3D_MPP_TILES(                                              \
-      KD,                                                                    \
-      KH,                                                                    \
-      KW,                                                                    \
-      SZ,                                                                    \
-      SY,                                                                    \
-      SX,                                                                    \
-      1,                                                                     \
-      1,                                                                     \
-      1,                                                                     \
-      CNAME,                                                                 \
-      SRCC,                                                                  \
-      bias,                                                                  \
-      true,                                                                  \
-      ncdhw,                                                                 \
-      true,                                                                  \
-      ungrouped,                                                             \
+#define INSTANTIATE_CONV3D_MPP_STANDARD_VARIANT(          \
+    KD, KH, KW, SZ, SY, SX, CNAME, SRCC, BNAME, HAS_BIAS) \
+  INSTANTIATE_CONV3D_MPP_TILES(                           \
+      KD,                                                 \
+      KH,                                                 \
+      KW,                                                 \
+      SZ,                                                 \
+      SY,                                                 \
+      SX,                                                 \
+      1,                                                  \
+      1,                                                  \
+      1,                                                  \
+      CNAME,                                              \
+      SRCC,                                               \
+      BNAME,                                              \
+      HAS_BIAS,                                           \
+      ncdhw,                                              \
+      true,                                               \
+      ungrouped,                                          \
       false)
+
+#define INSTANTIATE_CONV3D_MPP_STANDARD(KD, KH, KW, SZ, SY, SX, CNAME, SRCC) \
+  INSTANTIATE_CONV3D_MPP_STANDARD_VARIANT(                                   \
+      KD, KH, KW, SZ, SY, SX, CNAME, SRCC, bias, true)                       \
+  INSTANTIATE_CONV3D_MPP_STANDARD_VARIANT(                                   \
+      KD, KH, KW, SZ, SY, SX, CNAME, SRCC, nobias, false)
 
 #define INSTANTIATE_CONV3D_MPP_GROUPED(KD, KH, KW, SZ, SY, SX) \
   INSTANTIATE_CONV3D_MPP_TILES(                                \
