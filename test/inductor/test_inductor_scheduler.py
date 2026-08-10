@@ -366,6 +366,33 @@ class TestScheduler(TestCase):
                     )
                 )
 
+    def test_nested_reduction_sub_parent_domain_preserves_group_axis(self):
+        grouped = Mock()
+        grouped.get_ranges.return_value = ([3, 6], [16])
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.R,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+            x_grouped_context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.X,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+        self.assertEqual(context.sub_parent_domain, (3, 6, 8))
+        self.assertIsNone(x_grouped_context.sub_parent_domain)
+
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
         graph = Mock(sizevars=SizeVarAllocator())
@@ -434,33 +461,6 @@ class TestScheduler(TestCase):
                     group_size=16,
                 )
             )
-
-    def test_nested_reduction_parent_half_domain(self):
-        self.assertEqual(
-            NestedReduction._parent_half_domain(
-                NestedReduction.GroupedAxis.R,
-                16,
-                128,
-                512,
-            ),
-            (128, 256),
-        )
-        self.assertIsNone(
-            NestedReduction._parent_half_domain(
-                NestedReduction.GroupedAxis.X,
-                16,
-                128,
-                512,
-            )
-        )
-        self.assertIsNone(
-            NestedReduction._parent_half_domain(
-                NestedReduction.GroupedAxis.R,
-                1,
-                128,
-                512,
-            )
-        )
 
     def test_nested_reduction_axis_from_loop_body(self):
         outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
