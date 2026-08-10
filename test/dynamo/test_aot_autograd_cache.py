@@ -518,6 +518,92 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_input_alias_guards_restored_on_cache_hit(self):
+        def check(fn, compiled_fn, make_args):
+            expected = fn(*make_args())
+            actual = compiled_fn(*make_args())
+            self.assertEqual(actual, expected)
+
+        def offset_fn(a, b):
+            a.add_(10)
+            return b.clone()
+
+        def offset_args(offset):
+            def make_args():
+                base = torch.arange(8, dtype=torch.float32)
+                return base[:4], base[offset : offset + 4]
+
+            return make_args
+
+        compiled_offset_fn = torch.compile(offset_fn, backend="inductor")
+        check(offset_fn, compiled_offset_fn, offset_args(1))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+        # Force Dynamo to compile a new frame from the AOTAutograd cache. The
+        # cache hit must reinstall the offset guard for subsequent calls.
+        self._clear_dynamo_and_codecache()
+        check(offset_fn, compiled_offset_fn, offset_args(1))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        check(offset_fn, compiled_offset_fn, offset_args(2))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+
+        self._clear_all_caches()
+        counters.clear()
+
+        def topology_fn(a, b, c, d):
+            a.add_(1)
+            return b.clone() + c.clone() + d.clone()
+
+        def one_storage():
+            base = torch.arange(20, dtype=torch.float32)
+            return base[0:4], base[2:6], base[10:14], base[12:16]
+
+        def two_storages():
+            base = torch.arange(20, dtype=torch.float32)
+            other = base + 100
+            return base[0:4], base[2:6], other[10:14], other[12:16]
+
+        compiled_topology_fn = torch.compile(topology_fn, backend="inductor")
+        check(topology_fn, compiled_topology_fn, one_storage)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+        self._clear_dynamo_and_codecache()
+        check(topology_fn, compiled_topology_fn, one_storage)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        check(topology_fn, compiled_topology_fn, two_storages)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+
+        self._clear_all_caches()
+        counters.clear()
+
+        def duplicate_fn(a, b):
+            a.add_(1)
+            b.add_(2)
+            return a + b
+
+        def duplicate_args():
+            value = torch.arange(4, dtype=torch.float32)
+            return value, value
+
+        def distinct_args():
+            value = torch.arange(4, dtype=torch.float32)
+            # Keep storage, offset, and tensor metadata identical to the
+            # duplicate case; only Python object identity changes.
+            return value[:], value[:]
+
+        compiled_duplicate_fn = torch.compile(duplicate_fn, backend="inductor")
+        check(duplicate_fn, compiled_duplicate_fn, duplicate_args)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+        self._clear_dynamo_and_codecache()
+        check(duplicate_fn, compiled_duplicate_fn, duplicate_args)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        check(duplicate_fn, compiled_duplicate_fn, distinct_args)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
     @functorch_config.patch({"enable_autograd_cache": True})
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
@@ -714,6 +800,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_aot_runtime_trace_joint(self):
         @torch.compile(backend="inductor")
@@ -726,10 +814,14 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         x = TwoTensor(x_a, x_a.clone())
         out = f(x)
         out.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
 
         self._clear_dynamo_and_codecache()
+        x_b = torch.randn(4, requires_grad=True)
+        x = TwoTensor(x_b, x_b.clone())
         out = f(x)
         out.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -3521,6 +3613,82 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
+
+    def test_shared_storage_input_groups_preserve_topology(self):
+        base = torch.arange(20)
+        y = base + 100
+
+        duplicate = base[0:4]
+        distinct_same_views = (base[0:4], base[0:4])
+        self.assertEqual(
+            autograd_cache._duplicate_input_groups([duplicate, duplicate]),
+            ((0, 1),),
+        )
+        self.assertEqual(
+            autograd_cache._duplicate_input_groups(distinct_same_views),
+            (),
+        )
+        self.assertEqual(
+            autograd_cache._shared_storage_input_groups([duplicate, duplicate]),
+            autograd_cache._shared_storage_input_groups(distinct_same_views),
+        )
+
+        self.assertEqual(
+            autograd_cache._shared_storage_input_groups(
+                [base[0:4], base[2:6], base[10:14], base[12:16]]
+            ),
+            (((0, 0), (1, 2), (2, 10), (3, 12)),),
+        )
+        self.assertEqual(
+            autograd_cache._shared_storage_input_groups(
+                [base[0:4], base[2:6], y[10:14], y[12:16]]
+            ),
+            (((0, 0), (1, 2)), ((2, 10), (3, 12))),
+        )
+
+        # Symbolic offsets are graph inputs rather than cache-key constants.
+        with patch.object(
+            autograd_cache, "_storage_offset_for_cache_key", return_value=None
+        ):
+            self.assertEqual(
+                autograd_cache._shared_storage_input_groups([base[0:4], base[2:6]]),
+                (((0, None), (1, None)),),
+            )
+
+        # Offset extraction is unnecessary for inputs that do not share storage.
+        with patch.object(
+            autograd_cache,
+            "_storage_offset_for_cache_key",
+            side_effect=AssertionError("unexpected offset read"),
+        ):
+            self.assertEqual(autograd_cache._shared_storage_input_groups([base]), ())
+
+        sparse = torch.sparse_coo_tensor([[0]], [1.0], (2,))
+        self.assertEqual(
+            autograd_cache._shared_storage_input_groups([sparse]),
+            (),
+        )
+
+        # Opaque and wrapper tensor implementations may not expose a storage.
+        # Do not make AOTAutograd caching depend on storage access for them.
+        with patch.object(torch._C, "_has_storage", return_value=False):
+            self.assertEqual(
+                autograd_cache._shared_storage_input_groups([base[0:4], base[2:6]]),
+                (),
+            )
+
+    def test_symbolic_storage_offset_is_not_specialized_in_cache_key(self):
+        symbolic_offset = ShapeEnv().create_unbacked_symint()
+
+        class SymbolicOffsetTensor:
+            def storage_offset(self):
+                return symbolic_offset
+
+        self.assertIsNone(
+            autograd_cache._storage_offset_for_cache_key(
+                SymbolicOffsetTensor()  # pyrefly: ignore [bad-argument-type]
+            )
+        )
 
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):

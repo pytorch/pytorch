@@ -23,11 +23,12 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact
+from torch._guards import GuardEnvExpr, Source
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.output_code import (
     CompiledFxGraph,
@@ -389,6 +390,10 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     # Used by Compiled Autograd
     serialized_bw_module: SerializedGraphModule | None
 
+    # Dynamo guards emitted while AOTAutograd specialized its input calling
+    # convention. ShapeEnv guards are restored separately through guards_expr.
+    aotautograd_guards: list[GuardEnvExpr] = field(default_factory=list)
+
     def pre_save(self) -> None:
         """
         Perform any preparations to make the result ready for serialization.
@@ -598,6 +603,62 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             if check is not True:
                 raise AssertionError(f"guards check failed: {check}")
 
+    def _remap_aotautograd_guards(
+        self, aot_config: AOTConfig | CacheableAOTConfig
+    ) -> list[GuardEnvExpr]:
+        guards = list(getattr(self, "aotautograd_guards", ()))
+        if not guards:
+            return []
+
+        cached_sources = self.sanitized_aot_config.aot_autograd_arg_pos_to_source
+        current_sources = aot_config.aot_autograd_arg_pos_to_source
+        if cached_sources is None or current_sources is None:
+            raise RuntimeError(
+                "Cannot restore cached AOTAutograd guards without input sources"
+            )
+        if len(cached_sources) != len(current_sources):
+            raise RuntimeError(
+                "Cannot restore cached AOTAutograd guards with a different "
+                "number of input sources"
+            )
+
+        source_pairs = list(zip(cached_sources, current_sources))
+
+        def remap(value: Any) -> Any:
+            if isinstance(value, Source):
+                for cached_source, current_source in source_pairs:
+                    if value == cached_source:
+                        if current_source is None:
+                            break
+                        return current_source
+                raise RuntimeError(
+                    f"Cannot remap cached AOTAutograd guard source {value.name}"
+                )
+            if isinstance(value, list):
+                return [remap(item) for item in value]
+            if isinstance(value, tuple):
+                return tuple(remap(item) for item in value)
+            if isinstance(value, dict):
+                return {remap(key): remap(item) for key, item in value.items()}
+            return value
+
+        remapped_guards: list[GuardEnvExpr] = []
+        for guard in guards:
+            if not is_dataclass(guard):
+                raise RuntimeError(
+                    f"Cannot restore non-dataclass AOTAutograd guard {type(guard)}"
+                )
+            remapped_guards.append(
+                replace(
+                    guard,
+                    **{
+                        guard_field.name: remap(getattr(guard, guard_field.name))
+                        for guard_field in fields(guard)
+                    },
+                )
+            )
+        return remapped_guards
+
     # Turn result into the original callable
     def wrap_post_compile(
         self,
@@ -624,6 +685,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         from torch._dynamo.utils import dynamo_timed
 
         self._log_cached_graphs(aot_config)
+        aotautograd_guards = self._remap_aotautograd_guards(aot_config)
         # Cache hits only retain the cacheable subset of AOTConfig. Narrow once
         # here so the existing post-compile wrapper stack can keep its compile-time
         # AOTConfig annotations.
@@ -642,6 +704,9 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         # Now that we're pretty sure it's a successful load, add guards
         # to the existing shape environment from the cache.
         self._check_guards(args)
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context is not None:
+            tracing_context.guards_context.aotautograd_guards.extend(aotautograd_guards)
         return compiled_function
 
 
@@ -705,6 +770,7 @@ def deserialize_bundled_cache_entry(
     # In the precompile use case, guards are already serialized
     # by dynamo, so we don't need to add them to the environment
     entry.guards_expr = None
+    entry.aotautograd_guards = []
     # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
     # which is set by compile_fx. But in precompile, we never actually call compile_fx
     # so we don't have a place to track cudagraphs here.

@@ -57,6 +57,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
+from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
@@ -66,6 +67,7 @@ from torch.compiler._cache import (
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.fx.traceback import _get_memory_budget_annotation
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -446,6 +448,53 @@ def _get_custom_estimator_solver_uuids(
     return runtime_estimator_uuid, solver_uuid
 
 
+def _storage_offset_for_cache_key(input: torch.Tensor) -> int | None:
+    storage_offset = input.storage_offset()
+    if isinstance(storage_offset, torch.SymInt):
+        # Symbolic offsets are graph inputs, so the compiled artifact is generic
+        # over their values. Match StorageOffset guard emission, which also skips
+        # symbolic offsets instead of specializing on a guarding hint.
+        return None
+    return int(storage_offset)
+
+
+def _duplicate_input_groups(
+    example_inputs: Sequence[object],
+) -> tuple[tuple[int, ...], ...]:
+    object_id_to_input_positions: dict[int, list[int]] = {}
+    for i, input in enumerate(example_inputs):
+        if isinstance(input, torch.Tensor):
+            object_id_to_input_positions.setdefault(id(input), []).append(i)
+
+    return tuple(
+        tuple(input_positions)
+        for input_positions in object_id_to_input_positions.values()
+        if len(input_positions) > 1
+    )
+
+
+def _shared_storage_input_groups(
+    example_inputs: Sequence[object],
+) -> tuple[tuple[tuple[int, int | None], ...], ...]:
+    storage_ref_to_inputs: dict[StorageWeakRef, list[tuple[int, torch.Tensor]]] = {}
+    for i, input in enumerate(example_inputs):
+        if (
+            not isinstance(input, torch.Tensor)
+            or is_sparse_any(input)
+            or not torch._C._has_storage(input)
+        ):
+            continue
+
+        storage_ref = StorageWeakRef(input.untyped_storage())
+        storage_ref_to_inputs.setdefault(storage_ref, []).append((i, input))
+
+    return tuple(
+        tuple((i, _storage_offset_for_cache_key(input)) for i, input in inputs)
+        for inputs in storage_ref_to_inputs.values()
+        if len(inputs) > 1
+    )
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -513,6 +562,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
+        self.duplicate_input_groups = _duplicate_input_groups(example_inputs)
+        self.shared_storage_input_groups = _shared_storage_input_groups(example_inputs)
 
         # region_activation_memory_budget is graph-wide (the partitioner enforces
         # a single value across the graph) and propagates to every node, so the
@@ -1483,6 +1534,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         num_symints_saved_for_bw: int | None,
         serialized_bw_module: SerializedGraphModule | None,
         min_cut_info_str: str | None,
+        aotautograd_guards: list[torch._guards.GuardEnvExpr],
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1524,6 +1576,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
                 serialized_bw_module=serialized_bw_module,
+                aotautograd_guards=aotautograd_guards,
             )
 
         else:
@@ -1574,4 +1627,5 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
                 serialized_bw_module=serialized_bw_module,
+                aotautograd_guards=aotautograd_guards,
             )

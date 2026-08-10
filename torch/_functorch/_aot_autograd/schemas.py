@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     import contextlib
     from collections.abc import Callable, Iterable
 
-    from torch._guards import Source
+    from torch._guards import GuardEnvExpr, Source
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
@@ -1133,6 +1133,7 @@ class AOTAutogradCacheInfo:
     cache_key: str
     start_time_ns: int
     forward_symints: list[torch.SymInt]
+    aotautograd_guards: list[GuardEnvExpr] = field(default_factory=list)
 
 
 @dataclass
@@ -1147,7 +1148,7 @@ class CacheableAOTConfig:
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    aot_autograd_arg_pos_to_source: list[Source | None] | None = None
     static_input_indices: list[int] | None = None
     enable_log: bool = True
     # this is always false outside of export.
@@ -1175,7 +1176,7 @@ class AOTConfig:
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    aot_autograd_arg_pos_to_source: list[Source | None] | None = None
     static_input_indices: list[int] | None = None
     inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True

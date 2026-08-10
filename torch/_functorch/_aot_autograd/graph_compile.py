@@ -548,6 +548,7 @@ def _cache_inference_info(
             num_symints_saved_for_bw=None,
             serialized_bw_module=None,
             min_cut_info_str=None,
+            aotautograd_guards=cache_info.aotautograd_guards,
         )
         AOTAutogradCache.save(
             cache_info.cache_key,
@@ -2708,6 +2709,7 @@ def _cache_autograd_info(
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
                     serialized_bw_module=serialize_graph_module(bw_module),
                     min_cut_info_str=min_cut_info_str,
+                    aotautograd_guards=cache_info.aotautograd_guards,
                 )
                 AOTAutogradCache.save(
                     cache_info.cache_key,
