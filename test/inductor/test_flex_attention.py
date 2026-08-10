@@ -5709,11 +5709,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self, device):
-        second_device = device.split(":")[0] + ":1"
         make_tensor = functools.partial(
             torch.ones,
             (2, 2, 256, 32),
-            device=device,
+            device=0,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -5722,7 +5721,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device=second_device)
+        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device=1)
         with self.assertRaisesRegex(
             RuntimeError, "Expect q/k/v and block_mask to be on the same device"
         ):
