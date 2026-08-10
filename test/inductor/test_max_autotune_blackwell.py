@@ -744,13 +744,18 @@ class TestBlackwellAutoWSConfigs(TestCase):
             config.patch({"triton.enable_template_autows": True}),
         ):
             _HEURISTIC_CACHE.clear()
-            BaseHeuristicSingleton._instances.pop(
-                CUDABlackwellPersistentTMATemplateConfigHeuristic, None
-            )
+            for cls in (
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+            ):
+                BaseHeuristicSingleton._instances.pop(cls, None)
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            addmm_heuristic = CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic()
 
         mixin = BlackwellTMATemplateConfigMixin
         self.assertEqual(heuristic.mm_configs, mixin._generate_autows_configs())
+        # addmm shares the autoWS set rather than its own non-autoWS configs
+        self.assertEqual(addmm_heuristic.mm_configs, mixin._generate_autows_configs())
         self.assertEqual(
             len(heuristic.exhaustive_configs),
             len(mixin._generate_autows_exhaustive_configs()),
@@ -762,9 +767,11 @@ class TestBlackwellAutoWSConfigs(TestCase):
     def tearDown(self):
         super().tearDown()
         _HEURISTIC_CACHE.clear()
-        BaseHeuristicSingleton._instances.pop(
-            CUDABlackwellPersistentTMATemplateConfigHeuristic, None
-        )
+        for cls in (
+            CUDABlackwellPersistentTMATemplateConfigHeuristic,
+            CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+        ):
+            BaseHeuristicSingleton._instances.pop(cls, None)
 
 
 if __name__ == "__main__":

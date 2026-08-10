@@ -3218,6 +3218,9 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
+        if _use_template_autows():
+            # autoWS configs from the base heuristic already apply to addmm
+            return
         # NOTE: to ensure that we pass tests, addmm needs a small config
         self.mm_configs = (
             self.blackwell_persistent_mm_configs
