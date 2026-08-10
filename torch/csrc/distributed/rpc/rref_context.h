@@ -103,8 +103,8 @@ class TORCH_API RRefContext {
   // available, e.g., when processing to_here(). The forceCreated flag can be
   // used to ensure that the rref is created on the owner, otherwise throw in
   // cases where the user of this API expects this to return a completed future.
-  // Note that the return value is a intrusive_ptr to a c10::ivalue::Future that
-  // holds the RRef.
+  // Note that the return value is an intrusive_ptr to a c10::ivalue::Future
+  // that holds the RRef.
   c10::intrusive_ptr<JitFuture> getOwnerRRef(
       const RRefId& rrefId,
       bool forceCreated = false);
@@ -121,7 +121,7 @@ class TORCH_API RRefContext {
   // ForkId when the self remote is done.
   void addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref);
 
-  // Register a fork of the ``OwnerRRef``, and inserts a intrusive_ptr of the
+  // Register a fork of the ``OwnerRRef``, and inserts an intrusive_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   // Performs the same function as addForkOfOwner but ignores duplicate
@@ -266,7 +266,7 @@ class TORCH_API RRefContext {
   // number of pending UserRRef or UserRRef children is reduced, or
   // number of owned OwnerRRef is reduced.
   std::condition_variable deleteAllUsersCV_;
-  // The follow 3 maps keep UserRRefs alive by holding a intrusive_ptr to the
+  // The follow 3 maps keep UserRRefs alive by holding an intrusive_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
   // following two conditions is true:
   //

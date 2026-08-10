@@ -932,11 +932,16 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
+        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
+        # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
         def has_fake_tensor(tensor, tensor_applied) -> bool:
-            return isinstance(tensor, FakeTensor) or isinstance(
-                tensor_applied, FakeTensor
+            return (
+                isinstance(tensor, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+                or isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                    tensor_applied, FakeTensor
+                )
             )
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
@@ -2430,7 +2435,7 @@ class Module:
                     continue
 
                 # This is used to avoid copying uninitialized parameters into
-                # non-lazy modules, since they dont have the hook to do the checks
+                # non-lazy modules, since they don't have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
                 is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
@@ -2525,7 +2530,7 @@ class Module:
             for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
-                    # Must be Module if it have attributes
+                    # Must be Module if it has attributes
                     if len(input_name) > 1:
                         if input_name[0] not in self._modules:
                             unexpected_keys.append(key)
@@ -2615,8 +2620,8 @@ class Module:
                 out = hook(module, incompatible_keys)
                 if out is not None:
                     raise AssertionError(
-                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not "
+                        "expected to return new values, if incompatible_keys need to be modified, "
                         "it should be done inplace."
                     )
 
@@ -2669,6 +2674,10 @@ class Module:
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parameters.
+
+        The exact order of the returned parameters is unspecified, but repeated
+        calls to the ``parameters()`` method of an unchanged module return the
+        parameters in the same order.
 
         This is typically passed to an optimizer.
 
