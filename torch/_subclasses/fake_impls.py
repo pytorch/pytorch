@@ -1287,6 +1287,22 @@ def repeat_interleave_tensor(
     return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
+def _compute_cuda_elementwise_output_strides(
+    *args: Any, shape: ShapeType
+) -> tuple[int, ...] | None:
+    if any(
+        isinstance(arg, torch.Tensor) and arg.layout != torch.strided for arg in args
+    ):
+        return None
+
+    try:
+        # CUDA TensorIterator keeps promotion inside the kernel, so output
+        # layout is chosen from the original, unexpanded operands.
+        return utils.compute_tensoriterator_output_strides(*args, shape=shape)
+    except ValueError:
+        return None
+
+
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(
@@ -2378,6 +2394,15 @@ def make_fast_binary_impl(
 
         from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
+        all_ops_same_shape = True
+        for op in operands:
+            shape = op.shape if isinstance(op, torch.Tensor) else ()
+            if len(shape) != len(final_shape) or not guard_or_false(
+                sym_eq(shape, final_shape)
+            ):
+                all_ops_same_shape = False
+                break
+
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
@@ -2394,7 +2419,7 @@ def make_fast_binary_impl(
 
         # compute_types
         cpu = torch.device("cpu")
-        common_device: torch.device = cpu
+        common_device = utils.get_tensoriterator_common_device(*operands) or cpu
         common_dtype: torch.dtype | None = None
         has_different_input_dtypes = False
         for op in operands:
@@ -2402,8 +2427,6 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and op.device.type != "cpu":
-                common_device = op.device
             if common_dtype is None:
                 if type_promotion_kind != ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
                     has_different_input_dtypes = True
@@ -2456,7 +2479,9 @@ def make_fast_binary_impl(
                         op, memory_format=torch.channels_last
                     )
                 )
-        if definitely_contiguous:
+        if definitely_contiguous and (
+            common_device.type != "cuda" or all_ops_same_shape
+        ):
             # do contiguous
             count_label("fast is_contiguous")
             return FakeTensor(
@@ -2469,7 +2494,9 @@ def make_fast_binary_impl(
                 ),
                 device=common_device,
             )
-        if definitely_channels_last:
+        if definitely_channels_last and (
+            common_device.type != "cuda" or all_ops_same_shape
+        ):
             count_label("fast channels_last")
             # do channels last
             return FakeTensor(
@@ -2482,6 +2509,22 @@ def make_fast_binary_impl(
                 ),
                 device=common_device,
             )
+
+        if common_device.type == "cuda":
+            strides = _compute_cuda_elementwise_output_strides(
+                *operands, shape=final_shape
+            )
+            if strides is not None:
+                count_label("fast cuda tensoriterator strides")
+                if common_dtype is None:
+                    raise AssertionError("common_dtype must not be None")
+                return FakeTensor(
+                    mode,
+                    torch.empty_strided(
+                        final_shape, strides, dtype=common_dtype, device="meta"
+                    ),
+                    device=common_device,
+                )
 
         return slow("no contiguity match")
 

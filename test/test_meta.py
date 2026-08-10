@@ -2024,6 +2024,429 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out.size(), meta_out.size())
             self.assertEqual(ref_out.stride(), meta_out.stride())
 
+    @onlyCUDA
+    def test_cuda_mixed_dtype_binary_pointwise_fake_stride(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        complex_input = torch.randn(
+            1, 9, 17, device=device, dtype=torch.complex64
+        ).permute(0, 2, 1).squeeze(0)
+        double_input = torch.randn(
+            1, 9, 17, device=device, dtype=torch.float64
+        ).permute(0, 2, 1).squeeze(0)
+        long_input = torch.randint(
+            1, 8, (1, 9, 17), device=device, dtype=torch.int64
+        ).permute(0, 2, 1).squeeze(0)
+
+        cases = [
+            (
+                complex_input,
+                torch.float32,
+                (
+                    torch.ops.aten.add.Tensor,
+                    torch.ops.aten.sub.Tensor,
+                    torch.ops.aten.mul.Tensor,
+                    torch.ops.aten.div.Tensor,
+                    torch.ops.aten.pow.Tensor_Tensor,
+                    torch.ops.aten.eq.Tensor,
+                    torch.ops.aten.ne.Tensor,
+                ),
+            ),
+            (
+                double_input,
+                torch.float32,
+                (
+                    torch.ops.aten.div.Tensor_mode,
+                    torch.ops.aten.pow.Tensor_Tensor,
+                    torch.ops.aten.atan2.default,
+                    torch.ops.aten.remainder.Tensor,
+                    torch.ops.aten.fmod.Tensor,
+                    torch.ops.aten.hypot.default,
+                    torch.ops.aten.copysign.Tensor,
+                    torch.ops.aten.maximum.default,
+                    torch.ops.aten.minimum.default,
+                    torch.ops.aten.fmax.default,
+                    torch.ops.aten.fmin.default,
+                    torch.ops.aten.logaddexp.default,
+                    torch.ops.aten.logaddexp2.default,
+                    torch.ops.aten.nextafter.default,
+                    torch.ops.aten.xlogy.Tensor,
+                    torch.ops.aten.igamma.default,
+                    torch.ops.aten.igammac.default,
+                    torch.ops.aten.special_xlog1py.default,
+                    torch.ops.aten.special_zeta.default,
+                    torch.ops.aten.special_chebyshev_polynomial_t.default,
+                    torch.ops.aten.special_chebyshev_polynomial_u.default,
+                    torch.ops.aten.special_chebyshev_polynomial_v.default,
+                    torch.ops.aten.special_chebyshev_polynomial_w.default,
+                    torch.ops.aten.special_hermite_polynomial_h.default,
+                    torch.ops.aten.special_hermite_polynomial_he.default,
+                    torch.ops.aten.special_laguerre_polynomial_l.default,
+                    torch.ops.aten.special_legendre_polynomial_p.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_t.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_u.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_v.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_w.default,
+                    torch.ops.aten.eq.Tensor,
+                    torch.ops.aten.ne.Tensor,
+                    torch.ops.aten.lt.Tensor,
+                    torch.ops.aten.le.Tensor,
+                    torch.ops.aten.gt.Tensor,
+                    torch.ops.aten.ge.Tensor,
+                ),
+            ),
+            (
+                double_input,
+                torch.float64,
+                (torch.ops.aten.heaviside.default,),
+            ),
+            (
+                long_input,
+                torch.int64,
+                (
+                    torch.ops.aten.bitwise_and.Tensor,
+                    torch.ops.aten.bitwise_or.Tensor,
+                    torch.ops.aten.bitwise_xor.Tensor,
+                    torch.ops.aten.bitwise_left_shift.Tensor,
+                    torch.ops.aten.bitwise_right_shift.Tensor,
+                    torch.ops.aten.gcd.default,
+                    torch.ops.aten.lcm.default,
+                ),
+            ),
+        ]
+
+        for input_tensor, scalar_dtype, ops in cases:
+            scalar = torch.ones((), device=device, dtype=scalar_dtype).expand_as(
+                input_tensor
+            )
+            for op in ops:
+                kwargs = (
+                    {"alpha": 1}
+                    if op in (torch.ops.aten.add.Tensor, torch.ops.aten.sub.Tensor)
+                    else {}
+                )
+                if op is torch.ops.aten.div.Tensor_mode:
+                    kwargs["rounding_mode"] = None
+                with self.subTest(dtype=input_tensor.dtype, op=op):
+                    ref_out = op(scalar, input_tensor, **kwargs)
+
+                    with FakeTensorMode() as mode:
+                        fake_input = mode.from_tensor(input_tensor)
+                        fake_scalar = mode.from_tensor(scalar)
+                        fake_out = op(fake_scalar, fake_input, **kwargs)
+
+                    self.assertEqual(ref_out.size(), fake_out.size())
+                    self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        cpu_scalar = torch.ones((), dtype=torch.float32)
+        for op in (torch.ops.aten.add.Tensor, torch.ops.aten.mul.Tensor):
+            kwargs = {"alpha": 1} if op is torch.ops.aten.add.Tensor else {}
+            with self.subTest(cpu_scalar=True, op=op):
+                ref_out = op(cpu_scalar, complex_input, **kwargs)
+
+                with FakeTensorMode() as mode:
+                    fake_scalar = mode.from_tensor(cpu_scalar)
+                    fake_input = mode.from_tensor(complex_input)
+                    fake_out = op(fake_scalar, fake_input, **kwargs)
+
+                self.assertEqual(fake_out.device.type, torch.device(device).type)
+                self.assertEqual(ref_out.size(), fake_out.size())
+                self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(op=torch.ops.aten.sgn.default):
+            ref_out = torch.ops.aten.sgn.default(complex_input)
+
+            with FakeTensorMode() as mode:
+                fake_input = mode.from_tensor(complex_input)
+                fake_out = torch.ops.aten.sgn.default(fake_input)
+
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(ref_requires_grad=True):
+            ref_input = complex_input.detach().requires_grad_()
+            ref_scalar = torch.ones(
+                (), device=device, dtype=torch.float32
+            ).expand_as(complex_input)
+            ref_out = torch.add(ref_scalar, ref_input)
+            with FakeTensorMode() as mode:
+                fake_input = mode.from_tensor(ref_input)
+                fake_scalar = mode.from_tensor(ref_scalar)
+                fake_out = torch._refs.add(fake_scalar, fake_input, alpha=None)
+
+            self.assertTrue(fake_out.requires_grad)
+            self.assertFalse(fake_out.is_leaf)
+            self.assertIsNotNone(fake_out.grad_fn)
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(distinct_noncontiguous_layouts=True):
+            shape = (2, 3, 4)
+            a = torch.empty_strided(
+                shape, (12, 1, 3), device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, (1, 8, 2), device=device, dtype=torch.float64
+            ).fill_(2)
+            for lhs, rhs, expected_stride in (
+                (a, b, (12, 1, 3)),
+                (b, a, (1, 8, 2)),
+            ):
+                with self.subTest(expected_stride=expected_stride):
+                    ref_out = torch.add(lhs, rhs)
+
+                    with FakeTensorMode(
+                        shape_env=ShapeEnv(), static_shapes=False
+                    ) as mode:
+                        fake_out = torch.add(
+                            mode.from_tensor(lhs), mode.from_tensor(rhs)
+                        )
+
+                    fake_stride = tuple(int(s) for s in fake_out.stride())
+                    self.assertEqual(ref_out.size(), fake_out.size())
+                    self.assertEqual(ref_out.stride(), expected_stride)
+                    self.assertEqual(ref_out.stride(), fake_stride)
+
+        with self.subTest(shared_noncontiguous_layout=True):
+            shape = (2, 1, 3)
+            strides = (1, 99, 2)
+            a = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float64
+            ).fill_(2)
+            ref_out = torch.add(a, b)
+
+            with FakeTensorMode(shape_env=ShapeEnv(), static_shapes=False) as mode:
+                fake_out = torch.add(mode.from_tensor(a), mode.from_tensor(b))
+
+            fake_stride = tuple(int(s) for s in fake_out.stride())
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), strides)
+            self.assertEqual(ref_out.stride(), fake_stride)
+
+        with self.subTest(broadcasted_rank_layout=True):
+            a = torch.empty((2, 1), device=device, dtype=torch.float32)
+            b = torch.empty(
+                (1, 2, 1), device=device, dtype=torch.float64
+            ).permute(2, 0, 1)
+            ref_out = torch.add(a, b)
+            self.assertEqual(ref_out.stride(), (1, 1, 2))
+
+            for dynamic in (False, True):
+                with self.subTest(dynamic=dynamic):
+                    with FakeTensorMode(
+                        shape_env=ShapeEnv() if dynamic else None,
+                        static_shapes=not dynamic,
+                    ) as mode:
+                        fake_a = mode.from_tensor(a)
+                        fake_b = mode.from_tensor(b)
+                        fake_out = torch.add(fake_a, fake_b)
+                        ref_fake_out = torch._refs.add(fake_a, fake_b)
+
+                    self.assertEqual(
+                        ref_out.stride(), tuple(int(s) for s in fake_out.stride())
+                    )
+                    self.assertEqual(
+                        ref_out.stride(),
+                        tuple(int(s) for s in ref_fake_out.stride()),
+                    )
+
+        with self.subTest(zero_size_broadcast_layout=True):
+            a = torch.empty_strided(
+                (1,), (1,), device=device, dtype=torch.float32
+            )
+            b = torch.empty_strided(
+                (0, 3), (3, 3), device=device, dtype=torch.float64
+            )
+            ref_out = torch.add(a, b)
+
+            with FakeTensorMode() as mode:
+                fake_a = mode.from_tensor(a)
+                fake_b = mode.from_tensor(b)
+                fake_out = torch.add(fake_a, fake_b)
+                ref_fake_out = torch._refs.add(fake_a, fake_b)
+
+            self.assertEqual(ref_out.stride(), (1, 0))
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+            self.assertEqual(ref_out.stride(), ref_fake_out.stride())
+
+        with self.subTest(symbolic_ref_layout=True):
+            x = double_input
+            scalar = torch.empty(
+                (), device=device, dtype=torch.float32
+            ).expand_as(x)
+            ref_out = torch.atan2(scalar, x)
+
+            with FakeTensorMode(shape_env=ShapeEnv(), static_shapes=False) as mode:
+                fake_scalar = mode.from_tensor(scalar)
+                fake_x = mode.from_tensor(x)
+                fake_out = torch.atan2(fake_scalar, fake_x)
+                ref_fake_out = torch._refs.atan2(fake_scalar, fake_x)
+
+            self.assertEqual(
+                ref_out.stride(), tuple(int(s) for s in fake_out.stride())
+            )
+            self.assertEqual(
+                ref_out.stride(), tuple(int(s) for s in ref_fake_out.stride())
+            )
+
+        with self.subTest(unbacked_symbolic_strides=True):
+            shape_env = ShapeEnv()
+            with FakeTensorMode(shape_env=shape_env, static_shapes=False):
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+                a = torch.empty_strided(
+                    (u0, u1), (u1, 1), device=device, dtype=torch.float32
+                )
+                b = torch.empty_strided(
+                    (u0, u1), (1, u0), device=device, dtype=torch.float64
+                )
+                fake_out = torch.add(a, b)
+                ref_fake_out = torch._refs.add(a, b)
+
+            self.assertEqual(fake_out.ndim, 2)
+            self.assertEqual(fake_out.stride(), ref_fake_out.stride())
+
+        with self.subTest(ambiguous_contiguous_layout=True):
+            shape = (2, 1, 3, 4)
+            strides = (12, 99, 4, 1)
+            a = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, strides, device=device, dtype=torch.float64
+            ).fill_(2)
+            ref_out = torch.add(a, b)
+
+            with FakeTensorMode() as mode:
+                fake_out = torch._refs.add(
+                    mode.from_tensor(a), mode.from_tensor(b)
+                )
+                fake_round_out = torch._refs.round(mode.from_tensor(a))
+
+            self.assertEqual(ref_out.stride(), (12, 12, 4, 1))
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+            self.assertEqual(torch.round(a).stride(), fake_round_out.stride())
+
+        with self.subTest(scalar_operand_layout=True):
+            for shape, strides, expected_stride in (
+                ((2, 1, 3, 4), (12, 99, 4, 1), (12, 24, 4, 1)),
+                ((2, 1, 3), (3, 1, 1), (3, 1, 1)),
+            ):
+                a = torch.empty_strided(
+                    shape, strides, device=device, dtype=torch.float32
+                ).fill_(1)
+                for lhs_scalar in (False, True):
+                    with self.subTest(
+                        strides=strides,
+                        lhs_scalar=lhs_scalar,
+                    ):
+                        args = (2.0, a) if lhs_scalar else (a, 2.0)
+                        ref_out = torch.add(*args)
+
+                        with FakeTensorMode() as mode:
+                            fake_a = mode.from_tensor(a)
+                            fake_args = (
+                                (2.0, fake_a) if lhs_scalar else (fake_a, 2.0)
+                            )
+                            fake_out = torch._refs.add(*fake_args)
+
+                        with FakeTensorMode(
+                            shape_env=ShapeEnv(), static_shapes=False
+                        ) as mode:
+                            fake_a = mode.from_tensor(a)
+                            fake_args = (
+                                (2.0, fake_a) if lhs_scalar else (fake_a, 2.0)
+                            )
+                            dynamic_fake_out = torch.add(*fake_args)
+
+                        dynamic_fake_stride = tuple(
+                            int(s) for s in dynamic_fake_out.stride()
+                        )
+                        self.assertEqual(ref_out.stride(), expected_stride)
+                        self.assertEqual(ref_out.stride(), fake_out.stride())
+                        self.assertEqual(ref_out.stride(), dynamic_fake_stride)
+
+        with self.subTest(common_device_under_kernel_invocation=True):
+            from torch._subclasses.fake_tensor import in_kernel_invocation_manager
+
+            with FakeTensorMode() as mode:
+                fake_cpu_scalar = mode.from_tensor(torch.ones(()))
+                fake_cuda_input = mode.from_tensor(torch.ones(2, device=device))
+                with in_kernel_invocation_manager(mode):
+                    common_device = torch._prims_common.get_tensoriterator_common_device(
+                        fake_cpu_scalar, fake_cuda_input
+                    )
+
+            self.assertEqual(common_device.type, "cuda")
+
+        with self.subTest(fake_device_indices=True):
+            with FakeTensorMode():
+                fake_cuda0 = torch.empty(2, device="cuda:0")
+                fake_cuda1 = torch.empty(2, device="cuda:1")
+                with self.assertRaisesRegex(
+                    RuntimeError, "at least two devices, cuda:0 and cuda:1"
+                ):
+                    torch.add(fake_cuda0, fake_cuda1)
+
+        with self.subTest(ref_where_pred_stride=True):
+            shape = (2, 3)
+            pred = torch.empty_strided(
+                shape, (0, 1), device=device, dtype=torch.bool
+            ).fill_(True)
+            a = torch.empty_strided(
+                shape, (0, 1), device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, (1, 2), device=device, dtype=torch.float64
+            ).fill_(2)
+            ref_out = torch.where(pred, a, b)
+
+            with FakeTensorMode() as mode:
+                fake_pred = mode.from_tensor(pred)
+                fake_a = mode.from_tensor(a)
+                fake_b = mode.from_tensor(b)
+                fake_out = torch._refs.where(fake_pred, fake_a, fake_b)
+
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), (3, 1))
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(ref_non_elementwise_outputs=True):
+            real_input = complex_input.real.detach()
+            prelu_input = torch.empty_strided(
+                (2, 1, 3, 4),
+                (12, 99, 4, 1),
+                device=device,
+                dtype=torch.float64,
+            ).normal_()
+            prelu_weight = torch.ones(1, device=device, dtype=torch.float64)
+            ref_prelu_out = torch._refs.nn.functional.prelu(
+                prelu_input, prelu_weight
+            )
+            with FakeTensorMode() as mode:
+                fake_input = mode.from_tensor(real_input)
+                logsumexp_out = torch._refs.logsumexp(fake_input, 1)
+                dot_out = torch._refs.dot(fake_input.flatten(), fake_input.flatten())
+                prelu_out = torch._refs.nn.functional.prelu(
+                    mode.from_tensor(prelu_input),
+                    mode.from_tensor(prelu_weight),
+                )
+                addr_out = torch._refs.addr(
+                    mode.from_tensor(torch.randn(2, 3, device=device)),
+                    mode.from_tensor(torch.randn(2, device=device)),
+                    mode.from_tensor(torch.randn(3, device=device)),
+                )
+
+            self.assertEqual(logsumexp_out.size(), (17,))
+            self.assertEqual(dot_out.size(), ())
+            self.assertEqual(ref_prelu_out.stride(), (12, 12, 4, 1))
+            self.assertEqual(prelu_out.stride(), ref_prelu_out.stride())
+            self.assertEqual(addr_out.size(), (2, 3))
+
 
     def test_map_location_deserialize(self):
         import io
