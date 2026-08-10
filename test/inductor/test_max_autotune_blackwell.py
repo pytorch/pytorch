@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 import unittest
+import unittest.mock
 
 import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
+    BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
+    BlackwellTMATemplateConfigMixin,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
@@ -727,6 +730,39 @@ class TestBlackwellExhaustiveConfigs(TestCase):
             len(heuristic.mm_configs),
             len(addmm_configs),
             "Scaled TMA should use the larger scaled_persistent list, not the small addmm list",
+        )
+
+
+class TestBlackwellAutoWSConfigs(TestCase):
+    """autoWS config selection for the Blackwell persistent-TMA template."""
+
+    def test_autows_heuristic_uses_autows_configs(self):
+        with (
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.USE_META_WS", True
+            ),
+            config.patch({"triton.enable_template_autows": True}),
+        ):
+            _HEURISTIC_CACHE.clear()
+            BaseHeuristicSingleton._instances.pop(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic, None
+            )
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+
+        mixin = BlackwellTMATemplateConfigMixin
+        self.assertEqual(heuristic.mm_configs, mixin._generate_autows_default_configs())
+        self.assertEqual(
+            len(heuristic.exhaustive_configs), len(mixin._generate_autows_configs())
+        )
+        for cfg in heuristic.mm_configs:
+            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+            self.assertTrue(cfg.use_meta_ws)
+
+    def tearDown(self):
+        super().tearDown()
+        _HEURISTIC_CACHE.clear()
+        BaseHeuristicSingleton._instances.pop(
+            CUDABlackwellPersistentTMATemplateConfigHeuristic, None
         )
 
 
