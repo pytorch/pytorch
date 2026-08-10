@@ -24,7 +24,11 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    is_concrete_int,
+    sym_eq,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -46,6 +50,9 @@ from .functional_utils import (
     has_data_mutation,
     has_metadata_mutation,
     MetadataKey,
+    mutated_input_storage_copy_length,
+    mutation_footprints_are_contained_in_input,
+    StorageMutationFootprintMode,
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
@@ -217,11 +224,42 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+
+        # Functionalization can grow fake storage to accommodate an as_strided
+        # mutation.  Preserve the original physical bounds before wrapping the
+        # inputs.  Use bytes so symbolic element sizes do not require division.
+        original_storage_nbytes = [
+            arg.untyped_storage().nbytes()
+            if isinstance(arg, Tensor) and arg.layout == torch.strided
+            else None
+            for arg in flat_args
+        ]
         with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
-            flat_f_outs = f(*flat_f_args)
+            needs_mutation_footprints = any(
+                isinstance(arg, FunctionalTensor)
+                and arg.layout == torch.strided
+                and arg.requires_grad
+                and (
+                    storage_nbytes is None
+                    or not guard_or_false(
+                        sym_eq(
+                            storage_nbytes,
+                            arg.numel() * arg.element_size(),
+                        )
+                    )
+                )
+                for arg, storage_nbytes in zip(flat_f_args, original_storage_nbytes)
+            )
+            mutation_footprint_mode = (
+                StorageMutationFootprintMode(flat_f_args)
+                if needs_mutation_footprints
+                else None
+            )
+            with mutation_footprint_mode or contextlib.nullcontext():
+                flat_f_outs = f(*flat_f_args)
 
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this
@@ -254,7 +292,9 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
-        for arg, f_arg in zip(flat_args, flat_f_args):
+        for arg, f_arg, storage_nbytes in zip(
+            flat_args, flat_f_args, original_storage_nbytes
+        ):
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
@@ -274,7 +314,61 @@ def run_functionalized_fw_and_collect_metadata(
             if mutates_storage_metadata:
                 mutates_data = False
 
+            mutation_requires_storage_copy = False
+            mutation_requires_storage_copyback = False
+            if mutates_data and isinstance(arg, Tensor) and arg.layout == torch.strided:
+                mutation_footprints = (
+                    mutation_footprint_mode.get_input_footprints(f_arg)
+                    if mutation_footprint_mode is not None
+                    else ()
+                )
+                arg_after = from_fun(f_arg)
+                mutation_requires_storage_copy = (
+                    mutated_input_storage_copy_length(
+                        arg,
+                        arg_after,
+                        original_storage_nbytes=storage_nbytes,
+                    )
+                    is not None
+                )
+                mutation_requires_storage_copyback = (
+                    mutation_requires_storage_copy
+                    and not mutation_footprints_are_contained_in_input(
+                        arg, mutation_footprints
+                    )
+                )
+
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
+            if (
+                mutation_requires_storage_copy
+                and requires_grad
+                and isinstance(arg, Tensor)
+                and not arg.is_contiguous()
+            ):
+                # The storage-preserving fresh input uses as_strided_scatter,
+                # whose source backward currently only supports contiguous
+                # logical inputs. Fail explicitly instead of producing an OOB
+                # as_strided on the logical-size gradient storage.
+                raise RuntimeError(
+                    "AOTAutograd does not support storage-preserving input "
+                    "mutations on non-contiguous inputs that require gradients"
+                )
+            if (
+                mutation_requires_storage_copyback
+                and requires_grad
+                and not mutations_hidden_from_autograd
+                and not mutations_under_no_grad_or_inference_mode
+            ):
+                # The joint graph represents gradients using the logical input
+                # shape.  It cannot carry gradients for storage locations reached
+                # by an as_strided mutation outside that shape.  Reject this
+                # differentiable case before it reaches an opaque OOB failure in
+                # as_strided_scatter_backward.  Mutations hidden from autograd or
+                # performed under no_grad remain safe and supported.
+                raise RuntimeError(
+                    "AOTAutograd does not support differentiable input mutations "
+                    "that access storage outside the input's logical shape"
+                )
 
             input_info.append(
                 InputAliasInfo(
@@ -286,6 +380,8 @@ def run_functionalized_fw_and_collect_metadata(
                     mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
+                    mutation_requires_storage_copy=mutation_requires_storage_copy,
+                    mutation_requires_storage_copyback=mutation_requires_storage_copyback,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
                 )

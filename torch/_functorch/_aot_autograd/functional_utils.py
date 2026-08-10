@@ -9,22 +9,29 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
+from torch._prims_common import compute_storage_length
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
+from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
+    TorchDispatchMode,
     transform_subclass,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -83,6 +90,199 @@ def from_fun(t: object) -> object:
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)
+
+
+@dataclass(frozen=True)
+class StorageMutationFootprint:
+    sizes: tuple[Any, ...]
+    strides: tuple[Any, ...]
+    storage_offset: Any
+
+
+class StorageMutationFootprintMode(TorchDispatchMode):
+    """Record which storage locations input mutations can write."""
+
+    def __init__(self, inputs: Sequence[Any]) -> None:
+        super().__init__()
+        self._footprints: dict[StorageWeakRef, list[StorageMutationFootprint]] = {}
+        for input in inputs:
+            if isinstance(input, FunctionalTensor) and input.layout == torch.strided:
+                self._footprints.setdefault(StorageWeakRef(input.untyped_storage()), [])
+
+    def _record(self, value: Any) -> None:
+        for tensor in torch.utils._pytree.tree_leaves(value):
+            if not isinstance(tensor, FunctionalTensor):
+                continue
+            if tensor.layout != torch.strided:
+                continue
+            footprints = self._footprints.get(StorageWeakRef(tensor.untyped_storage()))
+            if footprints is not None:
+                footprints.append(
+                    StorageMutationFootprint(
+                        tuple(tensor.size()),
+                        tuple(tensor.stride()),
+                        tensor.storage_offset(),
+                    )
+                )
+
+    def __torch_dispatch__(
+        self,
+        func: torch._ops.OpOverload,
+        types: tuple[type[Any], ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        kwargs = kwargs or {}
+
+        # Keep the observer entirely off the overwhelmingly common read-only
+        # path.  In-place view operators mutate metadata, not data; any later
+        # data mutation is observed with the updated view metadata.
+        if not func._schema.is_mutable or torch.Tag.inplace_view in func.tags:
+            return func(*args, **kwargs)
+
+        normalized_args = _normalize_function_or_error(
+            func, args, kwargs, normalize_to_only_use_kwargs=True
+        ).kwargs
+        written_values = [
+            normalized_args["input" if schema_arg.name == "self" else schema_arg.name]
+            for schema_arg in func._schema.arguments
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+        ]
+        for value in written_values:
+            self._record(value)
+        result = func(*args, **kwargs)
+        # An out= operator may resize its destination before writing it.  The
+        # pre- and post-operation footprints together conservatively cover it.
+        for value in written_values:
+            self._record(value)
+        return result
+
+    def get_input_footprints(self, input: Any) -> tuple[StorageMutationFootprint, ...]:
+        if not isinstance(input, FunctionalTensor) or input.layout != torch.strided:
+            return ()
+        return tuple(self._footprints.get(StorageWeakRef(input.untyped_storage()), ()))
+
+
+def _footprint_is_empty(footprint: StorageMutationFootprint) -> bool:
+    return any(guard_or_false(sym_eq(size, 0)) for size in footprint.sizes)
+
+
+def _storage_bounds(
+    footprint: StorageMutationFootprint,
+) -> tuple[Any, Any] | None:
+    """Return inclusive storage bounds, including hypothetical negative strides."""
+    if _footprint_is_empty(footprint):
+        return None
+
+    lower = footprint.storage_offset
+    upper = footprint.storage_offset
+    for size, stride in zip(footprint.sizes, footprint.strides):
+        extent = (size - 1) * stride
+        if guard_or_false(stride >= 0):
+            upper = upper + extent
+        elif guard_or_false(stride < 0):
+            lower = lower + extent
+        else:
+            # An unbacked symbolic stride with unknown sign cannot be bounded.
+            return None
+    return lower, upper
+
+
+def _bounds_contained(
+    original: StorageMutationFootprint, mutation: StorageMutationFootprint
+) -> bool:
+    original_bounds = _storage_bounds(original)
+    mutation_bounds = _storage_bounds(mutation)
+    if original_bounds is None or mutation_bounds is None:
+        return False
+    return guard_or_false(mutation_bounds[0] >= original_bounds[0]) and guard_or_false(
+        mutation_bounds[1] <= original_bounds[1]
+    )
+
+
+def mutation_footprints_are_contained_in_input(
+    original_inpt: torch.Tensor,
+    mutations: tuple[StorageMutationFootprint, ...],
+) -> bool:
+    """Prove that every recorded write is within the input's logical elements.
+
+    Contiguous inputs occupy every offset between their bounds, so a range
+    proof is exact even when a mutation overlaps or has negative/zero strides.
+    Storage-preserving gradients for non-contiguous inputs are unsupported and
+    rejected separately.
+    """
+    if not mutations or not original_inpt.is_contiguous():
+        return False
+
+    original = StorageMutationFootprint(
+        tuple(original_inpt.size()),
+        tuple(original_inpt.stride()),
+        original_inpt.storage_offset(),
+    )
+    for mutation in mutations:
+        if _footprint_is_empty(mutation) or _bounds_contained(original, mutation):
+            continue
+        return False
+    return True
+
+
+# Some view mutations can update storage locations that are not part of the
+# input tensor's logical shape, for example as_strided() on a sliced input.
+def mutated_input_storage_copy_length(
+    original_inpt: torch.Tensor,
+    updated_inpt: Any,
+    original_storage_nbytes: Any | None = None,
+) -> int | None:
+    if not isinstance(updated_inpt, torch.Tensor):
+        return None
+    if is_traceable_wrapper_subclass(original_inpt) or is_traceable_wrapper_subclass(
+        updated_inpt
+    ):
+        return None
+    if (
+        original_inpt.layout != torch.strided
+        or updated_inpt.layout != torch.strided
+        or original_inpt.device != updated_inpt.device
+        or original_inpt.dtype != updated_inpt.dtype
+        or original_inpt.is_conj()
+        or updated_inpt.is_conj()
+        or original_inpt.is_neg()
+        or updated_inpt.is_neg()
+    ):
+        return None
+
+    updated_storage_len = compute_storage_length(updated_inpt)
+
+    # If the updated tensor uses storage past its logical shape, a normal
+    # original_inpt.copy_(updated_inpt) would miss part of the mutation.  During
+    # dynamic-shape tracing, preserve the original physical storage size in
+    # bytes before functionalization can expand its fake storage.  Comparing
+    # bytes also avoids introducing symbolic floor-division nodes.
+    if updated_storage_len > updated_inpt.numel():
+        required_storage_nbytes = updated_storage_len * updated_inpt.element_size()
+        if original_storage_nbytes is None:
+            original_storage_nbytes = original_inpt.untyped_storage().nbytes()
+        if original_storage_nbytes is not None and guard_or_false(
+            original_storage_nbytes < required_storage_nbytes
+        ):
+            raise RuntimeError(
+                "input mutation requires storage beyond the original input "
+                f"storage size: required {required_storage_nbytes} bytes, "
+                f"but storage has {original_storage_nbytes} bytes"
+            )
+        return updated_storage_len
+    return None
+
+
+def copy_mutated_input(original_inpt: torch.Tensor, updated_inpt: Any) -> None:
+    storage_copy_length = mutated_input_storage_copy_length(original_inpt, updated_inpt)
+    if storage_copy_length is not None:
+        original_storage = original_inpt.as_strided((storage_copy_length,), (1,), 0)
+        updated_storage = updated_inpt.as_strided((storage_copy_length,), (1,), 0)
+        original_storage.copy_(updated_storage)
+        return
+
+    original_inpt.copy_(updated_inpt)
 
 
 def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:

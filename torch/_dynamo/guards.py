@@ -97,6 +97,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageMetadata,
     StorageOverlap,
 )
 from torch._library.fake_class_registry import FakeScriptObject
@@ -5152,6 +5153,30 @@ class CheckFunctionManager:
                     None,
                 )
                 add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageMetadata):
+                source_name = guard.input_source.name
+                if guard.is_trivial:
+                    metadata_code_parts = [
+                        f"{source_name}.storage_offset() == 0",
+                        f"{source_name}.untyped_storage().size() == "
+                        f"{source_name}.numel() * {source_name}.element_size()",
+                    ]
+                else:
+                    metadata_code_parts = []
+                    if guard.size is not None:
+                        metadata_code_parts.append(
+                            f"{source_name}.untyped_storage().size() == {guard.size}"
+                        )
+                    if guard.offset is not None:
+                        metadata_code_parts.append(
+                            f"{source_name}.storage_offset() == {guard.offset}"
+                        )
+                builder.add_python_lambda_leaf_guard_to_root(
+                    metadata_code_parts,
+                    metadata_code_parts,
+                )
+                for code_part in metadata_code_parts:
+                    add_code_part(code_part, None, True)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 

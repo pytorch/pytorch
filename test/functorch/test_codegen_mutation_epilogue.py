@@ -4,9 +4,8 @@
 Tests for codegen'ing the mutation epilogue in _create_runtime_wrapper.
 
 The codegen'd mutation epilogue emits one of as_strided_(), copy_(),
-or detach().copy_() per mutated input, with the branch resolved at codegen
-time from each input's mutation metadata (mutates_metadata, mutates_data,
-is_leaf).
+detach().copy_(), or copy_mutated_input() per mutated input, with the branch
+resolved at codegen time from each input's mutation metadata.
 
 Tests that exercise data-only mutations use torch.compile (dynamo handles
 metadata mutations in-graph, so only data mutations reach the epilogue).
@@ -144,7 +143,117 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("detach().copy_", captured[0])
+        self.assertIn("orig_inputs[0].detach().copy_(updated_inputs[0])", captured[0])
+        self.assertNotIn("copy_mutated_input", captured[0])
+
+    def test_storage_copy_leaf_mutation_autograd(self):
+        def f(x):
+            with torch.no_grad():
+                x.as_strided((10,), (1,), 5).add_(1)
+            return x.sin()
+
+        ref_storage = torch.arange(20.0)
+        ref_x = ref_storage[:10].detach().requires_grad_()
+        ref_out = f(ref_x)
+        ref_out.sum().backward()
+
+        storage = torch.arange(20.0)
+        x = storage[:10].detach().requires_grad_()
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+            out = torch.compile(f, backend="aot_eager")(x)
+        out.sum().backward()
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(storage, ref_storage)
+        self.assertEqual(x.grad, ref_x.grad)
+        self.assertEqual(len(captured), 1)
+        self.assertIn(
+            "copy_mutated_input(orig_inputs[0].detach(), updated_inputs[0])",
+            captured[0],
+        )
+
+    def test_storage_copy_nonleaf_mutation_autograd(self):
+        def f(x):
+            with torch.no_grad():
+                x.as_strided((10,), (1,), 5).add_(1)
+            return x.sin()
+
+        ref_source = torch.arange(20.0, requires_grad=True)
+        ref_storage = ref_source * 1
+        ref_out = f(ref_storage[:10])
+        ref_out.sum().backward()
+
+        source = torch.arange(20.0, requires_grad=True)
+        storage = source * 1
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+            out = torch.compile(f, backend="aot_eager")(storage[:10])
+        out.sum().backward()
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(storage, ref_storage)
+        self.assertEqual(source.grad, ref_source.grad)
+        self.assertEqual(len(captured), 1)
+        self.assertIn(
+            "copy_mutated_input(orig_inputs[0], updated_inputs[0])", captured[0]
+        )
+        self.assertNotIn("orig_inputs[0].detach()", captured[0])
+
+    def test_storage_copy_tracked_nonleaf_mutations_in_bounds(self):
+        def f(x):
+            # Both absolute storage ranges are within x's logical range [5, 14].
+            x.as_strided((3,), (1,), 6).add_(1)
+            x.as_strided((2,), (1,), 11).mul_(2)
+            return x.sin()
+
+        ref_source = torch.arange(20.0, requires_grad=True)
+        ref_storage = ref_source * 1
+        ref_out = f(ref_storage[5:15])
+        ref_out.sum().backward()
+
+        source = torch.arange(20.0, requires_grad=True)
+        storage = source * 1
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+            # Keep the input length symbolic while proving the fixed mutation
+            # footprints are contained in it.
+            out = torch.compile(f, backend="aot_eager", dynamic=True)(storage[5:15])
+        out.sum().backward()
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(storage, ref_storage)
+        self.assertEqual(source.grad, ref_source.grad)
+        self.assertEqual(len(captured), 1)
+        self.assertRegex(
+            captured[0],
+            r"orig_inputs\[\d+\]\.copy_\(updated_inputs\[0\]\)",
+        )
+        self.assertNotIn("copy_mutated_input", captured[0])
+
+    def test_storage_copy_tracked_nonleaf_mutation_errors(self):
+        def f(x):
+            x.as_strided((10,), (1,), 5).add_(1)
+            return x.sin()
+
+        source = torch.arange(20.0, requires_grad=True)
+        storage = source * 1
+        storage_before = storage.detach().clone()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "differentiable input mutations that access storage outside",
+        ):
+            torch.compile(f, backend="aot_eager")(storage[:10])
+        self.assertEqual(storage, storage_before)
+
+    def test_storage_copy_tracked_noncontiguous_mutation_errors(self):
+        def f(x):
+            x.as_strided((2,), (2,), 2).mul_(2)
+            return x.sin()
+
+        source = torch.arange(10.0, requires_grad=True)
+        storage = source * 1
+        storage_before = storage.detach().clone()
+        with self.assertRaisesRegex(RuntimeError, "non-contiguous inputs"):
+            torch.compile(f, backend="aot_eager")(storage[::2])
+        self.assertEqual(storage, storage_before)
 
     @skipIfTorchDynamo(
         "aot_function uses FX tracing which conflicts with dynamo wrapping"

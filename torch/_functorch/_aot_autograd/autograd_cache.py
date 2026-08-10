@@ -17,12 +17,14 @@ import random
 import shutil
 import time
 import traceback
+from collections.abc import Sequence
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.source import AttrSource
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -33,8 +35,13 @@ from torch._dynamo.utils import (
     warn_once,
 )
 from torch._functorch import config
+from torch._guards import StorageMetadata, TracingContext
 from torch._inductor.codecache import (
+    _guarding_int_for_storage_metadata,
     _ident,
+    _is_valid_storage_metadata_guard_source,
+    _needs_storage_metadata_for_cache_key,
+    _storage_metadata_entries_for_cache_key,
     add_ephemeral_timeout_increase_for_distributed,
     AOTAUTOGRAD_CACHE_PREFIX,
     BypassFxGraphCache,
@@ -960,6 +967,53 @@ def autograd_cache_key(
             raise
 
 
+def _add_storage_metadata_guards_for_cache_sensitive_ops(
+    mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
+    args: Sequence[Any],
+    aot_config: AOTConfig,
+) -> None:
+    gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
+    tracing_context = TracingContext.try_get()
+    if (
+        tracing_context is None
+        or not isinstance(gm, torch.fx.GraphModule)
+        or not _needs_storage_metadata_for_cache_key(gm)
+        or aot_config.aot_autograd_arg_pos_to_source is None
+    ):
+        return
+
+    for arg, root_source in zip(args, aot_config.aot_autograd_arg_pos_to_source):
+        if not isinstance(arg, torch.Tensor):
+            continue
+        if not _is_valid_storage_metadata_guard_source(root_source):
+            continue
+        for path, (
+            storage_offset,
+            storage_size,
+        ), is_trivial in _storage_metadata_entries_for_cache_key(
+            arg, include_trivial=True
+        ):
+            source = root_source
+            for attr in path:
+                source = AttrSource(source, attr)
+            if is_trivial:
+                tracing_context.guards_context.aotautograd_guards.append(
+                    StorageMetadata(source, None, None, is_trivial=True)
+                )
+                continue
+            guarded_size = _guarding_int_for_storage_metadata(storage_size)
+            guarded_offset = _guarding_int_for_storage_metadata(storage_offset)
+            if guarded_size is None and guarded_offset is None:
+                continue
+            tracing_context.guards_context.aotautograd_guards.append(
+                StorageMetadata(
+                    source,
+                    guarded_size,
+                    guarded_offset,
+                )
+            )
+
+
 @contextlib.contextmanager
 def sanitize_gm_for_cache(
     gm: torch.fx.GraphModule,
@@ -1071,6 +1125,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         cache_event_time = time.time_ns()
         cache_state = None
         try:
+            _add_storage_metadata_guards_for_cache_sensitive_ops(mod, args, aot_config)
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )

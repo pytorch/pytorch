@@ -1608,7 +1608,7 @@
 - name: as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
   self: as_strided_scatter_backward(grad, TensorGeometry(self), TensorGeometry(src), size, stride, storage_offset)
   # See Note [as_strided_scatter backward support]
-  src: grad.contiguous().as_strided_symint(size, stride, storage_offset)
+  src: as_strided_scatter_src_backward(grad, TensorGeometry(self), size, stride, storage_offset)
   result: auto_linear
 
 - name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)

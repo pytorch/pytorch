@@ -489,6 +489,23 @@ class StorageOverlap(GuardEnvExpr):
     non_overlapping_sources: list[Source]
 
 
+@dataclasses.dataclass(frozen=True)
+class StorageMetadata(GuardEnvExpr):
+    input_source: Source
+    size: int | None
+    offset: int | None
+    is_trivial: bool = False
+
+    def __post_init__(self) -> None:
+        if self.is_trivial:
+            if self.size is not None or self.offset is not None:
+                raise AssertionError(
+                    "trivial storage metadata must not have exact values"
+                )
+        elif self.size is None and self.offset is None:
+            raise AssertionError("expected at least one storage metadata guard")
+
+
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 

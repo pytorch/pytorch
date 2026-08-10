@@ -1121,6 +1121,16 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._method_size_stride("stride", *args, **kwargs)
 
+    def method_storage_offset(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        # Reconstruct storage observations on graph intermediates in bytecode.
+        # This keeps the tensor as a graph output instead of letting later
+        # passes fold the observation from logical tensor metadata.
+        if self.source is None:
+            return TensorStorageOffsetVariable(self)
+        return None
+
     def _method_size_stride(
         self, name: str, dim: Any | None = None
     ) -> VariableTracker | None:
@@ -2426,6 +2436,7 @@ class TensorVariable(VariableTracker):
     tp_methods = {
         "size": Method(method_size),
         "stride": Method(method_stride),
+        "storage_offset": Method(method_storage_offset),
         "numel": Method(method_numel),
         "nelement": Method(method_nelement),
         "dim": Method(method_dim),
@@ -3553,6 +3564,14 @@ class UntypedStorageVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # An intermediate's backing storage size is not necessarily its
+        # logical numel. Reconstruct the query in bytecode so the tensor stays
+        # visible as a storage-observed graph output to later passes.
+        if self.from_tensor.source is None:
+            return UntypedStorageSizeVariable(
+                self.from_tensor, self.example_value.size()
+            )
+
         result = self.example_value.size()
         if not has_free_symbols(result):
             # avoid creating a node in the graph
@@ -3592,6 +3611,72 @@ class UntypedStorageVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
+        codegen.call_method(0)
+
+
+class UntypedStorageSizeVariable(VariableTracker):
+    _nonvar_fields = {
+        "example_value",
+        "proxy",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self, from_tensor: TensorVariable, example_value: Any, **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.from_tensor = from_tensor
+        self.example_value = example_value
+        self.proxy: torch.fx.Proxy | None = None
+
+    def python_type(self) -> type:
+        return int
+
+    def as_proxy(self) -> torch.fx.Proxy:
+        if self.proxy is None:
+            from ..external_utils import untyped_storage_size
+
+            tensor_proxy = self.from_tensor.as_proxy()
+            self.proxy = tensor_proxy.tracer.create_proxy(
+                "call_function", untyped_storage_size, (tensor_proxy,), {}
+            )
+            self.proxy.node.meta["example_value"] = self.example_value
+        return self.proxy
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.from_tensor)
+        codegen.load_method("untyped_storage")
+        codegen.call_method(0)
+        codegen.load_method("size")
+        codegen.call_method(0)
+
+
+class TensorStorageOffsetVariable(VariableTracker):
+    _nonvar_fields = {
+        "example_value",
+        "proxy",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, from_tensor: TensorVariable, **kwargs: Any) -> None:
+        example_value = from_tensor.as_proxy().node.meta["example_value"]
+        super().__init__(**kwargs)
+        self.from_tensor = from_tensor
+        self.example_value = example_value.storage_offset()
+        self.proxy: torch.fx.Proxy | None = None
+
+    def python_type(self) -> type:
+        return int
+
+    def as_proxy(self) -> torch.fx.Proxy:
+        if self.proxy is None:
+            self.proxy = self.from_tensor.as_proxy().storage_offset()
+            self.proxy.node.meta["example_value"] = self.example_value
+        return self.proxy
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.from_tensor)
+        codegen.load_method("storage_offset")
         codegen.call_method(0)
 
 

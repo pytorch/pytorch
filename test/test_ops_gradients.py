@@ -60,7 +60,6 @@ class TestBwdGradients(TestGradients):
             xfail("istft"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
-            xfail("as_strided_scatter"),
             skip("nn.functional.max_unpool1d"),
             skip("nn.functional.max_unpool2d"),
             skip("nn.functional.max_unpool3d"),

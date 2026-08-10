@@ -24,9 +24,31 @@ import torch
 from torch._dynamo import reset
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.source import AttrSource, LocalSource
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.aot_autograd_result import (
+    _refresh_cached_aotautograd_arg_sources,
+)
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._functorch._aot_autograd.collect_metadata_analysis import (
+    run_functionalized_fw_and_collect_metadata,
+)
+from torch._functorch._aot_autograd.descriptors import (
+    ParamAOTInput,
+    PlainAOTInput,
+    SubclassGetAttrAOTInput,
+    SyntheticBaseAOTInput,
+)
+from torch._functorch._aot_autograd.input_output_analysis import (
+    create_synthetic_base_metadata,
+    remove_dupe_metadata,
+)
+from torch._functorch._aot_autograd.runtime_wrappers import (
+    _set_aotautograd_arg_sources,
+    merge_view_inputs,
+)
+from torch._guards import StorageMetadata, tracing, TracingContext
 from torch._inductor import config, config_comms, metrics
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
@@ -37,6 +59,8 @@ from torch._inductor.cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from torch._inductor.codecache import (
+    _source_from_aot_input_desc,
+    _storage_metadata_for_cache_key,
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
@@ -50,6 +74,9 @@ from torch._inductor.codecache import (
     TensorMetadataAndValues,
 )
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
+from torch._inductor.compile_fx import (
+    _add_storage_metadata_guards_for_cache_sensitive_ops,
+)
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
@@ -3354,6 +3381,281 @@ class TestFxGraphCacheHashing(TestCase):
         result = graph.call_function(torch.empty, ((4,),), kwargs)
         graph.output(result)
         return torch.fx.GraphModule({}, graph)
+
+    def test_storage_metadata_for_cache_key_storage_less_tensor(self):
+        sparse = torch.randn(3, 3).to_sparse()
+        self.assertIsNone(_storage_metadata_for_cache_key(sparse))
+
+    def test_storage_metadata_for_cache_key_data_dependent_offset(self):
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            base = torch.empty(8)
+            offset = shape_env.create_unbacked_symint()
+            view = torch.as_strided(base, (4,), (1,), offset)
+
+            metadata = _storage_metadata_for_cache_key(view)
+
+        self.assertIsNotNone(metadata)
+        storage_offset, storage_bytes = metadata
+        self.assertIsInstance(storage_offset, torch.SymInt)
+        self.assertEqual(str(storage_offset), str(offset))
+        self.assertEqual(storage_bytes, 32)
+        self.assertEqual(shape_env.guards, [])
+
+        input_desc = PlainAOTInput(0)
+        input_source = LocalSource("x")
+        fw_metadata = types.SimpleNamespace(aotautograd_input_source_map=None)
+        _set_aotautograd_arg_sources(
+            fw_metadata,
+            [input_desc],
+            cast(
+                Any,
+                types.SimpleNamespace(aot_autograd_arg_pos_to_source=[input_source]),
+            ),
+        )
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["desc"] = input_desc
+        graph.output(graph.call_function(torch.as_strided, (x, (4,), (1,), 0)))
+        gm = torch.fx.GraphModule({}, graph)
+        context = TracingContext(None)
+        context.fw_metadata = cast(Any, fw_metadata)
+
+        with tracing(context):
+            _add_storage_metadata_guards_for_cache_sensitive_ops(gm, [view])
+
+        guards = [
+            guard
+            for guard in context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageMetadata)
+        ]
+        self.assertEqual(len(guards), 1)
+        self.assertEqual(guards[0].size, 32)
+        self.assertIsNone(guards[0].offset)
+
+    def test_storage_metadata_guard_source_after_lifted_subclass_parameter(self):
+        param_root_desc = ParamAOTInput("weight")
+        input_root_desc = PlainAOTInput(0)
+        param_desc = SubclassGetAttrAOTInput(param_root_desc, "a")
+        input_desc = SubclassGetAttrAOTInput(input_root_desc, "a")
+        param_source = LocalSource("weight")
+        input_source = LocalSource("x")
+        fw_metadata = types.SimpleNamespace(aotautograd_input_source_map=None)
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source=[param_source, input_source]
+        )
+        _set_aotautograd_arg_sources(
+            fw_metadata, [param_root_desc, input_root_desc], cast(Any, aot_config)
+        )
+
+        graph = torch.fx.Graph()
+        param = graph.placeholder("weight")
+        param.meta["desc"] = param_desc
+        x = graph.placeholder("x")
+        x.meta["desc"] = input_desc
+        view = graph.call_function(torch.as_strided, (x, (2,), (1,), 0))
+        graph.output(graph.call_function(torch.add, (view, param)))
+        gm = torch.fx.GraphModule({}, graph)
+
+        context = TracingContext(None)
+        context.fw_metadata = cast(Any, fw_metadata)
+        parameter = torch.ones(2)
+        user_input = torch.arange(4)[1:3]
+        with tracing(context):
+            _add_storage_metadata_guards_for_cache_sensitive_ops(
+                gm, [parameter, user_input]
+            )
+
+        guards = [
+            guard
+            for guard in context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageMetadata)
+        ]
+        self.assertEqual(len(guards), 1)
+        self.assertEqual(guards[0].input_source, AttrSource(input_source, "a"))
+        self.assertNotEqual(guards[0].input_source, param_source)
+
+    def test_subclass_aot_input_source_mapping(self):
+        root_desc = PlainAOTInput(0)
+        inner_desc = SubclassGetAttrAOTInput(root_desc, "a")
+        nested_desc = SubclassGetAttrAOTInput(inner_desc, "b")
+        root_source = LocalSource("x")
+        metadata = types.SimpleNamespace(aotautograd_input_source_map=None)
+        _set_aotautograd_arg_sources(
+            metadata,
+            [root_desc],
+            cast(
+                Any,
+                types.SimpleNamespace(aot_autograd_arg_pos_to_source=[root_source]),
+            ),
+        )
+
+        context = TracingContext(None)
+        context.fw_metadata = cast(Any, metadata)
+        with tracing(context):
+            inner_source = AttrSource(root_source, "a")
+            self.assertEqual(_source_from_aot_input_desc(inner_desc), inner_source)
+            self.assertEqual(
+                _source_from_aot_input_desc(nested_desc),
+                AttrSource(inner_source, "b"),
+            )
+
+    def test_aot_input_source_map_survives_dedupe_metadata(self):
+        def fn(a, b, c):
+            b.mul_(2)
+            return [a + b + c]
+
+        descs = [PlainAOTInput(i) for i in range(3)]
+        sources = [LocalSource(name) for name in ("a", "b", "c")]
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(4))
+        y = fake_mode.from_tensor(torch.randn(4))
+        metadata = run_functionalized_fw_and_collect_metadata(
+            fn,
+            flat_args_descs=descs,
+            keep_input_mutations=False,
+            static_input_indices=[],
+        )(x, x, y)
+        _set_aotautograd_arg_sources(
+            metadata,
+            descs,
+            cast(
+                Any,
+                types.SimpleNamespace(aot_autograd_arg_pos_to_source=sources),
+            ),
+        )
+
+        updated = remove_dupe_metadata(
+            metadata,
+            keep_arg_mask=[True, False, True],
+            add_dupe_map=[0, 0, 1],
+        )
+
+        self.assertIs(
+            updated.aotautograd_input_source_map,
+            metadata.aotautograd_input_source_map,
+        )
+        context = TracingContext(None)
+        context.fw_metadata = updated
+        with tracing(context):
+            self.assertEqual(_source_from_aot_input_desc(descs[2]), sources[2])
+
+    def test_aot_input_source_map_survives_synthetic_base_metadata(self):
+        def fn(a, b, c):
+            a.mul_(2)
+            return [a + b + c]
+
+        base = torch.randn(8)
+        a = torch.empty(0).set_(base.untyped_storage(), 0, (6,), (1,))
+        b = torch.empty(0).set_(base.untyped_storage(), 2, (6,), (1,))
+        c = torch.randn(6)
+        fake_mode = FakeTensorMode()
+        args = [fake_mode.from_tensor(arg) for arg in (a, b, c)]
+        descs = [PlainAOTInput(i) for i in range(3)]
+        sources = [LocalSource(name) for name in ("a", "b", "c")]
+        metadata = run_functionalized_fw_and_collect_metadata(
+            fn,
+            flat_args_descs=descs,
+            keep_input_mutations=False,
+            static_input_indices=[],
+        )(*args)
+        aot_config = cast(
+            Any,
+            types.SimpleNamespace(aot_autograd_arg_pos_to_source=sources),
+        )
+        _set_aotautograd_arg_sources(metadata, descs, aot_config)
+
+        with fake_mode:
+            inner_args, inner_descs, synthetic_base_info = merge_view_inputs(
+                aot_config,
+                args,
+                descs,
+                metadata.input_info,
+                is_inference=True,
+            )
+            self.assertIsNotNone(synthetic_base_info)
+            updated, _ = create_synthetic_base_metadata(
+                metadata,
+                synthetic_base_info,
+                args,
+                inner_args,
+                inner_descs,
+            )
+
+        synthetic_desc, unaffected_desc = inner_descs
+        self.assertIsInstance(synthetic_desc, SyntheticBaseAOTInput)
+        self.assertEqual(unaffected_desc, descs[2])
+        self.assertIs(
+            updated.aotautograd_input_source_map,
+            metadata.aotautograd_input_source_map,
+        )
+        context = TracingContext(None)
+        context.fw_metadata = updated
+        with tracing(context):
+            self.assertIsNone(_source_from_aot_input_desc(synthetic_desc))
+            self.assertEqual(_source_from_aot_input_desc(unaffected_desc), sources[2])
+
+    def test_aot_input_source_map_is_per_graph_metadata(self):
+        root_desc = PlainAOTInput(0)
+        inner_desc = SubclassGetAttrAOTInput(root_desc, "a")
+        desc = SubclassGetAttrAOTInput(inner_desc, "b")
+        first_source = LocalSource("first")
+        second_source = LocalSource("second")
+        first_metadata = types.SimpleNamespace(aotautograd_input_source_map=None)
+        second_metadata = types.SimpleNamespace(aotautograd_input_source_map=None)
+        _set_aotautograd_arg_sources(
+            first_metadata,
+            [root_desc],
+            cast(
+                Any,
+                types.SimpleNamespace(aot_autograd_arg_pos_to_source=[first_source]),
+            ),
+        )
+        _set_aotautograd_arg_sources(
+            second_metadata,
+            [root_desc],
+            cast(
+                Any,
+                types.SimpleNamespace(aot_autograd_arg_pos_to_source=[second_source]),
+            ),
+        )
+
+        context = TracingContext(None)
+        with tracing(context):
+            for metadata, expected in (
+                (first_metadata, AttrSource(AttrSource(first_source, "a"), "b")),
+                (second_metadata, AttrSource(AttrSource(second_source, "a"), "b")),
+                (first_metadata, AttrSource(AttrSource(first_source, "a"), "b")),
+            ):
+                context.fw_metadata = cast(Any, metadata)
+                self.assertEqual(_source_from_aot_input_desc(desc), expected)
+
+    def test_cached_aot_input_source_map_uses_current_sources(self):
+        desc = PlainAOTInput(0)
+        cached_source = LocalSource("cached")
+        current_source = LocalSource("current")
+        runtime_metadata = types.SimpleNamespace(
+            aotautograd_input_source_map={desc: cached_source}
+        )
+        subclass_metadata = types.SimpleNamespace(
+            aotautograd_input_source_map={desc: cached_source}
+        )
+        maybe_subclass_meta = types.SimpleNamespace(fw_metadata=subclass_metadata)
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source=[current_source]
+        )
+
+        _refresh_cached_aotautograd_arg_sources(
+            cast(Any, runtime_metadata),
+            cast(Any, maybe_subclass_meta),
+            cast(Any, aot_config),
+        )
+
+        context = TracingContext(None)
+        with tracing(context):
+            for metadata in (runtime_metadata, subclass_metadata):
+                context.fw_metadata = cast(Any, metadata)
+                self.assertEqual(_source_from_aot_input_desc(desc), current_source)
 
     def test_cpu_thread_count_affects_cache_key(self):
         def fn(x):

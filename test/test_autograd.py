@@ -6280,6 +6280,55 @@ Done""",
         fn = gradient_penalty.grad_fn.next_functions[0][0].next_functions[1][0]
         self.assertEqual(fn.name(), "ThresholdBackwardBackward0")
 
+    def test_as_strided_scatter_backward_rebases_storage_offset(self):
+        # as_strided_scatter uses absolute storage offsets in forward. Its
+        # backward operates on logical contiguous gradients, so an input view's
+        # storage offset must be subtracted first.
+        # Check equivalence with the same zero-offset geometry.
+        input_with_offset = torch.arange(20.0)[5:15].detach().requires_grad_()
+        input_at_zero = input_with_offset.detach().clone().requires_grad_()
+        src_with_offset = torch.randn(2, requires_grad=True)
+        src_at_zero = src_with_offset.detach().clone().requires_grad_()
+
+        out_with_offset = torch.as_strided_scatter(
+            input_with_offset, src_with_offset, (2,), (1,), 11
+        )
+        out_at_zero = torch.as_strided_scatter(
+            input_at_zero, src_at_zero, (2,), (1,), 6
+        )
+        grad = torch.arange(10.0)
+        grads_with_offset = torch.autograd.grad(
+            out_with_offset, (input_with_offset, src_with_offset), grad
+        )
+        grads_at_zero = torch.autograd.grad(
+            out_at_zero, (input_at_zero, src_at_zero), grad
+        )
+
+        expected_self_grad = grad.clone()
+        expected_self_grad[6:8] = 0
+        expected_src_grad = grad[6:8]
+        self.assertEqual(out_with_offset, out_at_zero)
+        self.assertEqual(grads_with_offset, grads_at_zero)
+        self.assertEqual(grads_with_offset, (expected_self_grad, expected_src_grad))
+
+    def test_as_strided_scatter_backward_rejects_unsupported_storage(self):
+        src = torch.randn(2, dtype=torch.double, requires_grad=True)
+        noncontiguous_self = torch.randn(4, 3, dtype=torch.double).t()
+        with self.assertRaisesRegex(
+            RuntimeError, "only supported for contiguous inputs"
+        ):
+            torch.as_strided_scatter(
+                noncontiguous_self, src, (2,), (1,), storage_offset=0
+            )
+
+        # The physical storage is large enough, but the scatter writes outside
+        # the logical input. A logical autograd gradient cannot represent it.
+        self_with_extra_storage = torch.randn(8, dtype=torch.double)[:4]
+        with self.assertRaisesRegex(RuntimeError, "within the input's logical storage"):
+            torch.as_strided_scatter(
+                self_with_extra_storage, src, (2,), (1,), storage_offset=4
+            )
+
     def test_inplace_on_view_weak_grad_fn(self):
         # Issue 23502: Test that b's grad_fn is preserved.
         a = torch.arange(10.0, requires_grad=True)
@@ -12723,6 +12772,24 @@ get_out().sum().backward()
                 offsets,
                 use_unsafe_view_func=True,
             )
+
+    def test_as_strided_view_func_replay_rebases_storage_offset(self):
+        def run(first_replay, second_replay):
+            source = torch.arange(20.0, requires_grad=True)
+            base = source * 1
+            inp = base[5:15]
+            with torch.autograd._force_original_view_tracking(first_replay):
+                first = inp.as_strided((5,), (1,), 6)
+            with torch.autograd._force_original_view_tracking(second_replay):
+                second = first.as_strided((3,), (1,), 7)
+            second.mul_(2)
+            out = inp.sin()
+            out.sum().backward()
+            return base.detach(), out.detach(), source.grad
+
+        expected = run(False, False)
+        # Exercise a full chain of generated relative-offset ViewFuncs.
+        self.assertEqual(run(True, True), expected)
 
     def test_view_func_replay_with_modified_state(self):
         with torch.autograd._force_original_view_tracking(True):

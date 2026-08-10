@@ -244,9 +244,26 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
             raise AssertionError(f"Expected name to be str, got {type(name)}")
         initializers.append(f"{name}({init_expr.expr})")
 
+    is_as_strided = fn.func.name.unambiguous_name() == "as_strided"
+    if is_as_strided:
+        constructor_args.append("bool is_relative_storage_offset = false")
+        clone_args.append("is_relative_storage_offset")
+        state_variables.append("bool is_relative_storage_offset;")
+        initializers.append("is_relative_storage_offset(is_relative_storage_offset)")
+
     # Generate call to underlying view op
     call_input_name = "input_base"
     op_call_args = [call_input_name, *(b.name for b in non_self_bindings)]
+    if is_as_strided:
+        # Direct as_strided replay stores a relative offset, while synthetic
+        # AsStridedViewFuncs used to fill view chains retain absolute offsets.
+        if op_call_args[-1] != "storage_offset":
+            raise AssertionError("expected as_strided's final arg to be storage_offset")
+        op_call_args[-1] = (
+            "is_relative_storage_offset "
+            "? input_base.sym_storage_offset() + storage_offset.value_or(0) "
+            ": storage_offset.value_or(input_base.sym_storage_offset())"
+        )
     op_call = CALL_DISPATCH.substitute(
         unambiguous_name=fn.func.name.unambiguous_name(),
         unpacked_args=op_call_args,

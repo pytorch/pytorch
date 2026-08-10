@@ -4758,13 +4758,33 @@ at::Tensor as_strided_scatter_symint(
     at::SymIntArrayRef stride,
     std::optional<c10::SymInt> storage_offset) {
   // See Note [as_strided_scatter backward support]
-  TORCH_INTERNAL_ASSERT(
-      !self.requires_grad() || self.is_contiguous(),
-      "as_strided_scatter is currently only supported for contiguous inputs");
+  const bool needs_backward = at::GradMode::is_enabled() &&
+      (self.requires_grad() || src.requires_grad());
+  TORCH_CHECK(
+      !needs_backward || self.is_contiguous(),
+      "as_strided_scatter is only supported for contiguous inputs when gradients are required");
   // See Note [*_scatter ops preserve strides]
   auto output = clone_preserve_strides(self);
   auto slice =
       output.as_strided_symint(size, stride, std::move(storage_offset));
+  if (needs_backward) {
+    // Backward receives a logical, contiguous gradient for self. It cannot
+    // represent writes to backing-storage locations outside self's logical
+    // elements, even when those locations exist in the physical storage.
+    auto effective_storage_offset =
+        slice.sym_storage_offset() - self.sym_storage_offset();
+    auto is_empty = slice.sym_numel().sym_eq(0);
+    TORCH_SYM_CHECK(
+        is_empty.sym_or(effective_storage_offset.sym_ge(0)),
+        "as_strided_scatter is only supported when the scatter view is within "
+        "the input's logical storage when gradients are required");
+    auto required_storage_length = at::detail::computeStorageNbytes(
+        size, stride, c10::SymInt(1), effective_storage_offset);
+    TORCH_SYM_CHECK(
+        is_empty.sym_or(required_storage_length.sym_le(self.sym_numel())),
+        "as_strided_scatter is only supported when the scatter view is within "
+        "the input's logical storage when gradients are required");
+  }
   TORCH_CHECK(
       slice.sym_sizes() == src.sym_sizes(),
       "expected src to have a size equal to the slice of self. src size = ",

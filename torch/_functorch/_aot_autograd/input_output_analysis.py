@@ -109,6 +109,7 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        aotautograd_input_source_map=m.aotautograd_input_source_map,
     )
 
 
@@ -198,6 +199,22 @@ def create_synthetic_base_metadata(
                 False
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+            ),
+            mutation_requires_storage_copy=(
+                any(
+                    m.input_info[x].mutation_requires_storage_copy
+                    for x in outer_indices
+                )
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_requires_storage_copy
+            ),
+            mutation_requires_storage_copyback=(
+                any(
+                    m.input_info[x].mutation_requires_storage_copyback
+                    for x in outer_indices
+                )
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_requires_storage_copyback
             ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
@@ -319,6 +336,7 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
+            aotautograd_input_source_map=m.aotautograd_input_source_map,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )

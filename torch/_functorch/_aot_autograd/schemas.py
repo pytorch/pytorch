@@ -143,10 +143,21 @@ class InputAliasInfo:
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
     mutation_is_shallow_copy_data: bool
+    mutation_requires_storage_copy: bool
+    # Runtime copyback must conservatively preserve the full physical storage.
+    mutation_requires_storage_copyback: bool
     requires_grad: bool
     keep_input_mutations: bool
 
     def __post_init__(self) -> None:
+        if (
+            self.mutation_requires_storage_copyback
+            and not self.mutation_requires_storage_copy
+        ):
+            raise AssertionError(
+                "mutation_requires_storage_copyback requires "
+                "mutation_requires_storage_copy"
+            )
         if self.mutates_storage_metadata:
             # For convenience, we guarantee that this is always true.
             # In practice, If we call .set_(), then at runtime there is no need
@@ -166,15 +177,18 @@ class InputAliasInfo:
         ):
             return MutationType.NOT_MUTATED
 
-        if _check_if_mutation_can_be_in_graph(
-            self.keep_input_mutations,
-            self.mutates_data,
-            self.mutates_metadata,
-            self.mutations_hidden_from_autograd,
-            self.mutations_under_no_grad_or_inference_mode,
-            self.mutates_storage_metadata,
-            self.mutation_inductor_storage_resize,
-            self.requires_grad,
+        if (
+            _check_if_mutation_can_be_in_graph(
+                self.keep_input_mutations,
+                self.mutates_data,
+                self.mutates_metadata,
+                self.mutations_hidden_from_autograd,
+                self.mutations_under_no_grad_or_inference_mode,
+                self.mutates_storage_metadata,
+                self.mutation_inductor_storage_resize,
+                self.requires_grad,
+            )
+            and not self.mutation_requires_storage_copy
         ):
             return MutationType.MUTATED_IN_GRAPH
 
@@ -534,6 +548,14 @@ class ViewAndMutationMeta:
 
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
+
+    # Maps the descriptors in this AOT graph's original input signature to
+    # their Dynamo sources.  Keep this on the per-graph metadata rather than
+    # TracingContext: DDPOptimizer runs multiple AOT graphs under one tracing
+    # context and restores each bucket's metadata before lazy backward compile.
+    aotautograd_input_source_map: dict[AOTInput, Source | None] | None = field(
+        default=None, repr=False
+    )
 
     # Input paths that held AsyncCollectiveTensors at compile time. A path is
     # (input_index, attr_path), where an empty attr_path means the top-level

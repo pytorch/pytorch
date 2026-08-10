@@ -861,6 +861,12 @@ Tensor as_strided_scatter_backward(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     std::optional<c10::SymInt> storage_offset);
+Tensor as_strided_scatter_src_backward(
+    const Tensor& grad,
+    const TensorGeometry& input_geometry,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    const std::optional<c10::SymInt>& storage_offset);
 std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& grad,
     const Tensor& self,

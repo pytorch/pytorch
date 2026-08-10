@@ -34,6 +34,7 @@ from torch._guards import (
     CompileContext,
     detect_fake_mode,
     DuplicateInputs,
+    StorageMetadata,
     tracing,
     TracingContext,
 )
@@ -62,7 +63,7 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base
+from .functional_utils import copy_mutated_input, gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -774,7 +775,10 @@ class _RuntimeForwardEpilogue:
                     # if all of the mutations to the leaf input were non-autograd-tracking mutations
                     # (aka mutations under no_grad(), or on detached views).
                     # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                    original_inpt.detach().copy_(updated_inpt)
+                    if meta.mutation_requires_storage_copyback:
+                        copy_mutated_input(original_inpt.detach(), updated_inpt)
+                    else:
+                        original_inpt.detach().copy_(updated_inpt)
                 else:
                     # Check if we have stream index information for this mutated input
                     if (
@@ -787,7 +791,10 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    if meta.mutation_requires_storage_copyback:
+                        copy_mutated_input(original_inpt, updated_inpt)
+                    else:
+                        original_inpt.copy_(updated_inpt)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1077,6 +1084,11 @@ def _create_runtime_wrapper(
             artifact_name="mutation_epilogue",
         )
         buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        if any(
+            runtime_metadata.input_info[inpt_idx].mutation_requires_storage_copyback
+            for inpt_idx in runtime_metadata.mutated_inp_runtime_indices
+        ):
+            buf.bind(copy_mutated_input=copy_mutated_input)
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1113,10 +1125,17 @@ def _create_runtime_wrapper(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
                     if meta.is_leaf:
-                        buf.writeline(
-                            f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
-                        )
-                        buf.writeline(f"else: {oi}.copy_({ui})")
+                        if meta.mutation_requires_storage_copyback:
+                            buf.writeline(
+                                f"if {oi}.requires_grad: "
+                                f"copy_mutated_input({oi}.detach(), {ui})"
+                            )
+                            buf.writeline(f"else: copy_mutated_input({oi}, {ui})")
+                        else:
+                            buf.writeline(
+                                f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
+                            )
+                            buf.writeline(f"else: {oi}.copy_({ui})")
                     else:
                         has_stream = (
                             runtime_metadata.mutated_inp_stream_indices is not None
@@ -1131,6 +1150,8 @@ def _create_runtime_wrapper(
                                 "See: https://github.com/pytorch/pytorch/issues/172522",
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
+                        elif meta.mutation_requires_storage_copyback:
+                            buf.writeline(f"copy_mutated_input({oi}, {ui})")
                         else:
                             buf.writeline(f"{oi}.copy_({ui})")
             if not wrote_body:
@@ -1583,6 +1604,52 @@ class EffectTokensWrapper(CompilerWrapper):
 # Dynamo's guards are not enough.  In practice, this seems to cover
 # everything.
 #
+def _add_storage_metadata_guards(
+    fw_metadata: ViewAndMutationMeta,
+    flat_args: list[FxValue],
+    aot_config: AOTConfig,
+) -> None:
+    tracing_context = TracingContext.try_get()
+    if not tracing_context or not aot_config.aot_autograd_arg_pos_to_source:
+        return
+
+    for arg_pos, input_info in enumerate(fw_metadata.input_info):
+        if not input_info.mutation_requires_storage_copy:
+            continue
+        source = aot_config.aot_autograd_arg_pos_to_source[arg_pos]
+        arg = flat_args[arg_pos]
+        if isinstance(arg, torch.Tensor):
+            # Avoid a top-level Inductor import from this runtime wrapper.
+            from torch._inductor.codecache import (
+                _is_valid_storage_metadata_guard_source,
+            )
+            from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
+
+            if not _is_valid_storage_metadata_guard_source(source):
+                continue
+
+            storage_size = int(guarding_hint_or_throw(arg.untyped_storage().size()))
+            storage_offset = int(guarding_hint_or_throw(arg.storage_offset()))
+            tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
+                StorageMetadata(source, storage_size, storage_offset)
+            )
+
+
+def _set_aotautograd_arg_sources(
+    fw_metadata: ViewAndMutationMeta,
+    flat_args_descs: list[AOTInput],
+    aot_config: AOTConfig,
+) -> None:
+    sources = aot_config.aot_autograd_arg_pos_to_source
+    if sources is not None and len(sources) != len(flat_args_descs):
+        raise AssertionError(
+            f"expected {len(flat_args_descs)} AOT input sources, got {len(sources)}"
+        )
+    fw_metadata.aotautograd_input_source_map = (
+        None if sources is None else dict(zip(flat_args_descs, sources))
+    )
+
+
 @dataclass
 class AOTDedupeWrapper(CompilerWrapper):
     keep_arg_mask: list[bool] = field(default_factory=list)
@@ -1609,6 +1676,7 @@ class AOTDedupeWrapper(CompilerWrapper):
     ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
+        _add_storage_metadata_guards(fw_metadata, flat_args, aot_config)
 
         # Strategy 1: For any input that is not mutated, we can leafify it if we
         # need to remove a duplicate.
@@ -1716,10 +1784,8 @@ class AOTDedupeWrapper(CompilerWrapper):
             fw_metadata, keep_arg_mask, add_dupe_map
         )
 
-        if (
-            tracing_context := TracingContext.try_get()
-            and aot_config.aot_autograd_arg_pos_to_source
-        ):
+        tracing_context = TracingContext.try_get()
+        if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
             # TODO(voz): This structure is 1:1, we could consider an alternate structure like
             # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
             # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -2263,8 +2329,16 @@ def merge_view_inputs(
         # have overlapping memory.
         # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
         # of tensors in the current group that shares a storage is non-overlapping.
-        aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
-            aot_config, fwd_inputs, aliased_input_indices
+        has_storage_copy_mutation = any(
+            mutated_input_info[inpt_idx].mutation_requires_storage_copy
+            for inpt_idx in aliased_input_indices
+        )
+        aliased_input_indices_no_false_sharing = (
+            set(aliased_input_indices)
+            if has_storage_copy_mutation
+            else compute_overlapping_inputs(
+                aot_config, fwd_inputs, aliased_input_indices
+            )
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(
@@ -3873,6 +3947,8 @@ def pre_compile(
     Runs a sequence of wrappers on the given function and arguments.
     Mutates wrappers in place.
     """
+    original_flat_args_descs = flat_args_descs.copy()
+    _set_aotautograd_arg_sources(fw_metadata, original_flat_args_descs, aot_config)
     for wrapper in wrappers:
         flat_fn, flat_args, flat_args_descs, fw_metadata = wrapper.pre_compile(
             flat_fn, flat_args, flat_args_descs, aot_config, fw_metadata=fw_metadata

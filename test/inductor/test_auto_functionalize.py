@@ -2027,11 +2027,15 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_dtype_view_clone_elimination_shared_storage(self):
         """
-        Two graph-input placeholders that share the same underlying storage
-        (e.g. per-layer slices of a single KV pool) collide in the pass's
-        ``storage_to_input`` map, which is keyed by
-        ``untyped_storage()._cdata`` alone. Verify the pass still produces
-        correct output for both mutations.
+        AOTAutograd merges the two aliased user inputs into one synthetic-base
+        graph input so mutations through either view update the full backing
+        storage. The first dtype-view mutation is based on that graph input,
+        while the second is based on the storage-copy result of the first.
+
+        Verify both mutations are correct and that clone elimination still
+        applies to the input-backed dtype view. The later intermediate-backed
+        view is not covered by the pass's graph-input safety rule and retains
+        its clone.
 
         This case is realistic for paged-KV deployments where each layer holds
         a slice of one big buffer with positive ``storage_offset``.
@@ -2096,10 +2100,12 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 # The underlying pool must reflect both mutations through the
                 # shared storage.
                 self.assertEqual(pool_compiled, pool_eager)
-                # The pass must fire once per auto_functionalized_v2 node;
-                # we have two dtype-view mutations so the counter is 2.
+                # The counter records eliminated base clones, not HOP nodes.
+                # Only the first dtype view is backed by a graph input; removing
+                # the second clone would require a separate liveness proof for
+                # the updated intermediate storage.
                 self.assertEqual(
-                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 2
+                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
                 )
 
     def test_reinplace_mutated_empty_no_self_edge(self):

@@ -50,6 +50,7 @@ import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
+from torch._dynamo.source import AttrSource, NumpyTensorSource
 from torch._dynamo.utils import (
     CompileEventLogger,
     counters,
@@ -125,12 +126,14 @@ from torch.compiler._cache import (
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
     guarding_hint_or_throw,
     has_guarding_hint,
     ShapeEnv,
 )
 from torch.utils._device import _device_constructors
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .cache_key import (
     CODE_CACHE_KEY_STRATEGY,
@@ -632,6 +635,167 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
     return meta
+
+
+_STORAGE_METADATA_TARGETS = OrderedSet(
+    [
+        torch.as_strided,
+        torch.as_strided_scatter,
+        torch.diagonal_scatter,
+        torch.select_scatter,
+        torch.slice_scatter,
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_scatter.default,
+        torch.ops.aten.diagonal_scatter.default,
+        torch.ops.aten.select_scatter.default,
+        torch.ops.aten.slice_scatter.default,
+    ]
+)
+
+
+def _needs_storage_metadata_for_cache_key(gm: torch.fx.GraphModule | None) -> bool:
+    if not isinstance(gm, torch.fx.GraphModule):
+        return False
+
+    method_targets = (
+        "as_strided",
+        "as_strided_scatter",
+        "diagonal_scatter",
+        "select_scatter",
+        "slice_scatter",
+    )
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            if node.op == "call_method" and node.target in method_targets:
+                return True
+            if node.op == "call_function" and node.target in _STORAGE_METADATA_TARGETS:
+                return True
+    return False
+
+
+def _storage_metadata_for_cache_key(
+    t: Tensor, *, include_trivial: bool = False
+) -> tuple[object, object] | None:
+    def with_hint(value: Any) -> object:
+        if has_guarding_hint(value):
+            return guarding_hint_or_throw(value)
+        return value
+
+    tensor_metadata = extract_tensor_metadata(t)
+    storage_bytes = tensor_metadata.storage_bytes
+    if storage_bytes is None:
+        return None
+
+    storage_offset = tensor_metadata.storage_offset
+    logical_bytes = t.numel() * t.element_size()
+    if (
+        not include_trivial
+        and guard_or_false(storage_offset == 0)
+        and guard_or_false(storage_bytes == logical_bytes)
+    ):
+        return None
+    return with_hint(storage_offset), with_hint(storage_bytes)
+
+
+def _storage_metadata_entries_for_cache_key(
+    t: Tensor, *, include_trivial: bool = False
+) -> tuple[tuple[tuple[str, ...], tuple[object, object], bool], ...]:
+    """Return nontrivial storage metadata for tensor leaves of ``t``.
+
+    AOTAutograd cache inputs can be traceable wrapper subclasses while Inductor
+    sees their flattened tensor attributes.  Record the attribute path so the
+    outer AOT cache key and its Dynamo guards cover the same physical storage as
+    the eventual Inductor inputs.
+    """
+
+    def visit(
+        value: Any, path: tuple[str, ...]
+    ) -> Generator[tuple[tuple[str, ...], tuple[object, object], bool], None, None]:
+        if not isinstance(value, torch.Tensor):
+            return
+        if is_traceable_wrapper_subclass(value):
+            inner_tensor_names, _ = value.__tensor_flatten__()
+            for name in inner_tensor_names:
+                yield from visit(getattr(value, name), (*path, name))
+            return
+
+        metadata = _storage_metadata_for_cache_key(value, include_trivial=True)
+        if metadata is None:
+            return
+        is_trivial = _storage_metadata_for_cache_key(value) is None
+        if include_trivial or not is_trivial:
+            yield path, metadata, is_trivial
+
+    return tuple(visit(t, ()))
+
+
+def _guarding_int_for_storage_metadata(value: Any) -> int | None:
+    if not has_guarding_hint(value):
+        return None
+    return int(guarding_hint_or_throw(value))
+
+
+def _source_from_aot_input_desc(desc: Any):
+    from torch._functorch._aot_autograd.descriptors import (
+        PlainAOTInput,
+        SubclassGetAttrAOTInput,
+    )
+
+    tracing_context = torch._guards.TracingContext.try_get()
+    fw_metadata = None if tracing_context is None else tracing_context.fw_metadata
+    source_map = (
+        None if fw_metadata is None else fw_metadata.aotautograd_input_source_map
+    )
+    if source_map is None:
+        return None
+
+    def resolve_source(input_desc: Any):
+        if isinstance(input_desc, PlainAOTInput):
+            # Only original user inputs have storage metadata guarded here.
+            # Parameters and synthetic AOT inputs have different lifetime and
+            # source semantics, so do not resolve arbitrary descriptor roots.
+            return source_map.get(input_desc)
+        if isinstance(input_desc, SubclassGetAttrAOTInput):
+            base_source = resolve_source(input_desc.base)
+            if base_source is not None:
+                return AttrSource(base_source, input_desc.attr)
+        return None
+
+    return resolve_source(desc)
+
+
+def _is_valid_storage_metadata_guard_source(source: Any) -> bool:
+    # NumpyTensorSource reconstructs through ___from_numpy(...), which can warn
+    # or produce ephemeral tensors while evaluating guards. Regular tensor
+    # guards already cover numpy shape/stride metadata.
+    return (
+        source is not None
+        and not isinstance(source, NumpyTensorSource)
+        and "___from_numpy(" not in source.name
+    )
+
+
+def _extract_storage_metadata_for_cache_key(
+    example_inputs: Sequence[InputType],
+) -> tuple[object | None, ...]:
+    metadata: list[object | None] = []
+    for inp in example_inputs:
+        if isinstance(inp, torch.Tensor):
+            entries = _storage_metadata_entries_for_cache_key(inp)
+            if len(entries) == 1 and not entries[0][0]:
+                # Preserve the existing key representation for plain tensors.
+                metadata.append(entries[0][1])
+            else:
+                metadata.append(
+                    tuple((path, value) for path, value, _ in entries)
+                    if entries
+                    else None
+                )
+        else:
+            metadata.append(None)
+    return tuple(metadata)
 
 
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
@@ -1499,6 +1663,10 @@ class FxGraphHashDetails:
             else:
                 processed_inputs.append(inp)
         self.example_inputs = processed_inputs
+        if _needs_storage_metadata_for_cache_key(gm):
+            self.input_storage_metadata = _extract_storage_metadata_for_cache_key(
+                example_inputs
+            )
         self.cache_key_tag = cconfig.cache_key_tag
         self.nested_inductor_config_patches = (
             _collect_nested_region_inductor_config_patches_for_hash(gm)

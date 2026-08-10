@@ -63,6 +63,7 @@ from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
+    copy_mutated_input,
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
@@ -977,7 +978,7 @@ def create_functionalized_fn(
                             # triggering check_inplace during tracing.  The
                             # requires_grad case is checked at runtime instead
                             with torch.no_grad():
-                                before.copy_(after)
+                                copy_mutated_input(before, after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
                         )
@@ -1027,7 +1028,7 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            before.copy_(after)
+                            copy_mutated_input(before, after)
 
             if aot_config.keep_inference_input_mutations:
                 # Note: This is a bit annoying. There's a layering issue here, where:
@@ -1481,6 +1482,7 @@ def aot_dispatch_subclass(
             # pyrefly: ignore [not-iterable]
         )(*primals_unwrapped)
 
+    meta_updated.aotautograd_input_source_map = meta.aotautograd_input_source_map
     subclass_meta.fw_metadata = meta_updated
 
     return SubclassTracingInfo(

@@ -3605,6 +3605,15 @@ Tensor as_strided_backward(
       inp_sizes, inp_strides, inp_effective_offset);
 }
 
+static c10::SymInt as_strided_scatter_effective_offset(
+    const TensorGeometry& input_geometry,
+    const std::optional<c10::SymInt>& storage_offset) {
+  // Forward offsets are absolute within the input's physical storage. Backward
+  // operates on a contiguous logical gradient, so rebase them to that input.
+  return storage_offset.value_or(input_geometry.sym_storage_offset()) -
+      input_geometry.sym_storage_offset();
+}
+
 Tensor as_strided_scatter_backward(
     const Tensor& grad,
     const TensorGeometry& input_geometry,
@@ -3619,15 +3628,27 @@ Tensor as_strided_scatter_backward(
   // this is not implemented. When autograd is being used, we ban non-contiguous
   // inputs. We can assume that the input was a contiguous tensor. Also, we'll
   // take the perf hit and contiguify grad for now.
-  auto grad_ = grad.contiguous();
-  auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  auto result_buffer = grad_.new_zeros_symint(input_geometry.sym_sizes());
-  auto result = result_buffer.as_strided_symint(
-      input_geometry.sym_sizes(), input_geometry.sym_strides());
-  auto result_slice = result_buffer.as_strided_symint(
-      sizes, strides, std::move(storage_offset));
-  result_slice.copy_(grad_slice);
+  auto result = grad.contiguous().clone();
+  auto effective_offset =
+      as_strided_scatter_effective_offset(input_geometry, storage_offset);
+  auto result_slice =
+      result.as_strided_symint(sizes, strides, std::move(effective_offset));
+  // as_strided_scatter overwrites this slice with src, so self only
+  // contributes to the output outside the slice.
+  result_slice.zero_();
   return result;
+}
+
+Tensor as_strided_scatter_src_backward(
+    const Tensor& grad,
+    const TensorGeometry& input_geometry,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    const std::optional<c10::SymInt>& storage_offset) {
+  auto effective_offset =
+      as_strided_scatter_effective_offset(input_geometry, storage_offset);
+  return grad.contiguous().as_strided_symint(
+      sizes, strides, std::move(effective_offset));
 }
 
 std::tuple<Tensor, Tensor> atan2_backward(

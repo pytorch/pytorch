@@ -38,6 +38,7 @@ from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import getArtifactLogger
 
 from .runtime_wrappers import (
+    _set_aotautograd_arg_sources,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
@@ -63,6 +64,27 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 TOut = TypeVar("TOut", bound=OutputCode)
+
+
+def _refresh_cached_aotautograd_arg_sources(
+    runtime_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: SubclassMeta | None,
+    aot_config: AOTConfig | CacheableAOTConfig,
+) -> None:
+    """Replace serialized Source values with those for the current cache load."""
+
+    def refresh(metadata: ViewAndMutationMeta) -> None:
+        source_map = metadata.aotautograd_input_source_map
+        if source_map is not None:
+            _set_aotautograd_arg_sources(
+                metadata,
+                list(source_map),
+                cast(AOTConfig, aot_config),
+            )
+
+    refresh(runtime_metadata)
+    if maybe_subclass_meta is not None:
+        refresh(maybe_subclass_meta.fw_metadata)
 
 
 class InductorOutput(ABC, Generic[TOut]):
@@ -623,11 +645,16 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         """
         from torch._dynamo.utils import dynamo_timed
 
-        self._log_cached_graphs(aot_config)
         # Cache hits only retain the cacheable subset of AOTConfig. Narrow once
         # here so the existing post-compile wrapper stack can keep its compile-time
         # AOTConfig annotations.
         runtime_aot_config = cast(AOTConfig, aot_config)
+        _refresh_cached_aotautograd_arg_sources(
+            self.runtime_metadata,
+            self.maybe_subclass_meta,
+            runtime_aot_config,
+        )
+        self._log_cached_graphs(aot_config)
         with dynamo_timed("AOTAutogradCache.inductor_load"):
             compiled_fw_func, compiled_bw_func, needs_autograd = (
                 self._load_and_post_compile(args, fx_config)

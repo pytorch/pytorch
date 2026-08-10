@@ -260,6 +260,13 @@ def maybe_to_fresh_input(idx: int, t: Any, meta: "ViewAndMutationMeta") -> Any:
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation
+            if meta.input_info[idx].mutation_requires_storage_copy:
+                # A logical clone drops storage outside the input view. Seed
+                # the storage-preserving scatter from a detached input so its
+                # source derivative is the logical identity.
+                return torch.as_strided_scatter(
+                    t.detach(), t, t.size(), t.stride(), t.storage_offset()
+                )
             return t.clone()
         if meta.input_info[idx] and meta.input_info[idx].mutates_metadata:
             # Make sure the primal we pass to autograd.grad()

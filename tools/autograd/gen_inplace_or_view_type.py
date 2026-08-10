@@ -408,6 +408,19 @@ def emit_view_func(
     from .gen_view_funcs import view_func_name
 
     view_func_args = [b.name for b in bindings if b.name != "self"]
+    if get_base_name(f) == "as_strided":
+        # AsStridedViewFunc may be replayed on a tensor with different storage
+        # metadata, such as the logical gradient used by CopySlices. Store the
+        # offset relative to this base rather than the forward's absolute one.
+        if view_func_args[-1] != "storage_offset":
+            raise AssertionError("expected as_strided's final arg to be storage_offset")
+        replay_view_func += (
+            "auto relative_storage_offset = "
+            "storage_offset.value_or(self.sym_storage_offset()) - "
+            "self.sym_storage_offset();\n"
+        )
+        view_func_args[-1] = "relative_storage_offset"
+        view_func_args.append("true")
     if view_idx is not None:
         view_func_args.append(f"{view_idx}")
     replay_view_func += REPLAY_VIEW_FUNC.substitute(

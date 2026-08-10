@@ -670,6 +670,13 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 4)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_sparse_input_does_not_query_storage(self):
+        def f(a):
+            return a.to_dense()
+
+        inp = torch.randn(3, 4).to_sparse()
+        self.assertEqual(aot_function(f, nop)(inp), f(inp))
+
     def test_complex_linear(self):
         # https://github.com/pytorch/pytorch/issues/93424
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]

@@ -16,6 +16,7 @@ from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._functorch._aot_autograd.utils import make_boxed_compiler
 from torch._functorch.compilers import min_cut_rematerialization_partition
 from torch._higher_order_ops.wrap import wrap
+from torch._inductor.utils import fresh_inductor_cache
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
@@ -3028,6 +3029,42 @@ class TestTwoTensorSubclass(
     _SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
 ):
     """Tests for TwoTensor wrapper subclass tracing under dynamo."""
+
+    @fresh_inductor_cache()
+    @torch._inductor.config.patch(fx_graph_cache=True)
+    @torch._functorch.config.patch(enable_autograd_cache=True)
+    def test_tensor_subclass_TwoTensor_storage_metadata_recompile(self):
+        def fn(x, src):
+            return torch.slice_scatter(x, src, 0, 5, 10)
+
+        def make_input(backing_size):
+            return TwoTensor(
+                torch.arange(backing_size, dtype=torch.float32)[:15],
+                torch.arange(backing_size, dtype=torch.float32)[:15],
+            )
+
+        src = TwoTensor(torch.full((5,), -1.0), torch.full((5,), -2.0))
+        cnt = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        # The final 20-element input must leave the dense 15-element
+        # specialization and reuse the first AOT cache entry.
+        for backing_size in (20, 15, 20):
+            x = make_input(backing_size)
+            expected = fn(x, src)
+            actual = compiled(x, src)
+
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                actual.a.untyped_storage().nbytes(),
+                expected.a.untyped_storage().nbytes(),
+            )
+            self.assertEqual(
+                actual.b.untyped_storage().nbytes(),
+                expected.b.untyped_storage().nbytes(),
+            )
+
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_tensor_subclass_TwoTensor_simple(self):
         def f(tt):
