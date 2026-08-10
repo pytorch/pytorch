@@ -6,7 +6,13 @@ import unittest.mock
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    NoTest,
+    run_tests,
+    TEST_CUDA,
+    TestCase,
+)
 
 
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
@@ -19,6 +25,8 @@ if not TEST_CUDA:
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._C._activate_gpu_trace()
