@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
 from unittest import mock
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
+    TEST_XPU,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -1180,9 +1182,8 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
-
-    @skipXPUIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+    @unittest.skipIf(
+        TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
         "XPU: SYCL TLA backward does not guarantee precision on non-Xe2 devices. "
         "Re-enable once oneDNN adds SDPA backward support. "
         "See https://github.com/intel/torch-xpu-ops/issues/4094",
