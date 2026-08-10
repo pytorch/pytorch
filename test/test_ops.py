@@ -24,6 +24,7 @@ from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
@@ -337,6 +338,28 @@ class TestCommon(TestCase):
                             continue
 
                         self.assertTrue(torch.Tag.pointwise in overload.tags)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_multinomial_zero_probability_regression(self, device, dtype):
+        """Regression test for #192577: multinomial must not select zero-probability entries."""
+        torch.manual_seed(0)
+
+        V = 151_936
+        logits = torch.randn(V, dtype=torch.float32) * 2.0
+        logits[12345] += 200.0
+        p = torch.softmax(logits, dim=-1).to(device=device, dtype=dtype)
+
+        self.assertTrue((p == 0.0).any())
+
+        num_draws = 20_000
+        for _ in range(num_draws):
+            idx = torch.multinomial(p, 1)
+            self.assertGreater(
+                p[idx].item(),
+                0.0,
+                f"torch.multinomial selected a zero-probability index "
+                f"on {device} ({dtype})",
+            )
 
     def test_reduction_tag_coverage(self):
         """Test that operators with reduction tag are from reduction operator files."""

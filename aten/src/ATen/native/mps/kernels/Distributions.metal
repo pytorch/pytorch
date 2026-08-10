@@ -95,15 +95,12 @@ kernel void exponential(
   float lambda = params.x;
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
-    // Only `u = 1` is the failure mode (`log(0)`); `u = 0` gives `log(1) = 0`.
-    float u = ::metal::min(
-        c10::metal::detail::uint32_to_uniform_float(raw[i]), 1.0f - eps);
-
-    // Negation of `log(1)` can produce `-0.0` for `u = 0` and
-    // can lead to `0 / -0.0 = NaN` in n=1 Gumbel fast path.
-    float val = -::metal::precise::log(1.0f - u) / lambda;
-    val = ::metal::max(val, FLT_MIN);
-    output[base + i] = static_cast<T>(val);
+    // Clamp `u` away from 0 to prevent `1.0f - u` from rounding to 1.0f
+    // and producing `-0.0` from `-log(1.0f - u)`.
+    float u = ::metal::clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    output[base + i] =
+        static_cast<T>(-::metal::precise::log(1.0f - u) / lambda);
   }
 }
 
