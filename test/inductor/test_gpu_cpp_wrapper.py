@@ -1088,21 +1088,19 @@ if RUN_GPU:
     )
 
 instantiate_device_type_tests(
-    TestGpuWrapper, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+    TestGpuWrapper, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(TestGpuWrapperCuda, globals(), only_for="cuda")
 instantiate_device_type_tests(
     TestLazyCompileKernelCollision,
     globals(),
     except_for="cpu",
-    allow_mps=True,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestCppWrapperStaticInitDeadlock,
     globals(),
     except_for="cpu",
-    allow_mps=True,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
@@ -1114,7 +1112,6 @@ instantiate_device_type_tests(
     DynamicShapesGpuWrapperGpuTests,
     globals(),
     except_for="cpu",
-    allow_mps=True,
     allow_xpu=True,
 )
 
