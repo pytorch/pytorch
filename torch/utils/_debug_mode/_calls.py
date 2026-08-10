@@ -43,6 +43,7 @@ class _DebugCall:
         # results from dispatch hooks
         self.record = record
         self.log = log
+        self.tensor_hash_leaves: dict[str, list[tuple[str, Any]]] = {}
         self.output_str: str | None = None
 
     def stringify_args(
@@ -441,6 +442,42 @@ def _deserialize_optional_debug_value(value: Any | None) -> Any | None:
     return _deserialize_debug_value(value)
 
 
+def _deserialize_tensor_hash_leaves(
+    value: Any,
+) -> dict[str, list[tuple[str, Any]]]:
+    tensor_hash_leaves = _deserialize_debug_value(value)
+    if not isinstance(tensor_hash_leaves, dict):
+        raise ValueError("Serialized DebugMode tensor_hash_leaves must be a dict")
+
+    result: dict[str, list[tuple[str, Any]]] = {}
+    for hash_type, hash_leaves in tensor_hash_leaves.items():
+        if hash_type not in ("input", "output"):
+            raise ValueError(
+                "Serialized DebugMode tensor_hash_leaves keys must be "
+                f"'input' or 'output', but found {hash_type!r}"
+            )
+        if not isinstance(hash_leaves, list):
+            raise ValueError(
+                f"Serialized DebugMode tensor_hash_leaves[{hash_type!r}] must be a list"
+            )
+
+        result[hash_type] = []
+        for hash_leaf in hash_leaves:
+            if not isinstance(hash_leaf, tuple) or len(hash_leaf) != 2:
+                raise ValueError(
+                    f"Serialized DebugMode tensor_hash_leaves[{hash_type!r}] "
+                    "entries must be (path, hash) tuples"
+                )
+            path, hash_value = hash_leaf
+            if not isinstance(path, str):
+                raise ValueError(
+                    "Serialized DebugMode tensor hash leaf paths must be strings, "
+                    f"but found {type(path).__name__}"
+                )
+            result[hash_type].append((path, hash_value))
+    return result
+
+
 def _serialize_common_call_fields(call: _DebugCall) -> dict[str, Any]:
     return {
         "call_depth": call.call_depth,
@@ -525,6 +562,7 @@ def _serialize_debug_call(call: _DebugCall) -> dict[str, Any]:
                 "op_name": _get_call_name(call),
                 "args_str": _op_call_args_str(call),
                 "kwargs_str": _op_call_kwargs_str(call),
+                "tensor_hash_leaves": _serialize_debug_value(call.tensor_hash_leaves),
             }
         )
     elif isinstance(call, _RedistributeCall):
@@ -583,6 +621,11 @@ def _deserialize_debug_call(data: Any) -> _DebugCall:
         call = _OpCall(_serialized_str(data, "op_name"), (), {}, call_depth)
         call.args_str = _serialized_str(data, "args_str")
         call.kwargs_str = _serialized_str(data, "kwargs_str")
+        serialized_hash_leaves = data.get("tensor_hash_leaves")
+        if serialized_hash_leaves is not None:
+            call.tensor_hash_leaves = _deserialize_tensor_hash_leaves(
+                serialized_hash_leaves
+            )
     elif call_type == "redistribute":
         arg_str = _serialized_str(data, "arg_str")
         call = _RedistributeCall(
