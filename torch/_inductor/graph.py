@@ -418,6 +418,7 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        donate_inputs: bool = True,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -621,7 +622,10 @@ class GraphLowering(torch.fx.Interpreter):
         # track the current placeholder index that we are processing
         self.placeholder_idx = -1
 
-        self.bw_donated_idxs = get_donated_idxs()
+        # Subgraphs pass donate_inputs=False: their inputs are caller-held and the
+        # top-level backward's donated indices are a different index space (see
+        # SubgraphLowering and the "subgraphs inheriting bw_donated_idxs" fix).
+        self.bw_donated_idxs = get_donated_idxs() if donate_inputs else None
 
         # Cache for dep size hints to avoid expensive recomputation
         self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
@@ -3199,7 +3203,11 @@ class SubgraphLowering(GraphLowering):
 
     def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
         self.parent = parent
-        super().__init__(*args, **kwargs)
+        # A subgraph's inputs are caller-held (owned by the parent graph) and the
+        # subgraph may be invoked from multiple call sites, so no input is ever
+        # safe to donate; donate_inputs=False keeps the base __init__ from
+        # inheriting the top-level backward's (differently-indexed) donated set.
+        super().__init__(*args, donate_inputs=False, **kwargs)
 
     def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
         name = super().allocate_non_dup_const_name(name, data)
