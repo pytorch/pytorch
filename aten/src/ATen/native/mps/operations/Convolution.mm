@@ -347,7 +347,7 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
   });
 }
 
-// conv3d forward on the Metal kernels: MPP on macOS 26+, simdgroup otherwise;
+// conv3d forward on the Metal kernels: MPP on macOS 26.2+, simdgroup otherwise;
 // planes past int32 take the long-indexed simdgroup variant on any macOS.
 static void conv3d_metal_forward(const Tensor& input_t,
                                  const Tensor& weight_t,
@@ -391,7 +391,7 @@ static void conv3d_metal_forward(const Tensor& input_t,
   TORCH_CHECK(
       std::max({input_depth, input_height, input_width, output_depth, output_height, output_width}) <= kInt32Max,
       "conv3d: a single spatial extent exceeds int32");
-  const bool use_mpp = !use_long_index && is_macos_at_least(MacOSVersion::MACOS_26_0);
+  const bool use_mpp = !use_long_index && has_mpp();
 
   const auto activation = conv3d_to_ndhwc(input_t); // NDHWC
   const auto weights = conv3d_weights_to_dhwio(weight_t); // DHWIO
