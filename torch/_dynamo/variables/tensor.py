@@ -307,6 +307,12 @@ class TensorVariable(VariableTracker):
         specialized_props = get_specialized_props(
             target_cls, tx, example_value, infer_subclass_type(example_value)
         )
+        # These fields match the conditionally specialized metadata in
+        # get_specialized_props(). If fake execution changes them to symbolic
+        # values, they are omitted and the old cache must be invalidated.
+        for k in ("_size", "stride", "is_contiguous"):
+            if k not in specialized_props:
+                setattr(self, k, None)
         for k, v in specialized_props.items():
             setattr(self, k, v)
 
@@ -319,7 +325,6 @@ class TensorVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         version_before: int | None,
-        has_tensor_arg: bool,
     ) -> None:
         """
         Sync attributes if self was mutated by an inplace operation.
@@ -332,8 +337,7 @@ class TensorVariable(VariableTracker):
             and version_after is not None
             and version_after > version_before
         ):
-            if has_tensor_arg:
-                self.synchronize_attributes(tx)
+            self.synchronize_attributes(tx)
             tx.output.check_input_mutation_on_current_stream(tx)
 
     def debug_repr(self) -> str:
@@ -1072,8 +1076,8 @@ class TensorVariable(VariableTracker):
         #   x.add_(y) where y.requires_grad=True => x.requires_grad becomes True
         # We detect inplace ops by checking if self's fake tensor version changes
         # after wrap_fx_proxy (which runs get_fake_value internally).
-        # We only synchronize when there's a tensor argument, since that's when
-        # metadata propagation is relevant.
+        # Some inplace ops mutate metadata even without tensor arguments, e.g.
+        # as_strided_ mutates size/stride from integer/list arguments.
 
         # See ops_consuming_unbacked_scalars in torch.py for the full allowlist
         # and reasoning.
@@ -1094,9 +1098,7 @@ class TensorVariable(VariableTracker):
         version_before = self._get_fake_version()
         with ctx():
             result = wrap_fx_proxy(tx, proxy)
-        self._sync_if_inplace_mutation(
-            tx, version_before, any(arg.is_tensor() for arg in args)
-        )
+        self._sync_if_inplace_mutation(tx, version_before)
 
         return result
 
@@ -1912,7 +1914,7 @@ class TensorVariable(VariableTracker):
         ):
             get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-        self._sync_if_inplace_mutation(tx, version_before, value.is_tensor())
+        self._sync_if_inplace_mutation(tx, version_before)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)

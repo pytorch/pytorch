@@ -592,12 +592,14 @@ static void init_multicast_for_block(
     const c10::intrusive_ptr<Block>& block,
     std::conditional_t<!use_fabric_handle, IpcChannel&, int&> ipc_channel,
     const std::vector<int>& pids,
-    const c10::intrusive_ptr<c10d::Store>& store,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& group,
+    bool use_pg,
     int rank,
     int world_size) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
     defined(CUDART_SUPPORTS_MULTICAST)
   auto driver_api = c10::cuda::DriverAPI::get();
+  auto store = group->getStore();
   auto handleType = use_fabric_handle
       ? CU_MEM_HANDLE_TYPE_FABRIC
       : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
@@ -637,6 +639,8 @@ static void init_multicast_for_block(
   McHandleType recv_handle;
   if constexpr (!use_fabric_handle) {
     recv_handle = ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
+  } else if (use_pg) {
+    recv_handle = pg_broadcast(group, block->device_idx, 0, mc_exported_handle);
   } else {
     // TODO implement storeExchange.broadcast
     auto gathered_handles = storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
@@ -692,9 +696,14 @@ static void init_multicast_for_block(
 check_all:
   // Whether all ranks have succeeded
   bool all_succeed = true;
-  auto rank_successes = storeExchange.all_gather(store, rank, world_size, success_end);
+  // uint8_t rather than bool: std::vector<bool> is not memcpy-able, which
+  // pg_all_gather requires.
+  auto success_flag = static_cast<uint8_t>(success_end);
+  auto rank_successes = use_pg
+      ? pg_all_gather(group, block->device_idx, success_flag)
+      : storeExchange.all_gather(store, rank, world_size, success_flag);
   for (int r = 0; r < world_size; ++r) {
-    all_succeed &= rank_successes[r];
+    all_succeed &= (rank_successes[r] != 0);
   }
   if (imported_mc_handle != 0) {
     // Rank 0 may only drop the reference cuMulticastCreate gave it once every
@@ -869,7 +878,11 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       close(imported_handles[r]);
     }
   }
-  storeExchange.barrier(store, rank, world_size);
+  if (use_pg) {
+    pg_barrier(group, block->device_idx);
+  } else {
+    storeExchange.barrier(store, rank, world_size);
+  }
   if constexpr (!use_fabric_handle) {
     close(block_handle);
   }
@@ -879,7 +892,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   bool group_has_multicast_support = check_group_multicast_support(reqs);
   if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block<use_fabric_handle>(
-        mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
+        mc_handle, mc_addr, block, ipc_channel, pids, group, use_pg, rank, world_size);
   }
 
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
