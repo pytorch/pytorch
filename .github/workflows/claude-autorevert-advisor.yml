@@ -26,6 +26,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # Needed by the advisor's `gh pr view` investigation step, since the
+      # scoped GITHUB_TOKEN below replaces the action's own app token.
+      pull-requests: read
 
     steps:
       - name: Checkout pytorch/pytorch trunk
@@ -48,6 +51,11 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
+          # Providing the workflow token stops the action from minting its own
+          # app token, bypassing Anthropic's OIDC app-token exchange -- the
+          # source of the observed intermittent "Workflow validation failed"
+          # 401s, which require the workflow to match the default branch.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |
