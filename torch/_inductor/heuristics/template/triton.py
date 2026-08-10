@@ -2769,7 +2769,8 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 block_m=block_m,
                 block_n=block_n,
                 block_k=64,
-                num_stages=2 if two_ctas else 3,  # 2-CTA caps the pipeline at 2 stages
+                # 2-CTA caps the pipeline at 2 stages (see _autows_constraints_ok)
+                num_stages=2 if two_ctas else 3,
                 num_warps=8,
                 group_m=8,
                 epilogue_subtile=epilogue_subtile,
