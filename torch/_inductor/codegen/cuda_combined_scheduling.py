@@ -129,6 +129,15 @@ class CUDACombinedScheduling(BaseScheduling):
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
 
+    def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node1):
+            return self._nv_universal_gemm_scheduling.can_fuse_reduction_epilogue(
+                node1, node2
+            )
+        return False
+
     def group_fn(
         self, sizes: Sequence[Sequence[_IntLike]]
     ) -> tuple[tuple[_IntLike, ...], ...]:
