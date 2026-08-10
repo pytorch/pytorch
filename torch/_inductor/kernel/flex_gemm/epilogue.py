@@ -55,13 +55,10 @@ from torch._inductor.kernel.flex_gemm.output_layout import (
     TRANSPOSED,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
-    _cute_call,
-    _cute_op_name,
     FlexGemmStructuralInt,
     grouped_tensor_layout,
     GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
-    lower_full_scalar,
     reduction_from_node,
     squeeze_source_node,
     tensor_meta_shape,
@@ -69,6 +66,13 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    gemm_epilogue_arg,
+    gemm_epilogue_source_expr,
+    GemmEpilogueCuteDSLKernel,
+    GemmEpilogueCuteDSLOpOverrides,
+    lower_gemm_epilogue_fx_node,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known_equal,
     statically_known_shape_equal,
@@ -89,36 +93,6 @@ FEED_MAIN_BINARY_FUNCTIONS = frozenset(
         torch.ops.aten.sub.Scalar,
     )
 )
-
-
-class FlexGemmCodegenBody:
-    def __init__(self) -> None:
-        self.lines: list[str] = []
-
-    def writeline(self, line: str) -> None:
-        self.lines.append(line)
-
-
-class FlexGemmCodegenCSE:
-    def __init__(self) -> None:
-        self.index = 0
-
-    def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
-        name = f"tmp{self.index}"
-        self.index += 1
-        body.writeline(f"{name} = {expr}")
-        return CuteDSLCSEVariable(
-            name,
-            ValueRanges.unknown() if bounds is None else bounds,
-            dtype=dtype,
-            shape=shape,
-        )
-
-
-class FlexGemmCodegenKernel:
-    def __init__(self) -> None:
-        self.body = FlexGemmCodegenBody()
-        self.cse = FlexGemmCodegenCSE()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1578,55 +1552,13 @@ def gemm_node(
     return gemm_nodes[0]
 
 
-def epimod_arg(value: Any, env: dict[torch.fx.Node, str]) -> Any:
-    """Translate FX references and constants into generated EpiMod expressions."""
-    if isinstance(value, torch.fx.Node):
-        if value in env:
-            return env[value]
-        raise NotImplementedError(
-            f"unsupported FlexGEMM EpiMod dependency: {value.format_node()}"
-        )
-    if isinstance(value, (bool, int)):
-        return value
-    if isinstance(value, float):
-        if math.isnan(value):
-            return 'float("nan")'
-        if math.isinf(value):
-            return 'float("inf")' if value > 0 else 'float("-inf")'
-        return value
-    if isinstance(value, (str, torch.dtype)) or value is None:
-        return value
-    if isinstance(value, (tuple, list)):
-        return type(value)(epimod_arg(item, env) for item in value)
-    raise NotImplementedError(f"unsupported FlexGEMM EpiMod constant: {value!r}")
+def flex_gemm_epilogue_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
+    """Adapt one FlexGEMM FX value to the shared CuTeDSL expression frontend."""
+    return gemm_epilogue_arg(value, env, "FlexGEMM")
 
 
-class FlexGemmTensorSSAOpOverrides(CuteDSLOpOverrides):
-    """Emit direct CuTeDSL expressions for a complete TensorSSA fragment."""
-
-    @staticmethod
-    def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
-        rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
-        return CuteDSLOpOverrides.add(a, rhs)
-
-    @staticmethod
-    def sub(a: Any, b: Any, *, alpha: Any = 1) -> Any:
-        rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
-        return CuteDSLOpOverrides.sub(a, rhs)
-
-    @staticmethod
-    def _to_copy(x: Any, *, dtype: torch.dtype, **kwargs: Any) -> Any:
-        unsupported_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if value not in (None, False, torch.preserve_format)
-        }
-        if unsupported_kwargs:
-            raise NotImplementedError(
-                "unsupported kwargs for FlexGEMM epilogue op _to_copy: "
-                f"{unsupported_kwargs}"
-            )
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
+class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
+    """Add PyTorch NaN propagation to the shared TensorSSA operation lowering."""
 
     @staticmethod
     def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
@@ -1670,10 +1602,6 @@ class FlexGemmTensorSSAOpOverrides(CuteDSLOpOverrides):
     def clamp_max(x: Any, max: Any) -> Any:
         return FlexGemmTensorSSAOpOverrides.minimum(x, max)
 
-    @staticmethod
-    def convert_element_type(x: Any, dtype: torch.dtype) -> Any:
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
-
 
 class FlexGemmEpiModOpOverrides(CuteDSLOpOverrides):
     """Emit QuACK expressions while reusing Inductor's op decompositions."""
@@ -1708,7 +1636,7 @@ class FlexGemmEpiModOpOverrides(CuteDSLOpOverrides):
 
     @staticmethod
     def constant(value: bool | float | int, dtype: torch.dtype) -> str:
-        return str(epimod_arg(value, {}))
+        return str(flex_gemm_epilogue_arg(value, {}))
 
     @classmethod
     def add(cls, a: Any, b: Any, *, alpha: Any = 1) -> str:
@@ -1884,7 +1812,7 @@ class FlexGemmEpiModSource:
 
     name: str
     source: str
-    tensorwise: bool = False
+    fragmentwise: bool = False
     local_reduce_combine: str | None = None
     local_reduce_finalize: str | None = None
     local_reduce_store_finalize: str | None = None
@@ -2069,21 +1997,6 @@ class FlexGemmEpiModEmitter:
         self.grouped_select_indices = analysis.grouped_select_indices
         self.grouped_main_layouts = analysis.grouped_main_layouts
         self.terminal_rewrites = self.outputs.terminal_rewrites
-        tensorwise_outputs = (self.outputs.output, *self.outputs.aux_outputs)
-        tensorwise_output_dtypes = all(
-            isinstance(meta := output.meta.get("val"), torch.Tensor)
-            and meta.dtype.is_floating_point
-            for output in tensorwise_outputs
-        )
-        tensorwise_local_reduce = (
-            swap_ab
-            and self.local_reduce is not None
-            and self.local_reduce.match.geometry.axis == 1
-            and not self.local_reduce.feeds_main
-        )
-        self.tensorwise = (
-            self.outputs.main_transform is not None or tensorwise_output_dtypes
-        ) and (self.local_reduce is None or tensorwise_local_reduce)
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
         self.local_reduce_prepass: FlexGemmEpiModReductionSpec | None = None
         self.local_reduce_source_nodes: frozenset[torch.fx.Node] = frozenset()
@@ -2125,6 +2038,11 @@ class FlexGemmEpiModEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
+        self.fragmentwise = (
+            self.local_reduce is None
+            or (self.local_reduce.feeds_main and self.local_reduce_prepass is not None)
+            or (not self.local_reduce.feeds_main and self.local_reduce_prepass is None)
+        )
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.alpha = alpha
         self.beta = beta
@@ -2136,7 +2054,7 @@ class FlexGemmEpiModEmitter:
         if not 0 <= mainloop_scale_count <= len(self.operand_names):
             raise RuntimeError("invalid FlexGEMM main-loop scale operand count")
         self.mainloop_scale_count = mainloop_scale_count
-        self.kernel = FlexGemmCodegenKernel()
+        self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
         self.base_env = self.initial_env_for_params(self.params)
         if self.local_reduce is not None and (
@@ -2150,7 +2068,7 @@ class FlexGemmEpiModEmitter:
         """Choose the representation used by the generated main callback."""
         return (
             FlexGemmTensorSSAOpOverrides()
-            if self.tensorwise
+            if self.fragmentwise
             else self.scalar_op_overrides()
         )
 
@@ -2198,43 +2116,19 @@ class FlexGemmEpiModEmitter:
             strict=True,
         ):
             dtype = node.meta["val"].dtype
-            expr = (
-                f"operator.ne({name}, cute.full_like({name}, 0))"
-                if dtype is torch.bool
-                else name
-            )
+            if dtype is torch.bool:
+                expr = (
+                    f"operator.ne({name}, cute.full_like({name}, 0))"
+                    if self.fragmentwise
+                    else f"epi_math.ne({name}, 0)"
+                )
+            else:
+                expr = name
             captures[node] = self.value(expr, dtype)
         return {
             self.gemm: self.value(gemm_value, torch.float32),
             **captures,
         }
-
-    def lower_expression_node(
-        self,
-        kernel: FlexGemmCodegenKernel,
-        env: dict[torch.fx.Node, Any],
-        node: torch.fx.Node,
-    ) -> None:
-        """Lower one ordinary FX expression into the supplied EpiMod body."""
-        if _cute_op_name(node.target) in ("view", "reshape", "squeeze"):
-            env[node] = epimod_arg(node.args[0], env)
-            return
-        lowered = lower_full_scalar(node)
-        if lowered is not None:
-            env[node] = epimod_arg(lowered, env)
-            return
-        args = tuple(epimod_arg(arg, env) for arg in node.args)
-        kwargs = {key: epimod_arg(value, env) for key, value in node.kwargs.items()}
-        with V.set_current_node(node):
-            expression = _cute_call(node, args, kwargs)
-        meta = node.meta.get("val")
-        dtype = meta.dtype if isinstance(meta, torch.Tensor) else torch.float32
-        env[node] = kernel.cse.generate(
-            kernel.body,
-            expression,
-            dtype=dtype,
-            shape=(1,),
-        )
 
     def lower_local_reduce_finalize(self) -> None:
         """Lower a compressed-output transform as a scalar QuACK finalizer."""
@@ -2257,7 +2151,7 @@ class FlexGemmEpiModEmitter:
         value = "value"
         if sink.finalize == "mean":
             value = f"(value / {float(local_reduce.match.geometry.group)!r})"
-        kernel = FlexGemmCodegenKernel()
+        kernel = GemmEpilogueCuteDSLKernel()
         reduced = self.value(value, dtype)
         env: dict[torch.fx.Node, Any] = dict.fromkeys(sink.aliases, reduced)
         if self.local_reduce_finalize_uses_prepass:
@@ -2280,9 +2174,11 @@ class FlexGemmEpiModEmitter:
             for node in self.graph_module.graph.nodes:
                 if node in env or node not in self.local_reduce_finalize_nodes:
                     continue
-                self.lower_expression_node(kernel, env, node)
+                env[node] = lower_gemm_epilogue_fx_node(
+                    kernel, env, node, context="FlexGEMM"
+                )
         self.local_reduce_finalize_body = tuple(kernel.body.lines)
-        self.local_reduce_finalize_result = epimod_arg(
+        self.local_reduce_finalize_result = flex_gemm_epilogue_arg(
             local_reduce.store.value_node, env
         )
 
@@ -2294,7 +2190,16 @@ class FlexGemmEpiModEmitter:
         dependencies = frozenset(
             (*self.analysis.local_reduce.graph.dependencies.get(source, ()), source)
         )
-        kernel = FlexGemmCodegenKernel()
+        bool_captures = [
+            node
+            for node in self.epilogue_arg_placeholders
+            if node in dependencies and node.meta["val"].dtype is torch.bool
+        ]
+        if bool_captures:
+            raise NotImplementedError(
+                "FlexGEMM accumulator prepasses do not support captured bool tensors"
+            )
+        kernel = GemmEpilogueCuteDSLKernel()
         env = dict(self.base_env)
         with (
             V.set_kernel_handler(kernel),
@@ -2314,9 +2219,11 @@ class FlexGemmEpiModEmitter:
                     raise NotImplementedError(
                         f"unsupported FlexGEMM EpiMod prepass node: {node.format_node()}"
                     )
-                self.lower_expression_node(kernel, env, node)
+                env[node] = lower_gemm_epilogue_fx_node(
+                    kernel, env, node, context="FlexGEMM"
+                )
         self.local_reduce_prepass_body = tuple(kernel.body.lines)
-        self.local_reduce_prepass_result = epimod_arg(source, env)
+        self.local_reduce_prepass_result = flex_gemm_epilogue_arg(source, env)
 
     def lower_grouped_main_layout(
         self, node: torch.fx.Node, layout: GroupedTensorSSALayout
@@ -2329,8 +2236,8 @@ class FlexGemmEpiModEmitter:
             if view_args is None:
                 raise AssertionError("grouped main layout requires a view or split")
             source_node = view_args[0]
-        source = epimod_arg(source_node, self.env)
-        if not self.tensorwise:
+        source = flex_gemm_epilogue_arg(source_node, self.env)
+        if not self.fragmentwise:
             self.env[node] = source
             return
         fragment_group = (
@@ -2362,10 +2269,10 @@ class FlexGemmEpiModEmitter:
 
     def lower_grouped_main_select(self, node: torch.fx.Node, index: int) -> None:
         """Select one analysis-validated lane from a grouped TensorSSA value."""
-        source = epimod_arg(node.args[0], self.env)
+        source = flex_gemm_epilogue_arg(node.args[0], self.env)
         expression = (
             f"{source}[{index}]"
-            if not self.tensorwise
+            if not self.fragmentwise
             else source[index]
             if isinstance(source, tuple)
             else f"{source}[((0, {index}, None), None, None)]"
@@ -2424,7 +2331,7 @@ class FlexGemmEpiModEmitter:
                 if node in self.terminal_rewrites:
                     source = self.terminal_rewrites[node]
                     if source is not None:
-                        self.env[node] = epimod_arg(source, self.env)
+                        self.env[node] = flex_gemm_epilogue_arg(source, self.env)
                     continue
                 if self.local_reduce_prepass is not None and node in prepass_aliases:
                     if self.local_reduce_prepass_value is None:
@@ -2440,7 +2347,7 @@ class FlexGemmEpiModEmitter:
                     self.env[node] = self.local_reduce_prepass_value
                     continue
                 if sink is not None and local_reduce is not None and node is sink.node:
-                    source = epimod_arg(sink.source, self.env)
+                    source = flex_gemm_epilogue_arg(sink.source, self.env)
                     if local_reduce.feeds_main:
                         meta = node.meta.get("val")
                         dtype = (
@@ -2457,13 +2364,19 @@ class FlexGemmEpiModEmitter:
                     else:
                         self.env[node] = source
                     continue
-                self.lower_expression_node(self.kernel, self.env, node)
+                self.env[node] = lower_gemm_epilogue_fx_node(
+                    self.kernel, self.env, node, context="FlexGEMM"
+                )
 
     def store_result(self, node: torch.fx.Node) -> Any:
         """Adapt an FX result to QuACK's FP32 register staging domain."""
-        result = epimod_arg(node, self.env)
+        result = flex_gemm_epilogue_arg(node, self.env)
         meta = node.meta.get("val")
-        if isinstance(meta, torch.Tensor) and meta.dtype is torch.bool:
+        if (
+            not self.fragmentwise
+            and isinstance(meta, torch.Tensor)
+            and meta.dtype is torch.bool
+        ):
             return f"epi_math.where({result}, 1.0, 0.0)"
         return result
 
@@ -2496,7 +2409,7 @@ class FlexGemmEpiModEmitter:
                 or self.local_reduce_prepass is not None
             )
         ):
-            store_value = epimod_arg(sink.source, self.env)
+            store_value = flex_gemm_epilogue_arg(sink.source, self.env)
             if self.local_reduce_finalize_uses_prepass:
                 store_value = f"({store_value}, {LOCAL_REDUCE_FEED_MAIN_ARG_NAME})"
             result_items.append(
@@ -2508,7 +2421,8 @@ class FlexGemmEpiModEmitter:
                 )
             )
         return_source = ", ".join(
-            f"{name!r}: {result}" for name, result in result_items
+            f"{name!r}: {gemm_epilogue_source_expr(result)}"
+            for name, result in result_items
         )
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         if body:
@@ -2535,7 +2449,7 @@ class FlexGemmEpiModEmitter:
         )
         key_payload = (
             f"inline_asm={inline_asm_cache_key()}\n"
-            f"tensorwise={self.tensorwise}\n{self.graph_module.code}\n"
+            f"fragmentwise={self.fragmentwise}\n{self.graph_module.code}\n"
             f"{body}return {{{return_source}}}\n"
             f"{finalize_payload}{prepass_payload}{self.epilogue_arg_kinds!r}"
         )
@@ -2579,15 +2493,15 @@ class FlexGemmEpiModEmitter:
             "    inline_asm_elementwise_intrinsic,\n"
             ")\n\n"
         )
-        tensor_decorator = "@cute.jit\n" if self.tensorwise else ""
+        fragment_decorator = "@cute.jit\n" if self.fragmentwise else ""
         return FlexGemmEpiModSource(
             name=name,
             source=(
                 f"{generated_imports}{finalize_source}{prepass_source}"
-                f"{tensor_decorator}def {name}({', '.join(self.params)}):\n"
+                f"{fragment_decorator}def {name}({', '.join(self.params)}):\n"
                 f"{body}    return {{{return_source}}}\n"
             ),
-            tensorwise=self.tensorwise,
+            fragmentwise=self.fragmentwise,
             local_reduce_combine=None if sink is None else sink.combine,
             local_reduce_finalize=(
                 None
