@@ -1393,14 +1393,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
         #   return [add, primals_1, le]
         #
-        if is_dynamic_shape_test(self._testMethodName):
-            # an extra symint exists before the saved tensors
-            expected_msg = "bw_donated_idxs=[2]"
-        else:
-            expected_msg = "bw_donated_idxs=[1]"
-
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check(expected_msg).run("\n".join(captured.output))
+        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
@@ -1747,6 +1741,22 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(eager_no_sq, comp_aot_no_sq)
         self.assertEqual(eager_no_sq, comp_ind_no_sq)
         self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
+
+    def test_aot_eager_group_norm_preserves_contiguous_view(self):
+        def fn(x):
+            y = x.flatten(2).transpose(1, 2) @ torch.ones(2, 2)
+            return torch.nn.functional.group_norm(y.transpose(1, 2).view(1, 2, 2, 2), 1)
+
+        x = torch.randn(1, 2, 2, 2)
+        eager_out = fn(x)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                compiled_out = torch.compile(
+                    fn, backend="aot_eager", fullgraph=True, dynamic=dynamic
+                )(x)
+
+                self.assertEqual(eager_out, compiled_out)
+                self.assertEqual(eager_out.stride(), compiled_out.stride())
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)

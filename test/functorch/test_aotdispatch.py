@@ -11550,6 +11550,24 @@ Expected a .* tangent but got a plain Tensor.""",
 
             self.assertEqual(ref_x.grad, x.grad)
 
+    @xfailIfTorchDynamo
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_tangent_alias_preserves_size_one_stride(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def fn(x):
+                return torch.ops._test_aotdispatch_lib.log_tangents_memory_format(
+                    x.clone()
+                )
+
+            stride = (128, 4, 16, 1)
+            x = torch.empty_strided((1, 4, 8, 4), stride, requires_grad=True)
+            y = fn(x)
+            y.backward(torch.ones_like(y))
+
+            self.assertEqual([stride], ctx.tangent_strides)
+
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
