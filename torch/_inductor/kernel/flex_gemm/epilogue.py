@@ -2267,7 +2267,7 @@ class FlexGemmEpiModEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        self.local_reduce_fragment_reduced = (
+        fragment_reduced = (
             self.local_reduce is not None
             and not swap_ab
             and self.local_reduce.match.geometry.axis == 1
@@ -2278,11 +2278,12 @@ class FlexGemmEpiModEmitter:
             self.local_reduce is not None
             and self.local_reduce.match.geometry.axis == 1
             and not self.local_reduce.feeds_main
-            and (swap_ab or self.local_reduce_fragment_reduced)
+            and (swap_ab or fragment_reduced)
         )
         self.tensorwise = (
             self.outputs.main_transform is not None or tensorwise_output_dtypes
         ) and (self.local_reduce is None or tensorwise_local_reduce)
+        self.local_reduce_fragment_reduced = fragment_reduced and self.tensorwise
         grouped_tensors = analysis.grouped_main_layouts | (
             analysis.local_reduce.grouped_tensors
             if self.local_reduce_fragment_reduced
