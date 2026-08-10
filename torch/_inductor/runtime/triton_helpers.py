@@ -237,18 +237,28 @@ def prod(input, axis):
 
 @triton.jit
 def minimum(a, b):
-    mask = a < b
-    if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
+    return tl.minimum(a, b, propagate_nan=tl.PropagateNan.ALL)
 
 
 @triton.jit
 def maximum(a, b):
-    mask = a > b
+    return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+
+
+@triton.jit
+def _minimum_reduce(a, b):
+    value = minimum(a, b)
     if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
+        value = tl.where(a == b, b, value)
+    return value
+
+
+@triton.jit
+def _maximum_reduce(a, b):
+    value = maximum(a, b)
+    if is_floating(a):
+        value = tl.where(a == b, b, value)
+    return value
 
 
 @triton.jit
@@ -267,19 +277,18 @@ def max2(a, dim):
 
 
 @triton.jit
+def min2_strict(a, dim):
+    return tl.reduce(a, dim, _minimum_reduce)
+
+
+@triton.jit
+def max2_strict(a, dim):
+    return tl.reduce(a, dim, _maximum_reduce)
+
+
+@triton.jit
 def fmax2(a, dim):
     return tl.reduce(a, dim, fmaximum)
-
-
-@triton.jit
-def _online_softmax_maximum(a, b):
-    return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
-
-
-@triton.jit
-def online_softmax_max2(a, dim):
-    # Softmax normalization does not observe the sign of a zero maximum.
-    return tl.reduce(a, dim, _online_softmax_maximum)
 
 
 @triton.jit
@@ -333,8 +342,17 @@ def exp(x, use_fast_math: tl.constexpr):
 
 
 @triton.jit
-def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
-    out_max = max2(lhs_max, dim)
+def online_softmax_reduce(
+    lhs_max,
+    lhs_sum,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    if strict_signed_zero:
+        out_max = max2_strict(lhs_max, dim)
+    else:
+        out_max = max2(lhs_max, dim)
     out_max_keepdim = tl.expand_dims(out_max, dim)
     delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
     out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
@@ -342,14 +360,23 @@ def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
 
 
 @triton.jit
-def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
+def online_softmax_combine(
+    lhs_max,
+    lhs_sum,
+    rhs_max,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
     """
     When we do combine, we assume lhs is the accumulator and rhs is the next
     block of data.
     Then rhs_sum is always 1. With that assumption, we can save some registers
     and computation.
     """
-    out_max = maximum(lhs_max, rhs_max)
+    if strict_signed_zero:
+        out_max = _maximum_reduce(lhs_max, rhs_max)
+    else:
+        out_max = maximum(lhs_max, rhs_max)
 
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
@@ -373,9 +400,14 @@ def online_softmax_reduce_scalar_combine(
     valid_mask,
     dim,
     use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
 ):
-    block_max = online_softmax_max2(rhs_max, dim)
-    out_max = maximum(lhs_max, block_max)
+    if strict_signed_zero:
+        block_max = max2_strict(rhs_max, dim)
+        out_max = _maximum_reduce(lhs_max, block_max)
+    else:
+        block_max = max2(rhs_max, dim)
+        out_max = maximum(lhs_max, block_max)
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
     )
@@ -385,6 +417,7 @@ def online_softmax_reduce_scalar_combine(
         1.0,
         exp(rhs_max - out_max_keepdim, use_fast_math),
     )
+    # The guard above gives padded lanes scale 1 when every value is -inf.
     rhs_scale = tl.where(valid_mask, rhs_scale, 0.0)
     out_sum = lhs_sum * lhs_scale + tl.sum(rhs_scale, dim)
     return out_max, out_sum
@@ -392,9 +425,17 @@ def online_softmax_reduce_scalar_combine(
 
 @triton.jit
 def online_softmax_combine_with_sum(
-    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+    lhs_max,
+    lhs_sum,
+    rhs_max,
+    rhs_sum,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
 ):
-    out_max = maximum(lhs_max, rhs_max)
+    if strict_signed_zero:
+        out_max = _maximum_reduce(lhs_max, rhs_max)
+    else:
+        out_max = maximum(lhs_max, rhs_max)
 
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)

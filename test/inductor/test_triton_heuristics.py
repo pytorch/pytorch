@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import math
 import os
 import sys
 import tempfile
@@ -191,7 +192,7 @@ class TestTritonHeuristics(TestCase):
         size_hints = {"x": 128, "r0_": 32768}
         triton_meta = {"device": device}
 
-        def rblocks(autotune_hints):
+        def config_values(autotune_hints):
             configs = _reduction_configs(
                 size_hints=size_hints,
                 inductor_meta={
@@ -200,9 +201,17 @@ class TestTritonHeuristics(TestCase):
                 },
                 triton_meta=triton_meta,
             )
-            return {config.kwargs["R0_BLOCK"] for config in configs}
+            return [
+                (
+                    config.kwargs["XBLOCK"],
+                    config.kwargs["R0_BLOCK"],
+                    config.num_warps,
+                    config.num_stages,
+                )
+                for config in configs
+            ]
 
-        def tiled_block_product(autotune_hints):
+        def tiled_block_products(autotune_hints):
             configs = _reduction_configs(
                 size_hints={"x": 128, "y": 8, "r0_": 32768},
                 inductor_meta={
@@ -211,21 +220,29 @@ class TestTritonHeuristics(TestCase):
                 },
                 triton_meta=triton_meta,
             )
-            product = 1
-            for name, value in configs[0].kwargs.items():
-                if name.endswith("BLOCK"):
-                    product *= value
-            return product
+            return [
+                math.prod(
+                    value
+                    for name, value in config.kwargs.items()
+                    if name.endswith("BLOCK")
+                )
+                for config in configs
+            ]
 
-        self.assertEqual(rblocks(set()), {baseline_rblock})
         self.assertEqual(
-            rblocks({AutotuneHint.SCALAR_ONLINE_SOFTMAX}),
-            {4096, 8192, 16384},
+            config_values(set()),
+            [(1, baseline_rblock, baseline_rblock // 128, 1)],
         )
-        self.assertEqual(tiled_block_product(set()), baseline_rblock)
         self.assertEqual(
-            tiled_block_product({AutotuneHint.SCALAR_ONLINE_SOFTMAX}), 4096
+            config_values({AutotuneHint.SCALAR_ONLINE_SOFTMAX}),
+            [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
         )
+        self.assertEqual(tiled_block_products(set())[0], baseline_rblock)
+        scalar_tiled_products = tiled_block_products(
+            {AutotuneHint.SCALAR_ONLINE_SOFTMAX}
+        )
+        self.assertEqual(scalar_tiled_products[0], 4096)
+        self.assertIn(baseline_rblock, scalar_tiled_products)
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
@@ -384,9 +401,11 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
@@ -432,6 +451,7 @@ class TestTritonHeuristics(TestCase):
             "inductor_meta": inductor_meta,
         }
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_pre_hook_assert(self):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
         args = self._get_cos_kernel_caching_autotuner_args()
@@ -446,6 +466,7 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             CachingAutotuner(**args)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))
         device_props = device_props._replace(warp_size=8)
@@ -643,6 +664,7 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
 # attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
 # used by these tests. CUDA paths are unaffected.
 @skipIfRocm
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
 
@@ -1527,11 +1549,13 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         mock_precompile.assert_called_once_with(dynamic_cfg)
 
 
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCheckLauncherCallArgs(TestCase):
     """Unit tests for CachingAutotuner._check_launcher_call_args.
 
-    These tests are pure-Python (no GPU / Triton compilation) and guard
-    against regressions in the improved arg-mismatch error path.
+    These exercise the arg-mismatch error path without Triton compilation,
+    but the shared cos-kernel fixture still builds a CachingAutotuner (which
+    resolves DeviceProperties for GPU_TYPE), so they require a GPU.
     """
 
     def _make_autotuner(self):
@@ -1703,6 +1727,7 @@ class TestMakeLaunchersMemory(TestCase):
             launchers=[],
             compile_results=results,
             triton_meta={"device": 0},
+            device_props=types.SimpleNamespace(type="cuda"),
             inductor_meta={},
             get_device_interface=lambda: None,
             _make_launcher=fake_make_launcher,

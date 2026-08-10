@@ -693,6 +693,24 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     return composite_fn
 
 
+def validate_test_name(name):
+    """
+    Validates a generated test name at instantiation time. In particular, test names must
+    not contain '.': unittest.TestLoader.loadTestsFromName resolves dotted names by
+    splitting on '.' and walking with getattr, so a dotted test name is discoverable in a
+    full-suite run but breaks any attempt to load the test by name (e.g.
+    `python test_foo.py TestClass.test_name`).
+    """
+    if '.' in name:
+        raise RuntimeError(
+            f'Test name "{name}" is invalid: it contains a "." character, which breaks '
+            'loading the test by name (unittest.TestLoader.loadTestsFromName splits on '
+            '"."). This name likely comes from a custom name_fn or an explicit subtest '
+            'name that interpolates a value whose string form contains a dot (e.g. '
+            'str(torch.bfloat16) == "torch.bfloat16" or a float). Use dtype_name() for '
+            'dtypes, or sanitize the generated name (e.g. .replace(".", "_")).')
+
+
 def instantiate_parametrized_tests(generic_cls):
     """
     Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
@@ -732,6 +750,7 @@ def instantiate_parametrized_tests(generic_cls):
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = f'{test.__name__}_{test_suffix}'
+            validate_test_name(full_name)
 
             # Apply decorators based on full param kwargs.
             for decorator in decorator_fn(param_kwargs):
@@ -1243,6 +1262,7 @@ def retry_shell(
     timeout=None,
     retries=1,
     was_rerun=False,
+    label="",
 ) -> tuple[int, bool]:
     # Returns exicode + whether it was rerun
     if not (retries >= 0):
@@ -1262,8 +1282,14 @@ def retry_shell(
         )
     except subprocess.TimeoutExpired:
         if retries == 0:
+            # NB: the "Command took >Nmin, returning 124" prefix is load
+            # bearing -- the CI log classifier matches on it, so only ever
+            # append here. The label names what timed out, so that timeouts
+            # group per test file on HUD instead of collapsing into a single
+            # fleet-wide bucket (which makes an uptick in one file invisible).
             print(
-                f"Command took >{timeout // 60}min, returning 124",
+                f"Command took >{timeout // 60}min, returning 124"
+                + (f" ({label})" if label else ""),
                 file=stdout,
                 flush=True,
             )
@@ -1282,6 +1308,7 @@ def retry_shell(
         timeout=timeout,
         retries=retries - 1,
         was_rerun=True,
+        label=label,
     )
 
 
@@ -1763,6 +1790,7 @@ _dsl_checker = LazyDSLCheck()
 # Lazy constants to avoid import-time overhead
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
+TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1774,6 +1802,7 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 # DSL skip decorators (following existing pattern)
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
+skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
@@ -2011,6 +2040,14 @@ def xfailIfTorchDynamo(func):
 
 def xfailIfPy312Plus(func):
     return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
+
+
+def xfailIfPy314Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 14) else func
+
+
+def xfailIfPy313AndEarlier(func):
+    return unittest.expectedFailure(func) if sys.version_info < (3, 14) else func
 
 
 def xfailIfLinux(func):
@@ -2532,6 +2569,22 @@ def skipIfRocmVersionLessThan(version=None):
         )
     return lazy_skip_if(_should_skip, f"ROCm version less than {version} required")
 
+# Skips a test on ROCm if the version is at least the given major.minor tuple.
+# Use for failures introduced in a ROCm release that pass on older versions,
+# e.g. skipIfRocmVersionAtLeast([7, 14]) skips on 7.14+ but runs on 7.2.x.
+# Built on lazy_skip_if so it works on both test methods and test classes.
+def skipIfRocmVersionAtLeast(version=None):
+    def _should_skip():
+        if not TEST_WITH_ROCM:
+            return False
+        rocm_version_tuple = getRocmVersion()
+        return (
+            rocm_version_tuple is not None
+            and version is not None
+            and rocm_version_tuple >= tuple(version)
+        )
+    return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
+
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
@@ -2547,6 +2600,8 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
         lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
     )
     return decorator(func) if func is not None else decorator
+
+requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
@@ -3663,7 +3718,15 @@ class TestCase(expecttest.TestCase):
         return CudaMemoryLeakCheck(self, name)
 
     def before_cuda_memory_leak_check(self):
-        torch._dynamo.reset()
+        self._reset_dynamo_if_imported()
+
+    @staticmethod
+    def _reset_dynamo_if_imported():
+        dynamo = sys.modules.get("torch._dynamo")
+        if dynamo is not None:
+            reset = getattr(dynamo, "reset", None)
+            if reset is not None:
+                reset()
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
@@ -3832,6 +3895,13 @@ class TestCase(expecttest.TestCase):
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+        else:
+            # For the non-compiled path there is no optimize() region, so this
+            # reset (and the matching one after super_run) is the only place we
+            # clear Dynamo state between tests. Resetting inside setUp/tearDown
+            # would land inside the compiled region and corrupt compiled
+            # autograd state, so do it here instead.
+            self._reset_dynamo_if_imported()
 
         torch.compiler.set_stance("default")
 
@@ -3921,6 +3991,8 @@ class TestCase(expecttest.TestCase):
             torch._dynamo.reset()
         elif torch._dynamo.config.compiled_autograd:
             torch._dynamo.compiled_autograd.reset()
+        else:
+            self._reset_dynamo_if_imported()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():
@@ -5226,7 +5298,7 @@ def find_free_port():
         return port
 
 # Errors that we can get in c10d initialization for which we should retry tests for.
-ADDRESS_IN_USE = "Address already in use"
+ADDRESS_IN_USE = "address already in use"
 CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
@@ -5244,7 +5316,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if any(connect_error in str(error) for connect_error in connect_errors):
+                if any(ce in str(error) or ce in str(error).lower() for ce in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}") from error

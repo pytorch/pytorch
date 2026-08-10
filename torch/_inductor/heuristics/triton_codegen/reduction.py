@@ -14,7 +14,12 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import (
+    AutotuneHint,
+    ReductionHint,
+    SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK,
+    TRITON_MAX_BLOCK,
+)
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
@@ -22,6 +27,9 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.triton_compat import Config
+
+
+_SCALAR_ONLINE_SOFTMAX_TILED_RBLOCK = 4096
 
 
 # ------------------------------------------------------------------
@@ -215,9 +223,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             AutotuneHint.SCALAR_ONLINE_SOFTMAX
             in inductor_meta.get("autotune_hints", ())
         )
-        if has_scalar_online_softmax_reduction and 8192 <= rnumel and "y" in size_hints:
-            MAX_R0_BLOCK = 4096
-        elif device_major is not None and device_major >= 10:
+        use_scalar_online_softmax_configs = (
+            has_scalar_online_softmax_reduction
+            and SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK <= rnumel
+        )
+        if device_major is not None and device_major >= 10:
             # Prefer smaller MAX_R0_BLOCK for Blackwell by default
             MAX_R0_BLOCK = 1024
         else:
@@ -276,6 +286,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     warp_size=warp_size,
                 )
 
+        contiguous_rblock = (
+            _SCALAR_ONLINE_SOFTMAX_TILED_RBLOCK
+            if use_scalar_online_softmax_configs and "y" in size_hints
+            else MAX_R0_BLOCK
+        )
         contiguous_config = make_config(
             # Default XBLOCK=2 launches too few programs to fill
             # the device. Prefer XBLOCK=1 so the autotuner has a candidate
@@ -283,7 +298,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             1
             if (torch.version.hip and size_hints.get("x", 0) <= 64)
             else (2 if rnumel <= 2048 else 1),
-            min(rnumel, MAX_R0_BLOCK),
+            min(rnumel, contiguous_rblock),
             register_intensive=register_intensive,
         )
         tiny_config = make_config(
@@ -304,13 +319,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         # Scalar online-softmax accumulators make larger R0_BLOCK candidates
         # viable without coordinate-descent tuning.
         scalar_acc_configs: list[Config] = []
-        if (
-            has_scalar_online_softmax_reduction
-            and 8192 <= rnumel
-            and "y" not in size_hints
-        ):
+        if use_scalar_online_softmax_configs and "y" not in size_hints:
+            first_rblock = min(rnumel, _SCALAR_ONLINE_SOFTMAX_TILED_RBLOCK)
             scalar_acc_configs = [
-                make_config(1, min(rnumel, 4096)),
+                make_config(1, first_rblock),
                 make_config(1, min(rnumel, 8192), num_warps=4),
                 make_config(1, min(rnumel, 16384), num_warps=8),
             ]
@@ -333,7 +345,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
-            return configs + (scalar_acc_configs or [contiguous_config])
+            if scalar_acc_configs:
+                return configs + scalar_acc_configs
+            return configs + [contiguous_config]
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
         elif reduction_hint == ReductionHint.OUTER_TINY:
@@ -642,6 +656,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
                 MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             else:
+                MAX_NUM_STAGES = 1
+            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
+            # emitted by device-side descriptors.
+            if inductor_meta.get("uses_device_tma"):
                 MAX_NUM_STAGES = 1
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
                 max(num_iters // 4, 1), MAX_NUM_STAGES

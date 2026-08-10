@@ -1025,11 +1025,16 @@ class FSDPParamGroup:
             if existing is not None:
                 new_groups[ranks] = existing
             else:
-                new_groups[ranks] = dist.new_group(
+                new_group = dist.new_group(
                     list(ranks),
                     use_local_synchronization=True,
                     group_desc="fsdp_reduce_scatter",
                 )
+                if new_group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"Current rank was not included in process group {ranks}"
+                    )
+                new_groups[ranks] = new_group
         mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property

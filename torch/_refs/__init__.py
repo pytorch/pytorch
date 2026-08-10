@@ -604,6 +604,22 @@ def _make_inplace(fn):
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(a, *args, **kwargs):
+        # In-place ops never resize `a`, but out_wrapper would resize `out=a`
+        # if the broadcasted result shape were larger. Reject the mismatch up
+        # front with the same error eager (TensorIterator) raises. Otherwise
+        # fake/meta tensors silently change shape here, which corrupts shape
+        # metadata recorded before the op (e.g. dynamo's tracked fakes).
+        shapes = [
+            t.shape
+            for t in itertools.chain(args, kwargs.values())
+            if isinstance(t, TensorLike)
+        ]
+        if shapes:
+            broadcasted_shape = tuple(_broadcast_shapes(a.shape, *shapes))
+            torch._check(
+                broadcasted_shape == a.shape,
+                lambda: f"output with shape {a.shape} doesn't match the broadcast shape {broadcasted_shape}",
+            )
         return fn(a, *args, out=a, **kwargs)
 
     inplace_name = f"{fn.__name__}_"
@@ -954,7 +970,7 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         a.dtype is not torch.bool,
         lambda: (
             "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -978,7 +994,7 @@ def positive(a: TensorLikeType) -> TensorLikeType:
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
-        raise RuntimeError(msg)
+        raise NotImplementedError(msg)
     return a
 
 
@@ -1865,7 +1881,7 @@ def sub(
     a, b = _maybe_broadcast(a, b)
 
     if isinstance(a, TensorLike) and isinstance(b, TensorLike):
-        torch._check(
+        torch._check_not_implemented(
             not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
             lambda: (
                 "Subtraction, the `-` operator, with two bool tensors is not supported. "
@@ -3374,14 +3390,56 @@ def native_group_norm(
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
-        input.ndim >= 2,
-        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+        num_channels > 0,
+        lambda: f"Expected number of channels to be greater than 0, got {num_channels}",
+    )
+    torch._check(
+        flattened_inner_size > 0,
+        lambda: f"Expected HxW to be greater than 0, got {flattened_inner_size}",
+    )
+    torch._check(
+        num_groups > 0,
+        lambda: f"Expected num groups to be greater than 0, got {num_groups}",
     )
     torch._check(
         num_channels % num_groups == 0,
-        lambda: "Expected number of channels in input to be divisible by num_groups, "
-        + f"but got input of shape {input.shape} and num_groups = {num_groups}",
+        lambda: (
+            "Expected number of channels in input to be divisible by num_groups, "
+            f"but got input of shape {input.shape} and num_groups={num_groups}"
+        ),
     )
+    torch._check(
+        weight is None or (weight.ndim == 1 and weight.numel() == num_channels),
+        lambda: (
+            "Expected weight to be a vector of size equal to the number of "
+            f"channels in input, but got weight of shape {weight.shape} "  # pyrefly: ignore[missing-attribute]
+            f"and input of shape {input.shape}"
+        ),
+    )
+    torch._check(
+        bias is None or (bias.ndim == 1 and bias.numel() == num_channels),
+        lambda: (
+            "Expected bias to be a vector of size equal to the number of "
+            f"channels in input, but got bias of shape {bias.shape} "  # pyrefly: ignore[missing-attribute]
+            f"and input of shape {input.shape}"
+        ),
+    )
+    # This check isn't in the C++ operator, but is necessary for how we apply weight and
+    # bias below.
+    torch._check(
+        input.ndim >= 2,
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+    )
+
+    # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
+    mem_fmt = (
+        torch.contiguous_format
+        if input.device.type not in ("cpu", torch._C._get_privateuse1_backend_name())
+        else utils.suggest_memory_format(input)
+    )
+    input = input.contiguous(memory_format=mem_fmt)
+    weight = weight.contiguous() if weight is not None else None
+    bias = bias.contiguous() if bias is not None else None
 
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = _maybe_convert_to_dtype(input, computation_dtype)
@@ -3675,7 +3733,7 @@ def stft(
     else:
         return_complex_ = return_complex
 
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
         lambda: "stft expected a tensor of floating point or complex values",
     )
@@ -3773,11 +3831,11 @@ def istft(
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
     win_length_ = win_length if win_length is not None else n_fft
 
-    torch._check(
+    torch._check_type(
         utils.is_complex_dtype(input.dtype),
         lambda: (
-            "istft input and window must be on the same device but got self on "
-            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+            "istft requires a complex-valued input tensor matching the "
+            "output from stft with return_complex=True."
         ),
     )
     n_frames = input.size(-1)

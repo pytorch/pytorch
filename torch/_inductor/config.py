@@ -257,6 +257,10 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
+# Use slower compare/select reductions for their ordered signed-zero tie behavior.
+# NaNs are propagated regardless of this setting.
+strict_signed_zero = False
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -651,10 +655,14 @@ max_autotune_gemm_backends = os.environ.get(
 
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to 0, None, or env var "none"/"all" to tune all configs.
+# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
+# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
+# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
+# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
+# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
+# "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
-    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
         return None
     return int(env_val)
@@ -884,6 +892,10 @@ cache_sdpa_constraint = (
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
@@ -1092,6 +1104,15 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
+# winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
+# then autotunes num_warps/num_stages over the winners). Requires
+# combo_kernel_per_subkernel_blocks.
+combo_kernel_compile_time_autotune: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_compile_time_autotune",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
+    default=False,
+)
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
@@ -1214,20 +1235,49 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 _micro_pipeline_tp: bool = False
 
 
-# Enable/disable partitioned scatter optimization for atomic add kernels
-# this will improve kernel performance at cost of memory usage.
+# Enable/disable partitioned scatter optimization for atomic add kernels.
+# Improves kernel performance for high-contention index_put(accumulate=True)
+# at the cost of temporary memory for expanded partition buffers.
+_partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default
+    )
+    == "1"
 )
 
-# Min partitions for scatter optimization
+# Power-of-2 bounds for num_partitions (bitwise AND partition assignment requires pow2).
+# Capped at 64: contention relief saturates before that while the expanded buffer keeps
+# growing, and P=128 measured slower than P=64 at every contention level on MI308X.
 partitioned_scatter_min_partitions: int = 2
+partitioned_scatter_max_partitions: int = 64
 
-# Max partitions for scatter optimization
-partitioned_scatter_max_partitions: int = 128
+# Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
+partitioned_scatter_min_index_size: int = 4096
 
-# Memory budget fraction for scatter buffers
-partitioned_scatter_memory_budget: float = 0.10
+# Skip ops where index_numel / scatter_dim_size is below this ratio.
+# Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
+# The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
+# slower scatter kernel (atomics over P copies lose cache residency), whether or not
+# contention was actually relieved. Assumes indices spread uniformly over all slots;
+# the real distribution is a runtime property, so concentrated indices are
+# under-estimated here.
+partitioned_scatter_min_contention_ratio: float = 4.0
+
+# GPU memory reserved for state invisible to the FX profile: CUDA driver context,
+# PyTorch caching allocator pool, and kernel scratch (cuBLAS/Triton). Subtracted from
+# total GPU memory to compute available headroom for expanded partition buffers.
+# 1.5 GB is conservative for MI300 (206 GB total); tune down to allow more partitions.
+partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
+
+# Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
+# diminishing-returns cap on num_partitions). Correctness gates and the hard memory
+# budget are still enforced. Useful for benchmarking or skewed-index workloads where
+# static estimates undercount real contention.
+# Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
+partitioned_scatter_force: bool = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
+)
 
 
 class _collective:
@@ -2140,7 +2190,7 @@ class triton:
 
     # Use scalar accumulators for online softmax in non-persistent CUDA
     # reduction loops.
-    scalar_online_softmax_accumulators = (
+    scalar_online_softmax_accumulators: bool = (
         os.environ.get("TORCHINDUCTOR_SCALAR_ONLINE_SOFTMAX_ACCUMULATORS", "1") == "1"
     )
 
@@ -2191,6 +2241,10 @@ class triton:
     # descriptor flavor only; requires use_tensor_descriptor and
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
+
+    # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
+    # (no-op on archs/Triton builds without meta-WS).
+    enable_template_autows = os.environ.get("ENABLE_TEMPLATE_AUTOWS", "0") == "1"
 
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
