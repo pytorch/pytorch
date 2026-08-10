@@ -162,7 +162,7 @@ class DtypePropagationOpsHandler:
     # singleton was populated. Python calls __init__ on every construction, so
     # without this the meta programming reruns on each of the thousands of
     # constructions a compile makes.
-    _rules_key: Optional[tuple[Any, ...]] = None
+    _rules_key: tuple[Any, ...] | None = None
 
     def __new__(cls):
         if cls._instance is None:
