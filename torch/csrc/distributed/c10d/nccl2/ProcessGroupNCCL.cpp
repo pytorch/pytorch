@@ -555,6 +555,15 @@ void ProcessGroupNCCL::finalize() {
     throw std::move(ncclException);
   }
 
+  if (memPool_) {
+    try {
+      deregisterMemPool(memPool_.get());
+    } catch (const std::exception& error) {
+      TC_LOG(ERROR, this)
+          << "Failed to deregister tensor allocation pool: " << error.what();
+    }
+  }
+
   // Clean up event pool
   {
     std::lock_guard<std::mutex> lock(event_pool_mutex_);
