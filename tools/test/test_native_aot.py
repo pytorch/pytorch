@@ -237,6 +237,11 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
 
     def test_wrapper_emits_stub_consultation(self) -> None:
         body = self._wrapper_body(with_manifest=True)
+        # The call site is unreadable without it: nothing in
+        # `stub(device, args...)` says it launches a kernel, and the
+        # short-circuit is what makes op.impl the fallback.
+        self.assertIn("// native-AOT: the last conjunct is the LAUNCH", body)
+        self.assertIn("&& short-circuits", body)
         self.assertIn(
             "if (!(at::globalContext().allowNativeAot() && at::native::embfoo_aot_stub.is_device_supported(c10::DeviceType::CUDA) && at::native::embfoo_aot_stub(c10::DeviceType::CUDA, self, k, op.outputs_[0]))) { op.impl(self, k, op.outputs_[0]); }",
             body,
