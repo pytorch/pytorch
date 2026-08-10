@@ -1084,7 +1084,8 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
     return alpha * (a @ b) + beta * c
 
 
-class TestSparseCSR(TestCase):
+class TestSparseCSRCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
 
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -1120,9 +1121,9 @@ class TestSparseCSR(TestCase):
             a = torch.sparse_csr_tensor(crow_indices, col_indices, values, (rows, cols))
             self.assertEqual(a._nnz(), nnz)
 
+    @onlyCPU
     @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @onlyCPU
     def test_addmv(self, device, dtype, matrix_shape):
         mat = torch.randn(matrix_shape, dtype=dtype, device=device)
         mat[mat.real < 0] = 0
@@ -1204,8 +1205,8 @@ class TestSparseCSR(TestCase):
         run_test(4, 5, 4, 10, False)
         run_test(4, 4, 4, 16, True)
 
-    @skipIfTorchDynamo()
     @onlyCPU
+    @skipIfTorchDynamo()
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
     def test_sparse_mm_reduce(self, device, dtype):
@@ -1267,6 +1268,7 @@ class TestSparseCSR(TestCase):
 
 
 class TestSparseCSRDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_csr_stride(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
@@ -4399,7 +4401,9 @@ class TestSparseCompressedTritonKernels(TestCase):
 instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
 
-instantiate_device_type_tests(TestSparseCSR, globals())
+instantiate_device_type_tests(TestSparseCSRCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSparseCSRDevice, globals())
+
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 
 if __name__ == '__main__':
