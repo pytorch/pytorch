@@ -79,6 +79,8 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import largeTensorTest, skipPRIVATEUSE1
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_device_type_tests,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -93,7 +95,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_TRITON,
     HAS_XPU_AND_TRITON,
     patch_inductor_backend,
-    requires_gpu,
     requires_triton,
 )
 from torch.testing._internal.triton_utils import (
@@ -123,6 +124,8 @@ TEST_MULTIPRIVATEUSE1 = TEST_PRIVATEUSE1 and torch.accelerator.device_count() >=
 
 
 class TestCacheKeyStrategy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _compact_sha256(self, data: bytes) -> str:
         return (
             base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
@@ -248,6 +251,8 @@ class TestCacheKeyStrategy(TestCase):
 
 
 class TestTorchKeyCache(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_prefetch(self):
         import threading
 
@@ -348,6 +353,8 @@ _custom_empty.__name__ = "empty"
 
 
 class TestPyCodeCache(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_linemaps_empty(self):
         src = """import torch"""
         (key, path) = PyCodeCache.write(src, "")
@@ -509,6 +516,8 @@ class TestPyCodeCache(TestCase):
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device_type = GPU_TYPE
 
     def setUp(self):
@@ -1707,7 +1716,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-    @requires_gpu()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_cache_hit_aligned_and_unaligned_inputs(self):
@@ -1759,7 +1767,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
 
-    @requires_gpu()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_aligned_unaligned_inputs_no_recompile(self):
@@ -1841,7 +1848,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @requires_gpu_and_triton
+    @requires_triton
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @with_tf32_off
@@ -1891,7 +1898,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1923,7 +1929,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
-    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1987,7 +1992,6 @@ class TestFxGraphCache(TestCase):
         out3 = torch.compile(model, fullgraph=True)(q, k, v).sum()
         self.assertFalse(torch.allclose(out1, out3))
 
-    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2054,7 +2058,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
-    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2138,7 +2141,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
-    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2538,6 +2540,8 @@ class TestFxGraphCache(TestCase):
 
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -3406,6 +3410,8 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
         return FxGraphCachePickler(gm).get_key(details)
@@ -4689,8 +4695,9 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
-    @skipPRIVATEUSE1
-    @requires_cuda_and_triton
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
             ["abc.cu", "def.cu"], "output", "so"
@@ -4732,6 +4739,8 @@ class TestCudaCompileCommand(TestCase):
 
 @instantiate_parametrized_tests
 class TestAutotuneCache(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device_type = GPU_TYPE
 
     def setUp(self):
@@ -4965,7 +4974,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache:
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_gpu_and_triton
+    @requires_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -5006,7 +5015,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache:
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_gpu_and_triton
+    @requires_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -5067,7 +5076,6 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
-    @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -5131,7 +5139,8 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
-    @requires_gpu()
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
@@ -5170,7 +5179,7 @@ class TestRemoteAOTAutogradCache(TestCase):
         for k in global_stats.fx_graph.cache:
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
-    @requires_gpu_and_triton
+    @requires_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
@@ -5221,6 +5230,8 @@ class TestRemoteAOTAutogradCache(TestCase):
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):
         def fn(x, y):
@@ -5275,6 +5286,8 @@ class TestVecISACheckBuild(TestCase):
     # platform-specific (the production path is fine; only the
     # CppTorchOptions construction is brittle to host compiler probes
     # when handed an off-arch VecISA like VecAVX2 on aarch64/macOS-arm64).
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_probe_load_returns_false_on_timeout(self):
         from torch._inductor import cpu_vec_isa
@@ -5339,6 +5352,8 @@ class TestVecISACheckBuild(TestCase):
 
 
 class TestCompilationEventLogging(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def reset(self):
         DynamoCache.clear()
         PrecompileContext.clear()
@@ -5537,6 +5552,8 @@ class TestAutotuneCacheExtraOptions(TestCase):
     extra_options is correctly preserved when saving and loading from cache.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_triton()
     def test_load_cached_autotuning_preserves_extra_options_with_coordesc(self):
         """
@@ -5718,6 +5735,9 @@ class TestAutotuneCacheExtraOptions(TestCase):
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertNotIn("extra_options", saved_data)
 
+
+instantiate_device_type_tests(TestRemoteAOTAutogradCache, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
