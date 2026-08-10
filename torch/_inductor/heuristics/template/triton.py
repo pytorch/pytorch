@@ -2189,9 +2189,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
         }
-        # The key is only injected on XPU (see ascending_k). Off XPU it is
-        # absent entirely, so the bmm/mm_plus_mm kernels get no ASCENDING_K
-        # constexpr define and no codegen cache-key change.
+        # Scoped to XPU (self.ascending_k) and to the templates that reference
+        # the key. The mm/addmm/... ops via mm_template are excluded because
+        # triton_mm.py.jinja already renders ascending unconditionally.
         if self.ascending_k and op_name in ("bmm", "baddbmm", "mm_plus_mm"):
             extra_kwargs["ASCENDING_K"] = True
         return extra_kwargs

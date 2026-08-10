@@ -82,7 +82,6 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1, check_max_autotune=False):
-        # One template; XPU renders it ascending via ASCENDING_K (see ascending_k).
         templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates

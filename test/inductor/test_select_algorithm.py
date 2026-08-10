@@ -371,9 +371,7 @@ class TestSelectAlgorithm(TestCase):
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
     @patches
-    @inductor_config.patch(
-        max_autotune_gemm_backends="TRITON", autotune_fallback_to_aten=False
-    )
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
     def test_mm_plus_mm_xpu_ascending_k_loop(self):
         # Regression: triton-xpu miscompiles descending-K loops
         # (range(K1, 0, -BLOCK_K)) when the K loop runs more than one iteration,
@@ -394,16 +392,15 @@ class TestSelectAlgorithm(TestCase):
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
     @patches
-    @inductor_config.patch(
-        max_autotune_gemm_backends="TRITON", autotune_fallback_to_aten=False
-    )
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
     def test_bmm_xpu_ascending_k_loop(self):
-        # Same regression guard for bmm (also used by baddbmm).
+        # Same regression guard for bmm (also used by baddbmm). K=512 keeps the
+        # K loop multi-iteration for every admissible BLOCK_K (< 128).
         def foo(a, b):
             return torch.bmm(a, b)
 
-        a = torch.randn(2, 128, 128, device=GPU_TYPE)
-        b = torch.randn(2, 128, 128, device=GPU_TYPE)
+        a = torch.randn(2, 128, 512, device=GPU_TYPE)
+        b = torch.randn(2, 512, 128, device=GPU_TYPE)
         _, code = run_and_get_code(torch.compile(foo), a, b)
         code = code[0]
         self.assertIn("triton_tem_fused_bmm", code)
