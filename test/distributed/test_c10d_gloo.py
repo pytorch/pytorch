@@ -297,6 +297,43 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             fut.wait()
 
     @requires_gloo()
+    def test_split_world_pg_created_after_another_gloo_pg(self):
+        # Regression test: ProcessGroupGloo::groupRanks() used to derive the
+        # identity rank mapping only when local_id_ == 0. local_id_ is a
+        # process-global counter over every ProcessGroupGloo constructed in the
+        # process, so a world-sized pg built after any other gloo pg (e.g. a
+        # stateless pg, or one inherited across fork) fell through to its empty
+        # global_ranks_in_group, and split() then indexed that empty vector and
+        # segfaulted on a null data pointer.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # (1) burn local_id_ == 0 on an unrelated gloo pg.
+        self._create_process_group_gloo(
+            c10d.PrefixStore("prior", store),
+            self.rank,
+            self.world_size,
+            self.opts(group_name="prior"),
+        )
+        # (2) a world-sized pg: default options -> global_ranks_in_group empty.
+        pg = self._create_process_group_gloo(
+            c10d.PrefixStore("world", store),
+            self.rank,
+            self.world_size,
+            self.opts(group_name="world"),
+        )
+
+        ranks = list(range(self.world_size))
+        split = pg.split(
+            c10d.PrefixStore("split", store), ranks, self.opts(group_name="split")
+        )
+        self.assertIsNotNone(split)
+        self.assertEqual(split.options.global_ranks_in_group, ranks)
+
+        tensor = torch.full((4,), float(self.rank + 1))
+        split.allreduce([tensor]).wait()
+        expected = float(sum(r + 1 for r in ranks))
+        self.assertEqual(tensor, torch.full_like(tensor, expected))
+
+    @requires_gloo()
     def test_empty_tensors(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -3442,6 +3479,77 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_bool_tensors(self):
         self._test_bool_tensors(backend="gloo")
+
+    @requires_gloo()
+    def test_split_group_does_not_alias_parent_options(self):
+        # Regression test: ProcessGroup::splitGroup used to hand the parent
+        # backend's live Options object to the child, so a split rewrote the
+        # parent's group_name/timeout and ProcessGroupGloo::split overwrote the
+        # parent's global_ranks_in_group with the child's ranks. The parent's
+        # next split then indexed that subgroup-sized vector out of bounds.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=111),
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        cpu = torch.device("cpu")
+        parent_options = pg._get_backend(cpu).options
+        parent_group_name = parent_options.group_name
+
+        half = self.world_size // 2
+        halves = (
+            list(range(half))
+            if self.rank < half
+            else list(range(half, self.world_size))
+        )
+        child = pg.split_group(
+            halves, timeout=timedelta(seconds=222), group_name=f"halves{halves}"
+        )
+        child_options = child._get_backend(cpu).options
+        self.assertIsNot(child_options, parent_options)
+        self.assertEqual(parent_options.group_name, parent_group_name)
+        self.assertEqual(parent_options._timeout, timedelta(seconds=111))
+        self.assertEqual(parent_options.global_ranks_in_group, [])
+        self.assertEqual(child_options._timeout, timedelta(seconds=222))
+        self.assertEqual(child_options.global_ranks_in_group, halves)
+
+        # A second split of the same parent must still see the world's ranks.
+        parity = [r for r in range(self.world_size) if r % 2 == self.rank % 2]
+        second = pg.split_group(
+            parity, timeout=timedelta(seconds=333), group_name=f"parity{parity}"
+        )
+        self.assertEqual(second._get_backend(cpu).options.global_ranks_in_group, parity)
+
+        c10d.destroy_process_group()
+
+    @skip_if_lt_x_gpu(1)
+    @requires_gloo()
+    def test_split_group_keeps_gloo_options(self):
+        # dist.split_group used to substitute a deep copy of the accelerator
+        # backend's options for every device. On a gloo world that raised
+        # "cannot pickle _Options" (ProcessGroupGloo._Options has no
+        # __deepcopy__), and on a "cpu:gloo,cuda:nccl" world the gloo leg
+        # rejected the nccl options and fell back to Options::create_default(),
+        # dropping the caller's timeout and group_name.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=torch.device("cuda", self.rank % torch.cuda.device_count()),
+        )
+        ranks = list(range(self.world_size))
+        child = c10d.split_group(split_ranks=[ranks], timeout=timedelta(seconds=222))
+        options = child._get_backend(torch.device("cpu")).options
+        self.assertEqual(options._timeout, timedelta(seconds=222))
+        self.assertEqual(options.group_name, child.group_name)
+        self.assertEqual(options.global_ranks_in_group, ranks)
+        c10d.destroy_process_group()
 
 
 class GlooProcessGroupWithDispatchedCollectivesTests(

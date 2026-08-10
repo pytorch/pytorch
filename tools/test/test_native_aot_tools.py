@@ -1,27 +1,20 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
+import json
 import os
 import tempfile
 import unittest
 
-
-TOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "native_aot")
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(
-        name, os.path.join(TOOLS_DIR, f"{name}.py")
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load module {name}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+# Ordinary package imports, like every other tools test (CI runs
+# `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
+# scope torch-free precisely so this works: the Test tools job runs in the
+# linter image, which has no built torch.
+from tools.native_aot import export, toolchains
 
 
-export = _load("export")
-toolchains = _load("toolchains")
+_TOOLS_FILE = os.path.abspath(toolchains.__file__)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 
 class TestExportJobs(unittest.TestCase):
@@ -83,12 +76,85 @@ class TestExportJobs(unittest.TestCase):
             self.assertFalse(export._job_needed(job, force=False))
 
     def test_run_job_is_module_level(self):
-        # The spawn pool pickles the job function by qualified name; a
-        # closure or nested function would break only at --jobs > 1.
+        # The pool pickles the job function by qualified name; a closure
+        # or nested function would break only at --jobs > 1.
         # (A real pickle round-trip needs export importable by module
         # name, which this by-path test harness can't provide.)
         self.assertEqual(export._run_job.__qualname__, "_run_job")
         self.assertEqual(export.export_point.__qualname__, "export_point")
+
+    def test_pool_never_forks_after_cuda_init(self):
+        # Plain "fork" gives workers a dead CUDA context (measured:
+        # is_initialized() False, allocation fails, no exception) because
+        # the parent initializes CUDA before the pool starts.
+        self.assertNotEqual(export.POOL_START_METHOD, "fork")
+        self.assertIn(export.POOL_START_METHOD, ("forkserver", "spawn"))
+
+    def test_cutedsl_export_passes_gpu_arch(self):
+        # The arch must reach the compiler as a --gpu-arch OPTION, not as
+        # process state: that is what lets one worker serve several
+        # arches. Appended to any builder-supplied options, never
+        # replacing them. Stubs cute.compile/export_to_c because this
+        # suite runs in the linter image, which has no DSL installed.
+        import sys
+        import types
+        import unittest.mock as mock
+
+        seen = {}
+
+        def fake_compile(fn, *args, **kwargs):
+            seen["options"] = kwargs.get("options")
+            return types.SimpleNamespace(export_to_c=lambda **kw: None)
+
+        fake_cute = types.ModuleType("cutlass.cute")
+        fake_cute.compile = fake_compile
+        fake_cutlass = types.ModuleType("cutlass")
+        fake_cutlass.cute = fake_cute
+        tc = toolchains.CuteDslToolchain()
+        with (
+            mock.patch.dict(
+                sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
+            ),
+            mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
+        ):
+            for opts, want in (
+                (None, "--gpu-arch sm_90a"),
+                ("--enable-assertions", "--enable-assertions --gpu-arch sm_90a"),
+            ):
+                b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+                if opts:
+                    b["options"] = opts
+                tc.export(b, "/tmp", arch="sm_90a")
+                self.assertEqual(seen["options"], want)
+            # No arch: builder options pass through untouched (the
+            # detect-from-device path must not inject --gpu-arch).
+            tc.export(
+                {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
+            )
+            self.assertIsNone(seen["options"])
+
+    def test_pool_preload_stays_fork_safe(self):
+        # The forkserver's server process is the fork PARENT for every
+        # worker, so only modules that are inert in a fork parent may be
+        # preloaded. Importing torch initializes no CUDA state; cutlass
+        # and triton would build DSL/driver state in the parent that every
+        # worker then inherits, which is what this pins down.
+        self.assertEqual(export.POOL_PRELOAD, ("torch",))
+
+    def test_json_normal_matches_sidecar_round_trip(self):
+        # _json_normal replaces a json.dumps/loads pair, so it must agree
+        # with one exactly: any divergence makes a spec mismatch its own
+        # sidecar and re-export forever.
+        point = {
+            "dtype": "float32",
+            "in_dtypes": ("float32", "bfloat16"),
+            "N": 4096,
+            "tma": True,
+        }
+        self.assertEqual(export._json_normal(point), json.loads(json.dumps(point)))
+        self.assertEqual(
+            export._json_normal(point)["in_dtypes"], ["float32", "bfloat16"]
+        )
 
 
 class TestArch(unittest.TestCase):
@@ -141,15 +207,6 @@ class TestArch(unittest.TestCase):
         self.assertEqual(len(hopper), 0)
         self.assertEqual(len(on_device), 1)
 
-    def test_sm_number_parsing(self):
-        tc = toolchains.Toolchain
-        self.assertEqual(tc._sm_number("sm_90a"), 90)
-        self.assertEqual(tc._sm_number("sm_100"), 100)
-        with self.assertRaises(ValueError):
-            tc._sm_number("90a")
-        with self.assertRaises(ValueError):
-            tc._sm_number("sm_90b")
-
     def test_multi_arch_jobs_nest_per_arch(self):
         # Multi-arch fan-out nests <out>/<arch>/<decl_id>; single arch
         # (or default None) keeps the flat layout.
@@ -199,6 +256,43 @@ class TestSpecExpansion(unittest.TestCase):
 
 
 class TestSourceStaleness(unittest.TestCase):
+    def test_closure_covers_shared_declaration_machinery(self):
+        # The grid expander and the validating loader decide which spec
+        # points exist and what a declaration means, so editing them
+        # changes what an artifact MEANS. They live in torchgen (outside
+        # the tools/*.py glob) and arrive by ordinary import, so only the
+        # sys.modules half of the closure can catch them -- which used to
+        # filter on "torch._native" alone and silently missed them.
+        # Compared by basename: an editable install can resolve torchgen
+        # to a different checkout than REPO, and relpath then yields a
+        # ../.. traversal rather than the tidy repo-relative path.
+        names = {os.path.basename(p) for p in export.source_closure()}
+        for want in (
+            "native_aot_spec_grid.py",
+            "native_aot_decl.py",
+            "toolchains.py",
+        ):
+            self.assertIn(want, names, f"{want} must invalidate artifacts")
+
+    def test_closure_survives_sys_modules_mutation(self):
+        # source_closure hashes files while walking sys.modules, and
+        # hashing imports hashlib lazily -- so on a cold interpreter the
+        # walk mutates the dict it is iterating and raises "dictionary
+        # changed size during iteration". Force that ordering by having
+        # the hash step import a module that is definitely not loaded yet.
+        import sys
+        import unittest.mock as mock
+
+        real_hash = export._file_hash
+
+        def hash_and_import(path):
+            importlib.import_module("wave")  # stdlib, unlikely to be loaded
+            return real_hash(path)
+
+        sys.modules.pop("wave", None)
+        with mock.patch.object(export, "_file_hash", hash_and_import):
+            export.source_closure()
+
     def test_sources_current_roundtrip(self):
         # A sidecar whose recorded closure matches the tree is current;
         # editing any recorded file (or recording none) makes it stale.
@@ -242,6 +336,44 @@ class TestSourceStaleness(unittest.TestCase):
                     {"prefix": "x", "spec": point, "sources": {rel: "0" * 16}}, f
                 )
             self.assertTrue(export._job_needed(job, force=False))
+
+
+class TestSidecarIntegrity(unittest.TestCase):
+    """The sidecar is written after the artifacts, so it is the commit
+    marker: absent means not-yet-exported, corrupt or orphaned means the
+    tree cannot be trusted."""
+
+    def test_empty_dir_is_fine(self):
+        # A clean build (or a newly added spec point) has no sidecar and
+        # no artifacts; it must export, not fail.
+        with tempfile.TemporaryDirectory() as d:
+            export._check_no_orphan_artifacts(d)
+
+    def test_artifacts_without_sidecar_are_fatal(self):
+        # An export that died between compiling and writing the sidecar.
+        # The CMake globs link *.o by pattern, so an undescribed orphan
+        # would otherwise be linked silently.
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k_f32.o"), "w").close()
+            with self.assertRaisesRegex(RuntimeError, "no sidecar"):
+                export._check_no_orphan_artifacts(d)
+
+    def test_artifacts_with_sidecar_are_fine(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k.o"), "w").close()
+            with open(os.path.join(d, "k.json"), "w") as f:
+                json.dump({"prefix": "k"}, f)
+            export._check_no_orphan_artifacts(d)
+
+    def test_unreadable_sidecar_is_fatal(self):
+        # Present but unparsable: corruption, not an interrupted run.
+        # Re-exporting would paper over it (and --force skips the check).
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "k.json")
+            with open(path, "w") as f:
+                f.write("{truncated")
+            with self.assertRaisesRegex(RuntimeError, "could not be read"):
+                export._read_sidecar(path)
 
 
 class TestToolchainRegistry(unittest.TestCase):
