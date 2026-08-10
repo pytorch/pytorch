@@ -17,7 +17,6 @@ from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70Or
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     MI200_ARCH,
     MI300_ARCH,
     NAVI_ARCH,
@@ -285,8 +284,7 @@ TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
-@instantiate_parametrized_tests
-class TestInlineAsmElementwiseCUDA(TestCase):
+class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
 
     hw_classification = HardwareClassification.CUDA
@@ -398,7 +396,7 @@ class TestInlineAsmElementwiseCUDA(TestCase):
         self.assertEqual(result.float(), expected.float(), atol=1e-5, rtol=1e-5)
 
 
-class TestInlineAsmElementwiseErrorsGENERIC(TestCase):
+class TestInlineAsmElementwiseInputValidation(TestCase):
     """Device-independent tests for error handling."""
 
     hw_classification = HardwareClassification.GENERIC
@@ -413,8 +411,18 @@ class TestInlineAsmElementwiseErrorsGENERIC(TestCase):
                 dtype=torch.float32,
             )
 
+    def test_error_cpu_tensor(self):
+        x = torch.randn(100, dtype=torch.float32)
+        with self.assertRaises(RuntimeError):
+            inline_asm_elementwise(
+                x,
+                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+                constraints="=v,v" if torch.version.hip else "=f,f",
+                dtype=torch.float32,
+            )
 
-class TestInlineAsmElementwiseErrorsCUDA(TestCase):
+
+class TestInlineAsmElementwiseErrors(TestCase):
     """CUDA-specific tests for error handling."""
 
     hw_classification = HardwareClassification.CUDA
@@ -447,19 +455,9 @@ class TestInlineAsmElementwiseErrorsCUDA(TestCase):
                 dtype=torch.float32,
             )
 
-    def test_error_cpu_tensor(self, device):
-        x = torch.randn(100, dtype=torch.float32)
-        with self.assertRaises(RuntimeError):
-            inline_asm_elementwise(
-                x,
-                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
-                constraints="=v,v" if torch.version.hip else "=f,f",
-                dtype=torch.float32,
-            )
-
 
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
-class TestInlineAsmElementwiseEdgeCasesCUDA(TestCase):
+class TestInlineAsmElementwiseEdgeCases(TestCase):
     """Tests for edge cases."""
 
     hw_classification = HardwareClassification.CUDA
@@ -606,7 +604,7 @@ class TestInlineAsmElementwiseEdgeCasesCUDA(TestCase):
 
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @xfailIfNoAcceleratorTriton
-class TestInlineAsmPackPaddingCUDA(TestCase):
+class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""
 
     hw_classification = HardwareClassification.CUDA
@@ -784,18 +782,14 @@ class TestInlineAsmPackPaddingCUDA(TestCase):
         ).run(code)
 
 
+instantiate_device_type_tests(TestInlineAsmElementwise, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
-    TestInlineAsmElementwiseCUDA, globals(), only_for=("cuda",)
+    TestInlineAsmElementwiseErrors, globals(), only_for=("cuda",)
 )
 instantiate_device_type_tests(
-    TestInlineAsmElementwiseErrorsCUDA, globals(), only_for=("cuda",)
+    TestInlineAsmElementwiseEdgeCases, globals(), only_for=("cuda",)
 )
-instantiate_device_type_tests(
-    TestInlineAsmElementwiseEdgeCasesCUDA, globals(), only_for=("cuda",)
-)
-instantiate_device_type_tests(
-    TestInlineAsmPackPaddingCUDA, globals(), only_for=("cuda",)
-)
+instantiate_device_type_tests(TestInlineAsmPackPadding, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":

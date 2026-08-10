@@ -641,9 +641,9 @@ class TestLeafFunctionEscapedGradients(TestCase):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionMakeFxAndCompile(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     """Tests for @leaf_function when mixing torch.compile and make_fx."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_not_called_during_compilation(self):
         """The real leaf_fn body runs only at runtime, not during compilation."""
@@ -2509,9 +2509,9 @@ instantiate_parametrized_tests(TestLeafFunctionDynamo)
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionRegisterHook(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     """Tests for @leaf_function's register_multi_grad_hook API."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_hook_fires_on_backward(self):
         hook_grads = []

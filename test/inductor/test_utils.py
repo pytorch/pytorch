@@ -39,6 +39,7 @@ from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -50,7 +51,7 @@ from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
-class TestUtilsGENERIC(TestCase):
+class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
@@ -341,17 +342,19 @@ class TestUtilsGENERIC(TestCase):
             self.assertEqual(flops, expected)
 
 
-class TestUtilsCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestDeviceTflops(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @xfailIfNoAcceleratorTriton
+    @onlyAccelerator
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    def test_get_device_tflops(self, dtype):
-        ret = get_device_tflops(dtype)
+    def test_get_device_tflops(self, device, dtype):
+        with torch.device(device):
+            ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestUtilsCUDA, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestDeviceTflops, globals(), allow_xpu=True)
 
 
 class TestLoadTemplate(TestCase):
@@ -417,10 +420,10 @@ class TestRuntimeEstimation(TestCase):
         self.assertAlmostEqual(result_ns, expected_ns)
 
 
-class TestFP4SupportCUDA(TestCase):
+class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         importlib.util.find_spec("cutlass_api") is None,
@@ -440,16 +443,20 @@ class TestFP4SupportCUDA(TestCase):
         result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
         self.assertEqual(result_fp32, cutlass.Float32)
 
-    def test_rand_strided_fp4_cuda(self):
+
+class TestRandStridedFP4(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_rand_strided_fp4(self, device):
         from torch._dynamo.testing import rand_strided
 
-        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=device)
         self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(t.shape, (16, 32))
         self.assertTrue(t.is_cuda)
 
 
-instantiate_device_type_tests(TestFP4SupportCUDA, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestRandStridedFP4, globals(), only_for=("cuda",))
 
 
 class TestFP4SupportCPU(TestCase):
