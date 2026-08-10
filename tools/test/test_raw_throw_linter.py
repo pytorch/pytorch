@@ -1,0 +1,244 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(REPO_ROOT))
+
+from tools.linter.adapters.raw_throw_linter import (
+    check_source,
+    find_throws,
+    replacement_macro,
+    scan_source,
+)
+
+
+PATH = "torch/csrc/example.cpp"
+
+
+def code_of(source: str) -> str:
+    return scan_source(source)[0]
+
+
+def comments_of(source: str) -> str:
+    return scan_source(source)[1]
+
+
+def names(source: str, path: str = PATH) -> list[str]:
+    return [m.name for m in check_source(path, source)]
+
+
+def lines_flagged(source: str, path: str = PATH) -> list[int | None]:
+    return [
+        m.line for m in check_source(path, source) if m.name == "raw throw statement"
+    ]
+
+
+class TestScanSource(unittest.TestCase):
+    def assertBlanked(self, source: str, expected_code: str) -> None:
+        code = code_of(source)
+        self.assertEqual(len(code), len(source))
+        self.assertEqual(code, expected_code)
+
+    def test_line_comment(self) -> None:
+        self.assertBlanked("a; // throw\nb;\n", "a;         \nb;\n")
+
+    def test_block_comment(self) -> None:
+        self.assertBlanked("a; /* throw\n throw */ b;\n", "a;         \n          b;\n")
+
+    def test_string_literal(self) -> None:
+        self.assertBlanked('f("throw");\n', "f(       );\n")
+
+    def test_string_with_escaped_quote(self) -> None:
+        self.assertBlanked('f("a\\"throw");\n', "f(          );\n")
+
+    def test_char_literal(self) -> None:
+        self.assertBlanked("c = ';';\n", "c =    ;\n")
+
+    def test_digit_separator_is_not_a_char_literal(self) -> None:
+        # 1'000'000 must not be read as a char literal swallowing the throw.
+        source = "n = 1'000'000;\nthrow std::runtime_error(x);\n"
+        self.assertEqual(len(find_throws(code_of(source))), 1)
+
+    def test_prefixed_char_literal_is_not_a_digit_separator(self) -> None:
+        for prefix in ("L", "u", "U", "u8"):
+            with self.subTest(prefix=prefix):
+                source = f"wchar_t c = {prefix}'a';\nthrow std::runtime_error(x);\n"
+                self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
+
+    def test_hex_digit_separator(self) -> None:
+        source = "n = 0xFF'FF;\nthrow Foo();\n"
+        self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
+
+    def test_raw_string(self) -> None:
+        source = 'auto s = R"(throw "x" )";\nthrow Foo();\n'
+        throws = find_throws(code_of(source))
+        self.assertEqual([t.line for t in throws], [2])
+
+    def test_raw_string_with_delimiter(self) -> None:
+        source = 'auto s = R"py(throw)py";\nthrow Foo();\n'
+        self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
+
+    def test_backslash_continued_line_comment(self) -> None:
+        source = "// a \\\nthrow Foo();\nthrow Bar();\n"
+        self.assertEqual([t.line for t in find_throws(code_of(source))], [3])
+
+    def test_comment_view_keeps_only_comments(self) -> None:
+        source = 'x; // @allow-raw-throw: ok\ny("@allow-raw-throw: no");\n'
+        comments = comments_of(source)
+        self.assertEqual(comments.splitlines()[0].strip(), "// @allow-raw-throw: ok")
+        self.assertEqual(comments.splitlines()[1].strip(), "")
+
+    def test_apostrophe_in_comment_does_not_swallow_code(self) -> None:
+        source = "// don't do this\nthrow Foo();\n"
+        self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
+
+    def test_slashes_inside_a_string_do_not_start_a_comment(self) -> None:
+        source = 'auto url = "http://x";\nthrow Foo();\n'
+        self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
+
+    def test_unterminated_block_comment_swallows_the_rest(self) -> None:
+        self.assertEqual(find_throws(code_of("/* x\nthrow Foo();\n")), [])
+
+    def test_line_numbers_are_preserved(self) -> None:
+        source = '/* a\n b */ "c\\n"\nthrow Foo();\n'
+        self.assertEqual([t.line for t in find_throws(code_of(source))], [3])
+
+
+class TestFindThrows(unittest.TestCase):
+    def test_expression(self) -> None:
+        throws = find_throws(code_of("throw std::runtime_error(msg);\n"))
+        self.assertEqual([t.expression for t in throws], ["std::runtime_error(msg)"])
+
+    def test_wrapped_throw_is_one_occurrence(self) -> None:
+        source = "throw(\n    ErrorReport(loc)\n    << what);\n"
+        throws = find_throws(code_of(source))
+        self.assertEqual(len(throws), 1)
+        self.assertEqual(throws[0].line, 1)
+        self.assertEqual(throws[0].expression, "( ErrorReport(loc) << what)")
+
+    def test_bare_rethrow(self) -> None:
+        throws = find_throws(code_of("throw;\n"))
+        self.assertEqual([t.expression for t in throws], [""])
+
+    def test_rethrow_word_is_not_a_throw(self) -> None:
+        self.assertEqual(find_throws(code_of("std::rethrow_exception(p);\n")), [])
+
+    def test_throw_specifier_in_identifier(self) -> None:
+        self.assertEqual(find_throws(code_of("int throwing_count = 0;\n")), [])
+
+
+class TestBuckets(unittest.TestCase):
+    """Every kind of throw is flagged at this stage; the allow-by-rule policy
+    for typed exceptions is a separate change."""
+
+    def test_all_shapes_are_flagged(self) -> None:
+        for expression in (
+            "std::runtime_error(x)",
+            "std::invalid_argument(x)",
+            "std::out_of_range(x)",
+            "python_error()",
+            "py::value_error(x)",
+            "c10::Error(x, y)",
+            "ErrorReport(loc) << x",
+            "std::move(e)",
+            "",
+        ):
+            source = f"throw {expression};\n"
+            with self.subTest(expression=expression):
+                self.assertEqual(names(source), ["raw throw statement"])
+
+    def test_word_throw_in_comment_or_string_is_not_flagged(self) -> None:
+        source = (
+            "// we throw here\n"
+            "/* throw */\n"
+            'TORCH_CHECK(false, "cannot throw");\n'
+            "int throwaway = 0;\n"
+        )
+        self.assertEqual(names(source), [])
+
+
+class TestAllowMarker(unittest.TestCase):
+    def test_marker_on_preceding_line_allows_the_throw(self) -> None:
+        source = "// @allow-raw-throw: rethrow keeps the original error\nthrow;\n"
+        self.assertEqual(names(source), [])
+
+    def test_marker_without_reason_is_rejected(self) -> None:
+        source = "// @allow-raw-throw\nthrow;\n"
+        self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
+
+    def test_marker_with_empty_reason_is_rejected(self) -> None:
+        source = "// @allow-raw-throw:   \nthrow;\n"
+        self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
+
+    def test_trailing_marker_does_not_allow_the_throw(self) -> None:
+        source = "throw Foo(); // @allow-raw-throw: nope\n"
+        self.assertEqual(
+            names(source), ["orphaned-allow-raw-throw", "raw throw statement"]
+        )
+
+    def test_file_level_marker_is_orphaned(self) -> None:
+        source = "// @allow-raw-throw\n#include <x.h>\nthrow Foo();\n"
+        self.assertEqual(
+            names(source), ["orphaned-allow-raw-throw", "raw throw statement"]
+        )
+
+    def test_marker_separated_by_blank_line_is_orphaned(self) -> None:
+        source = "// @allow-raw-throw: reason\n\nthrow Foo();\n"
+        self.assertEqual(
+            names(source), ["orphaned-allow-raw-throw", "raw throw statement"]
+        )
+
+    def test_marker_in_string_is_not_a_marker(self) -> None:
+        source = 'const char* s = "@allow-raw-throw: x";\nthrow Foo();\n'
+        self.assertEqual(names(source), ["raw throw statement"])
+
+    def test_marker_allows_only_the_next_throw(self) -> None:
+        source = "// @allow-raw-throw: reason\nthrow Foo();\nthrow Bar();\n"
+        self.assertEqual(lines_flagged(source), [3])
+
+    def test_trailing_marker_does_not_license_the_next_line(self) -> None:
+        source = "throw A(); // @allow-raw-throw: about A\nthrow B();\n"
+        self.assertEqual(lines_flagged(source), [1, 2])
+
+    def test_marker_licenses_only_one_throw_on_the_target_line(self) -> None:
+        source = "// @allow-raw-throw: reason\nif (a) throw A(); else throw B();\n"
+        self.assertEqual(names(source), ["raw throw statement"])
+
+    def test_form_feed_does_not_desync_marker_and_throw_lines(self) -> None:
+        source = "\f\n// @allow-raw-throw: reason\nthrow Foo();\n"
+        self.assertEqual(names(source), [])
+
+    def test_marker_above_a_wrapped_throw(self) -> None:
+        source = "// @allow-raw-throw: reason\nthrow(\n    Foo());\n"
+        self.assertEqual(names(source), [])
+
+
+class TestReplacementMacro(unittest.TestCase):
+    def test_per_directory(self) -> None:
+        cases = {
+            "aten/src/ATen/Foo.cpp": "TORCH_CHECK",
+            "c10/util/Foo.cpp": "TORCH_CHECK",
+            "torch/headeronly/util/Foo.h": "STD_TORCH_CHECK",
+            "torch/csrc/stable/foo.h": "STD_TORCH_CHECK",
+            "torch/csrc/inductor/aoti_runtime/model.h": "AOTI_RUNTIME_CHECK",
+            "torch/csrc/inductor/aoti_torch/foo.cpp": "TORCH_CHECK",
+        }
+        for path, macro in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(replacement_macro(path), macro)
+
+    def test_bare_rethrow_is_not_told_to_use_a_check_macro(self) -> None:
+        (message,) = check_source(PATH, "throw;\n")
+        self.assertNotIn("TORCH_CHECK", message.description or "")
+
+    def test_description_names_the_macro(self) -> None:
+        (message,) = check_source("torch/headeronly/util/Foo.h", "throw Foo();\n")
+        self.assertIn("STD_TORCH_CHECK", message.description or "")
+
+
+if __name__ == "__main__":
+    unittest.main()
