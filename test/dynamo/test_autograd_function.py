@@ -1203,9 +1203,9 @@ class GraphModule(torch.nn.Module):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_weight_: "f32[4, 3]", L_x_: "f32[5, 3]"):
-        l_weight_ = L_weight_
+    def forward(self, L_x_: "f32[5, 3]", L_weight_: "f32[4, 3]"):
         l_x_ = L_x_
+        l_weight_ = L_weight_
 
         bwd_body_0 = self.bwd_body_0
         fwd_body_0 = self.fwd_body_0
