@@ -230,6 +230,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsCoalescing() const override {
     return true;
   }
+  bool supportsTimeEstimation() const override {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+    return true;
+#else
+    return false;
+#endif
+  }
   bool supportsSplitting() const override {
     return true;
   }
@@ -242,6 +249,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
+  void startTimeEstimate();
+  float endTimeEstimate();
 
   // Create a child backend over `ranks` (a subset of this group's ranks) via
   // ncclCommSplit. Collective over the parent communicator: every parent rank
