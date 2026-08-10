@@ -55,6 +55,13 @@ struct NVSHMEMAllocation {
         buffer_offset(buffer_offset),
         device_idx(device_idx) {}
 
+  // Whether ptr falls within this allocation's data buffer.
+  bool contains(const void* ptr) const {
+    auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+    auto buffer_ptr = reinterpret_cast<uintptr_t>(alloc_base) + buffer_offset;
+    return ptr_int >= buffer_ptr && ptr_int < buffer_ptr + buffer_size;
+  }
+
   // Delete copy and move operations to prevent double-free
   NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
   NVSHMEMAllocation& operator=(const NVSHMEMAllocation&) = delete;
@@ -484,11 +491,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // allocation may reuse the same address range, and a stale cached handle
     // would carry the old allocation's size and peer mappings (matches the
     // NCCL allocator's invalidation on free).
-    const auto buffer_ptr = reinterpret_cast<uintptr_t>(ptr);
-    const auto buffer_size = alloc_it->second->buffer_size;
     for (auto it = symm_mems_.begin(); it != symm_mems_.end();) {
-      const auto key_ptr = reinterpret_cast<uintptr_t>(it->first.first);
-      if (key_ptr >= buffer_ptr && key_ptr < buffer_ptr + buffer_size) {
+      if (alloc_it->second->contains(it->first.first)) {
         it = symm_mems_.erase(it);
       } else {
         ++it;
@@ -522,16 +526,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // In case of MemPool, tensor.storage().data_ptr() may not match
     // exactly an allocation's base address. Thus we perform the search by
     // testing if the former is within an allocation's range.
-    auto alloc_it = std::find_if(
-        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
-          auto& allocation = pair.second;
-          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          // pair.first is buffer_ptr, the key alloc() stored (alloc_base +
-          // buffer_offset), i.e. the data buffer start past the signal pad.
-          auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
-          return ptr_int >= buffer_ptr &&
-              ptr_int < buffer_ptr + allocation->buffer_size;
-        });
+    auto alloc_it = find_allocation_covering(ptr);
     TORCH_CHECK(
         alloc_it != allocations_.end(),
         "Pointer not within any SymmetricMemory allocation, "
@@ -582,16 +577,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   bool has_allocation(void* ptr) override {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto alloc_it = std::find_if(
-        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
-          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          auto buffer_ptr =
-              reinterpret_cast<uintptr_t>(pair.second->alloc_base) +
-              pair.second->buffer_offset;
-          return ptr_int >= buffer_ptr &&
-              ptr_int < buffer_ptr + pair.second->buffer_size;
-        });
-    return alloc_it != allocations_.end();
+    return find_allocation_covering(ptr) != allocations_.end();
   }
 
   c10::DeviceType supported_device_type() override {
@@ -610,6 +596,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       c10::intrusive_ptr<NVSHMEMSymmetricMemory>,
       SymmMemKeyHash>
       symm_mems_;
+
+  // Caller must hold mutex_.
+  decltype(allocations_)::iterator find_allocation_covering(void* ptr) {
+    return std::find_if(
+        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+          return pair.second->contains(ptr);
+        });
+  }
 };
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
