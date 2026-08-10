@@ -20,7 +20,7 @@ from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._C._autograd import _make_saved_tensor, SavedTensor
-from typing import NoReturn
+from typing import NoReturn, overload, ParamSpec, TypeVar
 
 __all__ = [
     "checkpoint",
@@ -43,6 +43,9 @@ __all__ = [
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 _checkpoint_debug_enabled: bool | None = None
 
@@ -374,6 +377,35 @@ class _CheckpointedFunction:
 
 def _make_checkpoint_wrapper(function, **checkpoint_kwargs):
     return _CheckpointedFunction(function, **checkpoint_kwargs)
+
+
+@overload
+def checkpoint(
+    function: Callable[..., _T],
+    *args: Any,
+    use_reentrant: bool | None = None,
+    preserve_rng_state: bool = True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    respect_saved_tensors_hooks: bool | None = None,
+    **kwargs: Any,
+) -> _T: ...
+
+
+@overload
+def checkpoint(
+    function: None = None,
+    *,
+    use_reentrant: bool | None = None,
+    preserve_rng_state: bool = True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    respect_saved_tensors_hooks: bool | None = None,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
 
 
 # Note: [torch.compile and checkpoint]
@@ -1893,6 +1925,7 @@ def _checkpoint_without_reentrant_generator_impl(
     )
     error_on_nested_fx_trace = torch._dynamo.config.error_on_nested_fx_trace
     is_non_strict_tracing = torch.compiler._is_non_strict_tracing()
+    is_fx_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
 
     def recompute_fn(*args) -> None:
         # This will be called later during recomputation. This wrapping enables
@@ -1924,6 +1957,7 @@ def _checkpoint_without_reentrant_generator_impl(
                 recompute_context,
                 device_ctx,
                 nested_fx_trace_ctx,
+                torch.fx._symbolic_trace._is_fx_tracing_context(is_fx_tracing),
             ):  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
