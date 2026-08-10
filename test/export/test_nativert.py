@@ -220,7 +220,7 @@ def make_dynamic_cls(cls, strict=False):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CPU
 
     @staticmethod
     def get_module():
@@ -288,9 +288,7 @@ class TestNativeRT(TestCase):
             )
         raise AssertionError(f"unknown aoti case: {case}")
 
-    @requires_capabilities(Capability.lib.triton)
-    @parametrize("case", ["basic", "multi_output", "pytree"])
-    def test_aoti(self, device, case):
+    def _test_aoti(self, device, case):
         m, sample_inputs = self._aoti_case(device, case)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
@@ -373,8 +371,25 @@ class TestNativeRT(TestCase):
                 else:
                     raise e
 
+    @parametrize("case", ["basic", "multi_output", "pytree"])
+    def test_aoti(self, device, case):
+        self._test_aoti(device, case)
 
-instantiate_device_type_tests(TestNativeRT, globals())
+
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
+class TestNativeRTTriton(TestNativeRT):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
+    @parametrize("case", ["basic", "multi_output", "pytree"])
+    def test_aoti(self, device, case):
+        self._test_aoti(device, case)
+
+
+instantiate_device_type_tests(TestNativeRT, globals(), only_for="cpu")
+instantiate_device_type_tests(TestNativeRTTriton, globals(), except_for="cpu")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -421,6 +436,4 @@ if is_fbcode():
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    # nativert has not been supported on XPU yet.
-    if not torch.xpu.is_available():
-        run_tests()
+    run_tests()
