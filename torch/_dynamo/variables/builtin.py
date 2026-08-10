@@ -395,6 +395,7 @@ class BaseBuiltinVariable(VariableTracker):
     # Each reader declines (returns None) when the wrapped callable is not a type,
     # letting getattro_impl fall through to its dynamic getattr handling.
     # CPython classification (Objects/typeobject.c):
+    #   __dict__ -> type_getsets[]
     #   __bases__ -> type_getsets[] type_get_bases (getset)
     #   __base__  -> type_members[] {T_OBJECT, offsetof(tp_base), Py_READONLY}
     #   __flags__ -> type_members[] {T_ULONG, offsetof(tp_flags), Py_READONLY}
@@ -410,6 +411,15 @@ class BaseBuiltinVariable(VariableTracker):
             for i, b in enumerate(fn.__bases__)
         ]
         return variables.TupleVariable(items, source=source)
+
+    def _type_get_dict(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__dict__")
+        return VariableTracker.build(tx, fn.__dict__, source)
 
     def _type_get_base(
         self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
@@ -429,7 +439,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_getset = {
+        "__bases__": GetSet(_type_get_bases, None),
+        "__dict__": GetSet(_type_get_dict, None),
+    }
     tp_members = {
         "__base__": Member(_type_get_base, None),
         "__flags__": Member(_type_get_flags, None),

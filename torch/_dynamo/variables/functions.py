@@ -4076,6 +4076,14 @@ def _check_descriptor_obj_type(
         )
 
 
+def _is_none_descriptor_arg(obj: VariableTracker | None) -> bool:
+    if obj is None:
+        return True
+    if isinstance(obj, ConstantVariable):
+        return obj.as_python_constant() is None
+    return False
+
+
 # descr_members: __objclass__ and __name__ are PyMemberDef on all descriptor
 # types. https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
 class WrapperDescriptorVariable(VariableTracker):
@@ -4156,13 +4164,16 @@ class WrapperDescriptorVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
-    ) -> "MethodWrapperVariable":
+    ) -> VariableTracker:
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        if _is_none_descriptor_arg(obj):
+            return self
+        obj = cast(VariableTracker, obj)
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
@@ -4351,13 +4362,16 @@ class MethodDescriptorVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
-    ) -> "BoundBuiltinMethodVariable":
+    ) -> VariableTracker:
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        if _is_none_descriptor_arg(obj):
+            return self
+        obj = cast(VariableTracker, obj)
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
@@ -4633,12 +4647,15 @@ class MemberDescriptorVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        if _is_none_descriptor_arg(obj):
+            return self
+        obj = cast(VariableTracker, obj)
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
@@ -4740,11 +4757,14 @@ class GetSetDescriptorVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
+        if _is_none_descriptor_arg(obj):
+            return self
+        obj = cast(VariableTracker, obj)
         attr_name = self.descriptor.__name__
         # Try to eagerly call the C getter when we can obtain the
         # concrete Python object (UDOV.value, or as_python_constant
@@ -4826,7 +4846,7 @@ class PropertyVariable(VariableTracker):
     ) -> VariableTracker:
         # Mirrors property_descr_get: if obj is NULL or None, return self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
-        if obj is None:
+        if _is_none_descriptor_arg(obj):
             return self
         fget_source = AttrSource(self.source, "fget") if self.source else None
         fget_vt = VariableTracker.build(
@@ -4879,8 +4899,9 @@ class TupleGetterVariable(VariableTracker):
         owner: VariableTracker,
     ) -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2636-L2663
-        if obj is None:
+        if _is_none_descriptor_arg(obj):
             return self
+        obj = cast(VariableTracker, obj)
         _, (idx, _) = self.descriptor.__reduce__()
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
