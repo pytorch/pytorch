@@ -57,7 +57,9 @@ def _tp_shard_fn(param):
 class TestFullyShardDTensor(FSDPTest):
     @property
     def world_size(self):
-        return min(4, torch.cuda.device_count())
+        if torch.accelerator.is_available():
+            return min(4, torch.accelerator.device_count())
+        return 0
 
     def _run_train_parity(
         self, model, ref_model, dp_pg, mesh=None, num_iters=5, mlp_dim=16
@@ -90,7 +92,9 @@ class TestFullyShardDTensor(FSDPTest):
             ref_model.named_parameters(), model.named_parameters(), strict=True
         ):
             p2_full = p2.full_tensor() if isinstance(p2, DTensor) else p2
-            self.assertEqual(p1, p2_full, msg=f"Param mismatch: {n1} vs {n2}")
+            self.assertEqual(
+                p1, p2_full, msg=lambda msg: f"{msg}\nParam mismatch: {n1} vs {n2}"
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_dtensor_train_parity(self):

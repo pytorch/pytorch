@@ -42,8 +42,21 @@ except ImportError:
     HAS_ORIGAMI = False
 
 
-if IS_ROCM:
-    torch.set_float32_matmul_precision("highest")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    if IS_ROCM:
+        torch.set_float32_matmul_precision("highest")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
@@ -188,29 +201,25 @@ class TestOrigami(TestCase):
         Uses benchmark_gpu_calls count instead of wall-clock timing to avoid flakiness
         on shared CI runners and sequencing bias (origami runs first and pays import cost).
         """
-        # InductorTestCase caps test_configs.max_mm_configs=2, which would
-        # collapse both branches to 0 benchmark calls; restore the unlimited
-        # default so the differential comparison is meaningful.
-        with config.patch({"test_configs.max_mm_configs": None}):
-            for op_name in ("mm", "addmm", "bmm"):
-                with self.subTest(op_name=op_name):
-                    origami_case = self._compile_with_config(
-                        op_name,
-                        self._origami_default_config(ORIGAMI_COMPILE_TOPK),
-                        size=256,
-                    )
-                    max_autotune_case = self._compile_with_config(
-                        op_name,
-                        self._max_autotune_default_config(),
-                        size=256,
-                    )
-                    # Origami with topk should benchmark fewer configs than full max_autotune
-                    self.assertLess(
-                        origami_case["benchmark_gpu_calls"],
-                        max_autotune_case["benchmark_gpu_calls"],
-                        msg=f"Origami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
-                        f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
-                    )
+        for op_name in ("mm", "addmm", "bmm"):
+            with self.subTest(op_name=op_name):
+                origami_case = self._compile_with_config(
+                    op_name,
+                    self._origami_default_config(ORIGAMI_COMPILE_TOPK),
+                    size=256,
+                )
+                max_autotune_case = self._compile_with_config(
+                    op_name,
+                    self._max_autotune_default_config(),
+                    size=256,
+                )
+                # Origami with topk should benchmark fewer configs than full max_autotune
+                self.assertLess(
+                    origami_case["benchmark_gpu_calls"],
+                    max_autotune_case["benchmark_gpu_calls"],
+                    msg=lambda msg: f"{msg}\nOrigami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
+                    f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
+                )
 
     @unittest.skipIf(
         not DO_PERF_TEST,
@@ -350,7 +359,7 @@ class TestOrigami(TestCase):
                 self.assertIn(
                     "topk",
                     str(e).lower(),
-                    msg=f"Error should mention topk parameter: {e}",
+                    msg=lambda msg: f"{msg}\nError should mention topk parameter: {e}",  # noqa: F821
                 )
 
         # Test case 5: Mid-range integer topk
@@ -377,7 +386,7 @@ class TestOrigami(TestCase):
                     self.assertGreaterEqual(
                         result["topk_calls"],
                         0,
-                        msg=f"origami.select_topk_configs should be callable with topk={topk_val}",
+                        msg=lambda msg: f"{msg}\norigami.select_topk_configs should be callable with topk={topk_val}",
                     )
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
@@ -444,11 +453,17 @@ class TestOrigami(TestCase):
                 # Configuration with origami enabled, but we'll mock it to fail
                 patch_config = self._origami_default_config(ORIGAMI_COMPILE_TOPK)
 
-                # Mock origami module to be None (simulating import failure)
+                # Patch the cached origami binding directly. Avoid mock.patch.dict
+                # on sys.modules: its snapshot/restore evicts modules lazily imported
+                # inside the `with` (e.g. torch._dynamo.repro.after_dynamo), causing
+                # duplicate backend registration on the next subtest iteration.
                 with (
                     fresh_cache(),
                     config.patch(patch_config),
-                    mock.patch.dict("sys.modules", {"origami": None}),
+                    mock.patch(
+                        "torch._inductor.heuristics.template.triton.origami",
+                        None,
+                    ),
                 ):
                     compiled = torch.compile(fn, dynamic=False)
                     result = compiled(*args)
@@ -457,17 +472,18 @@ class TestOrigami(TestCase):
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertIsNotNone(compiled)
 
-    def test_origami_module_gate_when_env_var_unset(self):
-        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI is unset.
+    def test_origami_module_gate_when_env_var_disabled(self):
+        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI=0.
 
-        rocm.origami is a load-time-only knob (env-var driven). triton.py imports
+        rocm.origami is a load-time-only knob (env-var driven). origami is on by
+        default; setting TORCHINDUCTOR_ORIGAMI=0 disables it. triton.py imports
         the origami module at module load only when IS_ROCM and config.max_autotune
         and config.rocm.origami are all true; otherwise it sets ``origami = None``.
         Once cached, that decision is final for the process -- flipping
         config.rocm.origami via config.patch() after import has no effect.
 
         This subprocess test exercises the realistic disabled path: a fresh
-        Python process with TORCHINDUCTOR_ORIGAMI unset must end up with
+        Python process with TORCHINDUCTOR_ORIGAMI=0 must end up with
         ``triton.origami is None``, regardless of config.patch() calls afterward.
         """
         import subprocess
@@ -477,7 +493,7 @@ class TestOrigami(TestCase):
             "import os, torch\n"
             "from torch._inductor import config\n"
             "from torch._inductor.template_heuristics import triton as th\n"
-            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') != '1', 'env var leaked'\n"
+            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') == '0', 'env var not set to 0'\n"
             "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
             "# Even after flipping the config knob mid-process, origami stays None\n"
             "with config.patch({'rocm.origami': True, 'max_autotune': True}):\n"
@@ -486,7 +502,7 @@ class TestOrigami(TestCase):
         )
 
         env = os.environ.copy()
-        env.pop("TORCHINDUCTOR_ORIGAMI", None)
+        env["TORCHINDUCTOR_ORIGAMI"] = "0"
 
         result = subprocess.run(
             [sys.executable, "-c", snippet],
@@ -498,7 +514,7 @@ class TestOrigami(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+            msg=lambda msg: f"{msg}\nsubprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
         )
         self.assertIn("OK", result.stdout)
 

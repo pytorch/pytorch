@@ -22,6 +22,8 @@
 #include <ATen/ops/lt.h>
 #endif
 
+#include <utility>
+
 #if (!AT_CUDNN_ENABLED())
 
 namespace at {
@@ -246,7 +248,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
       ctc_loss_desc.desc(),
       workspace.data_ptr(),
       workspace_size));
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
@@ -342,7 +344,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       workspace.data_ptr()
 
           ));
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 } // namespace at::native
