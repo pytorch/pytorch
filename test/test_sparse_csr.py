@@ -24,7 +24,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     OpDTypes,
     ops,
     precisionOverride,
@@ -61,6 +60,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocm,
     skipIfTorchDynamo,
+    skipIfXpu,
     subtest,
     suppress_warnings,
     TEST_CUDA_CUDSS,
@@ -3629,7 +3629,8 @@ def skipIfNoTriton(cls):
         return skipped_cls
 
 @skipIfNoTriton
-class TestSparseCompressedTritonKernels(TestCase):
+class TestSparseCompressedTritonKernelsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _to_block_triangular_inplace(self, d, row_block, col_block):
         """
@@ -3650,7 +3651,8 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         return d
 
-    @onlyCUDA
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3165")
+    @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3683,9 +3685,9 @@ class TestSparseCompressedTritonKernels(TestCase):
         bsr = input.to_sparse_bsr(1)
         self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
+    @onlyAccelerator
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU),
@@ -3697,11 +3699,12 @@ class TestSparseCompressedTritonKernels(TestCase):
         def kernel_impl(*args, **kwargs):
             return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
+        device_type = torch.device(device).type
         kernel = torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
             kernel_impl,
-            "SparseCsrCUDA"
+            f"SparseCsr{device_type.upper()}"
         )
 
         # kernel != kernel_impl means dispatch was already registered.
@@ -3763,7 +3766,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 )
                 self.assertEqual(res_tri, res_dense)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU,
                      "Skipped for internal with remote GPUs")
@@ -3776,9 +3779,10 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs.to_sparse_bsc(16), rhs)
         with self.assertRaisesRegex(ValueError, "on the same GPU device"):
             bsr_dense_mm(lhs, rhs.cpu())
-        if torch.cuda.device_count() > 1:
+        if torch.accelerator.device_count() > 1:
+            device_type = torch.device(device).type
             with self.assertRaisesRegex(ValueError, "on the same GPU device"):
-                bsr_dense_mm(lhs.to("cuda:0"), rhs.to("cuda:1"))
+                bsr_dense_mm(lhs.to(f"{device_type}:0"), rhs.to(f"{device_type}:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
             bsr_dense_mm(lhs, rhs.to(torch.float))
         with self.assertRaisesRegex(ValueError, r"and one of \(half, bfloat16, float32\)"):
@@ -3808,8 +3812,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
             bsr_dense_mm(lhs, rhs, out=out)
 
+    @onlyAccelerator
     @parametrize("block_size", [16, 32, 64])
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3855,9 +3859,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                     res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
                     self.assertEqual(res, expected)
 
-
+    @onlyAccelerator
     @parametrize("block_size", [16, 32, 64])
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3925,7 +3928,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                     res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
                     self.assertEqual(res_tri, res_tri_grid)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3969,8 +3972,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 result = scatter_mm(blocks, other, indices_data=indices_data)
                 self.assertEqual(result, expected)
 
+    @onlyAccelerator
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -4103,11 +4106,11 @@ class TestSparseCompressedTritonKernels(TestCase):
         # but key is still valid:
         self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
 
+    @onlyAccelerator
     @suppress_warnings
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear', '_int_bsr_dense_addmm'])
     @parametrize("blocksize", [16, '16x32', 32])
     @parametrize("out_dtype", ['unspecified', 'int32'])
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
@@ -4282,8 +4285,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 result = operation(*args, **kwargs)
                 self.assertEqual(result, expected)
 
+    @onlyAccelerator
     @parametrize("op", ['bsr_dense_addmm', '_int_bsr_dense_addmm'])
-    @onlyCUDA
     @parametrize("out_dtype", ['unspecified', 'int32'])
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
@@ -4343,7 +4346,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         result = operation(*args, **dict(meta=meta, out=out))
         self.assertEqual(result, expected)
 
-    @onlyCUDA
+    @onlyAccelerator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_addmm_meta(self, device):
         from torch.sparse._triton_ops import bsr_dense_addmm_meta
@@ -4354,13 +4357,15 @@ class TestSparseCompressedTritonKernels(TestCase):
         beta = 0.0
         alpha = 1.0
 
+        device_type = torch.device(device).type
+
         def get_meta(M, K, N, sparsity=None):
             return bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha, dtype=dtype, sparsity=sparsity,
                                         _version="test_triton_bsr_dense_addmm_meta")
 
         def update_meta(M, K, N, value, sparsity=0.5):
             key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
-            update_bsr_dense_addmm_meta("bsr_dense_addmm", torch.cuda.get_device_name(),
+            update_bsr_dense_addmm_meta("bsr_dense_addmm", getattr(torch, device_type).get_device_name(),
                                         ("test_triton_bsr_dense_addmm_meta", dtype, sparsity),
                                         key, value)
 
@@ -4420,7 +4425,7 @@ instantiate_device_type_tests(TestSparseCSRCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSparseCSRDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSparseCSRCUDA, globals(), only_for="cuda")
 
-instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
+instantiate_device_type_tests(TestSparseCompressedTritonKernelsDevice, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
