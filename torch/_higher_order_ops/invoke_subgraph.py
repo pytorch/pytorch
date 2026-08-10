@@ -626,6 +626,9 @@ def get_output_metadata(subgraph, *operands):
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
 
+    # The one signal a below-autograd trace can get wrong; see the check below.
+    has_tensor_out_without_grad = False
+
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
@@ -648,9 +651,24 @@ def get_output_metadata(subgraph, *operands):
             # Check if tensor requires grad from metadata
             if hasattr(val, "requires_grad") and not val.requires_grad:
                 output_metadata.indexes_with_no_grad.add(idx)
+                has_tensor_out_without_grad = True
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
+
+    # A tensor's requires_grad=False is unreliable when the subgraph was traced
+    # below autograd (make_fx detaches every output), and believing it builds the
+    # backward with zero tangents. Any recorded True means grad-ness was tracked,
+    # so only re-derive by execution when nothing claims grad yet an operand does.
+    if (
+        has_tensor_out_without_grad
+        and len(output_metadata.indexes_with_no_grad) == output_metadata.num_fw_outs
+        and any(
+            isinstance(operand, torch.Tensor) and operand.requires_grad
+            for operand in operands
+        )
+    ):
+        return _get_output_metadata_by_execution(subgraph, *operands)
 
     return output_metadata
 
