@@ -1921,7 +1921,7 @@ def use_triton_template(
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
-    # _use_template_for_gpu calls is_big_gpu, which logs an SM-count warning.
+    # _use_template_for_gpu logs an SM-count warning.
     # Keep it last so the warning only fires when a Triton template is
     # actually in play, not on default-mode compiles or on devices without
     # Triton template support (e.g. mps).
