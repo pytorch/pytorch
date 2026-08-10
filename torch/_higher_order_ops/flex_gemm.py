@@ -47,7 +47,7 @@ FLEX_GEMM_OP_ALIASES = {
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
 }
-_SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
+_SUPPORTED_BACKENDS = {"NVGEMM", "QUACK", "TRITON"}
 
 
 _SUPPORTED_FLEX_GEMM_OP_NAMES = "/".join(

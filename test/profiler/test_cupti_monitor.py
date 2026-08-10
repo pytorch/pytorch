@@ -591,6 +591,110 @@ class TestCuptiRecords(TestCase):
         # stream 5 still has non-reassigned work (k14), so its annotation is kept there
         self.assertEqual(by_name["reduce_scatter"]["tid"], 5)
 
+    def test_graph_dependency_flows_json(self):
+        # CUDA-graph node->node dependency arrows in the JSON export: one flow per edge from the
+        # predecessor's end to the successor's start, resolved within the same replay
+        # (correlation_id) so arrows never cross replays, on the ops' display lanes. No CUDA.
+        from torch.profiler._cupti.monitor_trace import _graph_dependency_flow_events
+
+        # replay 100: node 11 on lane 7 [1000,2000]; node 12 on lane 8 [3000,4000], 12 -> 11.
+        # replay 200 repeats the same nodes and stays self-contained.
+        node_rows = [
+            (100, 11, 0, 7, 1000, 2000),
+            (100, 12, 0, 8, 3000, 4000),
+            (200, 11, 0, 7, 5000, 6000),
+            (200, 12, 0, 8, 7000, 8000),
+        ]
+        events = _graph_dependency_flow_events(node_rows, {12: [11]}, base_ns=0)
+        starts = [e for e in events if e["ph"] == "s"]
+        fins = [e for e in events if e["ph"] == "f"]
+        self.assertEqual(len(starts), 2)  # one edge per replay
+        self.assertEqual(len(fins), 2)
+        s0 = starts[0]
+        f0 = next(f for f in fins if f["id"] == s0["id"])
+        # arrow leaves the predecessor's end on its lane and lands on the successor's start
+        self.assertEqual((s0["tid"], s0["ts"]), (7, 2.0))
+        self.assertEqual((f0["tid"], f0["ts"], f0["bp"]), (8, 3.0, "e"))
+        self.assertNotEqual(
+            starts[0]["id"], starts[1]["id"]
+        )  # replays don't share a flow
+        # no recorded dependencies -> no flows
+        self.assertEqual(_graph_dependency_flow_events(node_rows, {}, base_ns=0), [])
+
+        # Clock skew: predecessor 13 ends at 4400 -- AFTER successor 14 starts at 3500 -- so the
+        # flow goes end(4.4) -> start(3.5), i.e. backwards. The JSON export renders that oddly (a
+        # known limitation, see the function docstring); the .pftrace export does not.
+        skewed = [
+            (300, 13, 0, 7, 1000, 4400),
+            (300, 14, 0, 8, 3500, 4500),
+        ]
+        ev = _graph_dependency_flow_events(skewed, {14: [13]}, base_ns=0)
+        s = next(e for e in ev if e["ph"] == "s")
+        f = next(e for e in ev if e["ph"] == "f")
+        self.assertEqual(
+            (s["ts"], f["ts"]), (4.4, 3.5)
+        )  # end -> start, backwards under skew
+
+    def test_cpu_launch_flow_targets_only_graph_roots(self):
+        # With graph node->node arrows drawn (graph_deps present), the CPU-launch -> GPU-op flow
+        # links only to root graph nodes; a non-root node gets its incoming edge from the dep
+        # arrow, so the cudaGraphLaunch does not fan out to every replayed kernel. Diamond, one
+        # replay (shared correlation): A (root) -> B, A -> C, {B, C} -> D. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def i64(*v):
+            return np.array(v, dtype=np.int64)
+
+        A, B, C, D, corr = 1001, 1002, 1003, 1004, 77
+        kernel = {
+            "start_ns": i64(1000, 3000, 3000, 5000),  # A, B||C, D
+            "end_ns": i64(2000, 4000, 4000, 6000),
+            "device_id": i64(0, 0, 0, 0),
+            "context_id": i64(1, 1, 1, 1),
+            "stream_id": i64(7, 7, 7, 7),
+            "correlation_id": i64(corr, corr, corr, corr),
+            "graph_id": i64(1, 1, 1, 1),
+            "graph_node_id": i64(A, B, C, D),
+            "name": np.array(["A", "B", "C", "D"], dtype=object),
+            "annotation": np.array([None] * 4, dtype=object),
+            "grid_x": i64(1, 1, 1, 1),
+            "grid_y": i64(1, 1, 1, 1),
+            "grid_z": i64(1, 1, 1, 1),
+            "block_x": i64(1, 1, 1, 1),
+            "block_y": i64(1, 1, 1, 1),
+            "block_z": i64(1, 1, 1, 1),
+            "registers_per_thread": i64(0, 0, 0, 0),
+            "static_shared_memory": i64(0, 0, 0, 0),
+            "dynamic_shared_memory": i64(0, 0, 0, 0),
+            "priority": i64(0, 0, 0, 0),
+            "queued": i64(0, 0, 0, 0),
+            "channel": i64(0, 0, 0, 0),
+            "channel_type": i64(0, 0, 0, 0),
+        }
+        window = {
+            "columns": {"kernel": kernel},
+            "user_annotations": {},
+            "graph_deps": {B: [A], C: [A], D: [B, C]},
+        }
+        _, events = _trace_window_entries(window, base_ns=0)
+        # Launch flow = "f" events keyed by the correlation id; only the root A (ts 1.0us) keeps it.
+        launch_ts = [
+            e["ts"] for e in events if e.get("ph") == "f" and e.get("id") == corr
+        ]
+        self.assertEqual(launch_ts, [1.0])
+        # The four dep edges are drawn as arrows (1<<40 flow-id base): A->B, A->C, B->D, C->D.
+        dep_starts = [
+            e for e in events if e.get("ph") == "s" and e.get("id", 0) >= (1 << 40)
+        ]
+        self.assertEqual(len(dep_starts), 4)
+        # Deps OFF: every kernel keeps its launch flow (no suppression).
+        window["graph_deps"] = {}
+        _, ev_off = _trace_window_entries(window, base_ns=0)
+        off = [e for e in ev_off if e.get("ph") == "f" and e.get("id") == corr]
+        self.assertEqual(len(off), 4)
+
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
