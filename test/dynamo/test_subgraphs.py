@@ -8,6 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import unsupported
 from torch._dynamo.utils import ifdynstaticdefault
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 globalmod = torch.nn.ReLU()
@@ -19,6 +20,8 @@ def indirectly_unsupported(a, b):
 
 
 class SubGraphTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _common(self, fn, frame_count, op_count):
         torch._dynamo.reset()
         v1 = torch.ones(10)

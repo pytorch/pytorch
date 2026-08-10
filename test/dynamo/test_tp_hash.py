@@ -6,9 +6,12 @@ import sys
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TpHashTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_hash_equals(self, value):
         """Assert Dynamo's hash(value) matches eager Python's hash(value)."""
         expected = hash(value)
