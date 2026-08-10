@@ -15,6 +15,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -23,11 +24,21 @@ namespace c10d::nccl2 {
 
 namespace {
 
-std::vector<uint64_t> toVecUint64(const std::vector<int64_t>& vec) {
+std::vector<uint64_t> normalizeSplitSizes(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    int group_size) {
+  c10d::checkSplitSizes(split_sizes, tensor, group_size);
+
+  if (split_sizes.empty()) {
+    return std::vector<uint64_t>(
+        group_size, static_cast<uint64_t>(tensor.size(0) / group_size));
+  }
+
   std::vector<uint64_t> out;
-  out.reserve(vec.size());
-  for (auto i : vec) {
-    out.push_back(static_cast<uint64_t>(i));
+  out.reserve(split_sizes.size());
+  for (auto split_size : split_sizes) {
+    out.push_back(static_cast<uint64_t>(split_size));
   }
   return out;
 }
@@ -77,9 +88,27 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
+      event_cache_enabled_(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
+      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
+          ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
+          ::c10d::SkipCleanUp))),
+      blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+
+  if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
+    auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+    options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
+  }
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
+      "with RCCL");
+#endif
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
@@ -195,6 +224,10 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
+  TORCH_CHECK(
+      supportsWindow(),
+      "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
+      "supported on ROCm");
   // Trigger the lazy bootstrap: prefer the tensor's device, then the bound
   // device, then the current CUDA device.
   if (init_state_ != InitializationState::INITIALIZED) {
@@ -214,6 +247,16 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     window->tensor_register(*tensor);
   }
   return window;
+}
+
+bool ProcessGroupNCCL::supportsWindow() const {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
+  int runtime_version = 0;
+  return ncclGetVersion(&runtime_version) == ncclSuccess &&
+      runtime_version >= NCCL_VERSION(2, 29, 0);
+#else
+  return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +483,45 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
   return work;
 }
 
+c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
+    at::Tensor& outputBuffer,
+    at::Tensor& inputBuffer,
+    const ::c10d::GatherOptions& opts) {
+  TORCH_CHECK(
+      opts.rootRank >= 0 && opts.rootRank < getSize(),
+      "invalid root rank: ",
+      opts.rootRank);
+  ensureInitialized(inputBuffer.device());
+
+  // outputBuffer is only meaningful on the root; elsewhere the caller passes an
+  // empty placeholder and gatherImpl ignores the (empty) output list.
+  std::vector<at::Tensor> outputList;
+  if (getRank() == opts.rootRank) {
+    ensureTensorContiguous(outputBuffer);
+    TORCH_CHECK(
+        inputBuffer.dtype() == outputBuffer.dtype(),
+        "output tensor must have the same type as input tensor");
+    const auto count = inputBuffer.numel();
+    TORCH_CHECK(
+        outputBuffer.numel() == count * getSize(),
+        "output tensor size must be equal to world_size times input tensor size");
+    auto flat = outputBuffer.view(-1);
+    outputList.reserve(getSize());
+    for (const auto r : c10::irange(getSize())) {
+      outputList.push_back(flat.narrow(0, r * count, count));
+    }
+  }
+  ++sequence_number_;
+  auto work = gatherImpl(
+      outputList,
+      inputBuffer,
+      static_cast<int>(opts.rootRank),
+      opts.asyncOp,
+      operationTimeout(opts.timeout));
+  work->setOutputs(std::vector<at::Tensor>{outputBuffer});
+  return work;
+}
+
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -535,6 +617,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
   ++sequence_number_;
   auto timeout = operationTimeout(opts.timeout);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
+    c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
+    c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
     auto work =
         allToAllSingleImpl(outputBuffer, inputBuffer, opts.asyncOp, timeout);
     work->setOutputs(std::vector<at::Tensor>{outputBuffer});
@@ -543,8 +627,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
   auto work = all_to_all_v_single(
       outputBuffer,
       inputBuffer,
-      toVecUint64(outputSplitSizes),
-      toVecUint64(inputSplitSizes),
+      normalizeSplitSizes(outputSplitSizes, outputBuffer, size_),
+      normalizeSplitSizes(inputSplitSizes, inputBuffer, size_),
       opts.asyncOp,
       timeout);
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
