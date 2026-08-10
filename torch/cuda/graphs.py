@@ -857,7 +857,10 @@ class CUDAGraph(_CUDAGraph):
 
         _require_cuda_bindings()
         # Narrow for the type checker (cuda bindings are present past the check).
-        assert _cuda_runtime is not None and _cuda_driver is not None  # noqa: S101
+        if _cuda_runtime is None or _cuda_driver is None:
+            raise AssertionError(
+                "expected _cuda_runtime and _cuda_driver to be not None"
+            )
 
         if _is_tools_id_unavailable():
             raise RuntimeError(
