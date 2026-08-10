@@ -19,7 +19,10 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_rocm_ver_atleast_multiprocess,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
@@ -183,6 +186,7 @@ class AbstractWindowTest:
         self.assertIsInstance(attr.access_type, WindowAccessType)
         win.tensor_deregister()
 
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_register_errors(self):
         self._init_pg()
         pool = self._make_pool()
