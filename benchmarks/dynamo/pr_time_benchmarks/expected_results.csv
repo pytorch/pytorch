@@ -118,7 +118,7 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,35970,0.1
+dtensor_dispatch_custom_handler,instruction_count,38000,0.1
 
 
 
@@ -131,3 +131,7 @@ nn_module_guard_eval_dynamic,instruction_count,104100,0.1
 
 
 autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
+
+
+
+runtime_overhead_eager_cpu,instruction_count,158800,0.1
