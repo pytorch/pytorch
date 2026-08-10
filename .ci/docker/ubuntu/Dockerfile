@@ -156,10 +156,14 @@ RUN rm install_onnx.sh common_utils.sh
 
 ARG TVM
 # Install apache-tvm for the dynamo tvm backend tests
+# apache-tvm declares apache-tvm-ffi>=0.1.12 with no upper bound, but its
+# prebuilt libtvm_runtime.so is ABI-bound to the tvm-ffi it was built against,
+# so the floating dep has to be pinned alongside it.
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/tvm.txt tvm.txt
-RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) && python -c "import tvm"'; fi
-RUN rm common_utils.sh tvm.txt
+COPY ci_commit_pins/tvm-ffi.txt tvm-ffi.txt
+RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) apache-tvm-ffi==$(get_pinned_commit tvm-ffi) && python -c "import tvm"'; fi
+RUN rm common_utils.sh tvm.txt tvm-ffi.txt
 
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
@@ -197,6 +201,7 @@ RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
+COPY ./common/patches /opt/cache/patches
 ENV PATH=/opt/cache/bin:$PATH
 RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
 RUN rm install_cache.sh
