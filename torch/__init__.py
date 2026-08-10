@@ -3065,6 +3065,14 @@ def compile(
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
     to compile the module inplace without changing its structure.
 
+    .. note::
+        When compiling an :class:`torch.nn.Module`, compilation is installed on
+        the module's call path, which invokes ``forward``. Other methods are not
+        compiled automatically; direct calls to them remain eager unless they
+        are passed to :func:`torch.compile` separately. Code reached from
+        ``forward`` may still be captured as part of the surrounding compiled
+        region.
+
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
     use.  A single frame may be compiled multiple times if previous compiled
