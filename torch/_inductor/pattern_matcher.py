@@ -2113,8 +2113,6 @@ def _serialize_pattern(
 
         file_template = textwrap.dedent(
             """\
-            # mypy: ignore-errors
-
             # noqa: F401, E501
             {msg}
             import torch
@@ -2177,18 +2175,20 @@ def _serialize_pattern(
 
 SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
 
+
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
 # to date.
-_known_precompiled_patterns: list[
-    tuple[
-        Any,
-        Iterable[Any],
-        Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
-        Any,
-        PatternExpr,
-    ]
-] = []
+@dataclasses.dataclass
+class _PrecompiledPattern:
+    search_fn: SearchFn
+    example_inputs: Sequence[Any]
+    trace_fn: TraceFn
+    scalar_workaround: dict[str, float | int] | None
+    search_fn_pattern: PatternExpr
+
+
+_known_precompiled_patterns: list[_PrecompiledPattern] = []
 
 
 def gen_register_replacement(
@@ -2233,7 +2233,7 @@ def gen_register_replacement(
             arg.constant = None
 
     _known_precompiled_patterns.append(
-        (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
+        _PrecompiledPattern(search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
     register_replacement(
         search_fn,
@@ -2868,8 +2868,18 @@ def fwd_only(
     get_decomp_fn: Callable[..., Any] = select_decomp_table,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
+    from torch.compiler import config as compiler_config
+
+    # Patterns are device-agnostic templates traced with fixed example tensors; keep the
+    # compile-on-one-rank device handling out of pattern tracing so make_fx's single-device
+    # check only validates real user graphs, not these internal fixed-device templates.
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with enable_python_dispatcher(), preserve_node_meta():
+    with (
+        # pyrefly: ignore [missing-attribute]
+        compiler_config.patch(compile_on_one_rank=False),
+        enable_python_dispatcher(),
+        preserve_node_meta(),
+    ):
         gm = make_fx(fn, get_decomp_fn(), tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
@@ -2909,7 +2919,11 @@ def joint_fwd_bwd(
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
-    with torch._guards.tracing(None):
+    from torch.compiler import config as compiler_config
+
+    # Keep compile-on-one-rank device handling out of pattern tracing (see fwd_only).
+    # pyrefly: ignore [missing-attribute]
+    with torch._guards.tracing(None), compiler_config.patch(compile_on_one_rank=False):
         aot_function(
             fn,
             # pyrefly: ignore[bad-argument-type]

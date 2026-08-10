@@ -3,7 +3,6 @@ from __future__ import annotations
 import sympy
 from sympy import S
 from sympy.core.relational import Relational
-from sympy.logic.boolalg import BooleanFunction
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
 
@@ -792,7 +791,7 @@ def canonicalize_bool_expr(expr: _T) -> _T:
     # nb. Relational.canonical in sympy is broken
     # https://github.com/sympy/sympy/issues/25924
 
-    if not isinstance(expr, (sympy.Rel, BooleanFunction)):
+    if not isinstance(expr, (Relational, sympy.And, sympy.Or, sympy.Not)):
         return expr
 
     if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
@@ -857,37 +856,31 @@ def _sympy_from_args(
 
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     """
-    After canonicalization, we are guaranteed to have eliminated Ge/Gt relations
-    (rewriting them to Le/Lt, respectively).
+    After canonicalization, supported relations have Ge/Gt rewritten to Le/Lt.
+    Relations with arithmetic operands are additionally normalized by subtraction.
     """
-    if isinstance(expr, BooleanFunction):
-        args = tuple(map(canonicalize_bool_expr, expr.args))
-        result = type(expr)(*args)
-        if type(result) is type(expr) and result.args == args:
-            return result
-        return canonicalize_bool_expr(result)
+    if isinstance(expr, (sympy.And, sympy.Or)):
+        return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
-    if isinstance(expr, Relational) and not (
-        isinstance(expr.lhs, sympy.Expr) and isinstance(expr.rhs, sympy.Expr)
-    ):
-        lhs = canonicalize_bool_expr(expr.lhs)
-        rhs = canonicalize_bool_expr(expr.rhs)
-        if isinstance(expr, tuple(opposite.keys())):
-            return opposite[type(expr)](rhs, lhs, evaluate=False)  # type: ignore[index]
-        if not isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne)):
-            raise AssertionError(f"Expected Lt/Le/Eq/Ne, got {type(expr)}")
-        return type(expr)(lhs, rhs, evaluate=False)
-
     t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
-        rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
+        lhs, rhs = expr.rhs, expr.lhs  # type: ignore[attr-defined]
         t = opposite[type(expr)]  # type: ignore[index]
     else:
         if not isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne)):
             raise AssertionError(f"Expected Lt/Le/Eq/Ne, got {type(expr)}")
-        rhs = expr.rhs - expr.lhs
+        lhs, rhs = expr.lhs, expr.rhs
         t = type(expr)
+
+    if not isinstance(lhs, sympy.Expr) or not isinstance(rhs, sympy.Expr):
+        return t(
+            canonicalize_bool_expr(lhs),
+            canonicalize_bool_expr(rhs),
+            evaluate=False,
+        )
+
+    rhs = rhs - lhs
 
     def is_neg(t: sympy.Expr) -> bool:
         return (t.is_Number and t.is_negative) or (

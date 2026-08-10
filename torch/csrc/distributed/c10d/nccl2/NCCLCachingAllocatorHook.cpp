@@ -4,6 +4,9 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 
+#include <algorithm>
+#include <vector>
+
 #include <ATen/Context.h>
 #include <c10/core/AllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -15,6 +18,25 @@ namespace {
 void ncclCachingAllocatorHookFn(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   NCCLCachingAllocatorHook::getInstance().regDeregMem(te);
+}
+
+// registeredComms_ is ordered by pointer, which differs between ranks. Any NCCL
+// call these hooks make that waits on peers (deregister_address tearing down a
+// symmetric window does so on NCCL builds that barrier there) must be issued in
+// the same order everywhere, so order by the group name instead.
+std::vector<ProcessGroupNCCL*> commsForDevice(
+    const std::set<ProcessGroupNCCL*>& comms,
+    c10::DeviceIndex device) {
+  std::vector<ProcessGroupNCCL*> out;
+  for (auto* comm : comms) {
+    if (device == comm->getDevice().index()) {
+      out.push_back(comm);
+    }
+  }
+  std::stable_sort(out.begin(), out.end(), [](auto* a, auto* b) {
+    return a->getCommName() < b->getCommName();
+  });
+  return out;
 }
 } // namespace
 
@@ -73,10 +95,8 @@ void NCCLCachingAllocatorHook::regDeregMem(
     TORCH_CHECK(
         !registeredMemMap_.count(addr), "Memory already registered with NCCL");
     registeredMemMap_.emplace(addr, MemInfo{len, te.device_});
-    for (auto* comm : registeredComms_) {
-      if (te.device_ == comm->getDevice().index()) {
-        comm->register_address(addr, len);
-      }
+    for (auto* comm : commsForDevice(registeredComms_, te.device_)) {
+      comm->register_address(addr, len);
     }
   } else if (
       te.action_ ==
@@ -86,10 +106,8 @@ void NCCLCachingAllocatorHook::regDeregMem(
     TORCH_CHECK(
         registeredMemMap_.count(addr), "Memory not registered with NCCL");
     registeredMemMap_.erase(addr);
-    for (auto* comm : registeredComms_) {
-      if (te.device_ == comm->getDevice().index()) {
-        comm->deregister_address(addr);
-      }
+    for (auto* comm : commsForDevice(registeredComms_, te.device_)) {
+      comm->deregister_address(addr, /*from_allocator_hook=*/true);
     }
   }
 }
