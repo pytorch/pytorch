@@ -67,9 +67,6 @@ from torch.testing._internal.common_utils import (
 
 test_contexts = [nullcontext, _test_mode]
 
-# Set environment variable to disable multicast for all tests in this module
-os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
-
 
 @contextmanager
 def _enable_multicast_for_test(test_case: TestCase, device_index: int):
@@ -381,16 +378,23 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             ag_entries = [
                 e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
             ]
-            # On NVLink-fabric hardware both the RendezvousRequest and handle
-            # exchange go through pg_all_gather → 2 allgathers. On hardware
-            # without NVLink fabric only the RendezvousRequest uses
-            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
-            self.assertIn(
-                len(ag_entries),
-                [1, 2],
-                lambda msg: f"{msg}\nexpected 1 or 2 NCCL _all_gather_base from rendezvous, "
-                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            bc_entries = [e for e in entries if e["profiling_name"] == "nccl:broadcast"]
+            has_mc = symm_mem_hdl.multicast_ptr != 0
+            # Exchanges routed through the PG: the RendezvousRequest allgather
+            # (always), the handle exchange allgather (NVLink-fabric hardware
+            # only; elsewhere handles go through ipc_channel), and, when
+            # multicast is set up, a success-flag allgather plus a multicast
+            # handle broadcast (fabric only).
+            lo, hi = (2, 3) if has_mc else (1, 2)
+            self.assertTrue(
+                lo <= len(ag_entries) <= hi,
+                f"expected {lo} to {hi} NCCL _all_gather_base from rendezvous "
+                f"(multicast={has_mc}), got {len(ag_entries)}: "
+                f"{[e['profiling_name'] for e in entries]}",
             )
+            self.assertLessEqual(len(bc_entries), 1)
+            if bc_entries:
+                self.assertTrue(has_mc)
 
             symm_mem_hdl.barrier()
             for peer in range(self.world_size):
@@ -1075,6 +1079,43 @@ class AsyncTPTest(MultiProcContinuousTest):
             raise AssertionError(
                 f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_fused_matmul_reduce_scatter_bfloat16_custom_reduce(self) -> None:
+        self._init_process()
+
+        M = 64
+        N = 32
+        K = 1024
+        group = dist.group.WORLD
+        rank = self.rank
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.rand(K, N, device="cuda", dtype=torch.bfloat16)
+
+        output_0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+        output_1 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+
+        torch.testing.assert_close(output_0, output_1, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_1.stride())
+
+        # The fused reducer is only selected under graph capture, so the eager
+        # call above does not cover it. output_1 already sized the symmetric
+        # memory workspace, which cannot grow during capture.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            output_2 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "avg", scatter_dim=0, group_name=group.group_name
+            )
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_2.stride())
 
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
