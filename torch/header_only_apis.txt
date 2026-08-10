@@ -48,10 +48,21 @@ HeaderOnlyArrayRef
 # c10/util/complex.h, torch/headeronly/util/complex.h
 complex
 
-# ATen/NumericUtils.h, c10/util/generic_math.h
+# torch/headeronly/util/complex_utils.h
+is_complex
+scalar_value_type
+
+# c10/util/generic_math.h
 div_floor_floating
 div_floor_integer
+
+# torch/headeronly/util/NumericUtils.h
 _isnan
+_isinf
+exp
+log
+log1p
+tan
 
 # ATen/core/PhiloxRNGEngine.h
 Philox4_32

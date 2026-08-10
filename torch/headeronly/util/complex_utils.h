@@ -1,6 +1,8 @@
+#pragma once
+
 #if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
 #error \
-    "c10/util/complex_utils.h is not meant to be individually included. Include c10/util/complex.h instead."
+    "torch/headeronly/util/complex_utils.h is not meant to be individually included. Include torch/headeronly/util/complex.h instead."
 #endif
 
 #include <limits>
@@ -44,3 +46,8 @@ bool isnan(const c10::complex<T>& v) {
 }
 
 } // namespace std
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+using c10::is_complex;
+using c10::scalar_value_type;
+HIDDEN_NAMESPACE_END(torch, headeronly)
