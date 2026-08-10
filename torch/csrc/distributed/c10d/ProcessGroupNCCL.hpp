@@ -11,10 +11,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <future>
 #include <iostream>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -304,7 +307,7 @@ class TensorShelf {
 //   ProcessGroupNCCL pg(store, rank, size);
 //   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
 //
-//   // At this point, NCCL kernel has already by queued successfully
+//   // At this point, NCCL kernel has already been queued successfully
 //   // Now, let current stream wait for the NCCL to finish, this function is
 //   // async operation as well
 //
@@ -383,6 +386,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
+
+    std::chrono::milliseconds getTimeout() const override {
+      return opTimeout_;
+    }
 
     const std::string& logPrefix() const;
 
@@ -505,6 +512,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
+    std::string logPrefix_;
     friend class ProcessGroupNCCL;
   };
 
@@ -522,6 +530,24 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     static c10::intrusive_ptr<Options> create(
         bool is_high_priority_stream = false) {
       return c10::make_intrusive<Options>(is_high_priority_stream);
+    }
+
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      auto copy = c10::make_intrusive<Options>(*this);
+      if (config.netName != nullptr) {
+        // ncclConfig_t::netName is a strdup'ed const char* (see the NCCLConfig
+        // pybind setter) and ncclConfig_t records no owner, so a plain copy
+        // would leave two Options sharing one allocation. Give the clone its
+        // own and tie the allocation to it: copies of this Options share it and
+        // free it once, when the last of them goes away. A netName from
+        // anywhere else -- the pybind setter, a config also handed to NCCL --
+        // is untracked and untouched.
+        copy->owned_net_name_ = std::shared_ptr<const char>(
+            strdup(config.netName),
+            [](const char* p) { std::free(const_cast<char*>(p)); });
+        copy->config.netName = copy->owned_net_name_.get();
+      }
+      return copy;
     }
 
     // Schedule NCCL operations on high priority CUDA streams
@@ -545,6 +571,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+
+   private:
+    // Keeps clone()'s strdup'ed config.netName alive; see clone().
+    std::shared_ptr<const char> owned_net_name_;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -861,7 +891,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -871,7 +901,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -881,12 +911,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
@@ -894,7 +924,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
@@ -929,6 +959,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      const GatherOptions& opts = GatherOptions()) override;
+
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -938,10 +973,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
@@ -993,7 +1024,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ErrorType getError() override;
 
   bool supportsShrinking() const override {
+#ifdef NCCL_HAS_COMM_SHRINK
     return true;
+#else
+    return false;
+#endif
   }
 
   // Backend-style shrink override that returns a Backend instance.
@@ -1019,23 +1054,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the given MemPool
   void deregisterMemPool(at::cuda::MemPool* pool);
 
-  // This method adds a temporary extension for the timeout period,
-  // applying to all collectives between the calling of this API and
-  // the completion of the first collective on the GPU. While this feature
-  // provides flexibility in specific scenarios, it introduces statefulness
-  // to timeout setting. Therefore, it is advisable to use this API sparingly
-  // and consider alternative approaches, such as directly setting the timeout
-  // or utilizing a barrier collective (one can set any timeout to the barrier),
-  // whenever feasible.
-  void addEphemeralTimeout(const std::chrono::milliseconds& timeout);
-
-  // This function is only intended for testing purposes because we don't
-  // want to expose the `WorkNCCL` via pybind. It verifies whether the
-  // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
-  // timeout.
-  bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<Work>& work,
-      const std::chrono::milliseconds& timeout);
+  // This method adds a temporary extension for the timeout period, applying to
+  // collectives issued after this call until the first such collective
+  // completes on the GPU. Existing work retains its original timeout.
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
 
   void setEnableNanCheck(bool enableNanCheck);
 
@@ -1088,7 +1110,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure thaht if record is True, the work obj will be enqueued via
+  // Ensure that if record is True, the work obj will be enqueued via
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
@@ -1476,6 +1498,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The number of ProcessGroupNCCL created on the current rank.
   size_t local_id_;
+
+  // Identity rank mapping [0, size_), used by groupRanks() when
+  // options_->global_ranks_in_group is empty. Filled in the constructor.
+  std::vector<uint64_t> defaultRanks_;
 
   std::string logPrefix_;
 

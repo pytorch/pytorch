@@ -111,7 +111,7 @@ static std::optional<at::Tensor> runTorchSlice_opset10(
   if (inputTensorValues.size() < minSliceInputCount ||
       inputTensorValues.size() > maxSliceInputCount) {
     TORCH_WARN(
-        "Constant folding - Invalid number of inputs found for opset opset >= 10 onnx::Slice op. "
+        "Constant folding - Invalid number of inputs found for opset >= 10 onnx::Slice op. "
         "Constant folding not applied.");
     return std::nullopt;
   }

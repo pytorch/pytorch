@@ -100,7 +100,7 @@ def reduce(
         else:
             warnings.warn(
                 "`nccl.reduce` with an output tensor list is deprecated. "
-                "Please specify a single output tensor with argument 'output' instead instead.",
+                "Please specify a single output tensor with argument 'output' instead.",
                 FutureWarning,
                 stacklevel=2,
             )

@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
@@ -250,7 +249,7 @@ TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
 }
 
 TORCH_META_FUNC(neg)(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
@@ -593,7 +592,6 @@ Tensor real(const Tensor& self) {
 Tensor _neg_view(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_neg(!self.is_neg());
-  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -654,7 +652,6 @@ Tensor resolve_conj(const Tensor& self) {
 Tensor _conj(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_conj(!self.is_conj());
-  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -847,7 +844,7 @@ Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
 Tensor positive(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
   return self;
 }
 
