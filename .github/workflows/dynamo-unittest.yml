@@ -58,6 +58,7 @@ jobs:
       compiler: clang21
       cuda-version: cpu
     secrets: inherit
+# probe: trigger dynamo_wrapped matrix to capture per-version skip failures
 
   dynamo-test:
     name: dynamo-test
