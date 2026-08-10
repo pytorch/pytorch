@@ -57,6 +57,16 @@ class UserDefinedSequence:
         return f"UserDefinedSequence({self.items})"
 
 
+class IndexLike:
+    """Object usable wherever an integer index is expected (defines __index__)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
 class TestSqConcat(torch._dynamo.test_case.TestCase):
     """Tests for sq_concat (+) and sq_inplace_concat (+=) operators for sequences."""
 
@@ -345,6 +355,79 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d = collections.deque([1, 2, 3])
         d *= -1
         self.assertEqual(list(d), [])
+
+    # --- deque.rotate ---
+
+    @make_dynamo_test
+    def test_deque_rotate_default(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate()
+        self.assertEqual(list(d), [5, 1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_deque_rotate_positive(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(2)
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_negative(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(-2)
+        self.assertEqual(list(d), [3, 4, 5, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_rotate_wraps(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(7)
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_index_arg(self):
+        d = collections.deque([1, 2, 3, 4, 5])
+        d.rotate(IndexLike(2))
+        self.assertEqual(list(d), [4, 5, 1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_rotate_short(self):
+        d = collections.deque([1])
+        d.rotate(3)
+        self.assertEqual(list(d), [1])
+        d = collections.deque([])
+        d.rotate(2)
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_rotate_with_maxlen(self):
+        d = collections.deque([1, 2, 3], maxlen=3)
+        d.rotate(1)
+        d.append(9)
+        self.assertEqual(list(d), [1, 2, 9])
+
+    @make_dynamo_test
+    def test_deque_rotate_noop_bumps_state(self):
+        # rotate() bumps the iteration-state counter whenever len > 1, even when
+        # n is a multiple of len (no element actually moves), so mutation during
+        # iteration is still detected.
+        for n in (0, 4):
+            d = collections.deque([1, 2, 3, 4])
+            with self.assertRaises(RuntimeError):
+                for _ in d:
+                    d.rotate(n)
+
+    # --- deque setattr (deque has no __dict__) ---
+
+    @make_dynamo_test
+    def test_deque_setattr_maxlen_readonly(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.maxlen = 10
+
+    @make_dynamo_test
+    def test_deque_setattr_unknown_attr(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.foo = 1
 
     # --- list re-init (list.__init__) ---
 
