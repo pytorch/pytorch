@@ -5540,9 +5540,7 @@ def _infer_scale_swizzle_impl(
                 ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
                 k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
                 ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
-                if eq_fn(scale_numel, ext_numel_a) or eq_fn(
-                    scale_numel, ext_numel_b
-                ):
+                if eq_fn(scale_numel, ext_numel_a) or eq_fn(scale_numel, ext_numel_b):
                     return (
                         ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
                         SwizzleType.SWIZZLE_32_4_4,
@@ -5553,9 +5551,7 @@ def _infer_scale_swizzle_impl(
                 ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
                 k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
                 ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
-                if eq_fn(scale_numel, ext_numel_a) or eq_fn(
-                    scale_numel, ext_numel_b
-                ):
+                if eq_fn(scale_numel, ext_numel_a) or eq_fn(scale_numel, ext_numel_b):
                     return (
                         ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
                         SwizzleType.SWIZZLE_32_4_4,
