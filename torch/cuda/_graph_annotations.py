@@ -104,7 +104,9 @@ _annotations_enabled: bool = False
 # annotations are enabled.
 _annotation_backend: str = "edge_walk"
 
-# Annotations of the ``mark_kernels`` scopes currently open, outermost first. Only the
+# Merged annotations of the ``mark_kernels`` scopes currently open, innermost last: each
+# entry already includes its enclosing scopes, with the inner scope winning shared keys. So
+# the innermost entry is what to annotate with, and leaving a scope just pops. Only the
 # "cupti" backend reads this (at node-creation time); the edge walk derives the same
 # information from graph topology after the fact.
 _active_scopes: list[dict[str, Any]] = []
@@ -122,31 +124,6 @@ def capture_root_graph_id() -> int | None:
     return _capture_root_graph_id
 
 
-# The merge of _active_scopes, maintained whenever that stack changes rather than derived
-# per node: scopes are entered and left orders of magnitude less often than nodes are
-# created, and merging per node would also hand every node its own equal-but-distinct dict.
-_current_annotation: dict[str, Any] | None = None
-
-
-def _refresh_current_annotation() -> None:
-    """Recompute the merged annotation after ``_active_scopes`` changes.
-
-    Nested scopes merge key-by-key with the inner scope winning, matching what the edge walk
-    produces via ``resolve_pending_annotations``. A single scope is used as-is, so every node
-    it covers shares one dict -- as they do for nested scopes too."""
-    global _current_annotation
-    if not _active_scopes:
-        _current_annotation = None
-    elif len(_active_scopes) == 1:
-        _current_annotation = _active_scopes[0]
-    else:
-        merged: dict[str, Any] = {}
-        for annotation in reversed(_active_scopes):
-            for key, value in annotation.items():
-                merged.setdefault(key, value)
-        _current_annotation = merged
-
-
 def _set_annotations_enabled(enabled: bool) -> None:
     """Set whether annotation recording is active. Used by ``torch.cuda.graph``
     to scope annotations to a capture; not a public API."""
@@ -156,7 +133,6 @@ def _set_annotations_enabled(enabled: bool) -> None:
         _capture_root_graph_id = None
         # A capture that raised mid-scope would otherwise leak its scopes into the next one.
         _active_scopes.clear()
-        _refresh_current_annotation()
 
 
 def _set_annotation_backend(backend: str) -> None:
@@ -171,12 +147,9 @@ def _set_annotation_backend(backend: str) -> None:
 
 
 def current_annotation() -> dict[str, Any] | None:
-    """The merged annotation for the ``mark_kernels`` scopes currently open, or ``None``
-    when none are.
-
-    A bare read of state maintained by :func:`_refresh_current_annotation`, because the CUPTI
-    node-creation handler calls this once per node on the capture thread. Not a public API."""
-    return _current_annotation
+    """The merged annotation for the ``mark_kernels`` scopes currently open, or ``None`` when
+    none are. Not a public API."""
+    return _active_scopes[-1] if _active_scopes else None
 
 
 def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
@@ -591,19 +564,15 @@ def mark_kernels(annotation: str | dict[str, Any]):
     if _annotation_backend == "cupti":
         # Nodes are attributed as CUPTI reports their creation, so the scope only has to
         # publish itself as the ambient annotation -- no frontier snapshot, and no rescan
-        # per enclosing scope.
-        _active_scopes.append(annotation)
-        _refresh_current_annotation()
+        # per enclosing scope. Merge into the enclosing scope on the way in (inner wins), so
+        # leaving is a pop and the enclosing annotation is restored as it was.
+        _active_scopes.append(
+            {**_active_scopes[-1], **annotation} if _active_scopes else annotation
+        )
         try:
             yield
         finally:
-            # Match by identity: a scope that raised must still pop, and popping by value
-            # could remove an equal annotation from an enclosing scope.
-            for i in range(len(_active_scopes) - 1, -1, -1):
-                if _active_scopes[i] is annotation:
-                    del _active_scopes[i]
-                    break
-            _refresh_current_annotation()
+            _active_scopes.pop()
         return
 
     scope = _begin_kernel_scope()

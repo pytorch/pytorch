@@ -1076,12 +1076,8 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
 # Annotation options live in that dict rather than as separate arguments so later ones do
 # not each widen the signature; validating here means a typo raises instead of silently
 # leaving the default in place.
-# Recognized keys of graph()'s annotation_config, each mapped to ``(default, allowed)``.
-# ``allowed`` is the tuple of permitted values, or None for an option that is not an
-# enumeration (a path or a limit, say) and validates itself. The default is stored
-# separately rather than taken as the first allowed value, so a boolean or free-form option
-# can be added without contorting it.
-_ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...] | None]] = {
+# Recognized keys of graph()'s annotation_config, each mapped to (default, allowed values).
+_ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...]]] = {
     "backend": ("auto", ("auto", "cupti", "edge_walk")),
 }
 
@@ -1089,12 +1085,8 @@ _ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...] | No
 def _parse_annotation_config(
     config: dict[str, typing.Any] | None,
 ) -> dict[str, typing.Any]:
-    """Validate ``graph(annotation_config=...)`` and resolve it against the defaults.
-
-    Returns every recognized key, so callers read the result directly instead of repeating
-    the defaults. An unrecognized key or value raises, so a typo fails loudly rather than
-    silently leaving the default in place.
-    """
+    """Validate ``graph(annotation_config=...)`` and resolve it against the defaults, so an
+    unrecognized key or value raises instead of silently doing nothing."""
     resolved = {key: default for key, (default, _) in _ANNOTATION_CONFIG_KEYS.items()}
     if config is None:
         return resolved
@@ -1106,7 +1098,7 @@ def _parse_annotation_config(
         )
     for key, value in config.items():
         allowed = _ANNOTATION_CONFIG_KEYS[key][1]
-        if allowed is not None and value not in allowed:
+        if value not in allowed:
             raise ValueError(
                 f"annotation_config[{key!r}] must be one of {list(allowed)}, got {value!r}"
             )
@@ -1141,21 +1133,16 @@ class graph:
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
             Requires single-threaded autograd; wrap the capture in
             ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
-        annotation_config (dict, optional): How annotation recording behaves, when
-            ``enable_annotations=True``. Options live in this dict rather than as separate
-            arguments so later ones do not each widen the signature; an unrecognized key or
-            value raises, so a typo fails instead of silently doing nothing. Currently
-            supported:
-
-            ``"backend"`` -- how ``mark_kernels`` scopes discover which nodes they contain.
-            ``"auto"`` (default) uses CUPTI node-creation callbacks if the CUPTI monitor
-            already holds a subscription, and otherwise falls back to walking the capture
-            graph's dependent edges. ``"cupti"`` requires the CUPTI path and brings the
-            monitor up if needed -- note that once a CUPTI subscription is held, kineto's
-            one-shot initialization fails permanently, so a later
-            :class:`torch.profiler.profile` records no GPU activity. ``"edge_walk"`` forces
-            the dependent-edge walk, which cannot see nodes created while the current stream
-            was not yet capturing.
+        annotation_config (dict, optional): Options for annotation recording, used when
+            ``enable_annotations=True``. An unrecognized key or value raises. Currently
+            supports ``"backend"``, which selects how ``mark_kernels`` scopes discover their
+            nodes: ``"auto"`` (default) uses CUPTI node-creation callbacks when the CUPTI
+            monitor already holds a subscription and otherwise walks the capture graph's
+            dependent edges; ``"cupti"`` requires the CUPTI path, bringing the monitor up if
+            needed -- which prevents kineto from initializing, so a later
+            :class:`torch.profiler.profile` records no GPU activity; ``"edge_walk"`` forces
+            the walk, which cannot see nodes created while the current stream was not yet
+            capturing.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
