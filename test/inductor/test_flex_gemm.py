@@ -1598,6 +1598,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             _SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm/scaled_mm"
         )
 
+    def test_scaled_mm_requires_functional_api(self):
+        for name, gemm_op in (
+            ("packet", torch.ops.aten._scaled_mm_v2),
+            ("default", torch.ops.aten._scaled_mm_v2.default),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    RuntimeError, "use torch.nn.functional.scaled_mm"
+                ):
+                    flex_gemm(gemm_op, (), lambda acc: acc)
+
     @parametrize(
         "case",
         (
@@ -1684,6 +1695,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
 
+    @unittest.skipUnless(importlib.util.find_spec("quack"), "requires external QuACK")
     def test_generated_captured_arg_rejects_addmm_scope(self):
         def fn(bias, a, b, scale):
             return flex_gemm(
@@ -2250,6 +2262,76 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         torch.testing.assert_close(actual, expected)
+        self.assertIn("_scaled_mm_v2", code)
+        self.assertNotIn("flex_gemm_runtime", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
+    def test_scaled_mm_fast_accum_falls_back(self):
+        from quack.blockscaled.operand import BlockScaledOperand
+
+        import torch.nn.functional as F
+
+        m = n = k = 64
+        a = BlockScaledOperand.quantize(
+            torch.randn(m, k, device="cuda", dtype=torch.bfloat16),
+            "mxfp8_e4m3",
+        )
+        b = BlockScaledOperand.quantize(
+            torch.randn(k, n, device="cuda", dtype=torch.bfloat16),
+            "mxfp8_e4m3",
+            dim=-2,
+        )
+        scale_a = a.scale.flatten()
+        scale_b = b.scale.flatten()
+        recipe = F.ScalingType.BlockWise1x32
+        swizzle = F.SwizzleType.SWIZZLE_32_4_4
+        gemm_kwargs = {
+            "scale_recipe_a": recipe,
+            "scale_recipe_b": recipe,
+            "swizzle_a": swizzle,
+            "swizzle_b": swizzle,
+            "output_dtype": torch.bfloat16,
+            "use_fast_accum": True,
+        }
+
+        def epilogue_fn(acc):
+            return (acc + 0.25).relu()
+
+        def fn(a_data, b_data, a_scale, b_scale):
+            return flex_gemm(
+                F.scaled_mm,
+                (a_data, b_data, a_scale, b_scale),
+                epilogue_fn,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        expected = epilogue_fn(
+            F.scaled_mm(
+                a.qdata,
+                b.qdata,
+                scale_a,
+                recipe,
+                scale_b,
+                recipe,
+                swizzle,
+                swizzle,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=True,
+            )
+        )
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a.qdata,
+            b.qdata,
+            scale_a,
+            scale_b,
+        )
+
+        torch.testing.assert_close(actual, expected, rtol=0.03, atol=0.3)
         self.assertIn("_scaled_mm_v2", code)
         self.assertNotIn("flex_gemm_runtime", code)
 
