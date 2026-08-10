@@ -2941,7 +2941,7 @@ Arguments:
               &::c10d::ProcessGroup::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Collectively create a one-sided communication window; all ranks must call in the same order")
+              "Create a new one-sided communication window")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -3099,7 +3099,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               &::c10d::Backend::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Collectively create a one-sided communication window; all ranks must call in the same order")
+              "Create a new one-sided communication window")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
@@ -4179,9 +4179,6 @@ Returns:
           .def(
               "deregister_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool)
-          .def(
-              "perform_nocolor_split",
-              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4227,11 +4224,6 @@ Returns:
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "perform_nocolor_split",
-          [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
-            self.getPrimary()->performNocolorSplit(device);
-          })
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {

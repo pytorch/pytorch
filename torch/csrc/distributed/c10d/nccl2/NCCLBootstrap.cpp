@@ -161,8 +161,7 @@ void populateNcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.nvlsCTAs=" << config.nvlsCTAs;
     }
-#endif
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
     else if (key == "nChannelsPerNetPeer" || key == "n_channels_per_net_peer") {
       config.nChannelsPerNetPeer = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
