@@ -37,19 +37,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
-
-
-def _load_export():
-    # By file path (like the sibling tools): `import export` after a
-    # sys.path insert works at runtime but is opaque to type checkers.
-    spec = importlib.util.spec_from_file_location(
-        "export", os.path.join(HERE, "export.py")
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError("cannot load tools/native_aot/export.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+# See export.py: as a script sys.path[0] is this directory, so the repo root
+# has to go on the path for `tools.native_aot` to import from any cwd.
+sys.path.insert(0, REPO)
 
 
 def _report(msg: str) -> None:
@@ -96,7 +86,8 @@ def should_run() -> bool:
         return False
     arch_list = os.getenv("TORCH_CUDA_ARCH_LIST")
     if arch_list:
-        export_mod = _load_export()
+        from tools.native_aot import export as export_mod
+
         if not export_mod.archs_from_cuda_arch_list(arch_list):
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "

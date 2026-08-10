@@ -699,6 +699,25 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_list_input(self):
+        def func(output, inputs):
+            torch.distributed.reduce_scatter(output, inputs)
+            return output
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = [
+                torch.ones(4, 4, device=self.device) * (self.rank + i)
+                for i in range(self.world_size)
+            ]
+            output = torch.empty(4, 4, device=self.device)
+            correct = torch.empty(4, 4, device=self.device)
+            func_compiled = torch.compile(func, fullgraph=True)
+            func_compiled(output, inputs)
+            func(correct, inputs)
+            self.assertTrue(same(output, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -1462,6 +1481,72 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
         if counter.op_count != 3:
             raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        local_size = [4, 4]
+        # single-proc test
+        inputs = [torch.ones(local_size, device=self.device)]
+        outputs = torch.empty(local_size, device=self.device)
+        correct_outputs = torch.empty(local_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_size_mismatch(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([8, 4], device=self.device)]
+        outputs = torch.empty([4, 4], device=self.device)
+        compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Exception,
+            "reduce_scatter requires every input_list element to have the same size as output",
+        ):
+            compiled(outputs, inputs, pg=GroupMember.WORLD)
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_scalar(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([], device=self.device)]
+        outputs = torch.empty([], device=self.device)
+        correct_outputs = torch.empty([], device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
