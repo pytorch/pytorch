@@ -10,6 +10,7 @@
 import json
 import os
 import sys
+import time
 import unittest
 from datetime import timedelta
 
@@ -22,12 +23,17 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch._C._distributed_c10d import FlightRecorderHook
+from torch.distributed.distributed_c10d import _world
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
+# CPU coverage comes from "fake" rather than gloo: ProcessGroupGloo records
+# itself, so the hook skips its ops and a gloo group can only show that nothing
+# was recorded. "fake" reaches the hook through the same c10d ops as any other
+# backend.
 FR_HOOK_BACKENDS = [
-    ("gloo", "cpu"),
+    ("fake", "cpu"),
     ("nccl2", "cuda"),
 ]
 
@@ -45,9 +51,6 @@ class AbstractFlightRecorderHookTest:
 
     def setUp(self):
         super().setUp()
-        # Note: gloo also records natively into the same recorder; keying
-        # entries by the hook's profiling_name prefix ("c10d:") keeps the
-        # assertions backend-agnostic.
         os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
         self._spawn_processes()
 
@@ -74,16 +77,24 @@ class AbstractFlightRecorderHookTest:
         return dist.group.WORLD
 
     def _hook_entries(self):
-        trace = json.loads(torch._C._distributed_c10d._dump_fr_trace_json())
-        return [
-            e
-            for e in trace.get("entries", [])
-            if e["profiling_name"].startswith("c10d:")
-        ]
+        # Each hooked backend records into a recorder instance of its own.
+        dump = torch._C._distributed_c10d._dump_fr_trace_json(backend=self.backend_name)
+        return json.loads(dump).get("entries", [])
+
+    def _name(self, op):
+        # profiling_name carries the backend's own name as the comm_lib field.
+        return f"{self.backend_name}:{op}"
+
+    def _fr_hook(self, pg):
+        # A backend with no native recording is hooked at group creation, so
+        # reuse that hook; attaching a second one would record every collective
+        # twice. "fake" is skipped there and has to be attached by hand.
+        hook = _world.pg_flight_recorder_hooks.get(pg)
+        return hook if hook is not None else FlightRecorderHook.attach(pg)
 
     def test_records_and_retires_collectives(self):
         pg = self._init_pg()
-        hook = FlightRecorderHook.attach(pg)
+        hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(8, device=self.device)
@@ -93,29 +104,34 @@ class AbstractFlightRecorderHookTest:
         if self.device_type == "cuda":
             torch.cuda.synchronize()
 
-        entries = self._hook_entries()[before:]
+        # An entry is retired when the collective completes, which a backend
+        # that pushes completion reports from its watchdog, about a tick after
+        # synchronize() returns. A backend without one retires at issue.
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            entries = self._hook_entries()[before:]
+            if len(entries) >= 3 and all(e["retired"] for e in entries):
+                break
+            time.sleep(0.05)
         names = [e["profiling_name"] for e in entries]
-        self.assertIn("c10d:allreduce", names)
-        self.assertIn("c10d:broadcast", names)
-        self.assertIn("c10d:barrier", names)
-        # Post-hooks fire after issue, so every recorded op must be retired.
-        # With null start/end events (no GPU timing) the state stays
-        # "scheduled"; retired is the completion signal, as with Gloo's
-        # native FR recording.
+        self.assertIn(self._name("all_reduce"), names)
+        self.assertIn(self._name("broadcast"), names)
+        self.assertIn(self._name("barrier"), names)
         for e in entries:
             self.assertTrue(e["retired"], msg=str(e))
         hook.remove()
 
     def test_records_tensor_metadata(self):
         pg = self._init_pg()
-        hook = FlightRecorderHook.attach(pg)
+        hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(4, 8, device=self.device)
         dist.all_reduce(t)
 
         entries = self._hook_entries()[before:]
-        allreduce = [e for e in entries if e["profiling_name"] == "c10d:allreduce"]
+        name = self._name("all_reduce")
+        allreduce = [e for e in entries if e["profiling_name"] == name]
         self.assertEqual(len(allreduce), 1)
         self.assertEqual(allreduce[0]["input_sizes"], [[4, 8]])
         self.assertEqual(allreduce[0]["input_dtypes"], ["Float"])
@@ -123,7 +139,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_p2p_and_collective_seq_ids(self):
         pg = self._init_pg()
-        hook = FlightRecorderHook.attach(pg)
+        hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(4, device=self.device)
@@ -141,8 +157,9 @@ class AbstractFlightRecorderHookTest:
             torch.cuda.synchronize()
 
         entries = self._hook_entries()[before:]
-        p2p = [e for e in entries if e["profiling_name"] in ("c10d:send", "c10d:recv")]
-        coll = [e for e in entries if e["profiling_name"] == "c10d:allreduce"]
+        # The peer goes into the name ("send 0->1"), so match on the flag.
+        p2p = [e for e in entries if e["is_p2p"]]
+        coll = [e for e in entries if e["profiling_name"] == self._name("all_reduce")]
         self.assertEqual(len(p2p), 2)
         self.assertEqual(len(coll), 1)
         # P2P ops advance p2p_seq_id only; collectives advance
@@ -153,7 +170,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_remove_stops_recording(self):
         pg = self._init_pg()
-        hook = FlightRecorderHook.attach(pg)
+        hook = self._fr_hook(pg)
         t = torch.ones(4, device=self.device)
         dist.all_reduce(t)
         count_attached = len(self._hook_entries())
@@ -165,7 +182,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_multiple_collectives_entry_order(self):
         pg = self._init_pg()
-        hook = FlightRecorderHook.attach(pg)
+        hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(4, device=self.device)
@@ -173,11 +190,8 @@ class AbstractFlightRecorderHookTest:
             dist.all_reduce(t)
 
         entries = self._hook_entries()[before:]
-        seqs = [
-            e["collective_seq_id"]
-            for e in entries
-            if e["profiling_name"] == "c10d:allreduce"
-        ]
+        name = self._name("all_reduce")
+        seqs = [e["collective_seq_id"] for e in entries if e["profiling_name"] == name]
         self.assertEqual(seqs, sorted(seqs))
         self.assertEqual(len(seqs), 5)
         hook.remove()
