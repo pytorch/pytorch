@@ -84,7 +84,7 @@ if(WIN32 AND BUILD_PYTHON)
   # CUDA runtime DLLs - only for CUDA builds.
   if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
     # CUDA 13+ moves DLLs to an architecture-specific bin directory.
-    if(WIN32 AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
       set(_cuda_windows_arch "arm64")
     else()
       set(_cuda_windows_arch "x64")
