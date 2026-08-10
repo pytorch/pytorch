@@ -440,10 +440,11 @@ def generic_repr(
             _repr_running.discard(obj_id)
         result_type = maybe_get_python_type(result)
         if not issubclass(result_type, str):
-            raise_type_error(
-                tx,
-                f"__repr__ returned non-string (type {result_type.__name__})",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
+            else:
+                err_str = f"__repr__ returned non-string (type {result_type.__name__})"
+            raise_type_error(tx, err_str)
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
@@ -475,10 +476,11 @@ def generic_str(
 
     result_type = maybe_get_python_type(result)
     if not issubclass(result_type, str):
-        raise_type_error(
-            tx,
-            f"__str__ returned non-string (type {result_type.__name__})",
-        )
+        if sys.version_info >= (3, 15):
+            err_str = f"{obj.python_qualified_name()}.__str__() must return a str, not {result.python_qualified_name()}"
+        else:
+            err_str = f"__str__ returned non-string (type {result_type.__name__})"
+        raise_type_error(tx, err_str)
     return result
 
 
@@ -881,6 +883,22 @@ def pynumber_index(
     return result
 
 
+def pynumber_tobase(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, base: int
+) -> VariableTracker | None:
+    """Mirrors PyNumber_ToBase (bin/oct/hex dispatch).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1653-L1666
+
+    Resolves __index__ (raising TypeError if absent), then formats the
+    resulting int in the requested base. Returns None (graph break) when the
+    index result is not a Python constant.
+    """
+    index = pynumber_index(tx, obj)
+    format_fn = {2: bin, 8: oct, 16: hex}[base]
+    return ConstantVariable.create(format_fn(index.as_python_constant()))
+
+
 def pyiter_next(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
@@ -1016,10 +1034,13 @@ def generic_getiter(
         res = obj.tp_iter_impl(tx)
         res_T = maybe_get_python_type(res)
         if not pyiter_check(res_T):
-            raise_type_error(
-                tx,
-                f"iter() returned non-iterator of type '{res.python_type_name()}'",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{obj.python_qualified_name()}.__iter__() must return an iterator, not {res.python_qualified_name()}"
+            else:
+                err_str = (
+                    f"iter() returned non-iterator of type '{res.python_type_name()}'"
+                )
+            raise_type_error(tx, err_str)
         return res
     elif pysequence_check(T):
         from .functions import UserFunctionVariable
