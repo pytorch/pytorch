@@ -293,8 +293,12 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       if (shutdown_) {
         break;
       }
+      // With abort_process_on_timeout_or_error disabled this is a no-op and
+      // the loop keeps running: comm_state_ stays TIMEOUT/ERROR so getError()
+      // reports it, and the next collective throws from
+      // checkAndAbortIfTimedOutOrError().
       if (comm_state_ != CommState::NORMAL) {
-        handleWatchdogFailure(
+        abortProcess(
             comm_state_ == CommState::TIMEOUT
                 ? "timeout - timeout watchdog detected operation timeout"
                 : "error - timeout watchdog detected operation error");
@@ -314,16 +318,38 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
           if (!options_c10d_->enable_reconfigure) {
             TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
                                 << ": " << ncclGetErrorString(asyncErr);
+            // abort() only tears the communicator down; abortProcess() runs
+            // the abort hooks and terminates if the mode allows it.
+            abort();
+            abortProcess(
+                std::string("error - nccl hit async error: ") +
+                ncclGetErrorString(asyncErr));
           } else {
             // Revoked below by the reconfigurable-mode handler.
             TC_LOG(ERROR, this)
                 << "Async error on rank " << rank_ << ": "
                 << ncclGetErrorString(asyncErr) << " (reconfigurable mode)";
           }
-          handleWatchdogFailure(
-              std::string("error - nccl hit async error: ") +
-              ncclGetErrorString(asyncErr));
         }
+      }
+
+      // In reconfigurable mode, gracefully revoke the communicator on any
+      // failure
+      // -- timeout or error, whether surfaced by the work queue or an async
+      // comm error -- so in-flight operations are stopped and the comm can
+      // later be reconfigured. This is the only revoke path under CUDA graph
+      // replay, where no synchronous collective reaches
+      // checkAndAbortIfTimedOutOrError(); isAborted() then reports the revoked
+      // state to the caller. revokeNcclComm() is idempotent and the revoked_
+      // check keeps the watchdog from logging every iteration.
+      if (comm_state_ != CommState::NORMAL &&
+          options_c10d_->enable_reconfigure && !revoked_.load()) {
+        TC_LOG(ERROR, this)
+            << "Revoking communicator on rank " << rank_
+            << " - watchdog detected "
+            << (comm_state_ == CommState::TIMEOUT ? "timeout" : "error")
+            << " (reconfigurable mode)";
+        revokeNcclComm();
       }
     }
   } catch (const std::exception& e) {
@@ -355,12 +381,14 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::runtime_error("NCCL operation timed out");
     } else {
-      handleWatchdogFailure("timeout - collective operation timed out");
+      abortNcclComm();
+      abortProcess("timeout - collective operation timed out");
       throw std::runtime_error("NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
-    // CleanUpOnly may have already removed the communicator on the watchdog
-    // thread, so a later collective cannot query the original NCCL error.
+    // With abort_process_on_timeout_or_error disabled the watchdog aborts the
+    // communicator on an async error and lets the process live, so a later
+    // collective can reach here with no communicator left to query.
     if (!nccl_comm_) {
       throw std::runtime_error(
           "NCCL communicator was aborted after a previous error");
@@ -379,7 +407,8 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::move(ncclException);
     }
-    handleWatchdogFailure(std::string("error - ") + ncclException.what());
+    abortNcclComm();
+    abortProcess(std::string("error - ") + ncclException.what());
     throw std::move(ncclException);
   }
 }
@@ -530,8 +559,7 @@ std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
     bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
-      !event_pool_.empty()) {
+  if (timing_enabled == timing_enabled_.load() && !event_pool_.empty()) {
     auto event = std::move(event_pool_.front());
     event_pool_.pop();
     return event;
@@ -546,7 +574,7 @@ void ProcessGroupNCCL::returnEvent(
     bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
+  if (timing_enabled == timing_enabled_.load() &&
       event_pool_.size() < max_event_pool_size_) {
     event_pool_.push(std::move(event));
   }

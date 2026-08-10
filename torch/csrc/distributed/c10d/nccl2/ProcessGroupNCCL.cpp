@@ -259,8 +259,7 @@ void ProcessGroupNCCL::init(at::Device device) {
 void ProcessGroupNCCL::initNcclResources() {
   c10::cuda::CUDAGuard gpuGuard(device_);
 
-  is_high_priority_stream_ = options_c10d_->is_high_priority_stream ||
-      getCvarBool(::c10d::TORCH_NCCL_HIGH_PRIORITY, false);
+  is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
 
   if (!internal_stream_) {
     internal_stream_.emplace(
@@ -285,7 +284,7 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
-  if (!blocking_wait_ && !shutdown_) {
+  if (!shutdown_) {
     timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
   }
 
@@ -619,7 +618,7 @@ void ProcessGroupNCCL::stopWatchdog() {
 void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   // Never terminate the process in reconfigurable mode: callers fall back to
   // revoke + throw so the failure can be handled by reconfiguring.
-  if (!SHOULD_TEAR_DOWN(async_error_handling_) ||
+  if (!abort_process_on_timeout_or_error_ ||
       options_c10d_->enable_reconfigure) {
     return;
   }
@@ -627,48 +626,6 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
                       << reason;
   runAbortHooks();
   ::abort();
-}
-
-void ProcessGroupNCCL::handleWatchdogFailure(const std::string& reason) {
-  if (options_c10d_->enable_reconfigure) {
-    revokeNcclComm();
-    return;
-  }
-
-  if (SHOULD_CLEAN_UP(async_error_handling_)) {
-    if (timeout_thread_.joinable() &&
-        std::this_thread::get_id() == timeout_thread_.get_id()) {
-      shutdown_ = true;
-      timeout_cv_.notify_all();
-    } else {
-      stopWatchdog();
-    }
-    try {
-      abortNcclComm();
-    } catch (const std::exception& e) {
-      TC_LOG(ERROR, this) << "Failed to clean up NCCL communicator after "
-                          << reason << ": " << e.what();
-      abortProcess(reason);
-      return;
-    }
-  }
-  abortProcess(reason);
-}
-
-void ProcessGroupNCCL::handleBlockingWaitFailure(
-    WorkNCCL::WorkStatus status,
-    int64_t reconfigure_uuid) {
-  std::lock_guard reconfigureLock(reconfigure_mutex_);
-  if (reconfigure_uuid_ != reconfigure_uuid) {
-    return;
-  }
-  comm_state_ = status == WorkNCCL::WorkStatus::TIMEDOUT ? CommState::TIMEOUT
-                                                         : CommState::ERROR;
-  if (options_c10d_->enable_reconfigure) {
-    revokeNcclComm();
-  } else {
-    abortNcclComm();
-  }
 }
 
 void ProcessGroupNCCL::revokeNcclComm() {
