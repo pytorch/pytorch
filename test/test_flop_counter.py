@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils.flop_counter import sdpa_backward_flop_count, sdpa_flop_count
@@ -889,6 +890,34 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """2000""")
 
+    def test_matmul_flop_formula_extra_positional_out(self):
+        # Regression test: Inductor's count_flops_fx can hand a matmul flop
+        # formula the output as an extra trailing positional arg, while
+        # shape_wrapper simultaneously passes out_shape by keyword.
+        # shape_wrapper strips the extra trailing positional before forwarding
+        # to the formula, preventing a TypeError collision on out_shape.
+        from torch.utils.flop_counter import flop_registry
+
+        # Mirrors FlopCounterMode._count_flops: f(*args, **kwargs, out_val=out),
+        # where args carries the output shape as a trailing positional.
+        a, b = (8, 128, 64), (8, 64, 32)
+        out = (8, 128, 32)
+        expected_bmm = 8 * 128 * 32 * 2 * 64
+        self.assertEqual(
+            flop_registry[torch.ops.aten.bmm](a, b, out, out_val=out), expected_bmm
+        )
+        self.assertEqual(
+            flop_registry[torch.ops.aten.baddbmm](out, a, b, out, out_val=out),
+            expected_bmm,
+        )
+
+        a2, b2 = (128, 64), (64, 32)
+        out2 = (128, 32)
+        self.assertEqual(
+            flop_registry[torch.ops.aten.addmm](out2, a2, b2, out2, out_val=out2),
+            128 * 32 * 2 * 64,
+        )
+
     def test_hook_registration(self):
         model = torch.nn.Linear(100, 100)
         x = torch.randn(3, 100)
@@ -1370,6 +1399,7 @@ class TestFlexAttentionEstimation(TestCase):
         expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
         self.assertEqual(fwd_flops, expected_flops)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not HAS_CUDA, "requires CUDA")
     def test_flex_attention_roofline_estimate(self):
         """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""

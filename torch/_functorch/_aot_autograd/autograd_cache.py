@@ -57,6 +57,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
+from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
@@ -447,35 +448,50 @@ def _get_custom_estimator_solver_uuids(
     return runtime_estimator_uuid, solver_uuid
 
 
-def _storage_offset_for_cache_key(input: torch.Tensor) -> int:
+def _storage_offset_for_cache_key(input: torch.Tensor) -> int | None:
     storage_offset = input.storage_offset()
     if isinstance(storage_offset, torch.SymInt):
-        try:
-            storage_offset = guarding_hint_or_throw(storage_offset)
-        except Exception as e:
-            raise BypassAOTAutogradCache(
-                "Cannot cache graph with unbacked symbolic input storage offset"
-            ) from e
+        # Symbolic offsets are graph inputs, so the compiled artifact is generic
+        # over their values. Match StorageOffset guard emission, which also skips
+        # symbolic offsets instead of specializing on a guarding hint.
+        return None
     return int(storage_offset)
+
+
+def _duplicate_input_groups(
+    example_inputs: Sequence[object],
+) -> tuple[tuple[int, ...], ...]:
+    object_id_to_input_positions: dict[int, list[int]] = {}
+    for i, input in enumerate(example_inputs):
+        if isinstance(input, torch.Tensor):
+            object_id_to_input_positions.setdefault(id(input), []).append(i)
+
+    return tuple(
+        tuple(input_positions)
+        for input_positions in object_id_to_input_positions.values()
+        if len(input_positions) > 1
+    )
 
 
 def _shared_storage_input_groups(
     example_inputs: Sequence[object],
-) -> tuple[tuple[tuple[int, int], ...], ...]:
-    storage_ref_to_offsets: dict[StorageWeakRef, list[tuple[int, int]]] = {}
+) -> tuple[tuple[tuple[int, int | None], ...], ...]:
+    storage_ref_to_inputs: dict[StorageWeakRef, list[tuple[int, torch.Tensor]]] = {}
     for i, input in enumerate(example_inputs):
-        if not isinstance(input, torch.Tensor):
+        if (
+            not isinstance(input, torch.Tensor)
+            or is_sparse_any(input)
+            or not torch._C._has_storage(input)
+        ):
             continue
 
         storage_ref = StorageWeakRef(input.untyped_storage())
-        storage_ref_to_offsets.setdefault(storage_ref, []).append(
-            (i, _storage_offset_for_cache_key(input))
-        )
+        storage_ref_to_inputs.setdefault(storage_ref, []).append((i, input))
 
     return tuple(
-        tuple(offsets)
-        for offsets in storage_ref_to_offsets.values()
-        if len(offsets) > 1
+        tuple((i, _storage_offset_for_cache_key(input)) for i, input in inputs)
+        for inputs in storage_ref_to_inputs.values()
+        if len(inputs) > 1
     )
 
 
@@ -546,6 +562,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
+        self.duplicate_input_groups = _duplicate_input_groups(example_inputs)
         self.shared_storage_input_groups = _shared_storage_input_groups(example_inputs)
 
         # region_activation_memory_budget is graph-wide (the partitioner enforces
@@ -600,8 +617,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        symint_name_map: dict[str, str] | None = None,
+        graph_symint_names: set[str] | None = None,
+    ) -> None:
         super().__init__(gm)
+        self._symint_name_map: dict[str, str] = symint_name_map or {}
+        self._graph_symint_names: set[str] = graph_symint_names or set()
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
             {
@@ -610,6 +634,21 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
+
+    def _reduce_symint(
+        self, s: torch.SymInt
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        name = str(s)
+        normalized = self._symint_name_map.get(name)
+        if normalized is not None:
+            if name in self._graph_symint_names:
+                return (_ident, (normalized,))
+            # Non-graph SymInt with non-deterministic name (from MetaConverter).
+            # Include the hint to distinguish different specializations.
+            hint = s.node.hint
+            if hint is not None:
+                return (_ident, (normalized, hint))
+        return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
@@ -684,14 +723,14 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
     def _stable_hash_for_cache_value(self, obj: Any) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         if hasattr(obj, "_stable_hash_for_caching"):
             return obj._stable_hash_for_caching()
         if isinstance(obj, torch.Tensor) and is_traceable_wrapper_subclass(obj):
             return self._default_stable_hash_for_caching(obj)
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             # Opaque objects are runtime pass-throughs; only the type matters
             # for cache key purposes, not the instance identity or value.
             return self._hash_bytes_for_cache(type(obj).__qualname__.encode())
@@ -728,9 +767,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return inner_hashes
 
     def _stabilize_tensor_subclass_metadata(self, obj: Any) -> Any:
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
 
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             return type(obj).__qualname__
         if isinstance(obj, tuple):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
@@ -808,10 +847,18 @@ def normalize_placeholder_names(
 
     # Track all the old state of placeholders
     old_placeholder_names = []
+    old_symint_names = []
     old_used_names = copy(gm.graph._graph_namespace._used_names)
     i = 0
+    j = 0
     for n in gm.graph.find_nodes(op="placeholder", sort=True):
-        if n.type != torch.SymInt:
+        if n.type == torch.SymInt:
+            new_name = f"s_{j}"
+            old_symint_names.append((n.name, n.target))
+            n.target = new_name
+            n._rename(new_name)
+            j += 1
+        else:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
@@ -829,8 +876,14 @@ def normalize_placeholder_names(
         gm.graph._graph_namespace._used_names = set()
         # Restore the placeholder names
         i = 0
+        j = 0
         for n in gm.graph.find_nodes(op="placeholder", sort=True):
-            if n.type != torch.SymInt:
+            if n.type == torch.SymInt:
+                (name, target) = old_symint_names[j]
+                n.target = target
+                n._rename(name)
+                j += 1
+            else:
                 (name, target) = old_placeholder_names[i]
                 n.target = target
                 n._rename(name)
@@ -838,6 +891,10 @@ def normalize_placeholder_names(
         if i != len(old_placeholder_names):
             raise AssertionError(
                 f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
+            )
+        if j != len(old_symint_names):
+            raise AssertionError(
+                f"j={j} != len(old_symint_names)={len(old_symint_names)}"
             )
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
@@ -909,8 +966,22 @@ def autograd_cache_key(
     """
 
     gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
-    with sanitize_gm_for_cache(gm):
-        try:
+    try:
+        # Capture graph SymInt placeholder names before normalization so the
+        # pickler can distinguish graph-native SymInts (deterministic names)
+        # from MetaConverter-generated SymInts (non-deterministic names).
+        graph_symint_names: set[str] = set()
+        symint_name_map: dict[str, str] = {}
+        if torch._functorch.config.autograd_cache_normalize_inputs:
+            for n in gm.graph.find_nodes(op="placeholder", sort=True):
+                if n.type == torch.SymInt:
+                    graph_symint_names.add(n.target)
+            j = 0
+            for inp in example_inputs:
+                if isinstance(inp, torch.SymInt):
+                    symint_name_map[str(inp)] = f"s_{j}"
+                    j += 1
+        with sanitize_gm_for_cache(gm):
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
@@ -920,24 +991,24 @@ def autograd_cache_key(
                 create_fx_config(compiler_config_extra),
                 act_input_paths,
             )
-            pickler = AOTAutogradCachePickler(gm)
+            pickler = AOTAutogradCachePickler(gm, symint_name_map, graph_symint_names)
             # The prefix distinguishes among the other kinds of objects we cache
             key = AOTAUTOGRAD_CACHE_PREFIX + pickler.get_hash(details)
             debug_lines = _get_debug_lines_for_cache_key(pickler, details, key)
             return key, debug_lines
-        except Exception:
-            # If enable_aot_compile is set, we're in AOT precompile mode where we always
-            # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
-            # a proper key because we are guaranteed in an AOT precompile world users are in
-            # complete control of distributing and loading artifacts.
-            if torch._functorch.config.bypass_autograd_cache_key:
-                log.info(
-                    "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
-                    exc_info=True,
-                )
-                return str(random.random()), []
-            else:
-                raise
+    except Exception:
+        # If enable_aot_compile is set, we're in AOT precompile mode where we always
+        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+        # a proper key because we are guaranteed in an AOT precompile world users are in
+        # complete control of distributing and loading artifacts.
+        if torch._functorch.config.bypass_autograd_cache_key:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
+            return str(random.random()), []
+        else:
+            raise
 
 
 @contextlib.contextmanager
@@ -1463,6 +1534,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         num_symints_saved_for_bw: int | None,
         serialized_bw_module: SerializedGraphModule | None,
         min_cut_info_str: str | None,
+        aotautograd_guards: list[torch._guards.GuardEnvExpr],
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1504,6 +1576,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
                 serialized_bw_module=serialized_bw_module,
+                aotautograd_guards=aotautograd_guards,
             )
 
         else:
@@ -1554,4 +1627,5 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
                 serialized_bw_module=serialized_bw_module,
+                aotautograd_guards=aotautograd_guards,
             )

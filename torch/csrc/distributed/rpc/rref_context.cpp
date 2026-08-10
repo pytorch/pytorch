@@ -256,7 +256,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
   // Start sending UserRRef delete messages, after all pendings are confirmed.
   // Note, there should be no new forkings in between, because it's assumed that
   // this utility is called during graceful shutdown, where no new user RPCs can
-  // be initiaited anymore.
+  // be initiated anymore.
   for (const auto& user : tempConfirmedUsers) {
     c10::intrusive_ptr<RRef> rref_ptr = user.second.lock();
     if (!rref_ptr) {

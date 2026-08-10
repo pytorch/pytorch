@@ -195,6 +195,11 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
+            mutation_is_shallow_copy_data=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -402,16 +407,16 @@ def compute_overlapping_inputs(
         tracing_context.guards_context.aotautograd_guards.append(
             StorageOverlap(overlapping_sources, non_overlapping_sources)
         )
-        for i in aliased_input_indices if len(actual_aliased_indices) > 1 else ():
-            storage_offset = fwd_inputs[i].storage_offset()
-            if not isinstance(storage_offset, torch.SymInt):
-                source = cast(Source, sources[i])
-                tracing_context.guards_context.aotautograd_guards.append(
-                    StorageOffset(
-                        source,
-                        int(storage_offset),
+        if len(actual_aliased_indices) > 1:
+            for i in aliased_input_indices:
+                storage_offset = fwd_inputs[i].storage_offset()
+                if not isinstance(storage_offset, torch.SymInt):
+                    tracing_context.guards_context.aotautograd_guards.append(
+                        StorageOffset(
+                            cast(Source, sources[i]),
+                            int(storage_offset),
+                        )
                     )
-                )
 
     return actual_aliased_indices
 

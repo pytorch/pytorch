@@ -402,7 +402,11 @@ def triton_op(
             name,
             backend_fn,
             mutates_args=mutates_args,
-            schema=infer_schema(fn, mutates_args=mutates_args),
+            schema=(
+                schema
+                if schema is not None
+                else infer_schema(fn, mutates_args=mutates_args)
+            ),
         )
         from .._subclasses.functional_tensor import FunctionalTensorMode
 

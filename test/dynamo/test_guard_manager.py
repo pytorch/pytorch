@@ -32,6 +32,9 @@ OBJECT_ALIASING = guards.OBJECT_ALIASING
 install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+SAME_STORAGE = guards.SAME_STORAGE
+NO_STORAGE_ALIASING = guards.NO_STORAGE_ALIASING
+install_storage_aliasing_guard = guards.install_storage_aliasing_guard
 
 
 x = torch.tensor(4)
@@ -577,6 +580,85 @@ user_stack=None)
         )
         self.assertFalse(guard_manager.check(f_locals_unaliased))
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
+
+    def test_storage_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        class Foo:
+            def __init__(self, x, y, z):
+                self.x = x
+                self.y = y
+                self.z = z
+
+        base = torch.arange(4)
+        example = Foo(base[:2], base[2:], torch.ones(2))
+        x_guard_mgr = guard_manager.getattr_manager(
+            "x", "", example.x, default_mgr_enum
+        )
+        y_guard_mgr = guard_manager.getattr_manager(
+            "y", "", example.y, default_mgr_enum
+        )
+        z_guard_mgr = guard_manager.getattr_manager(
+            "z", "", example.z, default_mgr_enum
+        )
+        verbose_code = "check_storage_aliasing([[x, y], [z]])"
+        install_storage_aliasing_guard(
+            [[x_guard_mgr, y_guard_mgr], [z_guard_mgr]],
+            [verbose_code],
+            None,
+        )
+
+        self.assertTrue(x_guard_mgr.has_storage_aliasing_guard())
+        self.assertTrue(y_guard_mgr.has_storage_aliasing_guard())
+        self.assertTrue(z_guard_mgr.has_storage_aliasing_guard())
+        self.assertTrue(
+            any(
+                isinstance(guard, SAME_STORAGE)
+                for guard in x_guard_mgr.get_leaf_guards()
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(guard, NO_STORAGE_ALIASING)
+                for guard in x_guard_mgr.get_leaf_guards()
+            )
+        )
+
+        # The same storage partition, including with fresh tensors, passes.
+        self.assertTrue(guard_manager.check(example))
+        same_base = torch.arange(4)
+        same_topology = Foo(same_base[:2], same_base[2:], torch.ones(2))
+        self.assertTrue(guard_manager.check(same_topology))
+
+        # Splitting a same-storage group fails.
+        split_group = Foo(torch.ones(2), torch.ones(2), torch.ones(2))
+        self.assertFalse(guard_manager.check(split_group))
+        split_debug = guard_manager.check_verbose(split_group)
+        self.assertFalse(split_debug.result)
+        self.assertEqual(split_debug.verbose_code_parts, [verbose_code])
+
+        # A failed relational check must not poison the next invocation.
+        self.assertTrue(guard_manager.check(same_topology))
+
+        # Merging two distinct groups also fails.
+        merged_base = torch.arange(6)
+        merged_groups = Foo(merged_base[:2], merged_base[2:4], merged_base[4:])
+        self.assertFalse(guard_manager.check(merged_groups))
+
+        # State is reset after both failure and success, so the manager is
+        # reusable across repeated cache lookups.
+        self.assertTrue(guard_manager.check(same_topology))
+        self.assertTrue(guard_manager.check(same_topology))
+
+        # Runtime Python scalars may have been tensorified while tracing. They
+        # do not participate in the runtime storage partition.
+        self.assertTrue(guard_manager.check(Foo(1, 1, torch.ones(2))))
+        self.assertTrue(guard_manager.check(same_topology))
+
+        # Tensors without a StorageImpl cannot satisfy a storage relation.
+        sparse = torch.sparse_coo_tensor([[0]], [1.0], (2,))
+        self.assertFalse(guard_manager.check(Foo(sparse, sparse, torch.ones(2))))
+        self.assertTrue(guard_manager.check(same_topology))
 
     def test_weakref_alive_guard(self):
         root = RootGuardManager()
@@ -2160,7 +2242,9 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         # Only fail if the leak is larger than 1MB.
         self.assertLessEqual(
-            delta, 1 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+            delta,
+            1 * 1024 * 1024,
+            lambda msg: f"{msg}\nMemory leaked: {delta / 1024 / 1024:.2f} MB",
         )
 
     def test_dict_keys_match(self):
