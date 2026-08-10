@@ -901,7 +901,7 @@ class ComboKernel(Kernel):
         # default keeps this working even where config.py predates the knob (e.g.
         # a branch that ships only the codegen change).
         min_kernels = max(
-            2, getattr(config, "combo_kernel_uniform_dispatch_min_kernels", 8)
+            2, getattr(config, "combo_kernel_uniform_dispatch_min_kernels", 32)
         )
         if len(self.sub_kernels) < min_kernels:
             log.debug(

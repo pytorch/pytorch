@@ -1143,6 +1143,17 @@ combo_kernel_uniform_dispatch: bool = (
     os.environ.get("TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH", "0") == "1"
 )
 
+# Minimum number of identical sub-kernels a combo group must have for uniform
+# dispatch to engage. Uniform dispatch replaces an N-way body/branch chain with a
+# single shared body indexed by a runtime pointer table: the benefit scales with
+# the group size N, while the pointer-table build/copy cost is roughly fixed. Tiny
+# groups (e.g. N=2, ~half of dashboard groups) therefore pay the overhead without
+# a meaningful benefit, so groups smaller than this fall back to sequential combo
+# dispatch. Env-overridable to sweep the threshold on the perf dashboard.
+combo_kernel_uniform_dispatch_min_kernels: int = int(
+    os.environ.get("TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MIN_KERNELS", "32")
+)
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 

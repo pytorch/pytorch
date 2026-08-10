@@ -876,6 +876,14 @@ test_perf_for_dashboard() {
     export TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH=1
   fi
 
+  # Uniform-dispatch cost-gate threshold (minimum identical sub-kernels for a
+  # combo group to use uniform dispatch). Extracted from DASHBOARD_TAG so it can
+  # be swept from the workflow trigger; when absent the inductor config default
+  # (32) applies.
+  if [[ "$DASHBOARD_TAG" =~ uniformmink-([0-9]+) ]]; then
+    export TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MIN_KERNELS="${BASH_REMATCH[1]}"
+  fi
+
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
 
