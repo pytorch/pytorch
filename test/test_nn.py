@@ -13836,9 +13836,10 @@ if __name__ == '__main__':
         # ``expected_{input,weight}_grad_max_ulp_diff`` caps are asserted only
         # for ``bias=False`` legs (bias=True relies on the feps grad_error
         # bound; see the docstring and the assert block).
-        # ``grad_error`` tolerance for the input/weight/bias grads, in units of
-        # eps (feps = 3 eps); a few lower-precision-matmul legs need more headroom.
-        grad_err_mult = 3
+        # input-grad ``grad_error`` tolerance, in units of eps (feps = 3 eps);
+        # a few lower-precision-matmul legs need a touch more headroom. Weight/bias
+        # grads stay at feps except the prob+bias accelerator legs below.
+        input_grad_err_mult = 3
         if prob_target and none_reduction:
             # prob + reduction='none' (per-sample loss + recompute backward).
             # Caps are drift trip-wires (~2-3x observed); grad_error is the
@@ -13856,7 +13857,7 @@ if __name__ == '__main__':
                     expected_weight_grad_max_ulp_diff = 192  # m1 77 (m2 49)
                     # MPS fp32 matmul rounds the dense recompute to ~3.3*eps
                     # (CI: input-grad err 3.99e-7); allow 5*eps headroom.
-                    grad_err_mult = 5
+                    input_grad_err_mult = 5
                 else:  # cuda / rocm
                     expected_input_grad_max_ulp_diff = 128  # cuda 34, rocm 43
                     expected_weight_grad_max_ulp_diff = 32  # 9
@@ -13968,15 +13969,23 @@ if __name__ == '__main__':
         # version matters: on CUDA 13 (L4) input ~10.6*eps and weight ~7.9*eps
         # (A100/CUDA12 was ~3.8*eps); cpu's higher-precision matmul stays under
         # 3*eps and bias=False stays at feps on the same hardware (confirming the
-        # bias is the amplifier). So all three grad_error bounds get 16*eps for
-        # these legs. (The per-element grad ULP trip-wires are skipped for all
-        # bias=True legs; see the asserts.)
-        if prob_target and bias and dtype == torch.float32 and "cpu" not in device:
-            grad_err_mult = max(grad_err_mult, 16)
+        # bias is the amplifier). So all three grad_error bounds are widened to
+        # 16*eps for these legs only (measured on CUDA; MPS/ROCm/XPU inherit it,
+        # CI-confirmed green) -- every other leg keeps feps for weight/bias. (The
+        # per-element grad ULP trip-wires are skipped for all bias=True legs;
+        # see the asserts.)
+        prob_bias_accel = (
+            prob_target and bias and dtype == torch.float32 and "cpu" not in device
+        )
+        if prob_bias_accel:
+            input_grad_err_mult = max(input_grad_err_mult, 16)
 
         eta = torch.finfo(dtype).eps
         feps = torch.finfo(dtype).eps * 3
-        grad_err_tol = eta * grad_err_mult
+        input_grad_err_tol = eta * input_grad_err_mult
+        # Weight/bias grad_error use feps, except the prob+bias accelerator legs
+        # (same cancellation inflates them too) which also get 16*eps.
+        wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
@@ -14145,11 +14154,11 @@ if __name__ == '__main__':
                     maximal_linear_bias_grad_err = err
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
-        self.assertLessEqual(maximal_input_grad_err, grad_err_tol,
+        self.assertLessEqual(maximal_input_grad_err, input_grad_err_tol,
                              msg=lambda msg: f"{msg}\nworst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
-        self.assertLessEqual(maximal_linear_weight_grad_err, grad_err_tol,
+        self.assertLessEqual(maximal_linear_weight_grad_err, wb_grad_err_tol,
                              msg=lambda msg: f"{msg}\nworst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
-        self.assertLessEqual(maximal_linear_bias_grad_err, grad_err_tol,
+        self.assertLessEqual(maximal_linear_bias_grad_err, wb_grad_err_tol,
                              msg=lambda msg: f"{msg}\nworst linear_bias-grad err {maximal_linear_bias_grad_err} from kwargs={worst_linear_bias_grad_err_kwargs}")
         self.assertLessEqual(maximal_output_max_ulp_diff, expected_max_ulp_diff,
                              msg=lambda msg: f"{msg}\nworst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")

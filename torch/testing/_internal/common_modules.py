@@ -1991,7 +1991,14 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                 batch_dims = () if num_batches is None else (num_batches,)
                 weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
                 for reduction, w in product(["mean", "sum", "none"], weights):
-                    if acc_dtype is not None:
+                    if acc_dtype is not None and bias:
+                        # bias=True is feps-only (no per-element caps), so force
+                        # >=2 chunks here (batch_chunk_size=2) to exercise the
+                        # mixed-precision bias-grad scratch-commit/zero_() across
+                        # chunk boundaries. bias=False keeps the single-chunk
+                        # aspect_ratio sample its per-element caps are calibrated on.
+                        options = dict(acc_dtype=acc_dtype, batch_chunk_size=2)
+                    elif acc_dtype is not None:
                         options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
                     elif num_batches is not None:
                         # batch_chunk_size=2 forces >=2 chunks on every device.
