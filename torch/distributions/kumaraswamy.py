@@ -14,7 +14,7 @@ __all__ = ["Kumaraswamy"]
 
 def _moments(a, b, n):
     """
-    Computes nth moment of Kumaraswamy using using torch.lgamma
+    Computes nth moment of Kumaraswamy using torch.lgamma
     """
     arg1 = 1 + n / a
     log_value = torch.lgamma(arg1) + torch.lgamma(b) - torch.lgamma(arg1 + b)
