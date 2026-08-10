@@ -2148,6 +2148,23 @@ def invoke_and_store_as_constant(
                 ],
             )
 
+    def convert_guardless(x: VariableTracker) -> Any:
+        try:
+            return x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="assume_constant_result specialize_args unguardable-source argument conversion failed",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Cannot convert argument of type {type(x).__name__} to a "
+                f"Python constant for function {name} marked with "
+                f"torch._dynamo.assume_constant_result(specialize_args=True). The "
+                f"argument has no guardable source, so it must already be a constant.",
+                hints=[
+                    "Pass this argument from outside the torch.compile region so it has a source",
+                    "Ensure all arguments can be converted to constants",
+                ],
+            )
+
     def convert_specialized(
         x: VariableTracker,
         source: Source | None = None,
@@ -2158,9 +2175,6 @@ def invoke_and_store_as_constant(
         top_level = source is None
         if source is None:
             source = x.source
-        if id(x) in ancestors:
-            _self_referential_constant_arg(source, name)
-        ancestors = ancestors | {id(x)}
         if x.is_tensor():
             unimplemented(
                 gb_type="assume_constant_result specialize_args tensor argument",
@@ -2187,22 +2201,17 @@ def invoke_and_store_as_constant(
         # A sourceless value is built by the traced bytecode itself and a
         # constant-source one is already baked into the graph: neither can vary
         # across calls, so no guard is needed (and none can be installed).
-        if source is None or is_constant_source(source):
-            try:
-                return x.as_python_constant()
-            except AsPythonConstantNotImplementedError:
-                unimplemented(
-                    gb_type="assume_constant_result specialize_args unguardable-source argument conversion failed",
-                    context=f"function {name}, variable type {type(x).__name__}",
-                    explanation=f"Cannot convert argument of type {type(x).__name__} to a "
-                    f"Python constant for function {name} marked with "
-                    f"torch._dynamo.assume_constant_result(specialize_args=True). The "
-                    f"argument has no guardable source, so it must already be a constant.",
-                    hints=[
-                        "Pass this argument from outside the torch.compile region so it has a source",
-                        "Ensure all arguments can be converted to constants",
-                    ],
-                )
+        # Split conditions: pyrefly does not narrow `source` past a compound
+        # `or` whose branch exits via NoReturn inside an except handler.
+        if source is None:
+            return convert_guardless(x)
+        if is_constant_source(source):
+            return convert_guardless(x)
+        # The cycle check lives below the sourceless/constant-source branch so
+        # `source` is narrowed; it cannot fire at top level (ancestors is empty).
+        if id(x) in ancestors:
+            _self_referential_constant_arg(source, name)
+        ancestors = ancestors | {id(x)}
         if top_level:
             if is_from_skip_guard_source(source):
                 _unguardable_constant_arg_source(source, name)
