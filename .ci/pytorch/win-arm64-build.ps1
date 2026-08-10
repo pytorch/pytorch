@@ -2,8 +2,8 @@
 # If you want to build with CUDA, run this with $env:USE_CUDA=1
 # If you want to build without CUDA, run this with $env:USE_CUDA=0
 
-# Check for setup.py in the current directory
-if (-not (Test-Path "setup.py")) {
+# Check for pyproject.toml in the current directory
+if (-not (Test-Path "pyproject.toml")) {
     Write-Host "ERROR: Please run this build script from PyTorch root directory."
     exit 1
 }
