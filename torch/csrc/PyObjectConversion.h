@@ -1,14 +1,17 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <c10/core/Device.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
 
 // Indirection that lets the libtorch-only Python-interop stable shims call into
 // code that only libtorch_python can provide (THPVariable_* &co) without
 // libtorch (or the user extension) linking libtorch_python. Today this backs
-// PyObject <-> Tensor conversion; other conversions between Python objects and
-// libtorch types that need libtorch_python can be added as further methods.
+// PyObject <-> Tensor/dtype/device conversion; other conversions between Python
+// objects and libtorch types that need libtorch_python can be added as further
+// methods.
 //
 // This mirrors c10's PyInterpreterVTable: an abstract interface declared in the
 // lower library, a no-op default that errors, and a concrete implementation
@@ -41,6 +44,22 @@ struct TORCH_API PyObjectConversionInterface {
   // null means the default torch.Tensor type. The GIL must be held.
   virtual PyObject* tensor_to_pyobject(const at::Tensor& t, PyObject* py_type)
       const = 0;
+
+  // Read the ScalarType out of a Python torch.dtype (PyObject*). The GIL must
+  // be held.
+  virtual at::ScalarType dtype_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.dtype for the given ScalarType. The
+  // GIL must be held.
+  virtual PyObject* dtype_to_pyobject(at::ScalarType dtype) const = 0;
+
+  // Read the at::Device out of a Python torch.device (PyObject*). The GIL must
+  // be held.
+  virtual at::Device device_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.device for the given at::Device. The
+  // GIL must be held.
+  virtual PyObject* device_to_pyobject(const at::Device& device) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
