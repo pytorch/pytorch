@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS)
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
-     run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
+     run_tests, load_tests, coalescedonoff, HardwareClassification, parametrize, subtest, skipIfTorchDynamo,
      IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
@@ -133,6 +133,8 @@ def _test_addmm_addmv(
 
 
 class TestSparseCSRSampler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
 
     def test_make_crow_indices(self):
         # Here we test the correctness of the crow_indices algorithm
@@ -190,6 +192,8 @@ def hybrid_nonhybrid(test_name='hybrid'):
 
 
 class TestSparseCompressed(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     """Testing sparse compressed (CSR, CSC, BSR, BSC) tensor generic features.
     """
 
@@ -1038,6 +1042,8 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
 
 
 class TestSparseCSR(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
 
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -3562,6 +3568,8 @@ def skipIfNoTriton(cls):
 
 @skipIfNoTriton
 class TestSparseCompressedTritonKernels(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
 
     def _to_block_triangular_inplace(self, d, row_block, col_block):
         """
