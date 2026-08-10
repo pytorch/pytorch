@@ -358,6 +358,23 @@ class CPUReproTests(TestCase):
                             **tol_kwargs,
                         )
 
+    @requires_vectorization
+    def test_nn_fold_permuted_input(self):
+        # Fix https://github.com/pytorch/pytorch/issues/191837
+        def fn(x):
+            x = x.permute(0, 1, 4, 3, 2)
+            x = x.reshape(1, 192 * 3 * 3, 2 * 2)
+            return F.fold(x, output_size=(4, 4), kernel_size=3, padding=1, stride=2)
+
+        v = torch.randn(1, 6, 4, 9, 32)
+        with set_num_threads(2):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="inductor")
+            actual, code = run_and_get_cpp_code(opt_fn, v)
+        FileCheck().check("transpose_mxn").run(code)
+        FileCheck().check("atomic_add_vec").run(code)
+        self.assertEqual(fn(v), actual, atol=1e-4, rtol=1e-4)
+
     def test_conv_max_pool_where_backward_mutation_dep(self):
         # Repro for https://github.com/pytorch/pytorch/issues/185509
         def fn(x, weight, bias, mask):
