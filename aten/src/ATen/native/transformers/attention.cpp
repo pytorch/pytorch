@@ -907,24 +907,19 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   // Keep query, key, value in high precision for accuracy
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
-  auto query_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
-          (query_.scalar_type() == at::kHalf ||
-           query_.scalar_type() == at::kBFloat16) &&
-          !query_.is_nested()
-      ? query_.to(at::kFloat)
-      : query_;
-  auto key_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
-          (key.scalar_type() == at::kHalf ||
-           key.scalar_type() == at::kBFloat16) &&
-          !key.is_nested()
-      ? key.to(at::kFloat)
-      : key;
-  auto value_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
-          (value.scalar_type() == at::kHalf ||
-           value.scalar_type() == at::kBFloat16) &&
-          !value.is_nested()
-      ? value.to(at::kFloat)
-      : value;
+  auto needs_float_promotion = [&](const Tensor& tensor) {
+    if (tensor.is_nested()) {
+      return false;
+    }
+    auto scalar_type = tensor.scalar_type();
+    if (scalar_type == at::kHalf || scalar_type == at::kBFloat16) {
+      return !ctx.allowFP16BF16ReductionMathSDP();
+    }
+    return scalar_type == at::kByte || scalar_type == at::kChar;
+  };
+  auto query_acc = needs_float_promotion(query_) ? query_.to(at::kFloat) : query_;
+  auto key_acc = needs_float_promotion(key) ? key.to(at::kFloat) : key;
+  auto value_acc = needs_float_promotion(value) ? value.to(at::kFloat) : value;
   auto attn_mask = attn_mask_;
   // Naive, composite implementation defined here.
 
