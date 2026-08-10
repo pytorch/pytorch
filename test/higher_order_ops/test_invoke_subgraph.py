@@ -73,6 +73,70 @@ def _aot_eager_with_runtime_epilogue():
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
+    def test_make_fx_traced_subgraph_joint(self):
+        # A subgraph captured by make_fx records its output meta["val"] below
+        # autograd, so requires_grad is False there even though the region does
+        # need a gradient. get_output_metadata must not take that at face value:
+        # if it does, the backward is built with zero tangents and tracing the
+        # joint dies with "outs_to_grad length (1) != tangents length (0)".
+        from torch._functorch.aot_autograd import aot_export_joint_simple
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def gn(x, y):
+            return (torch.sigmoid(torch.matmul(x, y)),)
+
+        subgraph = make_fx(gn)(
+            torch.randn(4, 4, requires_grad=True),
+            torch.randn(4, 4, requires_grad=True),
+        )
+
+        hop = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            return hop(subgraph, "subgraph_0", x, y)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        joint = aot_export_joint_simple(fn, (x, y), trace_joint=True)
+
+        # The region stays a HOP in both halves of the joint (fw call + bw
+        # recompute), rather than being dropped for lack of tangents.
+        num_hops = len([n for n in joint.graph.nodes if n.target is hop])
+        self.assertEqual(num_hops, 2)
+
+    def test_graph_module_pickle_roundtrip(self):
+        # Unpickling a GraphModule re-traces it symbolically, replaying calls with
+        # Proxy operands -- the path the FX/AOTAutograd caches load through. The
+        # region must come back as the *same* invoke_subgraph call, not inlined:
+        # a graph that silently flattens on reload loses the shared subgraph (and
+        # with it the no-drift guarantee) while still counting as a cache hit.
+        import pickle
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def gn(x, y):
+            return (torch.sigmoid(torch.matmul(x, y)),)
+
+        subgraph = make_fx(gn)(torch.randn(4, 4), torch.randn(4, 4))
+        hop = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            (out,) = hop(subgraph, "subgraph_0", x, y)
+            return out
+
+        gm = make_fx(fn)(torch.randn(4, 4), torch.randn(4, 4))
+        reloaded = pickle.loads(pickle.dumps(gm))
+
+        def count_hops(g):
+            return len([n for n in g.graph.nodes if n.target is hop])
+
+        self.assertEqual(count_hops(gm), 1)
+        self.assertEqual(count_hops(reloaded), 1)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        self.assertEqual(gm(x, y), reloaded(x, y))
+
     def test_simple(self):
         def gn(x, y):
             return torch.mul(x, y)
