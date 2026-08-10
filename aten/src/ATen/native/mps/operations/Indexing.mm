@@ -346,7 +346,7 @@ static inline const char* index_kernel_suffix(bool use_32bit_index) {
 }
 
 // Metal kernel-based nonzero using prefix-sum + scatter.
-// Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
+// Step 1: Per-block nonzero totals (block-local prefix scan).
 // Step 2: GPU prefix sum of block totals → block offsets + total count.
 // Host (optional):   Read back total count, allocate output, unless max_element is provided
 // Step 3: Scatter multi-dimensional indices into the output.
@@ -368,7 +368,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
-  // Count (step 1) indexes input/prefix by the flat element id, which is
+  // Count (step 1) indexes input by the flat element id, which is
   // bounded by numel, so its index width depends only on the input. Scatter
   // (step 3) also indexes the output, so it recomputes the width including out.
   const bool count_use_32bit_index = canUse32BitIndexMath(input);
@@ -396,13 +396,12 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // with base 0, identical to the unchunked path.
   const uint64_t chunk_elems = (static_cast<uint64_t>(1) << 31) / threads_per_group * threads_per_group;
 
-  // Scratch buffers. prefix (intra-block, <= threadgroup size) and block_sums
-  // (per-block totals, likewise bounded) fit in uint32. block_offsets (the
-  // running cumulative count) and total_nonzero can exceed 2^32 for a large
-  // dense input, so they are int64, matching CUDA's int64 aggregate.
-  auto tmp32 = at::empty({numel + num_blocks_u32}, input.options().dtype(kInt));
-  Tensor prefix_buf = tmp32.slice(0, 0, numel);
-  Tensor block_sums_buf = tmp32.slice(0, numel, numel + num_blocks_u32);
+  // Scratch buffers. block_sums (per-block totals, bounded by the threadgroup
+  // size) fits in uint32. block_offsets (the running cumulative count) and
+  // total_nonzero can exceed 2^32 for a large dense input, so they are int64,
+  // matching CUDA's int64 aggregate. The per-element intra-block prefixes are
+  // not stored: the scatter kernel recomputes them in threadgroup memory.
+  Tensor block_sums_buf = at::empty({num_blocks_u32}, input.options().dtype(kInt));
   auto tmp64 = at::empty({num_blocks_u32 + 1}, input.options().dtype(kLong));
   Tensor block_offsets_buf = tmp64.slice(0, 0, num_blocks_u32);
   Tensor total_nonzero_buf = tmp64.slice(0, num_blocks_u32, num_blocks_u32 + 1);
@@ -416,7 +415,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
         uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
         uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
-        mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf, base, block_base);
+        mtl_setArgs(computeEncoder, input, block_sums_buf, base, block_base);
         mtl_dispatch1DJob(computeEncoder, pso_step1, this_chunk);
       }
 
@@ -467,16 +466,8 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
         uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
         uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
-        mtl_setArgs(computeEncoder,
-                    input,
-                    prefix_buf,
-                    out,
-                    ndim_int,
-                    input.sizes(),
-                    block_offsets_buf,
-                    max_entries,
-                    base,
-                    block_base);
+        mtl_setArgs(
+            computeEncoder, input, out, ndim_int, input.sizes(), block_offsets_buf, max_entries, base, block_base);
         mtl_dispatch1DJob(computeEncoder, pso_step3, this_chunk);
       }
     }
