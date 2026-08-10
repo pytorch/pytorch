@@ -135,6 +135,9 @@ C10_HOST_DEVICE inline T exp(T x) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
   // use __expf fast approximation for peak bandwidth
   return __expf(x);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  // use native::exp fast approximation for peak bandwidth
+  return sycl::native::exp(x);
 #else
   return ::exp(x);
 #endif
@@ -153,6 +156,9 @@ C10_HOST_DEVICE inline T log(T x) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
   // use __logf fast approximation for peak bandwidth
   return __logf(x);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  // use native::log fast approximation for peak bandwidth
+  return sycl::native::log(x);
 #else
   return ::log(x);
 #endif
@@ -172,6 +178,9 @@ C10_HOST_DEVICE inline T log1p(T x) {
   // use __logf fast approximation for peak bandwidth
   // NOTE: There is no __log1pf so unfortunately we lose precision.
   return __logf(1.0f + x);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  // use native::log fast approximation for peak bandwidth
+  return sycl::native::log(1.0f + x);
 #else
   return ::log1p(x);
 #endif
@@ -190,6 +199,9 @@ C10_HOST_DEVICE inline T tan(T x) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
   // use __tanf fast approximation for peak bandwidth
   return __tanf(x);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  // use native::tan fast approximation for peak bandwidth
+  return sycl::native::tan(x);
 #else
   return ::tan(x);
 #endif

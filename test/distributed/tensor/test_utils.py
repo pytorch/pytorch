@@ -1377,7 +1377,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
             self.assertIsInstance(
                 fsdp_placement,
                 (_StridedShard, Shard),
-                f"Parameter {name} has unexpected FSDP placement: {fsdp_placement}",
+                lambda msg: f"{msg}\nParameter {name} has unexpected FSDP placement: {fsdp_placement}",
             )
 
         # Run training loop
@@ -1408,7 +1408,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
                 self.assertEqual(
                     ref_param,
                     param.full_tensor(),
-                    msg=f"Parameter mismatch at iteration {iter_idx}",
+                    msg=lambda msg: f"{msg}\nParameter mismatch at iteration {iter_idx}",
                 )
 
     @with_comms
@@ -1751,7 +1751,7 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 self.assertEqual(
                     a_dt_after_to_replicate,
                     b_dt.to_local(),
-                    f"{tensor_size=}, placements={src_p}",
+                    lambda msg: f"{msg}\n{tensor_size=}, placements={src_p}",
                 )
 
     @with_comms
@@ -1792,7 +1792,8 @@ class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTes
         target_tensor_dim: int,
     ) -> torch.Tensor:
         """Perform alltoall redistribution to a new shard dimension."""
-        assert isinstance(shard_spec, _StridedShard)  # noqa: S101
+        if not isinstance(shard_spec, _StridedShard):
+            raise AssertionError(f"expected _StridedShard, got {type(shard_spec)}")
         return shard_spec._to_new_shard_dim(
             local_tensor, mesh, mesh_dim, logical_shape, target_tensor_dim
         )

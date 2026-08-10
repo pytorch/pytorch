@@ -2023,7 +2023,7 @@ class _MaskPartial(Partial):
 
 
 def _register_placements_as_opaque():
-    from torch._library.opaque_object import MemberType, register_opaque_type
+    from torch._library.opaque_object import MemberType, register_custom_class
 
     allowed_members = {
         "is_shard": MemberType.USE_REAL,
@@ -2031,24 +2031,24 @@ def _register_placements_as_opaque():
         "is_replicate": MemberType.USE_REAL,
         "__eq__": MemberType.USE_REAL,
     }
-    register_opaque_type(Placement, typ="value", members=allowed_members)
-    register_opaque_type(
-        Shard, typ="value", members=allowed_members | {"dim": MemberType.USE_REAL}
+    register_custom_class(Placement, typ="constant", members=allowed_members)
+    register_custom_class(
+        Shard, typ="constant", members=allowed_members | {"dim": MemberType.USE_REAL}
     )
-    register_opaque_type(Replicate, typ="value", members=allowed_members)
-    register_opaque_type(
+    register_custom_class(Replicate, typ="constant", members=allowed_members)
+    register_custom_class(
         Partial,
-        typ="value",
+        typ="constant",
         members=allowed_members | {"reduce_op": MemberType.USE_REAL},
     )
-    register_opaque_type(
+    register_custom_class(
         _StridedShard,
-        typ="value",
+        typ="constant",
         members=allowed_members | {"dim": MemberType.USE_REAL},
     )
-    register_opaque_type(
+    register_custom_class(
         _MaskPartial,
-        typ="value",
+        typ="constant",
         members=allowed_members | {"reduce_op": MemberType.USE_REAL},
     )
 

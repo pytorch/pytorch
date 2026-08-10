@@ -8,12 +8,12 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
@@ -30,13 +30,16 @@ from .eval_frame import (
     innermost_fn,
     RunOnlyContext,
     skip_code,
+    StanceStr,
 )
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
 from .utils import (
+    _get_cudagraph_override,
     _get_error_on_graph_break,
+    _set_cudagraph_override,
     _set_error_on_graph_break,
     allow_lru_cache_wrapper_trace_without_warning,
     is_function,
@@ -152,7 +155,7 @@ class set_stance(_DecoratorContextManager):
 
     def __init__(
         self,
-        stance: str = "default",
+        stance: StanceStr = "default",
         *,
         skip_guard_eval_unsafe: bool = False,
         force_backend: str | Callable[..., Any] | None = None,
@@ -236,65 +239,7 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator to mark a function as nonstrict-traceable for dynamo.
 
-    A nonstrict-traced function appears as an opaque call in the dynamo graph.
-    Dynamo does not trace into the function body (hence the "nonstrict"), but
-    aot_autograd will trace into it.
-
-    This is similar to ``allow_in_graph`` but with enhanced support for:
-    - User-defined classes as inputs (must be registered with pytree)
-    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
-    - Global/captured tensors treated as constants (assumed not updated during execution)
-
-    Note:
-        - With ``backend="eager"``, the original Python function runs directly.
-          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
-          With ``backend="inductor"``, the traced graph is compiled with inductor.
-
-        - Training is supported: you can call ``.backward()`` on outputs and gradients
-          will flow through the nonstrict-traced function.
-
-    Dangerous patterns (may cause silent incorrectness):
-        - Side effects between nonstric_traced fn and compiled region: The function should
-          not depend on variables mutated by other code inside the compiled function, and code
-          after the call should not depend on mutations made by it.
-
-        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
-          are treated as constants. Gradients will NOT flow back to them. Pass tensors
-          as explicit arguments if gradients are needed.
-
-    Restrictions:
-        - Both inputs and outputs must use pytree-compatible types. User-defined classes
-          must be registered via :func:`torch.utils._pytree.register_pytree_node`,
-          :func:`torch.utils._pytree.register_dataclass`, or
-          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
-          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
-          tuple, dict) are already handled by default.
-        - Primitive values and container structure are specialized per call site:
-          each call site expects the same primitives and structure on every execution.
-
-    Example::
-
-        >>> import torch
-        >>> @torch._dynamo.nonstrict_trace
-        ... def traced_forward(model, x):
-        ...     # It's OK to have dynamo graph break within nonstrict_trace region
-        ...     torch._dynamo.graph_break()
-        ...     return model(x) + x
-        ...
-        >>> class MyModule(torch.nn.Module):
-        ...     def __init__(self):
-        ...         super().__init__()
-        ...         self.inner = torch.nn.Linear(10, 10)
-        ...
-        ...     def forward(self, x):
-        ...         return traced_forward(self.inner, x)
-        ...
-        >>> # Compile and run
-        >>> model = MyModule()
-        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
-        >>> out = opt_model(torch.randn(10, 10))
-        >>> out.sum().backward()  # Gradients flow through traced_forward
-
+    See :func:`torch.compiler.nonstrict_trace` for the full documentation.
     """
     if not callable(traceable_fn):
         raise AssertionError("nonstrict_trace expects a callable")
@@ -1103,11 +1048,11 @@ def _apply_func_to_inner_tensors_of_same_dim(
             case torch.Tensor() as inner:
                 if inner.dim() == t.dim():
                     func(inner, *args, **kwargs)
-            case OpaqueBase():
+            case CustomClassBase():
                 pass
             case unexpected:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                 )
 
 
@@ -1540,10 +1485,25 @@ def _allow_in_graph_einops() -> None:
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+class _ConfigPatchProtocol(Protocol):
+    """The config.patch() context manager object wrapped by DynamoConfigPatchProxy."""
+
+    changes: dict[str, Any]
+
+    def __enter__(self) -> None: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch: Any) -> None:
+    def __init__(self, config_patch: _ConfigPatchProtocol) -> None:
         self.config_patch = config_patch
 
     @property
@@ -1733,11 +1693,19 @@ class CudagraphOverrideContextManager:
     def __init__(self, fwd: bool | None = None, bwd: bool | None = None) -> None:
         self.fwd = fwd
         self.bwd = bwd
+        self.prev_cudagraph_override: list[tuple[bool | None, bool | None] | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        pass
+        # Set the override at runtime so it follows the dynamic call stack.
+        # Dynamo handles the lexical `with` symbolically and does not run this
+        # __enter__ at trace time; it runs when the generated/resumed bytecode
+        # re-enters the context, before invoking callees that are compiled as
+        # separate frames. OutputGraph seeds its annotation from this value via
+        # _get_cudagraph_override. Mirrors ErrorOnGraphBreakDecoratorContextManager.
+        self.prev_cudagraph_override.append(_get_cudagraph_override())
+        _set_cudagraph_override((self.fwd, self.bwd))
 
     def __exit__(
         self,
@@ -1745,7 +1713,7 @@ class CudagraphOverrideContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        pass
+        _set_cudagraph_override(self.prev_cudagraph_override.pop())
 
 
 def override_cudagraphs(

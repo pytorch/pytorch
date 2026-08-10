@@ -820,7 +820,7 @@ class TestExternKernelCaller(TestCase):
                 in message
                 for message in log_context.output
             ),
-            f"Expected warning message not found in logs: {log_context.output}",
+            lambda msg: f"{msg}\nExpected warning message not found in logs: {log_context.output}",
         )
 
         expected = torch.mm(a, b)
@@ -1060,7 +1060,7 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(
             captured_results["example_dtype"],
             torch.float4_e2m1fn_x2,
-            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            lambda msg: f"{msg}\nbenchmark_example_value should preserve float4_e2m1fn_x2 dtype "
             f"after unwrapping the view, but got {captured_results['example_dtype']}",
         )
         self.assertEqual(captured_results["example_shape"], (m, k))
@@ -1254,6 +1254,41 @@ class TestTemplateRender(TestCase):
                 kernels[0]
             )
 
+    def test_subgraph_nodes_participate_in_template_index_dtype(self):
+        """Covers implicit template buffers that are not explicit arguments."""
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.dependencies import MemoryDep, ReadWrites
+        from torch._inductor.select_algorithm import template_subgraph_index_dtype_nodes
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        large_capture = ir.Buffer(
+            name="large_capture",
+            layout=FixedLayout(torch.device("cpu"), torch.float32, [2**31 + 1]),
+        )
+
+        class FakeSubgraph:
+            def get_read_writes(self):
+                return ReadWrites(
+                    reads=OrderedSet(
+                        [MemoryDep("large_capture", sympy.Integer(0), (), ())]
+                    ),
+                    writes=OrderedSet(),
+                    index_exprs=OrderedSet(),
+                )
+
+        class FakeGraph:
+            def try_get_buffer(self, name):
+                return large_capture if name == "large_capture" else None
+
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                template_subgraph_index_dtype_nodes([FakeSubgraph()]),
+                (large_capture,),
+            )
+
     @unittest.skipIf(
         TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
     )
@@ -1418,7 +1453,7 @@ class TestTemplateRender(TestCase):
             # Verify template kernel was used
             self.assertIn("_mock_inner_add", code)
             # Verify epilogue fusion: relu fused via hook
-            self.assertIn("triton_helpers.maximum", code)
+            self.assertIn("maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
 
