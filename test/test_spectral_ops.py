@@ -257,13 +257,13 @@ class TestFFT(TestCase):
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
-        with self.assertRaisesRegex(RuntimeError, "rfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfft expects a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
-        with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
     @skipCPUIfNoFFT
@@ -706,7 +706,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
