@@ -67,10 +67,9 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
         equal to `quant_max`.");
 
   if(!at::isFloatingType(zero_point.scalar_type())){
-      auto [zp_min, zp_max] = at::aminmax(zero_point);
       TORCH_CHECK(
-          zp_min.item<int>() >= quant_min &&
-              zp_max.item<int>() <= quant_max,
+          at::min(zero_point).item().toInt() >= quant_min &&
+              at::max(zero_point).item().toInt() <= quant_max,
           "`zero_point` must be between `quant_min` and `quant_max`.");
   }
   TORCH_CHECK(
@@ -86,9 +85,9 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(Y)
-    .add_input(self)
-    .add_owned_input(native::_unsafe_view(scale, expected_shape))
-    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_const_input(self)
+    .add_owned_const_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_const_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): read once, write twice.  Not done at the moment
@@ -96,15 +95,15 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   TensorIterator iter_mask = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(mask)
-    .add_input(self)
-    .add_owned_input(native::_unsafe_view(scale, expected_shape))
-    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_const_input(self)
+    .add_owned_const_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_const_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
   fake_quant_per_channel_cachemask_stub(iter.device_type(), iter, iter_mask, quant_min, quant_max);
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 /* Backward path to fake-quantize the 'inputs' tensor per channel, with mask.
@@ -205,10 +204,9 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
       scale_.numel() == X_.size(axis),
       "dimensions of scale and zero-point are not consistent with input tensor")
 
-  auto [zp_min, zp_max] = at::aminmax(zero_point_rounded);
   TORCH_CHECK(
-      zp_min.item<int64_t>() >= quant_min &&
-          zp_max.item<int64_t>() <= quant_max,
+      at::min(zero_point_rounded).item().toLong() >= quant_min &&
+          at::max(zero_point_rounded).item().toLong() <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   TORCH_CHECK(
@@ -238,10 +236,10 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     .add_output(dX)
     .add_output(dScale_vec)
     .add_output(dZeroPoint_vec)
-    .add_input(X_)
-    .add_input(dY_)
-    .add_input(scale_vectorized)
-    .add_input(zero_point_vectorized)
+    .add_const_input(X_)
+    .add_const_input(dY_)
+    .add_const_input(scale_vectorized)
+    .add_const_input(zero_point_vectorized)
     .build();
 
   fake_quant_grad_learnable_channel_stub(

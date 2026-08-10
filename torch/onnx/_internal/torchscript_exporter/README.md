@@ -59,7 +59,7 @@ the original node. An example of a symbolic function needing context is
 
 It would be better for us to export inplace annotations,
 than to not export them, since it is useful information that can
-help the target of an ONNX export export more efficiently. However,
+help the target of an ONNX export more efficiently. However,
 ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
 inplace annotations, but we are losing information this way.
 
@@ -77,7 +77,7 @@ some moving parts to implementing the ONNX translation in this case:
   is what `symbolic_helper._if_scalar_type_as()` and
   `_jit_pass_onnx_scalar_type_analysis` does.
 
-- Dispatch to these functions takes advantage an outrageous coincidence
+- Dispatch to these functions takes advantage of an outrageous coincidence
     between the tensor and scalar name.  When we add two tensors together,
     you get the dispatch:
 

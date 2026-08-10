@@ -59,7 +59,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
         auto maxTg = [pso maxTotalThreadsPerThreadgroup];
         auto tg_x = std::min(grid_x, maxTg);
-        auto tg_y = std::min(grid_y, std::max(maxTg / tg_x, static_cast<NSUInteger>(1)));
+        auto tg_y = std::clamp(grid_y, 1UL, maxTg / tg_x);
         [computeEncoder dispatchThreads:MTLSizeMake(grid_x, grid_y, 1)
                   threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
       }
