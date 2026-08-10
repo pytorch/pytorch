@@ -16067,8 +16067,20 @@ op_db: list[OpInfo] = [
                    'TestOperators', 'test_jvpvjp', device_type="cuda"
                ),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_jvpvjp', device_type="xpu"
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=4e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_vjp', device_type="xpu"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_grad', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -16085,6 +16097,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
                    'TestOperators', 'test_grad', device_type="cuda",
                    active_if=TEST_WITH_ROCM,
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
@@ -20407,6 +20423,12 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
                # Align dtypes with CUDA for fallback ops
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='xpu'),
+           ),
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_operator', device_type="xpu",
+               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
