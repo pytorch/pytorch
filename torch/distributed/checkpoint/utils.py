@@ -23,6 +23,7 @@ from .api import (
     WRAPPED_EXCEPTION,
 )
 from .metadata import MetadataIndex, STATE_DICT_TYPE
+from .protocol import _get_checkpointable_tensor_shard, _is_checkpointable_tensor
 
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
@@ -76,7 +77,7 @@ class _DistWrapper:
     """
     This is a wrapper around PG that provides a series of features around object collectives.
 
-    It works without distributed initialized, where most collectives turns into nops.
+    It works without distributed initialized, where most collectives turn into nops.
 
     All variants that take functions are exception robust, meaning that if one or more
     ranks raise errors, all ranks will observe those.
@@ -350,6 +351,8 @@ def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tenso
     if hasattr(tensor, "__get_tensor_shard__"):
         # DTensor implements _Checkpointable
         return tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+    if _is_checkpointable_tensor(tensor):
+        return _get_checkpointable_tensor_shard(tensor, index)
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:

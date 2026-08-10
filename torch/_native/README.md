@@ -18,6 +18,13 @@ For overrides that always apply (no predicate), pass `unconditional_override=Tru
 
 All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get its version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
 
+Registration code must also avoid CUDA-initializing APIs (e.g. `torch.cuda.is_available()`, `get_device_capability()`, `device_count()` without NVML mode). These call `cuInit` which poisons `fork()` for any process importing torch. Use `torch.backends.cuda.is_built()` for build-time checks. Verify with:
+
+```
+# CUDA_VISIBLE_DEVICES=0 needed on multi-GPU hosts (test skips on TEST_MULTIGPU)
+CUDA_VISIBLE_DEVICES=0 pytest test/test_cuda.py::TestCuda::test_lazy_init -v
+```
+
 First, we're going to write the registration function, and a top-level call, being very careful to not pull in the `triton` package early:
 
 ```
@@ -321,6 +328,12 @@ All modules under `torch._native` route through Python's standard `logging` and 
 TORCH_LOGS=+native_dsl python my_script.py
 ```
 
+Per-compile instrumentation (`torch/_native/instrumentation.py`) has its own artifact, off by default to avoid log spew:
+
+```
+TORCH_LOGS=+native_dsl_compile python my_script.py
+```
+
 When adding new code under `torch/_native`, follow the existing pattern:
 * Use `log = logging.getLogger(__name__)` per module.
 * Default to `log.info(...)` for registration-time diagnostics that the average user does not need to see; reserve `log.warning(...)` for genuine misuse (e.g. user-supplied callbacks that fail).
@@ -331,7 +344,7 @@ Adding operators means that they should be tested. Given that we're dealing with
 
 The preferred testing method is to co-opt the existing `OpInfo` and `op_db` class/list and benefit from all the infrastructure built around that functionality.
 
-Each op should have a corresponding entry added in `torch/testing/_internal/common_methods_invocations.py`, with a input method appropriate for the overrides(s) in terms of shapes and dtypes. Instead of adding directly into `op_db`, add to the appropriate entry in `dsl_ops_by_dsl`, a dictionary, where the key will be the name of the DSL used - this must be present in `torch.backends.python_native.available_dsl`. These entries are then later added to `op_db` as appropriate for use in:
+Each op should have a corresponding entry added in `torch/testing/_internal/common_methods_invocations.py`, with an input method appropriate for the overrides(s) in terms of shapes and dtypes. Instead of adding directly into `op_db`, add to the appropriate entry in `dsl_ops_by_dsl`, a dictionary, where the key will be the name of the DSL used - this must be present in `torch.backends.python_native.available_dsl`. These entries are then later added to `op_db` as appropriate for use in:
 
 * `test_ops.py`
 * `test_unary_ufuncs.py`
