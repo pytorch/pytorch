@@ -3,6 +3,7 @@
 import collections
 import collections.abc
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -541,6 +542,95 @@ partial_fn = functools.partial(fn, scale=2)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn()
+
+    def test_bin_oct_hex_index(self):
+        # bin/oct/hex dispatch through __index__ (CPython PyNumber_ToBase).
+        class Indexable:
+            def __init__(self, val):
+                self.val = val
+
+            def __index__(self):
+                return self.val
+
+        def fn(t):
+            obj = Indexable(255)
+            return t + 1, bin(obj), oct(obj), hex(obj)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.zeros(1))
+        res = opt_fn(torch.zeros(1))
+        self.assertEqual(res[1:], ("0b11111111", "0o377", "0xff"))
+        self.assertEqual(ref[1:], res[1:])
+
+    def test_hex_index_type_error(self):
+        # hex on an object without __index__ raises TypeError, like CPython.
+        class NoIndex:
+            pass
+
+        def fn(t):
+            try:
+                hex(NoIndex())
+                return t + 1
+            except TypeError:
+                return t - 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_bin_oct_hex_require_index_not_int(self):
+        # oct/hex/bin dispatch through __index__, not __int__: an object with
+        # only __int__ must raise TypeError (CPython PyNumber_ToBase).
+        class IntNoIndex:
+            def __int__(self):
+                return 5
+
+        def fn(t):
+            results = []
+            for f in (bin, oct, hex):
+                try:
+                    f(IntNoIndex())
+                    results.append(1)
+                except TypeError:
+                    results.append(0)
+            return t + 1, tuple(results)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.zeros(1))
+        res = opt_fn(torch.zeros(1))
+        self.assertEqual(res[1], (0, 0, 0))
+        self.assertEqual(ref[1], res[1])
+
+    def test_bin_oct_hex_index_int_subclass(self):
+        # For an int subclass (incl. IntEnum/IntFlag members) __index__ is the
+        # inherited int slot. hex/oct/bin/operator.index must const-fold to the
+        # underlying int rather than re-dispatching into the slot, which would
+        # recurse forever (regression for PR #191408).
+        class MyInt(int):
+            def __new__(cls, v):
+                return super().__new__(cls, v)
+
+        class Color(enum.IntEnum):
+            RED = 1
+            GREEN = 2
+
+        class Perm(enum.IntFlag):
+            R = 4
+            W = 2
+
+        for obj in (MyInt(10), Color.RED, Color.GREEN, Perm.R | Perm.W):
+
+            def fn(t, obj=obj):
+                return t + 1, bin(obj), oct(obj), hex(obj), operator.index(obj)
+
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            ref = fn(torch.zeros(1))
+            res = opt_fn(torch.zeros(1))
+            self.assertEqual(res[1:], ref[1:])
+            self.assertEqual(
+                res[1:],
+                (bin(int(obj)), oct(int(obj)), hex(int(obj)), int(obj)),
+            )
 
     @make_test
     def test_obj_eq(a, b):
