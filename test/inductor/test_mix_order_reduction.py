@@ -1180,7 +1180,6 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
-    device_type = GPU_TYPE  # required for skipXPUIf/skipCUDAIf decorators
 
     @skipXPUIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
