@@ -341,6 +341,12 @@ test_failures = {
     "test_pointwise_laguerre_polynomial_l_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_legendre_polynomial_p_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_polar_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
+    "test_polar_size_zero_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_polar_scalar_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_add_complex7_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_add_complex8_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_add_complex9_dynamic_shapes": TestFailure(("cpu",), is_skip=True),

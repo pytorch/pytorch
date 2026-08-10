@@ -699,6 +699,21 @@ def add(
     return result
 
 
+@register_decomposition([aten.polar])
+def polar(abs: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+    complex_type = utils.corresponding_complex_dtype(abs.dtype)
+    re = abs * torch.cos(angle)
+    im = abs * torch.sin(angle)
+    if re.numel() == 0:
+        # Nothing to reinterpret as complex.
+        return torch.empty_like(re, dtype=complex_type)
+    # Interleave real/imag over a flattened view, reinterpret as complex, then
+    # restore the broadcast shape. Flattening keeps this rank-agnostic.
+    out_shape = re.shape
+    interleaved = torch.stack((re.reshape(-1), im.reshape(-1)), dim=-1).flatten()
+    return interleaved.view(complex_type).reshape(out_shape)
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
     if self.is_complex():

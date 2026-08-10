@@ -8197,6 +8197,36 @@ for dtype in (torch.int32, torch.int64):
         )
         self.common(fn, (*inp,), reference_in_float=self.device != "mps")
 
+    def test_polar_size_zero(self):
+        def fn(dist, angle):
+            return torch.polar(dist, angle)
+
+        dtype = highest_precision_float(self.device)
+        for shape in [(0,), (0, 10, 3), (2, 0, 3)]:
+            inp = (torch.rand(shape, dtype=dtype), torch.rand(shape, dtype=dtype))
+            self.common(fn, inp, reference_in_float=self.device != "mps")
+
+    def test_polar_scalar(self):
+        def fn(dist, angle):
+            return torch.polar(dist, angle)
+
+        dtype = highest_precision_float(self.device)
+        inp = (torch.tensor(2.0, dtype=dtype), torch.tensor(np.pi / 2, dtype=dtype))
+        self.common(fn, inp, reference_in_float=self.device != "mps")
+
+    def test_polar_fused(self):
+        # Fuse with elementwise and reduction ops to exercise the view logic.
+        def fn(dist, angle):
+            z = torch.polar(dist * 2.0, angle + 0.1)
+            return torch.abs(z).sum(), z.real * 3.0, z.imag.amax()
+
+        dtype = highest_precision_float(self.device)
+        inp = (
+            torch.rand((8, 4), dtype=dtype) + 0.5,
+            torch.rand((8, 4), dtype=dtype),
+        )
+        self.common(fn, inp, reference_in_float=self.device != "mps")
+
     @skip_if_gpu_halide  # incorrect result on CUDA
     def test_cauchy(self):
         def fn(x, y):

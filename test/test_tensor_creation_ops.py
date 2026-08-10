@@ -454,12 +454,12 @@ class TestTensorCreation(TestCase):
                              device=device, dtype=dtype)
         z = torch.polar(abs, angle)
         complex_dtype = float_to_corresponding_complex_type_map[dtype]
-        # float16 loses precision in cos/sin and the interleaved storage; relax tol.
-        atol, rtol = (1e-2, 1e-2) if dtype == torch.half else (1e-5, 1e-5)
+        # float16 loses precision in cos/sin.
+        tol = {torch.half: 1e-2}.get(dtype, 1e-5)
         self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
                                        -3.89711431703 - 2.25j, -1, -1],
                                       dtype=complex_dtype),
-                         z, atol=atol, rtol=rtol)
+                         z, atol=tol, rtol=tol)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
