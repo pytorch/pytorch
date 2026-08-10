@@ -64,13 +64,14 @@ def _origami_enabled() -> bool:
 
 
 def _is_hopper_cuda(device: torch.device | None) -> bool:
-    if device is None or device.type != "cuda":
+    # HIP devices use the cuda device type too, and their gfx9 architectures
+    # report capability major 9. Do not interpret that as NVIDIA Hopper.
+    if device is None or device.type != "cuda" or torch.version.hip is not None:
         return False
     try:
         if not torch.cuda.is_available():
             return False
-        major, _ = torch.cuda.get_device_capability(device)
-        return major == 9
+        return DeviceProperties.create(device).major == 9
     except (AssertionError, RuntimeError):
         # Capability lookup can fail for fake or invalid CUDA devices while
         # constructing candidate configs; leave pruning disabled in that case.
@@ -86,14 +87,27 @@ def _is_slow_hopper_wgmma_config(conf: BaseConfig) -> bool:
     # Hopper WGMMA codegen can hit pathological ptxas compile times. Keep the
     # default search space focused on lower-pipeline-pressure configs, while
     # retaining a post-scaling 128x256x64 tile that wins on large matmuls.
+    effective_num_warps = _effective_num_warps(conf)
+    # Triton requires WGMMA's M dimension to be a multiple of 64 and WGMMA
+    # operates on a four-warp warpgroup. Shape scaling can make a tile ineligible
+    # for the codegen path that this heuristic is intended to avoid.
+    if conf.block_m % 64 != 0 or effective_num_warps < 4:
+        return False
     if conf.num_stages >= 5:
         return True
-    if conf.num_stages >= 4 and _effective_num_warps(conf) >= 8:
+    if conf.num_stages >= 4 and effective_num_warps >= 8:
         return (conf.block_m, conf.block_n, conf.block_k) != (128, 256, 64)
     return False
 
 
 USE_META_WS = meta_ws_enabled()
+
+
+def _use_template_autows() -> bool:
+    """Whether to expand the Blackwell GEMM search space with Meta Triton autoWS
+    configs: opt-in flag plus an enabled meta-WS Triton build."""
+    return config.triton.enable_template_autows and USE_META_WS
+
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -185,6 +199,10 @@ class BlackwellGPUGemmConfig(GemmConfig):
     epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
+    # Meta Triton autoWS knobs (meta-WS builds only)
+    use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
+    data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
+    separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -901,7 +919,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
             # Add BlackwellGPUGemmConfig specific fields to key if present
             if isinstance(conf, BlackwellGPUGemmConfig):
-                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+                key += (
+                    conf.epilogue_subtile,
+                    conf.warp_specialize,
+                    conf.flatten,
+                    conf.use_meta_ws,
+                    conf.data_partition_factor,
+                    conf.separate_epilogue_store,
+                )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
             key += extra_key
@@ -924,6 +949,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+                    kwargs["USE_META_WS"] = conf.use_meta_ws
+                    kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
+                    kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
 
                 kwargs.update(extra_kwargs)
 
@@ -2294,6 +2322,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 k,
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
+                input_dtype=dtype,
                 op_name=op_name,
                 target_device=target_device,
             )
@@ -2442,6 +2471,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     n,
                     k,
                     dtype_size=dtype.itemsize,
+                    input_dtype=dtype,
                     op_name=op_name,
                     target_device=target_device,
                     **kwargs,
@@ -2472,6 +2502,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 n,
                 k,
                 dtype_size=dtype.itemsize,
+                input_dtype=dtype,
                 op_name=op_name,
                 target_device=target_device,
                 **kwargs,
@@ -2693,6 +2724,12 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
 
 # TMA mixins for Blackwell templates
 class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    """Config mixin for the Blackwell persistent-TMA GEMM template.
+
+    Generates the fb-triton autoWS (meta-WS) config sweep and prunes the
+    combinations the lowering cannot support before they reach codegen.
+    """
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2708,6 +2745,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            use_meta_ws = template_kwargs.get("USE_META_WS", False)
+            # autoWS configs come from a full sweep; drop combos the lowering
+            # does not support so no invalid config reaches codegen.
+            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -2722,7 +2764,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and not USE_META_WS
+                and not use_meta_ws
             )
             yield {
                 **template_kwargs,
@@ -2730,6 +2772,63 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
+
+    @staticmethod
+    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+        """autoWS lowering constraints; swept configs violating these are pruned."""
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
+        if block_n // subtile < 32:
+            return False
+        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
+        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        if dp == 2 and block_m not in (128, 256):
+            return False
+        return True
+
+    def _get_config_generator(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        # No curated autoWS set yet: sweep the full autoWS space for both default
+        # and exhaustive search, and let _get_template_configs_impl prune it.
+        if _use_template_autows():
+            return partial(
+                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+            )
+        return super()._get_config_generator()
+
+    @staticmethod
+    def _generate_autows_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256], repeat=3
+        ):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for epilogue_subtile in [1, 2, 4, 8]:
+                        for data_partition_factor in [1, 2]:
+                            for separate_epilogue_store in [False, True]:
+                                configs.append(
+                                    BlackwellGPUGemmConfig(
+                                        block_m=BLOCK_M,
+                                        block_n=BLOCK_N,
+                                        block_k=BLOCK_K,
+                                        num_stages=num_stages,
+                                        num_warps=num_warps,
+                                        group_m=8,
+                                        epilogue_subtile=epilogue_subtile,
+                                        use_meta_ws=True,
+                                        data_partition_factor=data_partition_factor,
+                                        separate_epilogue_store=separate_epilogue_store,
+                                        warp_specialize=True,
+                                        flatten=False,
+                                    )
+                                )
+        return configs
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:
@@ -3016,26 +3115,32 @@ class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     def _filter_scaled_configs(
         self,
         configs: list[BaseConfig],
+        input_dtype: torch.dtype | None = None,
         target_device: torch.device | None = None,
         **kwargs: Any,
     ) -> list[BaseConfig]:
-        # This is intentionally limited to standard MM. The reported ptxas
-        # pathology is from its BF16 WGMMA codegen; int8, scaled, and TMA
-        # templates use different codegen and need separate evidence before
-        # inheriting the same performance tradeoff.
-        if config.max_autotune_gemm_search_space == "DEFAULT" and _is_hopper_cuda(
-            target_device
+        # Apply this only to FP16/BF16 in the standard CUDA GEMM template family
+        # (mm/bmm, addmm/baddbmm, and mm-ah). The reported pathology is from BF16
+        # WGMMA; FP32, int8, scaled, and TMA paths should not inherit this
+        # empirical performance tradeoff without matching evidence.
+        if (
+            config.max_autotune_gemm_search_space == "DEFAULT"
+            and input_dtype in (torch.float16, torch.bfloat16)
+            and _is_hopper_cuda(target_device)
         ):
             original_count = len(configs)
             configs = [c for c in configs if not _is_slow_hopper_wgmma_config(c)]
             if len(configs) != original_count:
-                log.debug(
-                    "Hopper WGMMA: pruned %d/%d slow standard MM configs",
+                log.info(
+                    "Hopper WGMMA: pruned %d/%d slow standard GEMM configs",
                     original_count - len(configs),
                     original_count,
                 )
         return super()._filter_scaled_configs(
-            configs, target_device=target_device, **kwargs
+            configs,
+            input_dtype=input_dtype,
+            target_device=target_device,
+            **kwargs,
         )
 
 
@@ -3056,7 +3161,7 @@ class CUDAAddMMTemplateConfigHeuristic(AddMMConfigMixin, CUDAMMTemplateConfigHeu
     register=torch.version.hip is None,
     op_name="mm-ah",
 )
-class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+class CUDAMMAHTemplateConfigHeuristic(CUDAMMTemplateConfigHeuristic):
     """Standard MM template heuristic for CUDA using the extra mm configs only (for autoheuristic)"""
 
     def __init__(self) -> None:

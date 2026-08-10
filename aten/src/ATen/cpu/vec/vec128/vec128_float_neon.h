@@ -697,6 +697,48 @@ inline Vectorized<float> Vectorized<float>::le(
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
+#if defined(__clang__) && defined(__ARM_FEATURE_SVE)
+
+// Clang uses FMAD and FMLA interchangeably, depending on the result register
+
+template <>
+Vectorized<float> inline fmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svmad_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svmsb_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svnmsb_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svnmad_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+#else
+
 template <>
 Vectorized<float> inline fmadd(
     const Vectorized<float>& a,
@@ -728,6 +770,8 @@ Vectorized<float> inline fnmsub(
     const Vectorized<float>& c) {
   return Vectorized<float>(vnegq_f32(vfmaq_f32(c, a, b)));
 }
+
+#endif
 
 inline Vectorized<float> Vectorized<float>::erf() const {
   // constants

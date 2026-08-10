@@ -450,7 +450,7 @@ optimize_ddp_lazy_compile = False
 
 # lambda guarding on object aliasing to improve opportunity for dict tag
 # optimization
-use_lamba_guard_for_object_aliasing = True
+use_lamba_guard_for_object_aliasing = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
