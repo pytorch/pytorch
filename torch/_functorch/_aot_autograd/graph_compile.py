@@ -816,6 +816,108 @@ def _has_invoke_subgraph_node(gm: torch.fx.GraphModule):
     return False
 
 
+def _rewrite_bw_hop_to_recompute_fw(
+    new_bw_hop_gm: torch.fx.GraphModule,
+    new_fw_hop_gm: torch.fx.GraphModule,
+    fw_identifier: str,
+    num_primals: int,
+    num_fw_outputs: int,
+    num_saved: int,
+    num_sym: int,
+    num_tangents: int,
+) -> None:
+    """Turn a save-partitioned region backward into a recompute-as-call one.
+
+    The region is partitioned save-all, so new_fw_hop_gm outputs
+    (*fw_outs, *saved, *sym_nodes) and new_bw_hop_gm takes
+    (*sym_nodes, *saved, *tangents) -> (*grads), where `saved` is the
+    non-symint saved values (num_saved of them) and `sym_nodes` are the symints
+    (num_sym of them, always last). This pass relies on the forward's extra
+    outputs and the backward's leading inputs sharing that relative ordering.
+
+    We rewrite new_bw_hop_gm in place so it instead takes (*primals, *tangents)
+    and re-invokes new_fw_hop_gm(*primals) to regenerate (*saved, *sym_nodes)
+    internally. Because the forward subgraph is invoked from both the forward
+    graph and inside this backward subgraph, the two lower from the same
+    GraphModule (structurally identical kernels), so a recomputed reduction
+    matches the original forward (gh-186572), while only primals -- not
+    activations -- cross the outer fwd/bwd boundary.
+    """
+    from torch._higher_order_ops import invoke_subgraph
+
+    g = new_bw_hop_gm.graph
+    placeholders = g.find_nodes(op="placeholder")
+    # The bw signature must be exactly (*sym, *saved, *tangents). Extra placeholder
+    # classes (opaque objects, backward_state, bwd_seed_offset) would be silently
+    # misclassified as tangents, so fail loudly instead. bwd_seed_offset can't
+    # appear here since RNG is banned upstream.
+    if len(placeholders) != num_sym + num_saved + num_tangents:
+        raise AssertionError(
+            "recompute-as-call expected bw placeholders "
+            f"= {num_sym} sym + {num_saved} saved + {num_tangents} tangents, got "
+            f"{len(placeholders)} (unsupported placeholder class in the region)"
+        )
+    old_sym = placeholders[:num_sym]
+    old_saved = placeholders[num_sym : num_sym + num_saved]
+
+    fw_placeholders = new_fw_hop_gm.graph.find_nodes(op="placeholder")
+    if len(fw_placeholders) != num_primals:
+        raise AssertionError(
+            f"expected {num_primals} fw placeholders, got {len(fw_placeholders)}"
+        )
+    fw_out_vals = [
+        n.meta.get("val") if n is not None else None
+        for n in new_fw_hop_gm.graph.find_nodes(op="output")[0].args[0]
+    ]
+    if len(fw_out_vals) != num_fw_outputs + num_saved + num_sym:
+        raise AssertionError(
+            "recompute-as-call expected fw outputs "
+            f"= {num_fw_outputs} fw_outs + {num_saved} saved + {num_sym} sym, got "
+            f"{len(fw_out_vals)}"
+        )
+
+    new_bw_hop_gm.add_module("recompute_fw_subgraph", new_fw_hop_gm)
+
+    # New primal placeholders go at the very front (before existing placeholders).
+    new_primals = []
+    with g.inserting_before(placeholders[0]):
+        for i in range(num_primals):
+            p = g.placeholder(f"recompute_primal_{i}")
+            p.meta.update(copy.copy(fw_placeholders[i].meta))
+            new_primals.append(p)
+
+    # The re-invoke and getitems must come after all placeholders.
+    body_start = next(n for n in g.nodes if n.op != "placeholder")
+    with g.inserting_before(body_start):
+        get_attr_node = g.get_attr("recompute_fw_subgraph")
+        fw_call = g.call_function(
+            invoke_subgraph, args=(get_attr_node, fw_identifier, *new_primals)
+        )
+        fw_call.meta["val"] = tuple(fw_out_vals)
+        saved_gis = []
+        for j in range(num_saved):
+            gi = g.call_function(operator.getitem, args=(fw_call, num_fw_outputs + j))
+            gi.meta["val"] = fw_out_vals[num_fw_outputs + j]
+            saved_gis.append(gi)
+        sym_gis = []
+        for k in range(num_sym):
+            idx = num_fw_outputs + num_saved + k
+            gi = g.call_function(operator.getitem, args=(fw_call, idx))
+            gi.meta["val"] = fw_out_vals[idx]
+            sym_gis.append(gi)
+
+    for old, new in zip(old_sym, sym_gis):
+        old.replace_all_uses_with(new)
+    for old, new in zip(old_saved, saved_gis):
+        old.replace_all_uses_with(new)
+    for old in [*old_sym, *old_saved]:
+        g.erase_node(old)
+
+    g.eliminate_dead_code()
+    g.lint()
+    new_bw_hop_gm.recompile()
+
+
 def run_joint_graph_passes_on_hops(
     joint_gm: torch.fx.GraphModule,
     joint_inputs: Any,
@@ -861,6 +963,10 @@ def run_joint_graph_passes_on_hops(
     from torch._higher_order_ops.invoke_subgraph import (
         get_backward_nested_region_config,
     )
+
+    # Identifiers of checkpoint regions rewritten to recompute-as-call, so the
+    # restitch loop can pass primals+tangents (not saved tensors) to them.
+    recompute_ac_ids: set[str] = set()
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -995,6 +1101,20 @@ def run_joint_graph_passes_on_hops(
         new_hop_graphs[identifier].old_num_fw_inputs = num_fw_inputs
         new_hop_graphs[identifier].old_num_fw_outputs = num_fw_outputs
 
+        # Only rewrite checkpoint regions (marked by the front-door and
+        # propagated to node meta by invoke_subgraph) to recompute-as-call; leave
+        # nested_compile_region and other invoke_subgraph HOPs -- including any
+        # with their own partitioner config -- untouched.
+        # A checkpoint region (the front-door marked it) always recomputes via a
+        # shared-subgraph call. Recompute is coupled to the front-door rather than
+        # a separate flag, so enabling checkpoint_via_invoke_subgraph can't
+        # silently turn checkpoint into save-everything.
+        region_recompute = fw_hop_node.meta.get("custom", {}).get(
+            "_checkpoint_region", False
+        )
+        if region_recompute:
+            recompute_ac_ids.add(identifier)
+
         # Step 1) - Get the `joint_hop_gm`. As mentioned earlier, the
         # backward graph is the joint graph.
         joint_hop_gm = getattr(joint_gm, node.args[0].target)
@@ -1012,9 +1132,56 @@ def run_joint_graph_passes_on_hops(
         # so it can propagate them to the partitioner (and use in cudagraphs)
         static_lifetime_input_indices: list[int] = []
 
-        used_hop_custom_partition, partition_fn = _get_partition_fn(
-            fw_hop_node, aot_config, default_partition_fn
-        )
+        if region_recompute:
+            # The backward recomputes by re-invoking the forward subgraph, so the
+            # forward must expose every backward-needed activation as an output --
+            # that is the save-all partition. RNG in the region is not yet
+            # supported: re-invoking would draw fresh values (see flag docs). Note
+            # the ban is on presence of RNG ops, not on `must_recompute` tags,
+            # since the save-all partition marks nothing must_recompute.
+            # Recurse into nested subgraph modules: an RNG op inside a nested HOP
+            # would otherwise be missed, and re-invoking the region would draw
+            # fresh values on recompute. `is_rng_op` only catches aten ops tagged
+            # nondeterministic_seeded; with functionalize_rng_ops the RNG becomes
+            # run_*_rng_state HOPs (no such tag), so match those explicitly too.
+            from torch._prims.rng_prims import (
+                graphsafe_run_with_rng_state,
+                run_and_save_rng_state,
+                run_dtensor_rng_op,
+                run_with_rng_state,
+            )
+
+            rng_hops = (
+                run_and_save_rng_state,
+                run_with_rng_state,
+                graphsafe_run_with_rng_state,
+                run_dtensor_rng_op,
+            )
+            if any(
+                torch._functorch.partitioners.is_rng_op(n)
+                or (n.op == "call_function" and n.target in rng_hops)
+                for m in joint_hop_gm.modules()
+                if isinstance(m, torch.fx.GraphModule)
+                for n in m.graph.nodes
+            ):
+                raise RuntimeError(
+                    "checkpoint_via_invoke_subgraph does not support RNG ops in "
+                    f"the checkpointed region (invoke_subgraph {fw_hop_node.name}); "
+                    "move RNG out of the region or disable the flag."
+                )
+            from torch._inductor.compile_fx import (
+                partition_fn as _inductor_partition_fn,
+            )
+
+            used_hop_custom_partition = False
+            partition_fn = functools.partial(
+                _inductor_partition_fn,
+                partitioner_fn_override=torch._functorch.partitioners.default_partition,
+            )
+        else:
+            used_hop_custom_partition, partition_fn = _get_partition_fn(
+                fw_hop_node, aot_config, default_partition_fn
+            )
 
         # Step 2) and 3) - Run joint graph passes and partitioner
         try:
@@ -1041,10 +1208,27 @@ def run_joint_graph_passes_on_hops(
         extra_outputs = new_fw_out_nodes[num_fw_outputs:]
         symint_outputs = [n for n in extra_outputs if is_sym_node(n)]
 
-        new_hop_graphs[identifier].new_num_sym_nodes = len(symint_outputs)
-        new_hop_graphs[identifier].new_num_saved_nodes = len(extra_outputs) - len(
-            symint_outputs
-        )
+        new_num_sym_nodes = len(symint_outputs)
+        new_num_saved_nodes = len(extra_outputs) - new_num_sym_nodes
+        new_hop_graphs[identifier].new_num_sym_nodes = new_num_sym_nodes
+        new_hop_graphs[identifier].new_num_saved_nodes = new_num_saved_nodes
+
+        if region_recompute:
+            # Rewrite the backward to re-invoke the forward subgraph instead of
+            # consuming its saved activations (see helper docstring). The bw HOP
+            # node's args are (subgraph, identifier, *primals, *tangents), so the
+            # tangent count is what remains after the primals.
+            num_tangents = len(node.args) - 2 - num_fw_inputs
+            _rewrite_bw_hop_to_recompute_fw(
+                new_bw_hop_gm,
+                new_fw_hop_gm,
+                f"recompute_fw_{identifier}",
+                num_fw_inputs,
+                num_fw_outputs,
+                new_num_saved_nodes,
+                new_num_sym_nodes,
+                num_tangents,
+            )
 
         new_hop_graphs[identifier].partitioning_done = True
 
@@ -1204,16 +1388,24 @@ def run_joint_graph_passes_on_hops(
                 f"new_bw_hop_gm for identifier {identifier} must not be None"
             )
 
-        saved_tensor_nodes = extra_fw_outputs[:new_num_saved_nodes]
-        sym_nodes = extra_fw_outputs[new_num_saved_nodes:]
-
         num_primals = new_hop_graphs[identifier].old_num_fw_inputs
         if num_primals is None:
             raise AssertionError(
                 f"num_primals for identifier {identifier} must not be None"
             )
-        tangents = list(bw_node.args[2 + num_primals :])
-        operands = sym_nodes + saved_tensor_nodes + tangents
+
+        if identifier in recompute_ac_ids:
+            # new_bw_hop_gm was rewritten to take (*primals, *tangents) and
+            # re-invoke the forward subgraph internally to regenerate its
+            # activations -- so pass primals+tangents straight through (exactly
+            # bw_node's original operands). The forward's saved-tensor getitems
+            # (extra_fw_outputs) go unused here and are cleaned up by DCE.
+            operands = list(bw_node.args[2:])
+        else:
+            saved_tensor_nodes = extra_fw_outputs[:new_num_saved_nodes]
+            sym_nodes = extra_fw_outputs[new_num_saved_nodes:]
+            tangents = list(bw_node.args[2 + num_primals :])
+            operands = sym_nodes + saved_tensor_nodes + tangents
 
         # Insert the new_bw_hop_gm into the joint_gm
         with joint_gm.graph.inserting_after(bw_node):
