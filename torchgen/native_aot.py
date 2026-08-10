@@ -118,10 +118,20 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
     """The structured-wrapper call site. The stub has no kernel unless the
     AOT library registered one, and the Context switch gates the whole
     path; a true return means the AOT kernel filled the meta()-allocated
-    outputs and op.impl is skipped."""
+    outputs and op.impl is skipped.
+
+    The emitted comment is not decoration: the last conjunct LAUNCHES the
+    kernel, which no reader can infer from the call site alone (asked in
+    review of the generated code)."""
     device_type = f"c10::DeviceType::{m.dispatch_key}"
     stub = f"at::native::{m.stub_name()}"
     return (
+        f"// native-AOT: the last conjunct is the LAUNCH, not a query -- it runs the\n"
+        f"// AOT kernel into the meta()-allocated outputs and returns true if it\n"
+        f"// handled the call, false if it declined this shape. && short-circuits, so\n"
+        f"// the stub is never called when AOT is switched off or the device is\n"
+        f"// unsupported. op.impl below is the ordinary aten kernel, and it runs in\n"
+        f"// exactly those three cases: switched off, unsupported device, or declined.\n"
         f"if (!(at::globalContext().allowNativeAot() && "
         f"{stub}.is_device_supported({device_type}) && "
         f"{stub}({device_type}, {impl_exprs}))) {{ op.impl({impl_exprs}); }}"
