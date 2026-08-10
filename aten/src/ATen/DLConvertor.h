@@ -13,7 +13,15 @@ namespace at {
 TORCH_API ScalarType toScalarType(const DLDataType& dtype);
 TORCH_API DLManagedTensor* toDLPack(const Tensor& src);
 TORCH_API struct DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src);
-TORCH_API void toDLPackNonOwning(const Tensor& src, DLTensor* out);
+// Read-only variant: sets DLPACK_FLAG_BITMASK_READ_ONLY and exports through
+// const_data_ptr() so the conversion does not materialize a copy-on-write
+// tensor. The consumer must not mutate the data.
+TORCH_API struct DLManagedTensorVersioned* toDLPackVersionedReadOnly(
+    const Tensor& src);
+TORCH_API void toDLPackNonOwning(
+    const Tensor& src,
+    DLTensor* out,
+    bool read_only = false);
 TORCH_API Tensor
 fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter = {});
 TORCH_API Tensor fromDLPackVersioned(

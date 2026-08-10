@@ -269,7 +269,13 @@ struct OwnedOptionalArrayRef {
   std::optional<std::vector<T>> storage;
 
   /* implicit */ operator c10::OptionalArrayRef<T>() const {
-    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
+    // Build the OptionalArrayRef from a std::optional<ArrayRef<T>> (whose
+    // constructor is not lifetimebound) rather than from a temporary ArrayRef:
+    // the view points into the owned `storage` vector, which outlives the
+    // wrapper's enclosing call, so binding it to the temporary ArrayRef would
+    // be a spurious -Wreturn-stack-address error under C10_LIFETIMEBOUND.
+    return storage ? c10::OptionalArrayRef<T>(
+                         std::make_optional(c10::ArrayRef<T>(*storage)))
                    : c10::OptionalArrayRef<T>(std::nullopt);
   }
   /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
