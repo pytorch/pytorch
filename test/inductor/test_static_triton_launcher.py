@@ -224,6 +224,13 @@ class TestStaticTritonLauncherUnit(TestCase):
         ):
             self._global_scratch_kernel(StaticallyLaunchedXpuKernel)
 
+    @unittest.skipUnless(torch.version.hip, "ROCm only")
+    def test_rocm_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel()
+
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):
         autotuner = object.__new__(CachingAutotuner)
@@ -1127,22 +1134,24 @@ class TestFastCudaLauncherCompileResult(TestCase):
 
         previous_allocator = _allocator.get()
         patcher, results = self._patch_build_fast_launcher()
-        triton.set_allocator(
-            lambda size, alignment, stream: torch.empty(
+        alloc_fn = mock.Mock(
+            side_effect=lambda size, _alignment, _stream: torch.empty(
                 size, dtype=torch.uint8, device="cuda"
             )
         )
+        triton.set_allocator(alloc_fn)
         try:
             with patcher:
                 for _ in range(3):
                     a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
                     b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
-                    torch.testing.assert_close(
-                        gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2
-                    )
+                    self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
         finally:
             triton.set_allocator(previous_allocator)
 
+        self.assertGreater(alloc_fn.call_count, 0)
+        for call in alloc_fn.call_args_list:
+            self.assertGreater(call.args[0], 0)
         self.assertTrue(results, "_build_fast_launcher was not reached")
         self.assertFalse(
             any(results),
