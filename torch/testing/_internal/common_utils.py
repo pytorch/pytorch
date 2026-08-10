@@ -5794,6 +5794,30 @@ GRADCHECK_DEFAULT_EPS = 1e-6
 GRADCHECK_DEFAULT_ATOL = 1e-5
 GRADCHECK_DEFAULT_RTOL = 1e-3
 
+# Default tolerances for comparing gradients produced by a split backward
+# against a monolithic .backward() reference. The two reduce in a different
+# order, so non-associative summation makes them diverge by more than the dtype
+# default on hardware whose matmul accumulates below full float32 width. None
+# means use the torch.testing.assert_close default for the dtype. Backends that
+# need wider bounds override these in their test overlay.
+SPLIT_BACKWARD_GRAD_ATOL: float | None = None
+SPLIT_BACKWARD_GRAD_RTOL: float | None = None
+
+
+def split_backward_grad_tolerances() -> dict:
+    """Keyword args for assert_close when comparing a split backward to a reference.
+
+    Reads the constants above at call time rather than import time, so a backend
+    overlay can set them after the test module has been imported. Both are passed
+    together because assert_close rejects one without the other. When both are
+    None, falls back to the per-dtype default.
+    """
+    return {
+        "atol": SPLIT_BACKWARD_GRAD_ATOL,
+        "rtol": SPLIT_BACKWARD_GRAD_RTOL,
+    }
+
+
 TEST_WITH_SLOW_GRADCHECK: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW_GRADCHECK",
     env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK",
