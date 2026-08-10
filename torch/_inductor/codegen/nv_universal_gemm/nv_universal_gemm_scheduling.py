@@ -15,6 +15,7 @@ from torch._inductor.utils import (
     Placeholder,
 )
 from torch.utils._ordered_set import OrderedSet
+from torch._dynamo.device_interface import BackendFeature
 
 from ... import config
 from ...codecache import code_hash, get_path
@@ -42,7 +43,7 @@ from ...scheduler import (
     SchedulerNode,
 )
 from ...virtualized import V
-from ..common import BackendFeature, IndentedBuffer
+from ..common import IndentedBuffer
 from ..cutlass.python_evt import _ACCUMULATOR_ARG_NAME, CutlassEVTCodegen
 from .nv_universal_gemm import NVUniversalGemmCaller
 

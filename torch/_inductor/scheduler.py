@@ -41,6 +41,7 @@ import sympy
 import torch
 import torch._inductor.async_compile
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import BackendFeature
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.autotune_process import use_pipelined_autotuning
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
@@ -54,7 +55,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, config_comms, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
-from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
+from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import (
     estimate_nccl_collective_runtime,
     estimate_nccl_collective_runtime_nccl_estimator,

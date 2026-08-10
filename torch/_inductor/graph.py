@@ -23,6 +23,7 @@ import torch._logging
 import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
+from torch._dynamo.device_interface import BackendFeature
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
@@ -58,7 +59,6 @@ from torch.utils._typing_utils import not_none
 
 from . import config, ir
 from .codegen.common import (
-    BackendFeature,
     DeviceOpOverrides,
     FileBackedGraphModule,
     get_backend_features,

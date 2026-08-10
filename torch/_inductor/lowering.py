@@ -8754,7 +8754,8 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
-from .codegen.common import BackendFeature, pointwise_overrides_data
+from torch._dynamo.device_interface import BackendFeature
+from .codegen.common import pointwise_overrides_data
 
 
 def _get_pointwise_overrides(ns, name):

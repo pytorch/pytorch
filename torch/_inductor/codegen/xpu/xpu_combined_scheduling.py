@@ -23,8 +23,7 @@ if TYPE_CHECKING:
 
     import torch
     from torch.utils._ordered_set import OrderedSet
-
-    from ..common import BackendFeature
+    from torch._dynamo.device_interface import BackendFeature
 
     _IntLike: TypeAlias = int | Expr
 

@@ -1924,7 +1924,8 @@ def use_triton_template(
     enable_float8: bool = False,
     check_max_autotune: bool = True,
 ) -> bool:
-    from .codegen.common import BackendFeature, has_backend_feature
+    from torch._dynamo.device_interface import BackendFeature
+    from .codegen.common import has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:

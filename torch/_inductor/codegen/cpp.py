@@ -17,6 +17,7 @@ import sympy
 
 import torch
 import torch.fx
+from torch._dynamo.device_interface import BackendFeature
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
@@ -53,7 +54,6 @@ from ..utils import (
 )
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
-    BackendFeature,
     BracesBuffer,
     CSE,
     CSEVariable,

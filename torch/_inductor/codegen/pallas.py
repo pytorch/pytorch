@@ -10,6 +10,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._dynamo.device_interface import BackendFeature
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     Max as TorchMax,
@@ -23,7 +24,6 @@ from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
 from .block_analysis import BlockPatternMatcher
 from .common import (
-    BackendFeature,
     CSEVariable,
     IndentedBuffer,
     OpOverrides,
