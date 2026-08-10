@@ -1,26 +1,26 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 27e57f991c593e3e58d01e34ff9efc8f10d5812b..9886bf3306e0a359a416b1acb9cf8c6e057135f7 100644
+index 1b97bd87ef2a55edd2a937612df42267c3c8764d..6d8b509013d62608ef71834e7e4ab74f7b5949b5 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -1331 +1331,3 @@ class EpiMod:
+@@ -1334 +1334,3 @@ class EpiMod:
 -            bufs[name] = epi_args[name] = torch.empty(shape, dtype=torch.float32, device=device)
 +            bufs[name] = epi_args[name] = torch.empty(
 +                shape, dtype=op.sink_alloc_dtype(), device=device
 +            )
-@@ -1603 +1605 @@ class EpiMod:
+@@ -1606 +1608 @@ class EpiMod:
 -                for name, shape in sink_shapes:
 +                for name, shape, dtype in sink_shapes:
-@@ -1605 +1607 @@ class EpiMod:
+@@ -1608 +1610 @@ class EpiMod:
 -                        buf = _t.empty(shape, dtype=_t.float32, device=A.device)
 +                        buf = _t.empty(shape, dtype=dtype, device=A.device)
-@@ -1675 +1677,5 @@ class EpiMod:
+@@ -1678 +1680,5 @@ class EpiMod:
 -                        epi_args[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
 +                        epi_args[name] = torch.empty(
 +                            shape,
 +                            dtype=self.sinks[name].sink_alloc_dtype(),
 +                            device=A.device,
 +                        )
-@@ -1785 +1791,3 @@ class EpiMod:
+@@ -1788 +1794,3 @@ class EpiMod:
 -            sink_shapes = tuple((name, tuple(b.shape)) for name, b in sink_bufs.items())
 +            sink_shapes = tuple(
 +                (name, tuple(buf.shape), buf.dtype) for name, buf in sink_bufs.items()

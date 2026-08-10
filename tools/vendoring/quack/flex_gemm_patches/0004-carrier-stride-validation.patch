@@ -1,5 +1,5 @@
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index d840ba99b6656ae0fe193bbd70b09ac461a6f113..7fc4d93bc6054e1795b6e11579af19d7aeb43aac 100644
+index e7e010b1415799d995c47b01e437cc85295137b4..63282b4092a863a0395946a3bfebac82c8b0a9a1 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -264,0 +265 @@ class GroupedLocalReduceOutputLayout:
@@ -23,6 +23,6 @@ index d840ba99b6656ae0fe193bbd70b09ac461a6f113..7fc4d93bc6054e1795b6e11579af19d7
 +                raise ValueError(
 +                    f"{self.name}: compressed aux buffer must be contiguous in its last dim"
 +                )
-@@ -677,0 +683,2 @@ class GroupedReduceBase(EpiOp):
+@@ -686,0 +692,2 @@ class GroupedReduceBase(EpiOp):
 +        if self.output_layout.validate_carrier_fn is not None:
 +            self.output_layout.validate_carrier_fn(value)

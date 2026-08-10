@@ -186,7 +186,7 @@ def flex_gemm_epimod(
     aux_output_count: int,
     indexed_output: FlexGemmEpiModIndexedOutputPlan | None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
-    tensorwise: bool,
+    fragmentwise: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
 ):
     """Build and cache a QuACK EpiMod from generated FlexGEMM metadata."""
@@ -198,7 +198,7 @@ def flex_gemm_epimod(
         aux_output_count,
         None if indexed_output is None else indexed_output.cache_key,
         None if local_reduce is None else local_reduce.cache_key,
-        tensorwise,
+        fragmentwise,
         main_transform,
     )
     epimod = _EPIMOD_CACHE.get(key)
@@ -235,7 +235,7 @@ def flex_gemm_epimod(
             epi_ops.GroupedMainStore(
                 "main",
                 main_transform.group,
-                paired=not tensorwise and main_transform.group == 2,
+                paired=not fragmentwise and main_transform.group == 2,
             ),
         )
     else:
@@ -330,16 +330,14 @@ def flex_gemm_epimod(
                 ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
             else:
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-    if tensorwise:
-        if prepass is not None:
-            raise RuntimeError(
-                "TensorSSA FlexGEMM callbacks do not support reduction prepasses"
-            )
-        epimod = epilogue_module.tensor_epilogue(
+    if fragmentwise:
+        epimod = epilogue_module.fragment_epilogue(
             outputs=outputs,
             ops=ops,
             outs=sinks,
             extra_ops=extra_ops,
+            prepass=prepass,
+            prepass_outs=prepass_outs,
         )(epilogue_fn)
     else:
         epimod = epilogue_module.gemm_epilogue(
@@ -384,7 +382,7 @@ def gemm_epimod(
     epilogue_arg_kinds: tuple[str, ...] = (),
     indexed_output: FlexGemmEpiModIndexedOutputPlan | None = None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
-    tensorwise: bool = False,
+    fragmentwise: bool = False,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     tuned: bool = False,
     config_constraints: tuple[tuple[str, Any], ...] = (),
@@ -414,7 +412,7 @@ def gemm_epimod(
         len(aux_outs),
         indexed_output,
         local_reduce,
-        tensorwise,
+        fragmentwise,
         main_transform,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)

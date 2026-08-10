@@ -389,7 +389,7 @@ index 0000000000000000000000000000000000000000..19971c7ad1e1171343e6f054f09aa9ba
 +    """Explicit pre-store cast; normal EpiMod stores convert from the destination dtype."""
 +    return to_dtype(x, dtype)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c81bf8dda 100644
+index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c1683479fbb562 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -163 +163 @@ from typing import NamedTuple, Optional
@@ -409,7 +409,7 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c
 +)
 +
 @@ -292,0 +301,55 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
-+class _TensorEpiModMixin(_EpiModMixinBase):
++class _FragmentEpiModMixin(_EpiModMixinBase):
 +    """Device adapter for whole-fragment TensorSSA EpiMod callbacks."""
 +
 +    @cute.jit
@@ -465,10 +465,10 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c
 +
 +
 @@ -308,0 +372 @@ class EpiMod:
-+        tensorwise=False,
++        fragmentwise=False,
 @@ -348,0 +413,5 @@ class EpiMod:
-+        self.tensorwise = tensorwise
-+        if tensorwise and (self.mode != "element" or prepass is not None):
++        self.fragmentwise = fragmentwise
++        if fragmentwise and (self.mode != "element" or prepass is not None):
 +            raise ValueError(
 +                "TensorSSA callbacks support element mode without an accumulator prepass"
 +            )
@@ -477,7 +477,7 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c
 +            # Preserve the default disk-cache identity while distinguishing
 +            # explicit vectorizer choices and whole-fragment callbacks.
 +            *(() if self.vectorize is None else (("vectorize", self.vectorize),)),
-+            *(() if not self.tensorwise else (("tensorwise", True),)),
++            *(() if not self.fragmentwise else (("fragmentwise", True),)),
 @@ -414,0 +487,9 @@ class EpiMod:
 +    def supports_swap_ab(self) -> bool:
 +        """Whether every orientation-sensitive op supports swap-at-trace."""
@@ -500,11 +500,11 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c
 @@ -527 +611,4 @@ class EpiMod:
 -            (_EpiModMixinBase, _SM_BASE[sm]),
 +            (
-+                _TensorEpiModMixin if self.tensorwise else _EpiModMixinBase,
++                _FragmentEpiModMixin if self.fragmentwise else _EpiModMixinBase,
 +                _SM_BASE[sm],
 +            ),
 @@ -540,0 +628 @@ class EpiMod:
-+                "_epi_mod_tensorwise": self.tensorwise,
++                "_epi_mod_fragmentwise": self.fragmentwise,
 @@ -557,4 +645,4 @@ class EpiMod:
 -    def gemm_tuned(self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False):
 -        """Autotuned gemm(): config-space sweep via quack.gemm_runtime.autotune (lazy
@@ -658,7 +658,7 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c
 +                    preferred_config=preferred_config,
 +                )
 @@ -1794,0 +1966,16 @@ def gemm_epilogue(
-+def tensor_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
++def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +    """Decorate a whole-fragment TensorSSA callback using the EpiMod host stack."""
 +
 +    def wrap(fn):
@@ -668,7 +668,7 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..c8d1e0a38ffdd74a3372d505ff1d691c
 +            ops=ops,
 +            outs=outs,
 +            extra_ops=extra_ops,
-+            tensorwise=True,
++            fragmentwise=True,
 +        )
 +
 +    return wrap
