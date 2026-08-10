@@ -41,7 +41,8 @@ class KernelInputs(ABC):
         self._device_name: str | None = None
         self._scalars = scalars if scalars is not None else {}
         self._out_dtype = out_dtype
-        assert len(input_nodes) > 0, "Expected at least one input node"
+        if len(input_nodes) <= 0:
+            raise AssertionError("Expected at least one input node")
 
     def nodes(self, reorder: Sequence[int] | None = None) -> list[Any]:
         """
@@ -56,9 +57,10 @@ class KernelInputs(ABC):
         """
         if reorder is None:
             return self._input_nodes
-        assert len(self._input_nodes) == len(reorder), (
-            f"Reorder length mismatch: {len(self._input_nodes)} vs {len(reorder)}"
-        )
+        if len(self._input_nodes) != len(reorder):
+            raise AssertionError(
+                f"Reorder length mismatch: {len(self._input_nodes)} vs {len(reorder)}"
+            )
         return [self._input_nodes[i] for i in reorder]
 
     @property
@@ -126,6 +128,13 @@ class KernelInputs(ABC):
             for node in self._input_nodes
         )
 
+    def shapes_autotune(self) -> tuple[tuple[int, ...], ...]:
+        """Get coherent max-shape sizes for compile-time autotuning."""
+        return tuple(
+            V.graph.sizevars.upper_bounds_or_hints(node.get_size())
+            for node in self._input_nodes
+        )
+
     def strides_symbolic(self) -> tuple[tuple[sympy.Integer, ...], ...]:
         """
         Get the symbolic strides of all input nodes.
@@ -144,6 +153,13 @@ class KernelInputs(ABC):
         """
         return tuple(
             V.graph.sizevars.optimization_hints(node.get_stride())
+            for node in self._input_nodes
+        )
+
+    def strides_autotune(self) -> tuple[tuple[int, ...], ...]:
+        """Get coherent max-shape strides for compile-time autotuning."""
+        return tuple(
+            V.graph.sizevars.upper_bounds_or_hints(node.get_stride())
             for node in self._input_nodes
         )
 
@@ -187,7 +203,8 @@ class KernelInputs(ABC):
         Returns:
             The scalar value
         """
-        assert name in self._scalars, f"Scalar {name} not found, but required"
+        if name not in self._scalars:
+            raise AssertionError(f"Scalar {name} not found, but required")
         return self._scalars[name]
 
     @abstractmethod
@@ -225,7 +242,8 @@ class MMKernelInputs(KernelInputs):
         # for mm, we need at least 2 nodes, and we need to know which nodes
         # are the main matrices e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.
-        assert len(self._input_nodes) >= 2, "Expected at least 2 input nodes"
+        if len(self._input_nodes) < 2:
+            raise AssertionError("Expected at least 2 input nodes")
 
         # Adjust assertions to handle negative indices
         m1_idx, m2_idx = mat1_idx, mat2_idx
@@ -234,8 +252,10 @@ class MMKernelInputs(KernelInputs):
         if mat2_idx < 0:
             m2_idx += len(input_nodes)
 
-        assert 0 <= m1_idx < len(input_nodes), f"Invalid mat1_idx: {mat1_idx}"
-        assert 0 <= m2_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
+        if not (0 <= m1_idx < len(input_nodes)):
+            raise AssertionError(f"Invalid mat1_idx: {mat1_idx}")
+        if not (0 <= m2_idx < len(input_nodes)):
+            raise AssertionError(f"Invalid mat2_idx: {mat2_idx}")
 
         self._mat1_idx = mat1_idx
         self._mat2_idx = mat2_idx
@@ -327,8 +347,20 @@ class MMKernelInputs(KernelInputs):
 
         # Ensure K dimensions match between operands
         k_check = mat2_shape[-2]  # K from second-to-last dimension of mat2
-        assert k == k_check, f"K dimensions don't match: {k} vs {k_check}"
+        if k != k_check:
+            raise AssertionError(f"K dimensions don't match: {k} vs {k_check}")
 
+        return (m, n, k)
+
+    def mnk_autotune(self) -> tuple[int, int, int]:
+        """Get M, N, K at the coherent max-shape autotune point."""
+        shapes = self.shapes_autotune()
+        mat1_shape = shapes[self._mat1_idx]
+        mat2_shape = shapes[self._mat2_idx]
+        m, k = mat1_shape[-2:]
+        k_check, n = mat2_shape[-2:]
+        if k != k_check:
+            raise AssertionError(f"K dimensions don't match: {k} vs {k_check}")
         return (m, n, k)
 
     def batch_hinted(self) -> int:
@@ -345,3 +377,8 @@ class MMKernelInputs(KernelInputs):
         if len(mat1_shape) >= 3:
             return mat1_shape[-3]  # Batch from third-to-last dimension
         return 1  # Non-batched operation
+
+    def batch_autotune(self) -> int:
+        """Get the batch size at the coherent max-shape autotune point."""
+        mat1_shape = self.shapes_autotune()[self._mat1_idx]
+        return mat1_shape[-3] if len(mat1_shape) >= 3 else 1

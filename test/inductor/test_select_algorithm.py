@@ -23,7 +23,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import FixedLayout
+from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
@@ -35,14 +35,18 @@ from torch._inductor.select_algorithm import (
     TritonTemplateKernel,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_kernels
+from torch._inductor.utils import (
+    fresh_cache,
+    is_big_gpu,
+    run_and_get_code,
+    run_and_get_kernels,
+)
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -119,6 +123,14 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     ),
                     expected,
                 )
+
+    def test_realize_inputs_preserves_shape_constant(self):
+        import sympy
+
+        out = select_algorithm.realize_inputs(sympy.Integer(2048))
+
+        self.assertIsInstance(out, ShapeAsConstantBuffer)
+        self.assertEqual(out.expr, sympy.Integer(2048))
 
 
 class TestSelectAlgorithm(TestCase):
@@ -479,7 +491,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -488,18 +499,27 @@ class TestSelectAlgorithm(TestCase):
             rnd = torch.ops.prims.inductor_random.default(mm_4.shape, seed, "rand")
             return mm_4 * rnd
 
-        if GPU_TYPE == "xpu":
+        # Triton MFMA matmul on AMD GPUs and Intel XPUs produces
+        # ~1 ULP fp16 rounding differences vs the aten reference used by the
+        # autotuner's internal VERIFY path. Max abs diff 0.0625 (= 2^-4),
+        # max rel diff 2^-10 (fp16 mantissa LSB). Benign; expand tolerance
+        # to match the existing XPU pattern.
+        if GPU_TYPE == "xpu" or torch.version.hip:
             patcher = patch.object(
                 select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
             )
             fn = patcher(fn)
 
         # sizes picked so triton autotuning wins
-        fn(
+        _, (code,) = run_and_get_code(
+            fn,
             torch.randn(512, 1024, dtype=torch.float16, device=GPU_TYPE),
             torch.randn(384, 512, dtype=torch.float16, device=GPU_TYPE),
             torch.tensor(12345, device=GPU_TYPE),
         )
+        if GPU_TYPE == "cuda" and not torch.version.hip:
+            self.assertEqual(code.count("triton_helpers.rand4x"), 0)
+            self.assertEqual(code.count("tl.rand("), 1)
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
@@ -715,6 +735,66 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestSelectAlgorithmCleanup(TestCase):
+    def test_benchmark_only_clears_matching_precompile_cache_entry(self):
+        """
+        Autotune cleanup should release only the closure for the active site.
+        Clearing the whole precompile cache regresses compile-time reuse for
+        unrelated autotune sites.
+        """
+        cache = select_algorithm.AlgorithmSelectorCache()
+        cache.precompile_cache = {"keep": dict, "drop": dict}
+
+        with patch.object(cache, "make_benchmark_fn", return_value=lambda _choices: {}):
+            cache.benchmark([], [], unittest.mock.Mock(), None, precompile_key="drop")
+
+        self.assertIn("keep", cache.precompile_cache)
+        self.assertNotIn("drop", cache.precompile_cache)
+
+    def test_release_benchmark_artifacts_closes_and_clears_state(self):
+        """
+        Benchmark-only autotuners own temporary launchers and compile results.
+        Cleanup must close their module owners and clear the references that
+        otherwise keep Triton ``CompiledKernel`` objects alive.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        closed = []
+
+        class FakeKernel:
+            def __init__(self, name):
+                self.name = name
+
+            def close(self):
+                closed.append(self.name)
+
+        class FakeCompileResult:
+            def __init__(self, name):
+                self.kernel = FakeKernel(name)
+
+        def fake_launcher():
+            return None
+
+        launcher_kernel = FakeKernel("launcher")
+        fake_launcher.__self__ = launcher_kernel  # type: ignore[attr-defined]
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.launchers = [fake_launcher]
+        autotuner.compile_results = [FakeCompileResult("compile_result")]
+        autotuner.benchmark_failure_reasons = {fake_launcher: "failed"}
+        autotuner._cached_launcher = fake_launcher
+        autotuner._debug_call = object()
+
+        autotuner.release_benchmark_artifacts()
+
+        self.assertEqual(closed, ["launcher", "compile_result"])
+        self.assertEqual(autotuner.launchers, [])
+        self.assertEqual(autotuner.compile_results, [])
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertIsNone(autotuner._debug_call)
+
+
 class TestExternKernelCaller(TestCase):
     @requires_gpu()
     @patches
@@ -747,7 +827,7 @@ class TestExternKernelCaller(TestCase):
                 in message
                 for message in log_context.output
             ),
-            f"Expected warning message not found in logs: {log_context.output}",
+            lambda msg: f"{msg}\nExpected warning message not found in logs: {log_context.output}",
         )
 
         expected = torch.mm(a, b)
@@ -987,7 +1067,7 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(
             captured_results["example_dtype"],
             torch.float4_e2m1fn_x2,
-            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            lambda msg: f"{msg}\nbenchmark_example_value should preserve float4_e2m1fn_x2 dtype "
             f"after unwrapping the view, but got {captured_results['example_dtype']}",
         )
         self.assertEqual(captured_results["example_shape"], (m, k))
@@ -1085,11 +1165,12 @@ class TestGetInputsStorageSizeCheck(TestCase):
 class TestAutotuneDynamicMaxSize(TestCase):
     def test_benchmark_inputs_use_dynamic_upper_bound(self):
         from torch._inductor import ir
-        from torch._inductor.sizevars import SizeVarAllocator
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             BaseConfigHeuristic,
             GemmConfig,
         )
+        from torch._inductor.kernel.custom_op import _adapt_user_input_gen_fns
+        from torch._inductor.sizevars import SizeVarAllocator
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -1115,6 +1196,7 @@ class TestAutotuneDynamicMaxSize(TestCase):
 
         with V.set_graph_handler(mock_graph):
             meta = TensorMeta.from_irnodes(input_buf)
+            meta_with_override = TensorMeta.from_irnodes([input_buf], hint_override=32)
             autotune_args = select_algorithm.AlgorithmSelectorCache.get_inputs(
                 choices=[],
                 input_nodes=[input_buf],
@@ -1132,8 +1214,16 @@ class TestAutotuneDynamicMaxSize(TestCase):
                 has_int8_tensor=False,
                 exclude=lambda m, n, k: False,
             )[0]
-
+            input_gen_fn = _adapt_user_input_gen_fns(
+                [input_buf],
+                torch.ops.aten.relu.default,
+                {"self": lambda tensor: tensor},
+            )[0]
+            rng_state = torch.random.get_rng_state()
+            generated_custom_input = input_gen_fn(input_buf)
         self.assertEqual(meta.sizes, (64, 16))
+        self.assertIsInstance(meta_with_override, list)
+        self.assertEqual(meta_with_override[0].sizes, (32, 16))
         self.assertEqual(
             autotune_args.triton.input_tensors[0].shape, torch.Size([64, 16])
         )
@@ -1141,6 +1231,112 @@ class TestAutotuneDynamicMaxSize(TestCase):
         self.assertIn(64, cache_key)
         self.assertNotIn(8, cache_key)
         self.assertEqual(scaled_config.block_m, 64)
+        self.assertEqual(generated_custom_input.shape, torch.Size([64, 16]))
+        self.assertEqual(torch.count_nonzero(generated_custom_input), 0)
+        self.assertEqual(torch.random.get_rng_state(), rng_state)
+
+    def test_subgraph_benchmark_request_uses_generated_input_size(self):
+        from torch._inductor import ir
+        from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import FloorDiv
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        shape_env = ShapeEnv()
+        shape_env.var_to_range[s0] = ValueRanges(2, 64)
+        shape_env.backed_var_to_val[s0] = sympy.Integer(8)
+        stride_symbol = sympy.Symbol("stride_symbol", integer=True, positive=True)
+        shape_env.var_to_range[stride_symbol] = ValueRanges(2, 64)
+        shape_env.backed_var_to_val[stride_symbol] = sympy.Integer(8)
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars = SizeVarAllocator(shape_env)
+        mock_graph.buffer_layout_constraints = {}
+
+        device = torch.device("cpu")
+        dtype = torch.float32
+        input_layout = ir.FixedLayout(device, dtype, size=[s0, 16], stride=[16, 1])
+        output_layout = ir.FixedLayout(device, dtype, size=[20, 32], stride=[32, 1])
+        input_buf = ir.Buffer(name="dynamic_input", layout=input_layout)
+        generated_input = torch.empty_strided((20, 16), (16, 1))
+        stride_layout = ir.FixedLayout(
+            device, dtype, size=[2, 16], stride=[stride_symbol, 1]
+        )
+        stride_buf = ir.Buffer(name="dynamic_stride_input", layout=stride_layout)
+        generated_stride_input = torch.empty_strided((2, 16), (20, 1))
+
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        symbolic_size = shape_env.create_symintnode(s0, hint=8)
+        symbolic_stride = shape_env.create_symintnode(stride_symbol, hint=8)
+        with fake_mode:
+            example_input = torch.empty_strided((symbolic_size, 16), (16, 1))
+            example_stride_input = torch.empty_strided((2, 16), (symbolic_stride, 1))
+
+        subgraph_choice = object.__new__(SubgraphChoiceCaller)
+        subgraph_choice.name = "dynamic_subgraph"
+        subgraph_choice.input_nodes = [input_buf, stride_buf]
+        subgraph_choice.benchmark_inputs = [
+            generated_input,
+            generated_stride_input,
+        ]
+        subgraph_choice.example_inputs = [
+            example_input,
+            example_stride_input,
+        ]
+        subgraph_choice.sym_inputs = [s0, stride_symbol]
+        subgraph_choice.layout = output_layout
+        compiled_module = unittest.mock.Mock(key="module_key")
+        compiled_module.__file__ = "module.py"
+        subgraph_choice._compiled_module = compiled_module
+
+        with V.set_graph_handler(mock_graph):
+            subgraph_choice.sym_input_values = (
+                subgraph_choice._compute_sym_input_values()
+            )
+            request = subgraph_choice._create_benchmark_request()
+
+            expression_layout = ir.FixedLayout(
+                device, dtype, size=[2 * s0, 16], stride=[16, 1]
+            )
+            expression_buf = ir.Buffer(
+                name="dynamic_expression_input", layout=expression_layout
+            )
+            symbolic_expression = shape_env.create_symintnode(2 * s0, hint=16)
+            with fake_mode:
+                expression_example = torch.empty_strided(
+                    (symbolic_expression, 16), (16, 1)
+                )
+            subgraph_choice.input_nodes = [expression_buf]
+            subgraph_choice.benchmark_inputs = [torch.empty(20, 16)]
+            subgraph_choice.example_inputs = [expression_example]
+            subgraph_choice.sym_inputs = [s0]
+            expression_sym_values = subgraph_choice._compute_sym_input_values()
+
+            floor_layout = ir.FixedLayout(
+                device, dtype, size=[FloorDiv(s0, 2), 16], stride=[16, 1]
+            )
+            floor_buf = ir.Buffer(name="dynamic_floor_input", layout=floor_layout)
+            symbolic_floor = shape_env.create_symintnode(FloorDiv(s0, 2), hint=4)
+            with fake_mode:
+                floor_example = torch.empty_strided((symbolic_floor, 16), (16, 1))
+            subgraph_choice.input_nodes = [floor_buf]
+            subgraph_choice.benchmark_inputs = [torch.empty(10, 16)]
+            subgraph_choice.example_inputs = [floor_example]
+            subgraph_choice.sym_inputs = [s0]
+            with self.assertRaisesRegex(
+                AssertionError, "Benchmark tensor does not match"
+            ):
+                subgraph_choice._compute_sym_input_values()
+
+        self.assertEqual(request.input_tensor_meta[0].sizes, (20, 16))
+        self.assertEqual(request.input_tensor_meta[0].name, "dynamic_input")
+        self.assertEqual(request.input_tensor_meta[1].strides, (20, 1))
+        self.assertEqual(request.output_tensor_meta.sizes, (20, 32))
+        self.assertEqual(request.sym_input_values, [20, 20])
+        self.assertEqual(expression_sym_values, [10])
 
     def test_large_default_dynamic_upper_bound_uses_hint(self):
         from torch._inductor.sizevars import SizeVarAllocator
@@ -1156,6 +1352,83 @@ class TestAutotuneDynamicMaxSize(TestCase):
         sizevars = SizeVarAllocator(shape_env)
 
         self.assertEqual(sizevars.upper_bound_or_hint(s0), 8)
+
+    def test_dynamic_upper_bound_expressions_use_consistent_symbols(self):
+        from torch._inductor import ir
+        from torch._inductor.kernel_inputs import MMKernelInputs
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import FloorDiv
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        batch = sympy.Symbol("batch", integer=True, positive=True)
+        default_dim = sympy.Symbol("default_dim", integer=True, positive=True)
+        user_dim = sympy.Symbol("user_dim", integer=True, positive=True)
+        shape_env = ShapeEnv()
+        for symbol, hint, upper in (
+            (batch, 4, 64),
+            (default_dim, 8, SizeVarAllocator._MAX_AUTOTUNE_UPPER_BOUND + 1),
+            (user_dim, 4, 32),
+        ):
+            shape_env.var_to_range[symbol] = ValueRanges(2, upper)
+            shape_env.backed_var_to_val[symbol] = sympy.Integer(hint)
+        sizevars = SizeVarAllocator(shape_env)
+
+        self.assertEqual(sizevars.upper_bound_or_hint(default_dim - 1), 7)
+        self.assertEqual(sizevars.upper_bound_or_hint(FloorDiv(default_dim, 2)), 4)
+        self.assertEqual(sizevars.upper_bound_or_hint(default_dim * user_dim), 256)
+        untracked = sympy.Symbol("untracked", integer=True, positive=True)
+        self.assertEqual(sizevars.upper_bound_or_hint(untracked, fallback=7), 7)
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars = sizevars
+        mock_graph.buffer_layout_constraints = {}
+        layout = ir.FixedLayout(
+            torch.device("cpu"),
+            torch.float32,
+            size=[batch, default_dim, user_dim],
+            stride=[default_dim * user_dim, user_dim, 1],
+        )
+        with V.set_graph_handler(mock_graph):
+            meta = TensorMeta.from_irnodes(
+                ir.Buffer(name="mixed_bounds", layout=layout)
+            )
+            mat1 = ir.Buffer(
+                name="mat1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[batch, default_dim],
+                    stride=[default_dim, 1],
+                ),
+            )
+            mat2 = ir.Buffer(
+                name="mat2",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[default_dim, user_dim],
+                    stride=[user_dim, 1],
+                ),
+            )
+            kernel_inputs = MMKernelInputs([mat1, mat2])
+            autotune_mnk = kernel_inputs.mnk_autotune()
+            autotune_strides = kernel_inputs.strides_autotune()
+
+        self.assertEqual(meta.sizes, (64, 8, 32))
+        self.assertEqual(meta.strides, (256, 32, 1))
+        self.assertEqual(autotune_mnk, (64, 32, 8))
+        self.assertEqual(autotune_strides, ((8, 1), (32, 1)))
+
+        original = sympy.Symbol("original", integer=True, positive=True)
+        replacement = sympy.Symbol("replacement", integer=True, positive=True)
+        shape_env.var_to_range[original] = ValueRanges(2, 64)
+        shape_env.var_to_range[replacement] = ValueRanges(2, 32)
+        shape_env.backed_var_to_val[original] = sympy.Integer(8)
+        shape_env.backed_var_to_val[replacement] = sympy.Integer(8)
+        precomputed = sizevars.lookup_precomputed_size(2 * original + 1)
+        shape_env.replacements[original] = replacement
+        self.assertEqual(sizevars.upper_bound_or_hint(precomputed), 65)
 
     @requires_gpu()
     @requires_triton()
@@ -1324,6 +1597,41 @@ class TestTemplateRender(TestCase):
                 kernels[0]
             )
 
+    def test_subgraph_nodes_participate_in_template_index_dtype(self):
+        """Covers implicit template buffers that are not explicit arguments."""
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.dependencies import MemoryDep, ReadWrites
+        from torch._inductor.select_algorithm import template_subgraph_index_dtype_nodes
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        large_capture = ir.Buffer(
+            name="large_capture",
+            layout=FixedLayout(torch.device("cpu"), torch.float32, [2**31 + 1]),
+        )
+
+        class FakeSubgraph:
+            def get_read_writes(self):
+                return ReadWrites(
+                    reads=OrderedSet(
+                        [MemoryDep("large_capture", sympy.Integer(0), (), ())]
+                    ),
+                    writes=OrderedSet(),
+                    index_exprs=OrderedSet(),
+                )
+
+        class FakeGraph:
+            def try_get_buffer(self, name):
+                return large_capture if name == "large_capture" else None
+
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                template_subgraph_index_dtype_nodes([FakeSubgraph()]),
+                (large_capture,),
+            )
+
     @unittest.skipIf(
         TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
     )
@@ -1488,7 +1796,7 @@ class TestTemplateRender(TestCase):
             # Verify template kernel was used
             self.assertIn("_mock_inner_add", code)
             # Verify epilogue fusion: relu fused via hook
-            self.assertIn("triton_helpers.maximum", code)
+            self.assertIn("maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
 

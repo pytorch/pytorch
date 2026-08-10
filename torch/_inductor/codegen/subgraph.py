@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
@@ -27,9 +27,10 @@ from torch._inductor.ir import (
     Layout,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.utils import do_bench_using_profiling
+from torch._inductor.utils import do_bench_using_profiling, sympy_subs
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._sympy.solve import try_solve
 
 
 log = logging.getLogger(__name__)
@@ -85,8 +86,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         with V.fake_mode:
             for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
-                assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
-                assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
+                if len(get_free_symbols(inp.get_size(), unbacked_only=True)) != 0:
+                    raise AssertionError("expected no unbacked symbols in input size")
+                if len(get_free_symbols(inp.get_stride(), unbacked_only=True)) != 0:
+                    raise AssertionError("expected no unbacked symbols in input stride")
 
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
 
@@ -97,15 +100,23 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 if input_gen_fns is not None and i in input_gen_fns:
                     self.benchmark_inputs.append(input_gen_fns[i](inp))
                 else:
+                    tensor_meta = TensorMeta.from_irnodes(inp)
+                    if not isinstance(tensor_meta, TensorMeta):
+                        raise AssertionError("expected one TensorMeta per input")
                     self.benchmark_inputs.append(
-                        ir_node_to_tensor(inp, replace_symbols_with_hints=True)
+                        torch.empty_strided(
+                            tensor_meta.sizes,
+                            tensor_meta.strides,
+                            device=tensor_meta.device,
+                            dtype=tensor_meta.dtype,
+                        ).zero_()
                     )
 
         # Trace with symbolic inputs for guard detection
         self.gm = make_fx_graph(*trace_inputs)
         gm_original_output_strides(self.gm)
         # Store symbolic inputs for sym_input computation
-        self.example_inputs = trace_inputs
+        self.example_inputs = cast(list[FakeTensor], trace_inputs)
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
         self.sym_input_values = self._compute_sym_input_values()
@@ -130,36 +141,105 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 self._bmreq = self._create_benchmark_request()
 
     def _compute_sym_input_values(self) -> list[int]:
-        """Extract concrete dimension values for sym_inputs from benchmark_inputs.
+        """Bind symbolic input arguments to the concrete benchmark tensors.
 
         The compiled module expects symbolic dimension values as runtime arguments.
-        This maps each symbolic variable to its concrete value from the benchmark tensors.
-        Used for range based autotuning.
+        Bind direct symbols from tensor sizes and strides first, then solve
+        one-symbol expressions supported by ``try_solve``.  Any remaining symbols
+        use the same coherent max-shape policy as benchmark tensor materialization;
+        validation below rejects unsupported expressions instead of benchmarking
+        with inconsistent symbolic arguments.
         """
-        sym_input_names = OrderedSet(
-            [s.name for s in self.sym_inputs if hasattr(s, "name")]
+        if not all(isinstance(inp, torch.Tensor) for inp in self.benchmark_inputs):
+            raise AssertionError("expected tensor benchmark inputs")
+
+        bindings = V.graph.sizevars.shape_env.bind_symbols(
+            self.example_inputs, self.benchmark_inputs
         )
+        equations: list[tuple[sympy.Expr | int, int, str]] = []
+        for input_node, benchmark_input in zip(self.input_nodes, self.benchmark_inputs):
+            for kind, expressions, values in (
+                ("size", input_node.get_size(), benchmark_input.size()),
+                ("stride", input_node.get_stride(), benchmark_input.stride()),
+            ):
+                equations.extend(
+                    (expression, int(value), f"{input_node.get_name()} {kind}")
+                    for expression, value in zip(expressions, values)
+                )
 
-        # Build mapping: symbolic dimension name -> concrete value
-        sym_name_to_value: dict[str, int] = {}
-        for inp_node, benchmark_inp in zip(self.input_nodes, self.benchmark_inputs):
-            if isinstance(benchmark_inp, torch.Tensor):
-                for sym_dim, actual_dim in zip(
-                    inp_node.get_size(), benchmark_inp.shape
-                ):
-                    if isinstance(sym_dim, sympy.Symbol):
-                        sym_name_to_value[sym_dim.name] = int(actual_dim)
-                    elif str(sym_dim) in sym_input_names:
-                        sym_name_to_value[str(sym_dim)] = int(actual_dim)
+        pending = equations
+        while pending:
+            next_pending = []
+            made_progress = False
+            for expression, actual, source in pending:
+                if isinstance(expression, int):
+                    continue
+                expression = V.graph.sizevars.simplify(expression)
+                substituted = sympy_subs(expression, bindings)
+                if not isinstance(substituted, sympy.Basic):
+                    continue
+                unbound = substituted.free_symbols
+                if not unbound:
+                    continue
+                if len(unbound) != 1:
+                    next_pending.append((expression, actual, source))
+                    continue
 
-        result = []
-        for sym_var in self.sym_inputs:
-            if isinstance(sym_var, sympy.Symbol) and sym_var.name in sym_name_to_value:
-                result.append(sym_name_to_value[sym_var.name])
+                symbol = next(iter(unbound))
+                solution = try_solve(
+                    sympy.Eq(substituted, sympy.Integer(actual)), symbol
+                )
+                if solution is None or solution[1].free_symbols:
+                    next_pending.append((expression, actual, source))
+                    continue
+
+                candidate = solution[1]
+                if candidate.is_integer is not True:
+                    next_pending.append((expression, actual, source))
+                    continue
+                value = int(candidate)
+                prior = bindings.setdefault(symbol, value)
+                if prior != value:
+                    raise AssertionError(
+                        f"Conflicting benchmark value for {symbol}: {prior} != {value}"
+                    )
+                made_progress = True
+
+            if not made_progress:
+                break
+            pending = next_pending
+
+        for symbol in self.sym_inputs:
+            if not isinstance(symbol, sympy.Symbol):
+                raise AssertionError(f"expected symbolic input, got {symbol}")
+            bindings.setdefault(
+                symbol,
+                V.graph.sizevars.upper_bound_or_hint(symbol, fallback=1),
+            )
+
+        for expression, actual, source in equations:
+            if isinstance(expression, int):
+                resolved = expression
             else:
-                hint = V.graph.sizevars.shape_env.optimization_hint(sym_var, fallback=1)
-                result.append(int(hint))
-        return result
+                resolved_expr = sympy_subs(
+                    V.graph.sizevars.simplify(expression), bindings
+                )
+                if (
+                    isinstance(resolved_expr, sympy.Basic)
+                    and resolved_expr.free_symbols
+                ):
+                    raise AssertionError(
+                        f"Could not bind {source} expression {expression}: "
+                        f"unresolved symbols {resolved_expr.free_symbols}"
+                    )
+                resolved = int(resolved_expr)
+            if resolved != actual:
+                raise AssertionError(
+                    f"Benchmark tensor does not match {source} expression "
+                    f"{expression}: expected {resolved}, got {actual}"
+                )
+
+        return [bindings[symbol] for symbol in self.sym_inputs]
 
     def cache_decomposition(
         self, decomposition: Callable[..., Any], kwargs: dict[str, Any]
@@ -185,7 +265,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
         log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
 
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=compile_inputs,
@@ -221,10 +302,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self,
     ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
         """Create a benchmark request for async autotuning."""
-        assert self._compiled_module is not None, (
-            "Module must be compiled before creating benchmark request"
-        )
-        input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+        if self._compiled_module is None:
+            raise AssertionError(
+                "Module must be compiled before creating benchmark request"
+            )
+        input_tensor_meta = [
+            TensorMeta.from_tensor(tensor, name=node.get_name())
+            for node, tensor in zip(self.input_nodes, self.benchmark_inputs)
+        ]
         output_tensor_meta = TensorMeta.from_irnodes(self.layout)
 
         if self.layout.device.type == "cpu":
@@ -247,9 +332,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self,
     ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
         """Benchmark request for async autotuning. Pre-compiled when pipeline_max_autotune_gemm is enabled."""
-        assert self._bmreq is not None, (
-            "bmreq accessed but pipeline_max_autotune_gemm was not enabled during __init__"
-        )
+        if self._bmreq is None:
+            raise AssertionError(
+                "bmreq accessed but pipeline_max_autotune_gemm was not enabled during __init__"
+            )
         return self._bmreq
 
     def _ensure_compiled(self) -> None:
@@ -282,7 +368,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
@@ -293,7 +380,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def output_node(self) -> ir.TensorBox:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
@@ -406,10 +494,11 @@ class SubgraphTemplate(KernelTemplate):
         if not decompositions:
             return []
 
-        assert len(decompositions) == len(non_tensor_args), (
-            f"decompositions and non_tensor_args must have same length, "
-            f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
-        )
+        if len(decompositions) != len(non_tensor_args):
+            raise AssertionError(
+                f"decompositions and non_tensor_args must have same length, "
+                f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
+            )
 
         # Default to empty config_patches if not provided
         if config_patches_list is None:
@@ -519,11 +608,12 @@ class SubgraphTemplate(KernelTemplate):
     def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:
         """Validate that kwargs contains only non-tensor arguments."""
         for key, value in kwargs.items():
-            assert not isinstance(value, (torch.Tensor, Buffer)), (
-                f"kwargs['{key}'] contains tensor {type(value)}. "
-                f"Tensor arguments should be in input_nodes, not kwargs. "
-                f"Only scalar/non-tensor parameters should be in kwargs."
-            )
+            if isinstance(value, (torch.Tensor, Buffer)):
+                raise AssertionError(
+                    f"kwargs['{key}'] contains tensor {type(value)}. "
+                    f"Tensor arguments should be in input_nodes, not kwargs. "
+                    f"Only scalar/non-tensor parameters should be in kwargs."
+                )
 
     def _validate_layout_equivalence(
         self,
@@ -577,9 +667,9 @@ class SubgraphTemplate(KernelTemplate):
                     fake_tensor = input_gen_fns[i](inp)
                 else:
                     raw_shape = inp.get_size()
-                    concrete_shape = V.graph.sizevars.optimization_hints(raw_shape)
+                    concrete_shape = V.graph.sizevars.upper_bounds_or_hints(raw_shape)
                     raw_stride = inp.get_stride()
-                    concrete_stride = V.graph.sizevars.optimization_hints(raw_stride)
+                    concrete_stride = V.graph.sizevars.upper_bounds_or_hints(raw_stride)
                     fake_tensor = torch.empty_strided(
                         concrete_shape,
                         concrete_stride,
@@ -592,10 +682,11 @@ class SubgraphTemplate(KernelTemplate):
             output = fn(*example_inputs)
 
             # Assert single output
-            assert isinstance(output, torch.Tensor), (
-                f"Expected single tensor output, got {type(output)}. "
-                f"Multi-output custom ops not yet supported in autotuning."
-            )
+            if not isinstance(output, torch.Tensor):
+                raise AssertionError(
+                    f"Expected single tensor output, got {type(output)}. "
+                    f"Multi-output custom ops not yet supported in autotuning."
+                )
 
             return FixedLayout(
                 device=output.device,

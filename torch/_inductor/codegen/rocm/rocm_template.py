@@ -98,16 +98,19 @@ class ROCmTemplate(KernelTemplate):
             unique(self.input_nodes[idx].get_name() for idx in input_reorder)
         )
         expected_args.extend([self.output_node.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
-            call_args,
-            expected_args,
-        )
+        if list(call_args)[: len(expected_args)] != expected_args:
+            raise AssertionError(
+                (
+                    call_args,
+                    expected_args,
+                )
+            )
 
         size_args = (
             self.size_args() if hasattr(self, "size_args") else ()
         )  # subclass should define def size_args()
         # Resolve symbolic sizes to concrete ints for benchmarking only.
-        size_args_ints = list(V.graph.sizevars.optimization_hints(size_args))
+        size_args_ints = list(V.graph.sizevars.upper_bounds_or_hints(size_args))
         # The runtime args come right after the size args
         runtime_args = self.get_runtime_arg_values(**kwargs)
         extra_args = size_args_ints + runtime_args

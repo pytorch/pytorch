@@ -8,8 +8,8 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
+from torch._inductor.heuristics.template.params import DictKernelTemplateParams
 from torch._inductor.kernel_template_choice import KernelTemplateChoice
-from torch._inductor.template_heuristics.params import DictKernelTemplateParams
 
 
 log = logging.getLogger(__name__)
@@ -64,8 +64,8 @@ class LookupTableChoices(InductorChoices):
         """
         # Get node information using existing methods
         dtypes = kernel_inputs.dtypes()
-        shapes = kernel_inputs.shapes_hinted()
-        strides = kernel_inputs.strides_hinted()
+        shapes = kernel_inputs.shapes_autotune()
+        strides = kernel_inputs.strides_autotune()
 
         # Create tuple of (dtype, shape_list, stride_list) for each node
         node_info = tuple(
@@ -370,7 +370,7 @@ class LookupTableChoices(InductorChoices):
     ) -> list[KernelTemplateChoice]:
         """Fallback to parent if no lookup table or no matches."""
         # NOTE: this is broken out, so that subclasses are able to override this
-        # to handle explicitly the situations where the lookup take had a miss vs
+        # to handle explicitly the situations where the lookup table had a miss vs
         # overriding the entire logic
         return super()._finalize_template_configs(
             template_choices,
