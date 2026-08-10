@@ -4851,6 +4851,40 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.comm_name, comm_name.decode())
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_comm_name_defaults_to_group_desc_and_name(self):
+        # When the user does not set config.comm_name, ProcessGroupNCCL populates
+        # it with "<group_desc>:<group_name>" so the NCCL profiler / Inspector can
+        # recover the group semantics.
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "comm_name"):
+            raise SkipTest(
+                "comm_name binding absent (PyTorch might be built against NCCL < 2.27.3)"
+            )
+        store = c10d.FileStore(self.file_name, self.world_size)
+        os.environ["NCCL_DEBUG"] = "INFO"
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            dist.init_process_group(
+                "nccl", world_size=self.world_size, rank=self.rank, store=store
+            )
+            pg = c10d.new_group([0, 1], group_desc="test_desc")
+            t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
+            pg.allreduce(t).wait()
+            dist.barrier()
+            nccl_debug_file_content = nccl_debug_file.read()
+        comm_names = [
+            n.strip().decode()
+            for n in re.findall(
+                rb"Comm config Comm name set to (.*)", nccl_debug_file_content
+            )
+        ]
+        self.assertIn(f"{pg.group_desc}:{pg.group_name}", comm_names)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)

@@ -1071,6 +1071,15 @@ command = [
 ]
 
 [[linter]]
+code = 'CODEOWNERS_TAXONOMY'
+include_patterns = ['**']
+command = [
+    'python3',
+    'scripts/codeowners/check_taxonomy.py',
+    '--lintrunner',
+]
+
+[[linter]]
 code = 'TEST_HAS_MAIN'
 include_patterns = [
     'test/**/test_*.py',
