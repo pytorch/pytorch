@@ -72,6 +72,7 @@ class FlexGemmEpilogueConfig:
         gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
+        blockscaled_format: Optional shared QuACK A/B format name.
         quack_config_constraints: Optional native QuACK config field constraints.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
@@ -86,6 +87,7 @@ class FlexGemmEpilogueConfig:
     gemm_op: FlexGemmOpSpec
     alpha: float
     beta: float
+    blockscaled_format: str | None
     quack_config_constraints: tuple[tuple[str, Any], ...]
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
@@ -220,6 +222,12 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         ]
         if config.quack_config_constraints:
             kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
+        if config.blockscaled_format is not None:
+            kwargs.append(
+                f", SFA={input_args[2]}, SFB={input_args[3]}, "
+                f"bs_format_a={config.blockscaled_format!r}, "
+                f"bs_format_b={config.blockscaled_format!r}"
+            )
         if epilogue_args:
             kwargs.append(
                 f", epilogue_args=({', '.join(epilogue_args)},), "

@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import importlib
 import inspect
+import math
 import os
 from typing import Any, TYPE_CHECKING
 
@@ -41,6 +42,32 @@ def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     if arg.dtype in (torch.bool, torch.float4_e2m1fn_x2):
         return arg.view(torch.uint8)
     return arg
+
+
+def quack_blockscaled_scale_view(
+    scale: torch.Tensor,
+    mn: int,
+    storage_k: int,
+    format_name: str,
+) -> torch.Tensor:
+    """View a public flat SWIZZLE_32_4_4 scale as QuACK's blocked tensor."""
+    blockscaled = importlib.import_module("quack.blockscaled.operand")
+    format = blockscaled.BlockScaledFormat.from_name(format_name)
+    logical_k = format.logical_k(storage_k)
+    shape = (
+        (mn + 127) // 128,
+        (logical_k + 4 * format.sf_vec_size - 1) // (4 * format.sf_vec_size),
+        32,
+        4,
+        4,
+    )
+    expected_numel = math.prod(shape)
+    if scale.numel() != expected_numel:
+        raise RuntimeError(
+            f"{format_name} scale has {scale.numel()} elements, expected "
+            f"{expected_numel} for shape {shape}"
+        )
+    return scale.view(shape)
 
 
 def normalize_c(
@@ -303,6 +330,10 @@ def gemm_epimod(
     C: torch.Tensor | None = None,
     alpha: float = 1.0,
     beta: float = 0.0,
+    SFA: torch.Tensor | None = None,
+    SFB: torch.Tensor | None = None,
+    bs_format_a: str | None = None,
+    bs_format_b: str | None = None,
     out: torch.Tensor,
     aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
@@ -314,7 +345,18 @@ def gemm_epimod(
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense FlexGEMM call through external QuACK EpiMod."""
+    """Run a dense or block-scaled FlexGEMM call through external QuACK EpiMod."""
+    if (SFA is None) != (SFB is None):
+        raise RuntimeError("FlexGEMM block-scaled operands require both SFA and SFB")
+    if SFA is not None:
+        if SFB is None:
+            raise AssertionError("paired FlexGEMM scale validation failed")
+        if a.ndim != 2 or b.ndim != 2 or bs_format_a is None or bs_format_b is None:
+            raise NotImplementedError(
+                "FlexGEMM block-scaled main loops currently require 2-D operands and format names"
+            )
+        SFA = quack_blockscaled_scale_view(SFA, a.shape[-2], a.shape[-1], bs_format_a)
+        SFB = quack_blockscaled_scale_view(SFB, b.shape[-1], b.shape[-2], bs_format_b)
     if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
         raise NotImplementedError(
             "chunked grouped main output requires column-major B storage"
@@ -415,6 +457,10 @@ def gemm_epimod(
             config=None,
             config_constraints=config_constraints,
             tuned=tuned,
+            SFA=SFA,
+            SFB=SFB,
+            bs_format_a=bs_format_a,
+            bs_format_b=bs_format_b,
             concat_layout=(
                 None if main_transform is None else main_transform.concat_layout
             ),
