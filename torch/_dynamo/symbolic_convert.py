@@ -547,11 +547,11 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
         def fn(x: Any) -> None:
-            assert x, "msg"  # noqa: S101
+            assert x, "msg"  # noqa: S101  # function is to recognize assert statements in user code
     else:
 
         def fn(x: Any) -> None:
-            assert x  # noqa: S101
+            assert x  # noqa: S101  # function is to recognize assert statements in user code
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
@@ -3360,10 +3360,11 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
-                "LOAD_ATTR method variant should have been normalized by "
-                "remove_load_attr_method_variant in cleaned_instructions"
-            )
+            if inst.arg is None or inst.arg % 2 != 0:
+                raise AssertionError(
+                    "LOAD_ATTR method variant should have been normalized by "
+                    "remove_load_attr_method_variant in cleaned_instructions"
+                )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
