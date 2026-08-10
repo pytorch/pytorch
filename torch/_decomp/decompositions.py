@@ -2076,20 +2076,28 @@ def _fused_rms_norm_backward(
 
 def _is_contiguous_in_any_format(t: Tensor) -> bool:
     # Mirrors is_contiguous_in_any_format in
-    # aten/src/ATen/native/Normalization.cpp
+    # aten/src/ATen/native/Normalization.cpp. The `_or_false` variants keep this
+    # usable under unbacked symbolic shapes, where a plain is_contiguous() would
+    # raise a data-dependent error.
     return (
-        t.is_contiguous()
-        or t.is_contiguous(memory_format=torch.channels_last)
-        or t.is_contiguous(memory_format=torch.channels_last_3d)
+        utils.is_contiguous_or_false(t)
+        or utils.is_contiguous_for_memory_format_or_false(
+            t, memory_format=torch.channels_last
+        )
+        or utils.is_contiguous_for_memory_format_or_false(
+            t, memory_format=torch.channels_last_3d
+        )
     )
 
 
 def _suggest_memory_format_contig(t: Tensor) -> torch.memory_format:
     # Mirrors suggest_memory_format_contig in
     # aten/src/ATen/native/Normalization.cpp
-    if t.is_contiguous():
+    if utils.is_contiguous_or_false(t):
         return torch.contiguous_format
-    elif t.is_contiguous(memory_format=torch.channels_last_3d):
+    elif utils.is_contiguous_for_memory_format_or_false(
+        t, memory_format=torch.channels_last_3d
+    ):
         return torch.channels_last_3d
     else:
         return torch.channels_last
@@ -2109,14 +2117,22 @@ def _batch_norm_cpu_output_memory_format(
     # running_mean/running_var are copied below.
     all_contiguous = (
         _is_contiguous_in_any_format(input)
-        and (weight is None or weight.is_contiguous())
-        and (bias is None or bias.is_contiguous())
-        and (running_mean is None or running_mean.is_contiguous())
-        and (running_var is None or running_var.is_contiguous())
+        and (weight is None or utils.is_contiguous_or_false(weight))
+        and (bias is None or utils.is_contiguous_or_false(bias))
+        and (running_mean is None or utils.is_contiguous_or_false(running_mean))
+        and (running_var is None or utils.is_contiguous_or_false(running_var))
     )
     if all_contiguous:
         return _suggest_memory_format_contig(input)
     return utils.suggest_memory_format(input)
+
+
+def _to_memory_format_strides(t: Tensor, memory_format: torch.memory_format) -> Tensor:
+    # empty_like() always builds fresh strides for the requested memory format,
+    # while contiguous()/to() are no-ops whenever the tensor already qualifies.
+    # Those differ when a size-1 dimension leaves its stride unconstrained, so
+    # go through empty_like to match what the eager kernels allocate.
+    return torch.empty_like(t, memory_format=memory_format).copy_(t)
 
 
 def native_batch_norm_helper(
@@ -2205,10 +2221,8 @@ def native_batch_norm_helper(
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
-    if output_memory_format is not None and not output.is_contiguous(
-        memory_format=output_memory_format
-    ):
-        output = output.contiguous(memory_format=output_memory_format)
+    if output_memory_format is not None:
+        output = _to_memory_format_strides(output, output_memory_format)
     return (
         output.to(dtype=input.dtype),
         save_mean,
@@ -2746,6 +2760,17 @@ def native_batch_norm_backward(
         grad_input = ((grad_out_cast - proj) - grad_mean) * grad_scale
     else:
         grad_input = grad_out_cast * grad_scale
+
+    if input.device.type == "cpu":
+        # batch_norm_backward_cpu allocates grad_input as
+        # empty_like(input, input.suggest_memory_format()) rather than
+        # inheriting the input's strides. CUDA is left alone here: it picks
+        # between several kernels based on runtime properties (channels-last
+        # layout, 32-bit indexability), so its strides cannot be reproduced
+        # statically.
+        grad_input = _to_memory_format_strides(
+            grad_input, utils.suggest_memory_format(input)
+        )
 
     if output_mask[1]:
         grad_weight = dot_p * invstd

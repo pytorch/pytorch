@@ -741,6 +741,40 @@ class FakeTensorTest(TestCase):
             check(torch.randn(2, 3, 4).transpose(1, 2), training)
             # channels_last inputs must keep their layout, not be made contiguous.
             check(torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last), training)
+            # A size-1 dim leaves its stride unconstrained, so the kernel's
+            # freshly allocated strides can differ from the input's even though
+            # the input already counts as contiguous.
+            check(torch.randn(2, 4).as_strided((2, 1, 4), (4, 999, 1)), training)
+            check(torch.randn(2, 1, 8, 8).to(memory_format=torch.channels_last), training)
+
+    def test_native_batch_norm_backward_cpu_strides(self):
+        # batch_norm_backward_cpu allocates grad_input with
+        # empty_like(input, input.suggest_memory_format()).
+        # https://github.com/pytorch/pytorch/issues/192668
+        def check(x, train):
+            c = x.size(1)
+            args = (
+                torch.randn_like(x),
+                x,
+                torch.ones(c),
+                # eval mode reads the running stats, so they must be provided
+                torch.zeros(c),
+                torch.ones(c),
+                torch.zeros(c),
+                torch.ones(c),
+                train,
+                1e-5,
+                [True, True, True],
+            )
+            eager_out = torch.ops.aten.native_batch_norm_backward.default(*args)[0]
+            with FakeTensorMode(allow_non_fake_inputs=True):
+                fake_out = torch.ops.aten.native_batch_norm_backward.default(*args)[0]
+            self.assertEqual(fake_out.stride(), eager_out.stride())
+
+        for train in (True, False):
+            check(torch.randn(2, 3, 4).transpose(1, 2), train)
+            check(torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last), train)
+            check(torch.randn(2, 4).as_strided((2, 1, 4), (4, 999, 1)), train)
 
     def test_private_convolution_symint(self):
         shape_env = ShapeEnv()
