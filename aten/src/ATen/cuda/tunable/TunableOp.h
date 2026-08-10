@@ -49,38 +49,95 @@ class TunableOp {
     virtual ~TunableOp() = default;
 
     TuningStatus operator()(const ParamsT* params) {
+      return (*this)(params, params->Signature());
+    }
+
+    // Overload for callers that already computed the concrete params signature
+    // (the BLAS try_dispatch pre-check in Blas.cpp / ScaledBlas.cpp), avoiding
+    // a second params->Signature() fmt::format on the dispatch fast path.
+    TuningStatus operator()(
+        const ParamsT* params,
+        const std::string& concrete_params_sig) {
+      // Dispatch matrix. has_dynamic_dim (a GEMM dim is symbolic) is set only
+      // during compile-time autotune; the AOTI runtime .so never carries it.
+      //   tuning on, concrete miss -> tune; persist concrete (+ wildcard if dynamic)
+      //   tuning on, concrete hit  -> persist wildcard if dynamic and not yet stored
+      //   runtime,   concrete hit          -> dispatch via concrete
+      //   runtime,   miss + wildcard match -> dispatch via wildcard
+      //   runtime,   miss + no wildcard    -> Null; callers fall back to aten
       ResultEntry result = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
       if (ctx->IsTunableOpEnabled()) {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
-        auto params_sig = params->Signature();
-        auto blas_sig = params->BLASSignature();
-        result = mgr.Lookup(op_sig, params_sig);
-        // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (result == ResultEntry::Null()) {
-          bool should_record_untuned = !ctx->IsTuningEnabled();
-          if (ctx->IsTuningEnabled()) {
+        // Only this any() bit-check is on the cache-hit fast path;
+        // DynamicSignature() (a fmt::format with allocations) is computed
+        // lazily in the miss / case-4 branches. At runtime the mask is always
+        // empty (no TunableDynamicDimsGuard from AOTI cpp_wrapper), so this
+        // stays false on the hot path.
+        const bool has_dynamic_dim = params->dynamic_dims_mask.any();
+
+        result = mgr.Lookup(op_sig, concrete_params_sig);
+        const bool concrete_hit = (result != ResultEntry::Null());
+
+        if (ctx->IsTuningEnabled()) {
+          if (!concrete_hit) {
+            // Cases 1 & 2: concrete miss with tuning -> tune + persist.
+            bool can_tune = true;
 #ifndef USE_ROCM
-            bool is_capturing =
-                c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+            can_tune =
+                c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
                 c10::cuda::CaptureStatus::None;
-            if (!is_capturing) {
+            if (can_tune) {
               RegisterOpCandidates(params);
-              result = FindFastest(params);
-              mgr.Add(op_sig, params_sig, result);
-            } else {
-              should_record_untuned = true;
             }
-#else
-            result = FindFastest(params);
-            mgr.Add(op_sig, params_sig, result);
 #endif
+            if (can_tune) {
+              result = FindFastest(params);
+              mgr.Add(op_sig, concrete_params_sig, result);
+              if (has_dynamic_dim) {
+                // Case 2: also seed wildcard key with the same tuned kernel.
+                // mgr.Add is a no-op when the key already exists, so the
+                // first-tuned-wins semantics required by the dynamic-dims
+                // contract are preserved.
+                mgr.Add(op_sig, params->DynamicSignature(), result);
+              }
+            } else if (ctx->IsRecordUntunedEnabled()) {
+              mgr.RecordUntuned(
+                  ctx->GetUntunedFile(),
+                  op_sig,
+                  concrete_params_sig,
+                  params->BLASSignature());
+            }
           }
-          if (should_record_untuned && ctx->IsRecordUntunedEnabled()) {
-            // or record the gemm into file
-            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
+          else if (has_dynamic_dim) {
+            // Case 4: concrete hit + dynamic -> ensure wildcard is persisted
+            // so subsequent shapes that differ only in the dynamic dims can
+            // reuse this kernel without re-tuning.
+            auto dynamic_params_sig = params->DynamicSignature();
+            if (mgr.Lookup(op_sig, dynamic_params_sig) == ResultEntry::Null()) {
+              mgr.Add(op_sig, dynamic_params_sig, result);
+            }
           }
+          // Case 3: concrete hit + no dynamic -> nothing to do.
+        }
+        else {
+          // Tuning disabled (runtime). We cannot rely on any caller-set
+          // dynamic mask here -- AOTI cpp_wrapper does not emit a
+          // TunableDynamicDimsGuard so GetCurrentDynamicDimsMask() is
+          // empty. On concrete miss, scan all persisted wildcard
+          // entries and return any whose token-pattern matches the
+          // concrete signature. If none match, result stays Null and
+          // the caller (e.g. launchTunableGemmAndBias) falls back to
+          // the non-tunable aten path.
+          if (!concrete_hit) {
+            result = mgr.LookupWildcardFallback(op_sig, concrete_params_sig);
+            if (result == ResultEntry::Null() && ctx->IsRecordUntunedEnabled()) {
+              auto blas_sig = params->BLASSignature();
+              mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, concrete_params_sig, blas_sig);
+            }
+          }
+          // Case 1: concrete hit -> use it.
         }
       }
       else {
@@ -432,7 +489,27 @@ struct OpParams {
   OpParams(const OpParams&) = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
+  virtual std::string DynamicSignature() const {
+    return Signature();
+  }
   virtual std::string BLASSignature() const = 0;
+
+  // Per-instance mask describing which logical GEMM dims are dynamic for
+  // this particular op invocation. The producer (Blas.cpp / CUDABlas.cpp /
+  // ScaledBlas.cpp) reads at::cuda::tunable::GetCurrentDynamicDimsMask()
+  // once and stamps the result here before calling the TunableOp; the
+  // Gemm*Params subclasses' DynamicSignature() implementations then read
+  // this field instead of the previously-global TuningContext setting.
+  //
+  // Default-constructed (all-zero) means "no dim is dynamic", which yields
+  // a DynamicSignature() byte-identical to Signature() and preserves the
+  // legacy concrete-only behavior for callers that don't push a guard.
+  DynamicDimsMask dynamic_dims_mask{};
+
+  bool IsDynamicM() const { return dynamic_dims_mask.m(); }
+  bool IsDynamicN() const { return dynamic_dims_mask.n(); }
+  bool IsDynamicK() const { return dynamic_dims_mask.k(); }
+  bool IsDynamicBatch() const { return dynamic_dims_mask.batch(); }
 };
 
 } // namespace at::cuda::tunable
