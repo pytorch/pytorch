@@ -824,6 +824,9 @@ class CachingAutotuner(KernelInterface):
         """Whether ``_dynamic_scale_rblock`` should attempt occupancy-
         driven rblock halving for this autotuner.
         """
+        if "strict_sum_rblock" in self.inductor_meta:
+            # Strict numerics: don't scale/tune R0_BLOCK for reductions (it shifts the order).
+            return False
         return _could_dynamic_scale_rblock(
             size_hints=self.size_hints,
             heuristic_type=self.heuristic_type,
@@ -2259,9 +2262,11 @@ class CachingAutotuner(KernelInterface):
             HeuristicType.FIXED,
         ):
             return False
-        # Deterministic mode forbids tuning RBLOCK / num_warps for reductions
-        # because those knobs shift numerics.
-        if self.deterministic_mode and self.heuristic_type in (
+        # Deterministic mode (and strict numerics) forbid tuning RBLOCK / num_warps for
+        # reductions because those knobs shift numerics.
+        if (
+            self.deterministic_mode or "strict_sum_rblock" in self.inductor_meta
+        ) and self.heuristic_type in (
             HeuristicType.REDUCTION,
             HeuristicType.PERSISTENT_REDUCTION,
             HeuristicType.SPLIT_SCAN,
@@ -4060,6 +4065,7 @@ def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...
         combo_meta.get(f"tile_hint_{i}"),
         sub_meta.get("add_persistent_rblock", False),
         sub_meta.get("has_loadstore_with_contiguous_rdim"),
+        sub_meta.get("uses_device_tma", False),
         tuple(sorted(tma.items())),
         tuple(sorted(tiling_scores.items())),
     )
@@ -4530,12 +4536,20 @@ def _reduction_configs(
     from torch._inductor.heuristics.registry import get_codegen_heuristic
 
     reduction_heuristic = get_codegen_heuristic("reduction", triton_meta["device"].type)
-    return reduction_heuristic.get_configs(
+    configs = reduction_heuristic.get_configs(
         size_hints=size_hints,
         inductor_meta=inductor_meta,
         triton_meta=triton_meta,
         num_dynamic=num_dynamic,
     )
+    r0 = inductor_meta.get("strict_sum_rblock")
+    if r0 is not None:
+        configs = copy.deepcopy(configs)
+        for triton_config in configs:
+            if "R0_BLOCK" in triton_config.kwargs:
+                triton_config.kwargs["R0_BLOCK"] = r0
+        configs = unique_configs(configs)
+    return configs
 
 
 def filter_reduction_configs_for_determinism(
@@ -4698,6 +4712,12 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+    strict_rblock = inductor_meta.get("strict_sum_rblock")
+    if strict_rblock is not None and any(
+        triton_config.kwargs.get("R0_BLOCK", strict_rblock) != strict_rblock
+        for triton_config in configs
+    ):
+        raise AssertionError("strict sum requires its planned R0_BLOCK")
 
     if return_configs:
         return configs
