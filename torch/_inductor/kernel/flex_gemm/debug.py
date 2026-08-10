@@ -278,12 +278,15 @@ def format_flex_gemm_lowering_plan(
     capture_kinds: Sequence[tuple[str, str]],
     aux_metas: Sequence[torch.Tensor],
     local_reduce_metas: Sequence[torch.Tensor],
+    *,
+    swap_ab_alignment: int,
 ) -> str:
     """Render buffer allocation and runtime-ABI decisions."""
     lines = [
         "output_storage:",
         f"  logical: shape={tuple(logical_output_size)}, dtype={output_dtype}",
         f"  physical: shape={tuple(physical_output_size)}",
+        f"  swap_ab_alignment: {swap_ab_alignment} elements",
         "",
     ]
     _append_items(
