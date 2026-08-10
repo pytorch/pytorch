@@ -42,15 +42,15 @@ jobs:
       check_experiments: amd-sandbox
 
   linux-noble-rocm-py3_12-build:
-    name: linux-noble-rocm-py3.12-mi300
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-noble-rocm-py3.12-mi300
+      build-environment: linux-noble-rocm-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
-      # The amd-sandbox experiment routes the gfx942 test shards onto the
+      # The amd-sandbox experiment routes the mi350 test shards onto the
       # amd-sandbox- prefixed runner scale sets via the dedicated
       # amd-sandbox-label-type output (empty when the experiment is disabled, in
       # which case the canonical linux.rocm.gpu.mi350.* labels are used).
@@ -73,7 +73,7 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-test:
-    name: linux-noble-rocm-py3.12-mi300
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-noble-rocm-py3_12-build
