@@ -1116,18 +1116,23 @@ test_better_benchmark() {
   git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
   pushd "${benchmark_dir}"
 
-  python - <<'PY'
+  local gpu_indices
+  gpu_indices="$(python - <<'PY'
+import sys
 import torch
 
 count = torch.cuda.device_count()
-if count != 8:
-    raise RuntimeError(f"Expected 8 GPUs, found {count}")
-print(f"Found {count} GPUs")
+if count < 1:
+    raise RuntimeError("Expected at least one GPU")
+print(f"Found {count} GPUs", file=sys.stderr)
+print(",".join(str(index) for index in range(count)))
 PY
+)"
 
   python scripts/bench_parallel.py \
     repros/canonical \
-    --gpus 0,1,2,3,4,5,6,7 \
+    --all-shapes \
+    --gpus "${gpu_indices}" \
     --output "${debug_dir}/current.json"
   # TODO: Add a single-input CI export mode to bench_report.py. For now it
   # requires --compare, so compare the result with itself and export the
