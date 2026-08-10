@@ -4333,6 +4333,8 @@ class FakeTensorViewCopy(TestCase):
 
         self.assertEqual(fake_view.stride(), eager_view.stride())
         self.assertEqual(fake_view_copy.stride(), eager_view_copy.stride())
+        self.assertTrue(torch._C._is_alias_of(fake_pre_view, fake_view))
+        self.assertFalse(torch._C._is_alias_of(fake_pre_view, fake_view_copy))
         self.assertIsNone(fake_view_copy._base)
 
     def test_expand_then_view_copy_matches_eager_mode(self):
