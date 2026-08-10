@@ -615,11 +615,15 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
             def statically_known_multiple_of(expr, val):
                 return expr % val == 0
 
-        def make_qkv(name, stride, offset=0):
+            @staticmethod
+            def statically_known_geq(expr, val):
+                return expr >= val
+
+        def make_qkv(name, stride, offset=0, size=(2, 4, 128, 64)):
             mat = mock.Mock()
             mat.get_device.return_value = torch.device("cuda")
             mat.get_dtype.return_value = torch.float16
-            mat.get_size.return_value = [2, 4, 128, 64]
+            mat.get_size.return_value = size
             mat.get_stride.return_value = stride
             mat.get_name.return_value = name
             mat.get_layout.return_value = mock.Mock(offset=offset)
@@ -632,6 +636,12 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         semantic_offset = make_qkv("semantic_offset", [32768, 8192, 64, 1], offset=8)
         good_block_shapes = [(128, 64), (128, 64), (128, 64)]
         bad_block_shapes = [(128, 64), (128, 64), (128, 96)]
+        padded_tail = make_qkv(
+            "padded_tail",
+            [65536, 16384, 128, 1],
+            size=(2, 4, 128, 65),
+        )
+        tail_block_shapes = [(128, 128), (128, 128), (128, 128)]
         graph = mock.Mock(sizevars=FakeSizeVars(), unaligned_buffers=set())
         with (
             V.set_graph_handler(graph),
@@ -649,6 +659,14 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
             )
             self.assertFalse(
                 use_flex_tdm_descriptor(good, good, good, block_shapes=bad_block_shapes)
+            )
+            self.assertTrue(
+                use_flex_tdm_descriptor(
+                    padded_tail,
+                    padded_tail,
+                    padded_tail,
+                    block_shapes=tail_block_shapes,
+                )
             )
 
     def test_flex_tdm_gate_preserves_dynamic_sequence_lengths(self):
@@ -737,6 +755,46 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
         q = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
         k = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
         v = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self.assertIn("load_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(q, k, v), atol=2e-2, rtol=2e-2)
+
+    def _head_dim_tail(self, seq_len):
+        # Slice a 128-wide buffer rather than allocating head_dim 65
+        # contiguously: a contiguous tensor would have a 130-byte row stride,
+        # which the descriptor gate rejects outright, so TDM would never be
+        # selected and the test would pass without exercising the overhang.
+        padded = torch.randn(2, 4, seq_len, 128, device=GPU_TYPE, dtype=torch.float16)
+        tail = padded[..., :65]
+        self.assertEqual(tail.stride()[-2], 128)
+        return tail
+
+    def test_tdm_flex_padded_head_dim_correctness_and_selection(self):
+        # head_dim 65 rounds to a descriptor block width of 128, so the block
+        # overhangs the logical head dimension. Check that the out-of-bounds
+        # region does not corrupt the attention result.
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = self._head_dim_tail(512)
+        k = self._head_dim_tail(512)
+        v = self._head_dim_tail(512)
+
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self.assertIn("load_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(q, k, v), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_flex_decode_padded_head_dim_correctness_and_selection(self):
+        # Decode composes flex_decode.py.jinja and builds its own descriptors,
+        # so the forward padded-head test does not cover this codegen. Only
+        # K/V are gated here; q_len=1 just selects the decode lowering.
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = self._head_dim_tail(1)
+        k = self._head_dim_tail(512)
+        v = self._head_dim_tail(512)
+
         result, code = self._compile_and_get_code(fn, q, k, v)
         self.assertIn("load_tensor_descriptor", "\n".join(code))
         torch.testing.assert_close(result, fn(q, k, v), atol=2e-2, rtol=2e-2)

@@ -170,10 +170,13 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
-# TDM tensor descriptors share Triton's 16-byte semantic base-alignment contract.
-# This stricter value is only a preferred request/block/row pattern; external input
-# pointers are not assumed to have 128-byte base alignment.
-_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES = 128
+# Triton requires 16-byte descriptor base/row alignment and an innermost block
+# extent of at least 16 bytes.
+_TDM_REQUIRED_ALIGNMENT_BYTES = TMA_ALIGNMENT
+
+# Current TDM templates select only layouts expected to use the 128-byte direct
+# request path. This is a performance policy, not descriptor correctness.
+_TDM_DIRECT_PATH_ALIGNMENT_BYTES = 128
 _TDM_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
     [torch.float16, torch.bfloat16, torch.float32]
 )
@@ -2130,6 +2133,7 @@ def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
     """
     from torch.utils._triton import has_triton_amd_tdm_device
 
+    # ROCm 7.14 is the first supported compiler/runtime toolchain for gfx1250.
     if not _rocm_version_at_least(7, 14):
         return False
     if device is None or device.type != "cuda":
@@ -2139,6 +2143,7 @@ def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
         arch = getattr(props, "gcnArchName", "")
     except Exception:
         return False
+    # The Triton probe also requires the stable make_tensor_descriptor API.
     return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
 
 
@@ -2164,32 +2169,24 @@ def _tdm_row_major_from_strides(strides_i: Sequence[sympy.Expr | int]) -> bool |
     return inner[0] == 1
 
 
-def tdm_descriptor_row_major(mat: IRNode, add_guards: bool = False) -> bool | None:
+def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
     """Classify a 2D operand by its single statically unit-stride dimension."""
     from .virtualized import V
 
     strides = mat.get_stride()
     if len(strides) != 2:
         return None
-    if add_guards:
-        strides_i = V.graph.sizevars.guard_int_seq(strides)
-    else:
-        strides_i = [
-            V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
-        ]
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
+    ]
     return _tdm_row_major_from_strides(strides_i)
 
 
 def _tdm_operand_compatible(
     mat: IRNode,
     accepted_dtypes: OrderedSet[torch.dtype],
-    add_guards: bool,
 ) -> bool:
-    """Check descriptor semantics and the preferred TDM request layout.
-
-    ``add_guards`` specializes this operand, so only ``_tdm_operands_compatible``
-    passes it, and only once the whole list is admitted.
-    """
+    """Check descriptor semantics and the current direct-path selection policy."""
     from .virtualized import V
 
     dtype = mat.get_dtype()
@@ -2200,48 +2197,39 @@ def _tdm_operand_compatible(
     if mat.get_name() in V.graph.unaligned_buffers:
         return False
 
-    if add_guards:
-        sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-        strides_i = V.graph.sizevars.guard_int_seq(strides)
-        offset = V.graph.sizevars.guard_int(mat.get_layout().offset)
-    else:
-        sizes_i = [
-            V.graph.sizevars.replace_backed_symbols_with_hints(size) for size in sizes
-        ]
-        strides_i = [
-            V.graph.sizevars.replace_backed_symbols_with_hints(stride)
-            for stride in strides
-        ]
-        offset = V.graph.sizevars.replace_backed_symbols_with_hints(
-            mat.get_layout().offset
-        )
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(stride) for stride in strides
+    ]
+    offset = V.graph.sizevars.replace_backed_symbols_with_hints(mat.get_layout().offset)
 
-    # Reuse the strides resolved above; tdm_descriptor_row_major would resolve
-    # them again, and under add_guards re-specialize them.
+    # Reuse the strides resolved above rather than resolving their hints twice.
     row_major = _tdm_row_major_from_strides(strides_i)
     if row_major is None:
         return False
-    inner_idx = 1 if row_major else 0
-    outer_idx = 1 - inner_idx
+    outer_idx = 0 if row_major else 1
     itemsize = dtype.itemsize
 
     def aligned(expr: sympy.Expr, alignment: int) -> bool:
         return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
 
-    # Triton's tensor descriptor semantic contract.
-    if not aligned(offset * itemsize, TMA_ALIGNMENT):
+    # Descriptor correctness. The innermost block extent is checked by the
+    # template config filter, not by constraining the logical tensor extent.
+    if not aligned(offset * itemsize, _TDM_REQUIRED_ALIGNMENT_BYTES):
         return False
-    if not aligned(strides_i[outer_idx] * itemsize, TMA_ALIGNMENT):
-        return False
-    if not aligned(sizes_i[inner_idx] * itemsize, TMA_ALIGNMENT):
+    if not aligned(strides_i[outer_idx] * itemsize, _TDM_REQUIRED_ALIGNMENT_BYTES):
         return False
 
-    # Prefer rows that preserve the 128B request pattern. The allocation base itself
-    # remains governed by Triton's 16B semantic contract above.
-    return aligned(
-        strides_i[outer_idx] * itemsize,
-        _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
-    )
+    # Performance policy: select only rows expected to use the direct path.
+    return aligned(strides_i[outer_idx] * itemsize, _TDM_DIRECT_PATH_ALIGNMENT_BYTES)
+
+
+def _guard_tdm_operand_layout(mat: IRNode) -> None:
+    """Specialize the values used to construct a selected TDM descriptor."""
+    from .virtualized import V
+
+    V.graph.sizevars.guard_int_seq(mat.get_size())
+    V.graph.sizevars.guard_int_seq(mat.get_stride())
+    V.graph.sizevars.guard_int(mat.get_layout().offset)
 
 
 def _tdm_operands_compatible(
@@ -2254,10 +2242,7 @@ def _tdm_operands_compatible(
     Rejecting an operand must not leave the graph specialized on its shape, so
     the decision is made guard-free before any ``guard_int`` pins a hint.
     """
-    if not all(
-        _tdm_operand_compatible(mat, accepted_dtypes, add_guards=False)
-        for mat in matrices
-    ):
+    if not all(_tdm_operand_compatible(mat, accepted_dtypes) for mat in matrices):
         return False
 
     # Bounds only; unlike specialization, this does not pin a dynamic dim.
@@ -2270,16 +2255,8 @@ def _tdm_operands_compatible(
     if not add_guards:
         return True
 
-    # Admitted: pin the values the descriptor is built from. Same predicates,
-    # same hints, so this cannot change the answer -- assert in case it ever does.
-    if not all(
-        _tdm_operand_compatible(mat, accepted_dtypes, add_guards=True)
-        for mat in matrices
-    ):
-        raise AssertionError(
-            "TDM operand admission changed under specialization; the guard-free "
-            "and guarded checks must agree"
-        )
+    for mat in matrices:
+        _guard_tdm_operand_layout(mat)
     return True
 
 
@@ -2353,38 +2330,45 @@ def use_flex_tdm_descriptor(
         def aligned(expr: sympy.Expr | int, alignment: int) -> bool:
             return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
 
-        # Only the allocation base uses Triton's shared 16-byte descriptor
-        # contract; request dimensions below require 128-byte alignment.
+        # Correctness: Triton's shared descriptor contract -- unit last stride, a
+        # 16-byte-aligned base, and an innermost block extent of at least 16 bytes.
         if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return reject("innermost stride is not statically known to be one")
-        if not aligned(offset * itemsize, TMA_ALIGNMENT):
-            return reject(f"offset is not {TMA_ALIGNMENT}-byte aligned")
+        if not aligned(offset * itemsize, _TDM_REQUIRED_ALIGNMENT_BYTES):
+            return reject(f"offset is not {_TDM_REQUIRED_ALIGNMENT_BYTES}-byte aligned")
 
-        if block_shape:
-            if len(block_shape) != 2:
-                return reject("expected a two-dimensional block shape")
-            if not aligned(
-                block_shape[-1] * itemsize,
-                _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
-            ):
-                return reject(
-                    "block width does not preserve the preferred "
-                    f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
-                )
+        if block_shape and len(block_shape) != 2:
+            return reject("expected a two-dimensional block shape")
 
-        if not aligned(sizes[-1] * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES):
-            return reject(
-                "innermost dimension does not preserve the preferred "
-                f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
-            )
-        if not all(
-            aligned(stride * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES)
-            for stride in strides[:-1]
+        # The innermost extent the descriptor actually requests: the block width
+        # when the caller supplies one, else the full innermost dimension.
+        innermost = block_shape[-1] if block_shape else sizes[-1]
+        if not V.graph.sizevars.statically_known_geq(
+            innermost * itemsize, _TDM_REQUIRED_ALIGNMENT_BYTES
         ):
             return reject(
-                "outer strides do not preserve the preferred "
-                f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+                "innermost request extent is not statically known to hold at "
+                f"least {_TDM_REQUIRED_ALIGNMENT_BYTES} bytes"
             )
+
+        if not all(
+            aligned(s * itemsize, _TDM_REQUIRED_ALIGNMENT_BYTES) for s in strides[:-1]
+        ):
+            return reject(
+                f"outer strides are not {_TDM_REQUIRED_ALIGNMENT_BYTES}-byte aligned"
+            )
+
+        # Performance policy: current flex templates select only the direct path.
+        if not all(
+            aligned(s * itemsize, _TDM_DIRECT_PATH_ALIGNMENT_BYTES)
+            for s in strides[:-1]
+        ):
+            return reject("outer strides are not direct-path aligned")
+        if block_shape and not aligned(
+            block_shape[-1] * itemsize,
+            _TDM_DIRECT_PATH_ALIGNMENT_BYTES,
+        ):
+            return reject("block width is not direct-path aligned")
 
         # Install bounds only after this operand passes its guard-free checks.
         # These range guards do not pin dynamic sequence lengths to their

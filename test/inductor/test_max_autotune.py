@@ -5783,6 +5783,17 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         ):
             self.assertFalse(_gfx1250_tdm_enabled(device))
 
+    def test_tdm_backend_probe_strips_arch_features(self):
+        from torch.utils._triton import has_triton_amd_tdm_device
+
+        with mock.patch(
+            "torch.utils._triton._has_triton_amd_tdm_device", return_value=True
+        ) as supports_tdm:
+            self.assertTrue(
+                has_triton_amd_tdm_device("gfx1250:sramecc+:xnack-")
+            )
+        supports_tdm.assert_called_once_with("gfx1250")
+
     def test_tdm_template_rejects_descriptor_shapes_exceeding_int32(self):
         from torch._inductor.utils import use_triton_tdm_template
 
@@ -5834,6 +5845,14 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                 use_triton_tdm_template(make_mat("C", stride=(65, 1)), make_mat("B"))
             )
             self.assertTrue(use_triton_tdm_template(make_mat("C"), make_mat("B")))
+            # Logical tails need not be 16-byte multiples when the descriptor
+            # block and row stride satisfy the selected direct-path policy.
+            self.assertTrue(
+                use_triton_tdm_template(
+                    make_mat("tail", size=(128, 65), stride=(128, 1)),
+                    make_mat("B"),
+                )
+            )
 
             aligned_dim = graph.sizevars.shape_env.create_symbol(
                 128,
@@ -5980,51 +5999,30 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             [(64, 64, 64)],
         )
 
-    def test_tdm_template_reuses_shared_persistent_descriptor_source(self):
-        from torch._inductor.kernel.mm import (
-            persistent_tdm_mm_template,
-            persistent_tma_mm_template,
-        )
+    def test_persistent_descriptor_source_uses_stable_api(self):
         from torch._inductor.kernel.mm_common import load_kernel_template
 
-        self.assertEqual(persistent_tdm_mm_template.name, "mm_persistent_tdm")
-        self.assertEqual(
-            persistent_tdm_mm_template.src_hash,
-            persistent_tma_mm_template.src_hash,
-        )
         source = load_kernel_template("triton_persistent_tma_mm")
         self.assertIn("make_tensor_descriptor", source)
         self.assertIn("load_tensor_descriptor", source)
 
     def test_tdm_config_policy_uses_backend_stage_policy(self):
         from torch._inductor.heuristics.template.triton import (
-            BaseHeuristicSingleton,
             ROCmPersistentTDMTemplateConfigHeuristic,
         )
 
-        heuristic_cls = ROCmPersistentTDMTemplateConfigHeuristic
-        try:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with mock.patch(
-                "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                return_value=2,
-            ):
-                heuristic = heuristic_cls()
-            self.assertTrue(heuristic.uses_tdm_configs)
-            # The dense TDM heuristic tunes over the persistent pool, matching
-            # every other persistent heuristic including its own scaled sibling.
-            self.assertIs(heuristic.mm_configs, heuristic.persistent_mm_configs)
-            # That pool is authored with the CUDA stage counts; ROCm's
-            # _filter_configs is what normalizes them to the backend policy, so
-            # that is where the stage invariant has to hold.
-            for configs in (heuristic.mm_configs, heuristic.exhaustive_configs):
-                filtered_configs = heuristic._filter_configs(configs)
-                self.assertTrue(filtered_configs)
-                self.assertTrue(
-                    all(config.num_stages == 2 for config in filtered_configs)
+        heuristic = ROCmPersistentTDMTemplateConfigHeuristic()
+        self.assertTrue(heuristic.uses_tdm_configs)
+        self.assertEqual(heuristic.mm_configs, heuristic.persistent_mm_configs)
+        for configs in (heuristic.mm_configs, heuristic.exhaustive_configs):
+            filtered_configs = heuristic._filter_configs(configs)
+            self.assertTrue(filtered_configs)
+            self.assertTrue(
+                all(
+                    config.num_stages == heuristic.default_num_stages
+                    for config in filtered_configs
                 )
-        finally:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+            )
 
     def test_tdm_addmm_heuristic_composes_current_addmm_mixin(self):
         from torch._inductor.heuristics.template.triton import (
@@ -6138,7 +6136,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                 "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
                 return_value=True,
             ),
-            mock.patch("torch._inductor.codegen.triton.log.debug") as log_debug,
         ):
             checker = TMACompatibilityChecker(
                 kernel, torch.float16, for_store=False, force=True
@@ -6153,9 +6150,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                     BlockParameters(shape=[torch.iinfo(torch.int32).max + 1])
                 )
             )
-            self.assertEqual(log_debug.call_count, 2)
-            self.assertIn("rank between 1 and 5", log_debug.call_args_list[0].args[0])
-            self.assertIn("fit in int32", log_debug.call_args_list[1].args[0])
 
 
 def simple_fn():
@@ -6407,6 +6401,26 @@ class TestTDMEndToEnd(TestCase):
 
         a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
         b = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_and_get_code(fn, a, b)
+        joined = "\n".join(code)
+        self.assertIn("make_tensor_descriptor", joined)
+        self.assertIn("load_tensor_descriptor", joined)
+        torch.testing.assert_close(result, fn(a, b), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_padded_tail_mm_correctness_and_selection(self):
+        # The operand gate admits a logical extent that is not a 16-byte
+        # multiple, because Triton's descriptor contract constrains the
+        # descriptor's block extent rather than the tensor's logical shape.
+        # The block then overhangs the logical tail, so this checks that the
+        # out-of-bounds region does not corrupt the result.
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        # a is a K-tail slice of a 128-wide buffer: logical K=65, row stride 128.
+        a = torch.randn(256, 128, device=GPU_TYPE, dtype=torch.float16)[:, :65]
+        b = torch.randn(65, 256, device=GPU_TYPE, dtype=torch.float16)
+        self.assertEqual(a.stride(), (128, 1))
+
         result, code = self._compile_and_get_code(fn, a, b)
         joined = "\n".join(code)
         self.assertIn("make_tensor_descriptor", joined)

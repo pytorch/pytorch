@@ -35,7 +35,7 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
-    _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
+    _TDM_DIRECT_PATH_ALIGNMENT_BYTES,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
@@ -80,9 +80,10 @@ IS_ROCM = torch.version.hip is not None
 
 
 def _tdm_block_aligned(block: int, dtype_size: int) -> bool:
+    """Whether a tile's contiguous extent satisfies direct-path policy."""
     if dtype_size <= 0:
         raise AssertionError(f"Expected positive dtype_size, got {dtype_size}")
-    return (int(block) * dtype_size) % _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES == 0
+    return (int(block) * dtype_size) % _TDM_DIRECT_PATH_ALIGNMENT_BYTES == 0
 
 
 def _tdm_descriptor_blocks_aligned(
@@ -3267,8 +3268,8 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
 ):
     """Persistent descriptor MM heuristic for gfx1250 TDM.
 
-    No `TMAWorkspaceMixin`: stable descriptors need no workspace. Its
-    `num_warps != 2` filter is NVIDIA-TMA policy and does not apply here.
+    No `TMAWorkspaceMixin`: stable descriptors need no explicit TMA descriptor
+    workspace. Its `num_warps != 2` filter is NVIDIA-TMA policy.
     """
 
     def __init__(self) -> None:
@@ -3289,8 +3290,9 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
                 "ROCmPersistentTDMTemplateConfigHeuristic requires MMKernelInputs"
             )
         mat1, mat2 = kernel_inputs.mat1mat2()
-        a_row_major = tdm_descriptor_row_major(mat1, add_guards=True)
-        b_row_major = tdm_descriptor_row_major(mat2, add_guards=True)
+        # Template admission already installed the required guards.
+        a_row_major = tdm_descriptor_row_major(mat1)
+        b_row_major = tdm_descriptor_row_major(mat2)
         if a_row_major is None or b_row_major is None:
             return
 
@@ -3307,6 +3309,7 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
                 "A_ROW_MAJOR": a_row_major,
                 "B_ROW_MAJOR": b_row_major,
                 "NUM_SMS": get_num_sms(),
+                # The TDM capability gate requires make_tensor_descriptor.
                 "TMA_EXPERIMENTAL_API": False,
             }
 
@@ -3326,10 +3329,9 @@ class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
 class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
     """Shared stable-descriptor options for gfx1250 scaled TDM templates.
 
-    No `TMAWorkspaceMixin`: stable descriptors need no workspace. Neither half
-    of its `num_warps != 2 and block_k >= 32` filter applies here -- the warp
-    restriction is NVIDIA-TMA policy, and `check_supported_striding` pins A
-    row-major, so the 128-byte rule already forces `block_k >= 128` for FP8.
+    No `TMAWorkspaceMixin`: stable descriptors need no explicit TMA descriptor
+    workspace. Its warp restriction is NVIDIA-TMA policy, while the scaled-MM
+    layout and direct-path filter already force `block_k >= 128` for FP8.
     """
 
     scaled_persistent_mm_configs: list[BaseConfig]
@@ -3350,8 +3352,9 @@ class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         mat_a, mat_b = kernel_inputs.mat1mat2()
-        a_row_major = tdm_descriptor_row_major(mat_a, add_guards=True)
-        b_row_major = tdm_descriptor_row_major(mat_b, add_guards=True)
+        # Template admission already installed the required guards.
+        a_row_major = tdm_descriptor_row_major(mat_a)
+        b_row_major = tdm_descriptor_row_major(mat_b)
         if a_row_major is None or b_row_major is None:
             return
         kwargs = {
@@ -3365,6 +3368,7 @@ class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
             yield {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
+                # The TDM capability gate requires make_tensor_descriptor.
                 "TMA_EXPERIMENTAL_API": False,
             }
 

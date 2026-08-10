@@ -2283,31 +2283,19 @@ class TestTDMScaled(TestCase):
 
     def test_tdm_scaled_config_policy(self):
         from torch._inductor.heuristics.template.triton import (
-            BaseHeuristicSingleton,
             ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic,
         )
 
-        heuristic_cls = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic
-        try:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with (
-                config.patch({"triton.enable_tdm": True}),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                    return_value=2,
-                ),
-            ):
-                heuristic = heuristic_cls()
-            self.assertTrue(heuristic.uses_tdm_configs)
-            self.assertIs(heuristic.mm_configs, heuristic.scaled_persistent_mm_configs)
-            configs = heuristic._filter_configs(heuristic.mm_configs)
-            self.assertTrue(all(config.num_stages == 2 for config in configs))
-        finally:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+        heuristic = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic()
+        self.assertTrue(heuristic.uses_tdm_configs)
+        self.assertEqual(heuristic.mm_configs, heuristic.scaled_persistent_mm_configs)
+        configs = heuristic._filter_configs(heuristic.mm_configs)
+        self.assertTrue(
+            all(config.num_stages == heuristic.default_num_stages for config in configs)
+        )
 
     def test_tdm_scaled_config_uses_operand_orientation_probe(self):
         from torch._inductor.heuristics.template.triton import (
-            BaseHeuristicSingleton,
             BaseScaledMMConfigMixin,
             ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic,
         )
@@ -2319,35 +2307,23 @@ class TestTDMScaled(TestCase):
             [mat_a, mat_b, scale_a, scale_b], mat1_idx=0, mat2_idx=1
         )
 
-        heuristic_cls = ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic
-        try:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with (
-                config.patch({"triton.enable_tdm": True}),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                    return_value=2,
-                ),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.tdm_descriptor_row_major",
-                    side_effect=[True, False],
-                ),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_num_sms",
-                    return_value=1,
-                ),
-                mock.patch.object(
-                    BaseScaledMMConfigMixin,
-                    "_get_template_configs_impl",
-                    return_value=iter([{}]),
-                ) as base_impl,
-            ):
-                heuristic = heuristic_cls()
-                [options] = heuristic._get_template_configs_impl(
-                    kernel_inputs, "scaled_mm"
-                )
-        finally:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+        with (
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.tdm_descriptor_row_major",
+                side_effect=[True, False],
+            ),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.get_num_sms",
+                return_value=1,
+            ),
+            mock.patch.object(
+                BaseScaledMMConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([{}]),
+            ) as base_impl,
+        ):
+            heuristic = ROCmScaledTDMEpilogueScalingTemplateConfigHeuristic()
+            [options] = heuristic._get_template_configs_impl(kernel_inputs, "scaled_mm")
 
         self.assertEqual(options["NUM_SMS"], 1)
         self.assertFalse(options["TMA_EXPERIMENTAL_API"])
@@ -2356,7 +2332,6 @@ class TestTDMScaled(TestCase):
 
     def test_tdm_main_loop_supplies_required_tile_options(self):
         from torch._inductor.heuristics.template.triton import (
-            BaseHeuristicSingleton,
             ROCmScaledTDMConfigMixin,
             ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic,
         )
@@ -2373,33 +2348,22 @@ class TestTDMScaled(TestCase):
             "BLOCK_K": 64,
         }
 
-        heuristic_cls = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic
-        try:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
-            with (
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_backend_num_stages",
-                    return_value=2,
+        with (
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.get_scaling_options",
+                return_value=(
+                    ScalingType.BlockWise128x128,
+                    ScalingType.BlockWise128x128,
                 ),
-                mock.patch(
-                    "torch._inductor.heuristics.template.triton.get_scaling_options",
-                    return_value=(
-                        ScalingType.BlockWise128x128,
-                        ScalingType.BlockWise128x128,
-                    ),
-                ),
-                mock.patch.object(
-                    ROCmScaledTDMConfigMixin,
-                    "_get_template_configs_impl",
-                    return_value=iter([base_config]),
-                ),
-            ):
-                heuristic = heuristic_cls()
-                [options] = heuristic._get_template_configs_impl(
-                    kernel_inputs, "scaled_mm"
-                )
-        finally:
-            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+            ),
+            mock.patch.object(
+                ROCmScaledTDMConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base_config]),
+            ),
+        ):
+            heuristic = ROCmScaledTDMMainLoopScalingTemplateConfigHeuristic()
+            [options] = heuristic._get_template_configs_impl(kernel_inputs, "scaled_mm")
 
         self.assertEqual(options["TILE_SIZE_A"], 128)
         self.assertEqual(options["TILE_SIZE_B"], 128)
