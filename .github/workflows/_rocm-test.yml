@@ -63,6 +63,18 @@ on:
         required: false
         type: number
         default: 1
+      export-profiler-trace:
+        description: |
+          If set to "1", export Chrome profiler traces from performance benchmarks.
+        required: false
+        type: string
+        default: ""
+      enable-torch-trace:
+        description: |
+          If set to "1", enable TORCH_TRACE structured logging and collect tlparse output.
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -216,6 +228,8 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          EXPORT_PROFILER_TRACE: ${{ inputs.export-profiler-trace }}
+          ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
@@ -268,6 +282,8 @@ jobs:
             -e TESTS_TO_INCLUDE \
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
+            -e EXPORT_PROFILER_TRACE \
+            -e ENABLE_TORCH_TRACE \
             --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \
