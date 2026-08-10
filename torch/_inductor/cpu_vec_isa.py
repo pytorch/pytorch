@@ -643,7 +643,11 @@ def is_cpu_isa_compatible(host_isa: str, artifact_isa: str) -> bool:
     # pick_vec_isa() already contains all implied tokens.  The expansion below
     # is still needed for strings sourced from AOTI_CPU_ISA metadata (which
     # stores only the highest-capability token).
-    if "avx512" in host_tokens or "avx512_vnni" in host_tokens or "amx_tile" in host_tokens:
+    if (
+        "avx512" in host_tokens
+        or "avx512_vnni" in host_tokens
+        or "amx_tile" in host_tokens
+    ):
         expanded_host_tokens.add("avx2")
     if "avx512_vnni" in host_tokens or "amx_tile" in host_tokens:
         expanded_host_tokens.add("avx512")

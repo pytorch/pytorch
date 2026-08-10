@@ -232,6 +232,5 @@ class TestAOTIPackageDeviceValidation(TestCase):
             self.assertIn("Device information mismatch", mock_warn.call_args[0][0])
 
 
-
 if __name__ == "__main__":
     run_tests()
