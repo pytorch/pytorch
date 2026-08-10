@@ -1845,7 +1845,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             gb_type="Missing bool_impl override",
             context=f"bool_impl {self}",
             explanation=f"{type(self).__name__} does not implement bool_impl. Add a bool_impl override to {type(self).__name__}.",
-            hints=[*graph_break_hints.DYNAMO_BUG]
+            hints=[*graph_break_hints.DYNAMO_BUG],
         )
 
     def is_hashable(self) -> bool:
