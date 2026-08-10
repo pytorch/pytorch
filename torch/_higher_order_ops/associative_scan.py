@@ -800,11 +800,11 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             return g_xs
 
-        # Compute the gradients of all leaves sequentially
-        # TODO: Use torch.vmap here for parallelization, requires vmap of associative_scan
-        g_xs = [
-            compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(len(gl_ys))
-        ]
+        # Compute the per-leaf gradients in parallel through vmap.
+        g_xs_stacked = torch.vmap(compute_grad, in_dims=-1, out_dims=-1)(
+            torch.stack(bwxs, -1), torch.stack(bwys, -1), torch.stack(gl_ys, -1)
+        )
+        g_xs = torch.unbind(g_xs_stacked, -1)
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
