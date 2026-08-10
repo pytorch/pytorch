@@ -686,9 +686,8 @@ class ComboKernelTests(TestCase):
         torch.testing.assert_close(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-            # Per-subkernel: signature has XBLOCK_0, XBLOCK_1
-            FileCheck().check("R0_BLOCK_0: tl.constexpr = 64").check(
-                "R0_BLOCK_1: tl.constexpr = 512"
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").check(
+                "R0_BLOCK: tl.constexpr = 512"
             ).run(code[0])
         else:
             FileCheck().check("XBLOCK : tl.constexpr").check_not(
@@ -1095,11 +1094,7 @@ class ComboKernelTests(TestCase):
         default_kvs = dict(
             re.findall(r"'(XBLOCK_\d+)':\s*(\d+)", default_match.group(1))
         )
-        body_kvs = dict(
-            re.findall(r"(XBLOCK_\d+):\s*tl\.constexpr\s*=\s*(\d+)", combined)
-        )
-        # Grid and kernel body must agree on every XBLOCK_i.
-        self.assertEqual(default_kvs, body_kvs)
+        self.assertIsNone(re.search(r"XBLOCK_\d+:\s*tl\.constexpr\s*=", combined))
         self.assertEqual(set(default_kvs), {"XBLOCK_0", "XBLOCK_1", "XBLOCK_2"})
 
     @requires_gpu_and_triton
@@ -1861,17 +1856,195 @@ class ComboKernelDynamicShapesTests(TestCase):
                     torch._inductor.metrics.generated_kernel_count,
                     4 if benchmark else 1,
                 )
-                FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
-                    "R0_BLOCK_1: tl.constexpr = 32"
-                ).run(code[0])
+                if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                    FileCheck().check_count(
+                        "R0_BLOCK: tl.constexpr = 32", 1, exactly=True
+                    ).run(code[0])
+                else:
+                    FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
+                        "R0_BLOCK_1: tl.constexpr = 32"
+                    ).run(code[0])
 
 
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
     combo_kernel_per_subkernel_blocks = True
 
+    @requires_gpu_and_triton
+    def test_noinline_sub_kernel_bodies(self):
+        # Per-subkernel combos emit each body as a @triton.jit(noinline=True)
+        # device function called from its dispatch branch, so ptxas allocates
+        # registers per body instead of jointly over the merged control-flow
+        # graph (a register-fat member cannot degrade the others' occupancy).
+        def fn(x, y, z):
+            return x + 1, torch.sigmoid(y), torch.tanh(z)
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(6144, device=GPU_TYPE),
+            torch.rand(4096, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        # Three sub-function definitions before the combo kernel, each
+        # dispatch branch reduced to a call.
+        fc = FileCheck()
+        for num in range(3):
+            fc = fc.check("@triton.jit(noinline=True)").check(f"_body_{num}(")
+        fc = fc.check("pid = tl.program_id(0)")
+        for num in range(3):
+            fc = fc.check(f"pid < num_blocks_{num}:").check(f"_body_{num}(")
+        fc.run(code)
+
+    @requires_gpu_and_triton
+    def test_noinline_sub_kernel_body_dedupes_identical_members(self):
+        def fn(x, y):
+            return x + 1, y + 1
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(8192, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        (
+            FileCheck()
+            .check_count("@triton.jit(noinline=True)", 1, exactly=True)
+            .check("_body_0(")
+            .check("pid = tl.program_id(0)")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_0(")
+            .run(code)
+        )
+
+    @requires_gpu_and_triton
+    def test_noinline_sub_kernel_body_dedupes_by_signature(self):
+        def fn(x, y):
+            return x + 1, y + 1
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE, dtype=torch.float32),
+            torch.rand(8192, device=GPU_TYPE, dtype=torch.float64),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        FileCheck().check_count("@triton.jit(noinline=True)", 2, exactly=True).check(
+            "_body_0("
+        ).check("_body_1(").run(code)
+        (
+            FileCheck()
+            .check("pid = tl.program_id(0)")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_1(")
+            .run(code)
+        )
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch("combo_kernels_autotune", 0)
+    def test_noinline_sub_kernel_bodies_no_bench(self):
+        def fn(x, y):
+            return x + 1, torch.tanh(y)
+
+        inps = (
+            torch.rand(8192, device=GPU_TYPE),
+            torch.rand(4096, device=GPU_TYPE),
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        code = " ".join(code)
+
+        (
+            FileCheck()
+            .check("@triton.jit(noinline=True)")
+            .check("_body_0(")
+            .check("XBLOCK : tl.constexpr")
+            .check("@triton.jit(noinline=True)")
+            .check("_body_1(")
+            .check("XBLOCK : tl.constexpr")
+            .check("XBLOCK_1 : tl.constexpr")
+            .check_not("XBLOCK_0: tl.constexpr =")
+            .check("pid < num_blocks_0:")
+            .check("_body_0(")
+            .check("pid < num_blocks_1:")
+            .check("_body_1(")
+            .run(code)
+        )
+
 
 class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
     combo_kernel_per_subkernel_blocks = True
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "max_autotune": False,
+            "max_autotune_pointwise": False,
+            "triton.persistent_reductions": False,
+        }
+    )
+    def test_no_autotune_regular_reduction(self):
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        source_only_configs = []
+        source_only_kernel_deltas = []
+        orig_generate = SIMDScheduling.generate_combo_kernel_code
+
+        def capture_source_only_config(scheduling, *args, **kwargs):
+            old_kernel_count = torch._inductor.metrics.generated_kernel_count
+            result = orig_generate(scheduling, *args, **kwargs)
+            if kwargs.get("only_gen_src_code"):
+                source_only_kernel_deltas.append(
+                    torch._inductor.metrics.generated_kernel_count - old_kernel_count
+                )
+                source_only_configs.extend(
+                    kernel.no_bench_stitched_config.kwargs
+                    for _, kernel, nodes in result
+                    if kernel is not None
+                    and len(nodes) > 1
+                    and kernel.no_bench_stitched_config is not None
+                )
+            return result
+
+        inps = (
+            torch.randn(512, 2048, device=GPU_TYPE),
+            torch.randn(256, 2048, device=GPU_TYPE),
+        )
+        expected = fn(*inps)
+
+        with (
+            fresh_cache(),
+            patch.object(
+                SIMDScheduling,
+                "generate_combo_kernel_code",
+                capture_source_only_config,
+            ),
+        ):
+            actual = torch.compile(fn)(*inps)
+
+        self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
+        self.assertEqual(len(source_only_configs), 1)
+        self.assertEqual(source_only_kernel_deltas, [1])
+        self.assertEqual(
+            {key for key in source_only_configs[0] if key.startswith("R0_BLOCK")},
+            {"R0_BLOCK_0", "R0_BLOCK_1"},
+        )
 
 
 class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTests):
@@ -2447,6 +2620,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
             autotune_hints=None,
             atomic_add_found=False,
             no_x_dim=False,
+            uses_device_tma=False,
             tiling_scores=None,
         ):
             return {
@@ -2456,6 +2630,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
                 "autotune_hints": autotune_hints if autotune_hints is not None else [],
                 "atomic_add_found": atomic_add_found,
                 "no_x_dim": no_x_dim,
+                "uses_device_tma": uses_device_tma,
                 "tiling_scores": tiling_scores
                 if tiling_scores is not None
                 else {"x": 1, "r0_": 8},
@@ -2492,6 +2667,12 @@ class ComboKernelTestsMaxAutotune(TestCase):
             ("all identical merge", None, None, 1),
             ("different r0_numel", ("size_hints_1",), {"x": 2048, "r0_": 512}, 2),
             ("different num_load", ("inductor_meta_1", "num_load"), 12, 2),
+            (
+                "different uses_device_tma",
+                ("inductor_meta_1", "uses_device_tma"),
+                True,
+                2,
+            ),
             (
                 "different tiling_scores",
                 ("inductor_meta_1", "tiling_scores"),
