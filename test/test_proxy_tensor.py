@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import (
 )
 import torch
 import torch._dynamo
+import os
 import unittest
 import warnings
 import operator
@@ -48,6 +49,11 @@ from pathlib import Path
 aten = torch.ops.aten
 
 HAS_CUDA = torch.cuda.is_available()
+
+CPP_FAKETENSOR = os.environ.get("CPP_FAKETENSOR", "0") == "1"
+
+if CPP_FAKETENSOR:
+    raise NotImplementedError("c++ faketensor not implemented yet")
 
 
 def strip_end(s, suffix):
