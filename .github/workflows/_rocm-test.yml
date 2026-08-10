@@ -39,6 +39,21 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      compile-threads:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If non-empty, pins TORCHINDUCTOR_COMPILE_THREADS for the test container
+          so the Inductor compile-worker fan-out is fixed instead of derived from
+          the visible CPU count. Empty leaves the default behavior.
+      repro-probe:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          [AIPYTORCH-894 A/B only] When true, emit greppable REPRO_PROBE lines into the job log
+          (one-shot CPU-affinity/parallel_info probe + background compile-worker sampler). Inert by default.
       dashboard-tag:
         required: false
         type: string
@@ -204,6 +219,8 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          TORCHINDUCTOR_COMPILE_THREADS: ${{ inputs.compile-threads }}
+          REPRO_PROBE: ${{ inputs.repro-probe && '1' || '0' }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -218,12 +235,21 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
+          # Optionally forward a pinned Inductor compile-worker count into the
+          # container. Only forward when non-empty: an empty value would be parsed
+          # as int("") and crash decide_compile_threads().
+          COMPILE_THREADS_FLAG=""
+          if [[ -n "${TORCHINDUCTOR_COMPILE_THREADS}" ]]; then
+            COMPILE_THREADS_FLAG="-e TORCHINDUCTOR_COMPILE_THREADS"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            ${COMPILE_THREADS_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
@@ -282,7 +308,16 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
           fi
-          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${TEST_COMMAND}"
+          # [AIPYTORCH-894 A/B] In-log reproduction evidence (gated on repro-probe). Non-fatal.
+          if [[ "${REPRO_PROBE}" == "1" ]]; then
+            docker exec -t "${container_name}" bash -lc 'echo "REPRO_PROBE affinity=$(python -c "import os;print(len(os.sched_getaffinity(0)))") nproc=$(nproc) parallel_info:"; python -c "import torch;print(torch.__config__.parallel_info())"' || true
+          fi
+          # [AIPYTORCH-894 A/B] Background compile-worker sampler (gated). Non-fatal; dies with container.
+          SAMPLER=""
+          if [[ "${REPRO_PROBE}" == "1" ]]; then
+            SAMPLER='{ ( for i in $(seq 1 60); do echo "REPRO_PROBE workers=$(pgrep -fc "compile_worker|async_compile|torch/_inductor/compile_worker" 2>/dev/null || echo 0) ts=$(date +%s)"; sleep 30; done ) & } && '
+          fi
+          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${SAMPLER}${TEST_COMMAND}"
 
       - name: Restore workspace owner
         if: always()
@@ -327,7 +362,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
-          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
           retention-days: 14
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
