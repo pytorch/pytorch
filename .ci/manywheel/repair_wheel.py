@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from auditwheel.wheeltools import add_platforms, InWheelCtx
-
 from build_env_setup import PLATFORM_TAGS
 
 
