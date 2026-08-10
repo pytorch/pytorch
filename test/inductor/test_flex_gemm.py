@@ -434,6 +434,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         with self.assertRaisesRegex(ValueError, "expects a 2-D tensor"):
             to_blocked(torch.ones(4))
 
+    @unittest.skipUnless(importlib.util.find_spec("quack"), "requires external QuACK")
     def test_quack_feed_main_host_guards_match_runtime_contract(self):
         from quack.grouped_reduce import feed_main_capable
 
@@ -2131,8 +2132,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    @parametrize("terminal_view", (False, True))
-    def test_scaled_mm_indexed_output_falls_back(self, terminal_view):
+    @parametrize(
+        "case",
+        (
+            ("plain", False, False),
+            ("terminal_view", True, False),
+            ("strided_indices", False, True),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_scaled_mm_indexed_output_falls_back(self, case):
+        _, terminal_view, strided_indices = case
         from quack.blockscaled.operand import BlockScaledOperand
 
         import torch.nn.functional as F
@@ -2149,7 +2159,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         scale_a = a.scale.flatten()
         scale_b = b.scale.flatten()
-        targets = torch.arange(m, device="cuda", dtype=torch.int64) % n
+        target_count = 2 * m if strided_indices else m
+        targets = torch.arange(target_count, device="cuda", dtype=torch.int64) % n
+        if strided_indices:
+            targets = targets[::2]
         recipe = F.ScalingType.BlockWise1x32
         swizzle = F.SwizzleType.SWIZZLE_32_4_4
         gemm_kwargs = {
@@ -2197,14 +2210,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         if terminal_view:
-            torch.testing.assert_close(
+            self.assertEqual(
                 actual[0].view(torch.float16),
                 expected[0].view(torch.float16),
                 rtol=0.02,
                 atol=0.2,
             )
         else:
-            torch.testing.assert_close(actual[0], expected[0], rtol=0.02, atol=0.2)
+            self.assertEqual(actual[0], expected[0], rtol=0.02, atol=0.2)
         self.assertEqual(actual[1], actual[0].gather(1, targets[:, None]).squeeze(1))
         self.assertIn("_scaled_mm_v2", code)
         self.assertNotIn("FlexGemmEpiModIndexedOutputPlan", code)
@@ -4774,140 +4787,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_local_m_reduce_contiguous_transpose(self):
-        m, n, k, group = 256, 192, 64, 128
-        normalized_input = self.makeTensor(m, n)
-        incoming = self.makeTensor(m, n)
-        row_scale = torch.rand(m, 1, device="cuda", dtype=torch.float32) + 0.5
-        gamma = torch.rand(1, n, device="cuda", dtype=torch.float32) + 0.5
-        zdz = torch.rand(m, 1, device="cuda", dtype=torch.float32) * 0.1
-
-        def epilogue_fn(acc):
-            grad = acc.float()
-            normalized = normalized_input.float() * row_scale
-            output = incoming.float() + (grad * gamma - normalized * zdz) * row_scale
-            partial = (grad * normalized).view(-1, group, n).sum(1)
-            return (
-                output.to(acc.dtype),
-                (normalized * gamma).to(acc.dtype),
-                partial.mT.contiguous(),
-            )
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK", "tuned": True},
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        with self.limitEpiModAutotune(a.device):
-            (actual, normalized, dw), (code,) = run_and_get_code(
-                torch.compile(fn, backend="inductor", fullgraph=True), a, b
-            )
-        expected = epilogue_fn(a @ b)
-        high_precision_grad = a.double() @ b.double()
-        high_precision_normalized = normalized_input.double() * row_scale.double()
-        high_precision_output = (
-            incoming.double()
-            + (
-                high_precision_grad * gamma.double()
-                - high_precision_normalized * zdz.double()
-            )
-            * row_scale.double()
-        )
-        self.assertMatchesLowPrecisionEager(
-            actual, expected[0], high_precision_output, k
-        )
-        self.assertMatchesLowPrecisionEager(
-            normalized,
-            expected[1],
-            high_precision_normalized * gamma.double(),
-            1,
-        )
-        torch.testing.assert_close(
-            dw,
-            (high_precision_grad * high_precision_normalized)
-            .view(-1, group, n)
-            .sum(1)
-            .mT.float(),
-            atol=5e-3,
-            rtol=5e-3,
-        )
-        self.assertTrue(dw.is_contiguous())
-        self.assertEqual(dw.shape, (n, m // group))
-        FileCheck().check("tuned=True").check(
-            "output_layout=flex_gemm_output_layout.TRANSPOSED"
-        ).check_not("extern_kernels.mm").run(code)
-        self.assertLocalReduceAuxCode(code, group, axis=0)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize(
-        "case",
-        (
-            ("axis_m_t", "t", 0, 128, 192),
-            ("axis_n_transpose", "transpose", 1, 192, 128),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_mm_tuple_aux_single_group_contiguous_transpose(self, case):
-        _, form, axis, m, n = case
-        k = 64
-        group = m if axis == 0 else n
-        tile = torch.randn(m, n, device="cuda", dtype=torch.float32) * 0.02
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
-
-        def epilogue_fn(acc):
-            value = acc.float() * tile
-            reduced = (
-                value.view(-1, group, n).sum(1)
-                if axis == 0
-                else value.view(m, -1, group).sum(-1)
-            )
-            transposed = reduced.t() if form == "t" else reduced.transpose(0, 1)
-            return acc.relu(), transposed.contiguous()
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK", "config": config},
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected = epilogue_fn(a.double() @ b.double())
-        self.assertMatchesLowPrecisionEager(
-            actual, epilogue_fn(a @ b)[0], expected[0], k
-        )
-        torch.testing.assert_close(aux, expected[1].float(), atol=5e-3, rtol=5e-3)
-        self.assertTrue(aux.is_contiguous())
-        expected_shape = (n, m // group) if axis == 0 else (n // group, m)
-        self.assertEqual(aux.shape, expected_shape)
-        FileCheck().check("output_layout=flex_gemm_output_layout.TRANSPOSED").check_not(
-            "extern_kernels.mm"
-        ).run(code)
-        self.assertLocalReduceAuxCode(code, group, axis=axis)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_contiguous_transpose_rejects_swap(self):
         m = n = group = 128
         config = {
@@ -7454,6 +7333,143 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 lambda acc: acc.relu(),
                 kernel_options={"backend": "CUTLASS"},
             )
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
+    def test_mm_tuple_aux_local_m_reduce_contiguous_transpose(self, device):
+        m, n, k, group = 256, 192, 64, 128
+        normalized_input = self.makeTensor(m, n, device=device)
+        incoming = self.makeTensor(m, n, device=device)
+        row_scale = torch.rand(m, 1, device=device, dtype=torch.float32) + 0.5
+        gamma = torch.rand(1, n, device=device, dtype=torch.float32) + 0.5
+        zdz = torch.rand(m, 1, device=device, dtype=torch.float32) * 0.1
+
+        def epilogue_fn(acc):
+            grad = acc.float()
+            normalized = normalized_input.float() * row_scale
+            output = incoming.float() + (grad * gamma - normalized * zdz) * row_scale
+            partial = (grad * normalized).view(-1, group, n).sum(1)
+            return (
+                output.to(acc.dtype),
+                (normalized * gamma).to(acc.dtype),
+                partial.mT.contiguous(),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = self.makeTensor(m, k, device=device)
+        b = self.makeTensor(k, n, device=device)
+        with self.limitEpiModAutotune(a.device):
+            (actual, normalized, dw), (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+        expected = epilogue_fn(a @ b)
+        high_precision_grad = a.double() @ b.double()
+        high_precision_normalized = normalized_input.double() * row_scale.double()
+        high_precision_output = (
+            incoming.double()
+            + (
+                high_precision_grad * gamma.double()
+                - high_precision_normalized * zdz.double()
+            )
+            * row_scale.double()
+        )
+        self.assertMatchesLowPrecisionEager(
+            actual, expected[0], high_precision_output, k
+        )
+        self.assertMatchesLowPrecisionEager(
+            normalized,
+            expected[1],
+            high_precision_normalized * gamma.double(),
+            1,
+        )
+        self.assertEqual(
+            dw,
+            (high_precision_grad * high_precision_normalized)
+            .view(-1, group, n)
+            .sum(1)
+            .mT.float(),
+            atol=5e-3,
+            rtol=5e-3,
+        )
+        self.assertTrue(dw.is_contiguous())
+        self.assertEqual(dw.shape, (n, m // group))
+        FileCheck().check("tuned=True").check(
+            "output_layout=flex_gemm_output_layout.TRANSPOSED"
+        ).check_not("extern_kernels.mm").run(code)
+        self.assertLocalReduceAuxCode(code, group, axis=0)
+
+    @parametrize(
+        "case",
+        (
+            ("axis_m_t", "t", 0, 128, 192),
+            ("axis_n_transpose", "transpose", 1, 192, 128),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_tuple_aux_single_group_contiguous_transpose(self, device, case):
+        _, form, axis, m, n = case
+        k = 64
+        group = m if axis == 0 else n
+        tile = torch.randn(m, n, device=device, dtype=torch.float32) * 0.02
+        config = {
+            "tile_m": 256,
+            "tile_n": 256,
+            "cluster_m": 2,
+            "cluster_n": 1,
+            "pingpong": False,
+            "is_dynamic_persistent": True,
+            "swap_ab": False,
+        }
+
+        def epilogue_fn(acc):
+            value = acc.float() * tile
+            reduced = (
+                value.view(-1, group, n).sum(1)
+                if axis == 0
+                else value.view(m, -1, group).sum(-1)
+            )
+            transposed = reduced.t() if form == "t" else reduced.transpose(0, 1)
+            return acc.relu(), transposed.contiguous()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = self.makeTensor(m, k, device=device)
+        b = self.makeTensor(k, n, device=device)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = epilogue_fn(a.double() @ b.double())
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b)[0], expected[0], k
+        )
+        self.assertEqual(aux, expected[1].float(), atol=5e-3, rtol=5e-3)
+        self.assertTrue(aux.is_contiguous())
+        expected_shape = (n, m // group) if axis == 0 else (n // group, m)
+        self.assertEqual(aux.shape, expected_shape)
+        FileCheck().check("output_layout=flex_gemm_output_layout.TRANSPOSED").check_not(
+            "extern_kernels.mm"
+        ).run(code)
+        self.assertLocalReduceAuxCode(code, group, axis=axis)
+
+
+instantiate_device_type_tests(
+    TestFlexGemmTransposedOutputDevice, globals(), only_for="cuda"
+)
 
 
 @skipIfNoCuteDSL

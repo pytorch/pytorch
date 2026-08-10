@@ -283,7 +283,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
     if gemm_op is torch.ops.aten._scaled_mm_v2.default:
         output, aux_outputs = flex_gemm_output_values(subgraph.graph_module)
-        if flex_gemm_indexed_output_plan(output, aux_outputs) is not None:
+        try:
+            indexed_output_plan = flex_gemm_indexed_output_plan(output, aux_outputs)
+        except NotImplementedError as exc:
+            raise QuackScaledMmUnsupported(
+                "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
+            ) from exc
+        if indexed_output_plan is not None:
             raise QuackScaledMmUnsupported(
                 "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
             )
