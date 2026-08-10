@@ -750,6 +750,8 @@ class TestSympyInterp(TestCase):
         gm = fx.symbolic_trace(trace_f)
         self.assertEqual(gm(7, 2), 3.5)
 
+class TestSympyInterpDevice(TestCase):
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -1334,6 +1336,7 @@ class TestCCodePrinting(TestCase):
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
+instantiate_parametrized_tests(TestSympyInterpDevice)
 instantiate_parametrized_tests(TestSympySolve)
 
 
