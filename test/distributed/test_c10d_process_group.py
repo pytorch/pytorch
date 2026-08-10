@@ -21,7 +21,28 @@ from torch.testing._internal.common_utils import run_tests
 
 
 class AbstractProcessGroupTest(C10dBackendTest):
+    def test_new_group_rank_normalization(self):
+        self._init_pg()
+
+        ranks = torch.arange(self.world_size)
+        group = dist.new_group(ranks=ranks)
+        self.assertEqual(
+            dist.get_process_group_ranks(group), list(range(self.world_size))
+        )
+
+        tensor = torch.tensor([self.rank], device=self.device)
+        dist.broadcast(tensor, src=0, group=group)
+        self.assertEqual(tensor, torch.zeros_like(tensor))
+
+        with self.assertRaisesRegex(TypeError, "ranks must be a sequence of integers"):
+            dist.new_group(ranks=torch.arange(self.world_size, dtype=torch.float))
+
+        with self.assertRaisesRegex(ValueError, "must not contain duplicate entries"):
+            dist.new_group(ranks=[0, torch.tensor(0)])
+
     def test_sequence_numbers(self):
+        if not self.supports_sequence_numbers:
+            self.skipTest(f"{self.backend_name} does not support sequence numbers")
         self._init_pg()
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertEqual(default_pg._get_sequence_number_for_group(), 0)

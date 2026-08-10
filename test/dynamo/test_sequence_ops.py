@@ -3,6 +3,7 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -182,6 +183,24 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         b = [3, 4]
         result = a + b
         self.assertEqual(list(result), [1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_user_defined_list_concat_returns_plain_list(self):
+        # out-of-place C sq_concat constructs a fresh base-type object
+        result = UserDefinedList([1]) + UserDefinedList([2])
+        self.assertIs(type(result), list)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_user_defined_list_inplace_concat(self):
+        # in-place C sq_inplace_concat mutates and returns self: subclass
+        # type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a += [2]
+        self.assertEqual(list(a), [1, 2])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
 
     # --- User-defined tuple subclass concatenation ---
 
@@ -638,6 +657,51 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TestSqConcat)
+
+
+class TestSqRepeat(torch._dynamo.test_case.TestCase):
+    """Tests for sq_repeat (*) and sq_inplace_repeat (*=) on sequences."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # --- User-defined subclasses: the inherited C sq_repeat slot ---
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat(self):
+        # CPython runs list's inherited C sq_repeat: result is a plain list,
+        # not the subclass
+        result = UserDefinedList([1, 2]) * 2
+        self.assertEqual(result, [1, 2, 1, 2])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_list_repeat_reflected(self):
+        result = 2 * UserDefinedList([5])
+        self.assertEqual(result, [5, 5])
+        self.assertIs(type(result), list)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_repeat(self):
+        result = UserDefinedTuple([1, 2]) * 2
+        self.assertEqual(result, (1, 2, 1, 2))
+        self.assertIs(type(result), tuple)
+
+    @make_dynamo_test
+    def test_user_defined_list_inplace_repeat(self):
+        # in-place repeat mutates the object: type and identity preserved
+        a = UserDefinedList([1])
+        b = a
+        a *= 3
+        self.assertEqual(list(a), [1, 1, 1])
+        self.assertIs(type(a), UserDefinedList)
+        self.assertIs(a, b)
 
 
 # ---------------------------------------------------------------------------
