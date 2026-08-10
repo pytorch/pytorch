@@ -120,6 +120,20 @@ def _triton_int64_loads(code):
     return [line.strip() for line in _triton_int64_load_lines(code)]
 
 
+def _triton_kernel_lines(code, marker):
+    kernel_bodies = [
+        match.group("body") for match in _TRITON_KERNEL_BODY.finditer(code)
+    ]
+    if not kernel_bodies:
+        raise AssertionError("expected at least one generated Triton kernel")
+    return [
+        line.strip()
+        for kernel_body in kernel_bodies
+        for line in kernel_body.splitlines()
+        if marker in line
+    ]
+
+
 try:
     try:
         import triton  # @manual
@@ -3023,12 +3037,67 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         for index_load in index_loads:
             self.assertIn("[XBLOCK, 1]", index_load)
             self.assertNotRegex(index_load, r"R\d+_BLOCK")
+        bounds_checks = _triton_kernel_lines(code, "tl.device_assert")
+        self.assertEqual(2, len(bounds_checks))
+        for bounds_check in bounds_checks:
+            self.assertIn("[XBLOCK, 1]", bounds_check)
+            self.assertNotRegex(bounds_check, r"R\d+_BLOCK")
         if persistent_reductions:
             self.assertIn("@triton_heuristics.persistent_reduction", code)
             self.assertNotIn("for r0_offset in tl.range", code)
         else:
             self.assertNotIn("@triton_heuristics.persistent_reduction", code)
             self.assertIn("for r0_offset in tl.range", code)
+
+    @unittest.skipIf(not (TEST_CUDA or TEST_WITH_ROCM), "requires CUDA or ROCm")
+    @parametrize("persistent_reductions", [False, True])
+    def test_reduction_invariant_masked_index_expr(self, persistent_reductions):
+        def fn(value):
+            positions = torch.arange(
+                value.shape[0], device=value.device, dtype=torch.int64
+            )
+            positions = positions[:, None, None].expand(-1, 2, value.shape[-1])
+            values = torch.cat((positions, value), dim=1)
+            return values.sum(dim=-1)
+
+        value = torch.randint(0, 10, (16, 3, 64), device=device_type, dtype=torch.int64)
+        expected = fn(value)
+
+        def compile_with(dense_indexing):
+            with config.patch(
+                {
+                    "force_disable_caches": True,
+                    "triton.dense_indexing": dense_indexing,
+                    "triton.persistent_reductions": persistent_reductions,
+                }
+            ):
+                return run_and_get_code(torch.compile(fn, fullgraph=True), value)
+
+        actual, (code,) = compile_with(dense_indexing=False)
+        dense_actual, (dense_code,) = compile_with(dense_indexing=True)
+        self.assertEqual(expected, actual)
+        self.assertEqual(expected, dense_actual)
+
+        def row_index_broadcasts(generated_code):
+            return [
+                line
+                for line in _triton_kernel_lines(generated_code, "tl.broadcast_to(x")
+                if re.search(r"tl\.broadcast_to\(x\d+, \[XBLOCK,", line)
+            ]
+
+        narrow_broadcasts = [
+            line for line in row_index_broadcasts(code) if "[XBLOCK, 1]" in line
+        ]
+        self.assertEqual(1, len(narrow_broadcasts), narrow_broadcasts)
+        row_symbols = re.findall(r"tl\.broadcast_to\((x\d+),", narrow_broadcasts[0])
+        self.assertEqual(1, len(row_symbols), row_symbols)
+        dense_broadcasts = [
+            line
+            for line in row_index_broadcasts(dense_code)
+            if f"tl.broadcast_to({row_symbols[0]}," in line
+        ]
+        self.assertEqual(1, len(dense_broadcasts), dense_broadcasts)
+        self.assertIn("[XBLOCK, R0_BLOCK]", dense_broadcasts[0])
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @parametrize(
