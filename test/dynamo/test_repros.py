@@ -58,6 +58,9 @@ from torch._dynamo.testing import (
     skipIfNotPy312,
     skipIfPy312,
 )
+from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.object_protocol import vt_identity_compare
+from torch._guards import tracing, TracingContext
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import (
@@ -1203,6 +1206,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """2""")
+
+    def test_metaclass_descriptor(self):
+        class Meta(type):
+            def __neg__(cls):
+                return 999
+
+        class Base(metaclass=Meta):
+            # Alias int's unary __neg__ slot wrapper into this class's dict under a
+            # different name. __objclass__ == int, __name__ == '__neg__', but looked
+            # up on Base, whose metaclass separately defines __neg__.
+            sneaky = int.__neg__
+
+        def fn(x):
+            if Base.sneaky.__objclass__ is not int:
+                raise AssertionError("Base.sneaky.__objclass__ is not int")
+
+            n = x.size(0)  # symint under dynamic shapes -> NOT a compile-time constant
+            # CPython: Base.sneaky is the unbound int.__neg__ wrapper_descriptor,
+            # so this is int.__neg__(n) == -n.
+            r = Base.sneaky(n)
+            return x + r
+
+        x = torch.zeros(7)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x)[0].item(), -7)
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -5104,6 +5132,65 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f_compiled(a)
         # See https://github.com/pytorch/pytorch/issues/161010
 
+    # https://github.com/pytorch/pytorch/issues/185888
+    @parametrize("backend", ["eager", "inductor"])
+    def test_as_strided_inplace_internal_tensor_metadata(self, backend):
+        def fn():
+            x = torch.arange(4.0)
+            y = x.as_strided_((2, 2), (2, 1))
+            observer = torch.max(y)
+            return (
+                y,
+                x.size(),
+                x.shape,
+                x.dim(),
+                y.size(),
+                x.stride(),
+                y.stride(),
+                observer,
+            )
+
+        eager = fn()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+        actual = compiled()
+
+        self.assertEqual(actual[0], eager[0])
+        self.assertEqual(tuple(actual[1]), tuple(eager[1]))
+        self.assertEqual(tuple(actual[2]), tuple(eager[2]))
+        self.assertEqual(actual[3], eager[3])
+        self.assertEqual(tuple(actual[4]), tuple(eager[4]))
+        self.assertEqual(tuple(actual[5]), tuple(eager[5]))
+        self.assertEqual(tuple(actual[6]), tuple(eager[6]))
+        self.assertEqual(actual[7], eager[7])
+
+    # https://github.com/pytorch/pytorch/issues/185888
+    @parametrize("backend", ["eager", "inductor"])
+    def test_as_strided_inplace_internal_tensor_symbolic_metadata(self, backend):
+        def fn(inp):
+            x = torch.arange(16.0)
+            n = inp.size(0)
+            y = x.as_strided_((n,), (2,))
+            return (
+                x.size(),
+                y.size(),
+                x.stride(),
+                y.stride(),
+                x.is_contiguous(),
+                y.is_contiguous(),
+            )
+
+        inp = torch.empty(5)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+        actual = compiled(inp)
+
+        self.assertEqual(tuple(actual[0]), tuple(eager[0]))
+        self.assertEqual(tuple(actual[1]), tuple(eager[1]))
+        self.assertEqual(tuple(actual[2]), tuple(eager[2]))
+        self.assertEqual(tuple(actual[3]), tuple(eager[3]))
+        self.assertEqual(actual[4], eager[4])
+        self.assertEqual(actual[5], eager[5])
+
     # Extension of https://github.com/pytorch/pytorch/issues/161010
     # in the non memory dense case
     def test_clone_not_memory_dense(self):
@@ -7210,6 +7297,23 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
         self.assertEqual(out_ref, out_res)
 
+    def test_gather_out_dynamic_shapes(self):
+        def f(x, index, out):
+            torch.gather(x, 1, index, sparse_grad=False, out=out)
+            return out
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3):
+            x = torch.randn(1, width)
+            index = torch.randint(width, (1, 1))
+            out_ref = torch.empty(1, 1)
+            out_res = torch.empty(1, 1)
+
+            f(x, index, out_ref)
+            res = opt_f(x, index, out_res)
+            self.assertEqual(out_ref, out_res)
+            self.assertEqual(out_ref, res)
+
     @skipIfNotPy312
     def test_sys_monitoring(self):
         found_dynamo = False
@@ -8687,6 +8791,11 @@ SavedForBackwardsAOTOutput(idx=5)""",
                 return x + 1.0
             return x + 2.0
 
+        def reversed_f(x):
+            if sentinel is target.__annotations__:
+                return x + 1.0
+            return x + 2.0
+
         try:
             opt_f = torch.compile(f, backend="eager")
             self.assertEqual(opt_f(torch.tensor(0.0)).item(), 1.0)
@@ -8700,8 +8809,38 @@ SavedForBackwardsAOTOutput(idx=5)""",
                 torch._dynamo.exc.Unsupported, "unsupported identity comparison"
             ):
                 torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+
+            torch._dynamo.reset()
+            opt_reversed_f = torch.compile(reversed_f, backend="eager")
+            self.assertEqual(opt_reversed_f(torch.tensor(0.0)).item(), 1.0)
+
+            target.__annotations__ = other
+            self.assertEqual(opt_reversed_f(torch.tensor(0.0)).item(), 2.0)
         finally:
             target.__annotations__ = old_annotations
+
+    def test_known_identity_precedes_tracker_type_proof(self):
+        value = object()
+
+        class KnownValueVariable(VariableTracker):
+            def __init__(self, py_type):
+                super().__init__()
+                self.value = value
+                self.py_type = py_type
+
+            def get_real_python_backed_value(self):
+                return self.value
+
+            def python_type(self):
+                return self.py_type
+
+        left = KnownValueVariable(object)
+        right = KnownValueVariable(str)
+        with tracing(TracingContext(None)):
+            result = vt_identity_compare(mock.Mock(), left, right)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.as_python_constant())
 
     def test_is_with_fresh_bound_builtin_method_source(self):
         class Foo:
@@ -8999,6 +9138,59 @@ SavedForBackwardsAOTOutput(idx=5)""",
         result = f(torch.tensor(0.0))
         self.assertEqual(result.item(), 2.0)
 
+    def test_is_with_sourceless_heap_type_spoofing_builtin(self):
+        class FakeBuiltin:
+            __slots__ = ()
+
+        FakeBuiltin.__module__ = "builtins"
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            obj = FakeBuiltin()
+            reductor = getattr(obj, "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        self.assertEqual(f(torch.tensor(0.0)).item(), 1.0)
+
+        FakeBuiltin.__reduce_ex__ = None
+        try:
+            self.assertEqual(f(torch.tensor(0.0)).item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            del FakeBuiltin.__reduce_ex__
+
+    def test_is_with_sourceless_super_getattr_graph_break(self):
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        def f(x):
+            obj = B()
+            reductor = getattr(super(B, obj), "__reduce_ex__", None)
+            if reductor is not None:
+                return x + 1.0
+            return x + 2.0
+
+        opt_f = torch.compile(f, backend="eager")
+        self.assertEqual(opt_f(torch.tensor(0.0)).item(), 1.0)
+
+        A.__reduce_ex__ = None
+        try:
+            self.assertEqual(opt_f(torch.tensor(0.0)).item(), 2.0)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "unsupported identity comparison"
+            ):
+                torch.compile(f, backend="eager", fullgraph=True)(torch.tensor(0.0))
+        finally:
+            del A.__reduce_ex__
+
     def test_is_with_enum_new_member(self):
         class Color(Enum):
             RED = 1
@@ -9194,6 +9386,94 @@ SavedForBackwardsAOTOutput(idx=5)""",
             if old is not None:
                 self.assertEqual(old, 0)
         assert_swappable(m3.weight)
+
+    def test_grid_sampler_2d_cpu_fallback_captured(self):
+        # torch._grid_sampler_2d_cpu_fallback used to have no meta kernel, so
+        # running it under FakeTensorMode hard-errored ("data is not allocated
+        # yet") and Dynamo could not capture it. Regression test for the
+        # NGB-enabled failure of test_nn.py TestNN.test_grid_sample: with the
+        # meta registrations it captures with no graph break.
+        def fn(inp, grid):
+            out = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            return out + 1
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        expected = fn(inp, grid)
+
+        cnt = CompileCounter()
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(inp, grid)
+        self.assertEqual(out, expected)
+        # Both the fallback and the add are captured into one graph.
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_grid_sampler_2d_cpu_fallback_backward(self):
+        # The backward also needs a meta kernel, or AOTAutograd fails to trace
+        # it. Grads must match eager.
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True).sum()
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+
+        i_ref, g_ref = inp.clone().requires_grad_(), grid.clone().requires_grad_()
+        fn(i_ref, g_ref).backward()
+
+        i_test, g_test = inp.clone().requires_grad_(), grid.clone().requires_grad_()
+        torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            i_test, g_test
+        ).backward()
+
+        self.assertEqual(i_test.grad, i_ref.grad)
+        self.assertEqual(g_test.grad, g_ref.grad)
+
+    def test_grid_sampler_2d_cpu_fallback_inductor(self):
+        # The op has no inductor lowering, so once it is capturable inductor
+        # must auto-fall-back to the aten op and infer the output layout from
+        # the meta kernel. Check values and strides against eager, including a
+        # channels_last input (where the meta returning contiguous must match
+        # what the real kernel allocates).
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+
+        from torch._inductor.utils import run_and_get_code
+
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        for inp in (
+            torch.randn(2, 3, 4, 5),
+            torch.randn(2, 3, 4, 5).contiguous(memory_format=torch.channels_last),
+        ):
+            expected = fn(inp, grid)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out, (code,) = run_and_get_code(opt_fn, inp, grid)
+            self.assertEqual(out, expected)
+            self.assertEqual(out.stride(), expected.stride())
+            # fullgraph plus this keep the test from passing via an eager
+            # fallback, which would return the same values and strides.
+            self.assertIn("_grid_sampler_2d_cpu_fallback", code)
+
+    def test_grid_sampler_2d_cpu_fallback_dynamic_shapes(self):
+        # The meta kernels run check_grid_sampler_common/_2d, so their
+        # torch._check calls must stay symint-safe: changing the dynamic dims
+        # must not add guards that force a recompile.
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        torch._dynamo.mark_dynamic(inp, 2)
+        torch._dynamo.mark_dynamic(grid, 1)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(inp, grid), fn(inp, grid))
+
+        inp2 = torch.randn(2, 3, 9, 5)
+        grid2 = torch.rand(2, 11, 7, 2) * 2 - 1
+        self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_operator_is_with_source_aliases(self):
         shared = tuple(range(2))

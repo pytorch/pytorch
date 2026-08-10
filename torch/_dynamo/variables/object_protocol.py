@@ -55,6 +55,7 @@ from ..source import (
     Source,
     TrustedSkipGuardSource,
     TypeDictSource,
+    TypeMROSource,
     TypeSource,
 )
 from ..utils import istype
@@ -75,6 +76,11 @@ if TYPE_CHECKING:
     from ..symbolic_convert import InstructionTranslatorBase
 
 
+# Py_TPFLAGS_IMMUTABLETYPE: type attributes cannot be set or deleted.
+# https://docs.python.org/3/c-api/typeobj.html#c.Py_TPFLAGS_IMMUTABLETYPE
+_PY_TPFLAGS_IMMUTABLETYPE = 1 << 8
+
+
 def vt_identity_compare(
     tx: "InstructionTranslatorBase",
     left: VariableTracker,
@@ -85,6 +91,11 @@ def vt_identity_compare(
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
+    # An unguarded source can be canonicalized with another source that points
+    # to the same object while tracing, even though the two runtime sources can
+    # later diverge. Check that provenance before relying on VT identity.
+    if left.has_untrusted_source_alias or right.has_untrusted_source_alias:
+        return None
     if (
         left.source is not None and is_from_untrusted_skip_guard_source(left.source)
     ) or (
@@ -283,6 +294,13 @@ def vt_identity_compare(
                 return value, not is_from_skip_guard_source(var.source), False
             return NO_SUCH_SUBOBJ, False, False
 
+        # A sourceless getattr can still depend on mutable state outside the
+        # trace (for example, a lookup through super() and its class MRO).
+        # Without a source there is no way to guard that lookup, so do not use
+        # its current value to resolve an identity comparison.
+        if isinstance(var, GetAttrVariable):
+            return NO_SUCH_SUBOBJ, False, False
+
         value = var.get_real_python_backed_value()
         if value is not NO_SUCH_SUBOBJ:
             return value, False, False
@@ -387,10 +405,64 @@ def vt_identity_compare(
             return False
         return True
 
+    def descriptor_source_by_walking_mro(
+        cls: type[object],
+        cls_source: Source,
+        name: str,
+        expected_descriptor: object,
+    ) -> Source | None:
+        """Build an MRO descriptor source while buffering all required guards."""
+        for idx, klass in enumerate(type.__getattribute__(cls, "__mro__")):
+            namespace = type.__getattribute__(klass, "__dict__")
+            if name not in namespace:
+                continue
+            if namespace[name] is not expected_descriptor:
+                return None
+
+            mro_source = TypeMROSource(cls_source)
+            for absent_idx in range(1, idx):
+                absent_class_source = GetItemSource(mro_source, absent_idx)
+                absent_dict_source = TypeDictSource(absent_class_source)
+                if not queue_guard(
+                    absent_dict_source,
+                    partial(GuardBuilder.DICT_NOT_CONTAINS, key=name),
+                ):
+                    return None
+
+            owner_source = cls_source if idx == 0 else GetItemSource(mro_source, idx)
+            return DictGetItemSource(TypeDictSource(owner_source), name)
+        return None
+
+    def has_immutable_descriptor_lookup(
+        obj_type: type[object], name: str, expected_descriptor: object
+    ) -> bool:
+        for cls in type.__getattribute__(obj_type, "__mro__"):
+            if not (
+                type.__getattribute__(cls, "__flags__") & _PY_TPFLAGS_IMMUTABLETYPE
+            ):
+                return False
+            namespace = type.__getattribute__(cls, "__dict__")
+            if name in namespace:
+                return namespace[name] is expected_descriptor
+        return False
+
     def install_bound_c_method_lookup_guards(
         var: BoundBuiltinMethodVariable | MethodWrapperVariable,
     ) -> bool:
         name = var.descriptor.__name__
+        if not is_fresh_bound_c_method(var) and var.obj.source is None:
+            try:
+                obj_type = var.obj.python_type()
+            except NotImplementedError:
+                obj_type = None
+            if (
+                isinstance(obj_type, type)
+                and type.__getattribute__(obj_type, "__dictoffset__") == 0
+                and has_immutable_descriptor_lookup(obj_type, name, var.descriptor)
+            ):
+                # Instances cannot shadow the descriptor, and the immutable
+                # MRO prefix cannot change the lookup from Python.
+                return True
         if (
             not is_fresh_bound_c_method(var)
             and isinstance(var.obj, UserDefinedObjectVariable)
@@ -412,8 +484,16 @@ def vt_identity_compare(
                 class_attr_source = AttrSource(var.obj.cls_source, name)
                 if resolve_source_value(class_attr_source) is not var.descriptor:
                     return False
-                descriptor_source = var.obj.get_source_by_walking_mro(tx, name)
-                if resolve_source_value(descriptor_source) is not var.descriptor:
+                descriptor_source = descriptor_source_by_walking_mro(
+                    type(var.obj.value),
+                    var.obj.cls_source,
+                    name,
+                    var.descriptor,
+                )
+                if (
+                    descriptor_source is None
+                    or resolve_source_value(descriptor_source) is not var.descriptor
+                ):
                     return False
                 if not queue_guard(
                     class_attr_source, GuardBuilder.ID_MATCH
@@ -438,10 +518,16 @@ def vt_identity_compare(
         if isinstance(var.descriptor, types.ClassMethodDescriptorType):
             if not isinstance(var.obj, UserDefinedClassVariable):
                 return False
-            descriptor_source = var.obj.get_source_by_walking_mro(
-                tx, var.descriptor.__name__
+            descriptor_source = descriptor_source_by_walking_mro(
+                var.obj.value,
+                obj_source,
+                var.descriptor.__name__,
+                var.descriptor,
             )
-            if resolve_source_value(descriptor_source) is not var.descriptor:
+            if (
+                descriptor_source is None
+                or resolve_source_value(descriptor_source) is not var.descriptor
+            ):
                 return False
             if var.descriptor.__name__ not in var.obj.value.__dict__:
                 if not queue_guard(
@@ -676,10 +762,28 @@ def vt_identity_compare(
     ):
         return ConstantVariable.create(False)
 
+    # A concrete identity proof must take precedence over tracker type
+    # metadata. A tracker whose python_type() is imprecise must not turn two
+    # references to the same Python object into a false identity result.
+    if left_known and right_known and left_val is right_val:
+        if not install_identity_guard(
+            left, left_needs_guard
+        ) or not install_identity_guard(right, right_needs_guard):
+            return None
+        return guarded_result(True)
+
     # Different Python types can never be the same object. Check this before
     # the concrete-value path so type-disjoint comparisons do not acquire
     # unnecessary object-identity guards. The source types still need guards:
     # e.g. a class attribute can be rebound to an object of the other type.
+    # A GetAttrVariable that could not be resolved safely may change both
+    # value and type when external lookup state changes. The specialized
+    # descriptor cases above have already installed their lookup guards.
+    if (isinstance(left, GetAttrVariable) and not left_known and not left_absent) or (
+        isinstance(right, GetAttrVariable) and not right_known and not right_absent
+    ):
+        return None
+
     try:
         if left.python_type() is not right.python_type():
             queued_before_type_proof = len(pending_guards)
@@ -692,12 +796,6 @@ def vt_identity_compare(
         pass
 
     if left_known and right_known:
-        if left_val is right_val:
-            if not install_identity_guard(
-                left, left_needs_guard
-            ) or not install_identity_guard(right, right_needs_guard):
-                return None
-            return guarded_result(True)
         if not install_identity_guard_for_false_compare(
             left, left_needs_guard, right_val
         ) or not install_identity_guard_for_false_compare(
@@ -1061,10 +1159,11 @@ def generic_repr(
             _repr_running.discard(obj_id)
         result_type = maybe_get_python_type(result)
         if not issubclass(result_type, str):
-            raise_type_error(
-                tx,
-                f"__repr__ returned non-string (type {result_type.__name__})",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
+            else:
+                err_str = f"__repr__ returned non-string (type {result_type.__name__})"
+            raise_type_error(tx, err_str)
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
@@ -1096,10 +1195,11 @@ def generic_str(
 
     result_type = maybe_get_python_type(result)
     if not issubclass(result_type, str):
-        raise_type_error(
-            tx,
-            f"__str__ returned non-string (type {result_type.__name__})",
-        )
+        if sys.version_info >= (3, 15):
+            err_str = f"{obj.python_qualified_name()}.__str__() must return a str, not {result.python_qualified_name()}"
+        else:
+            err_str = f"__str__ returned non-string (type {result_type.__name__})"
+        raise_type_error(tx, err_str)
     return result
 
 
@@ -1502,6 +1602,22 @@ def pynumber_index(
     return result
 
 
+def pynumber_tobase(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, base: int
+) -> VariableTracker | None:
+    """Mirrors PyNumber_ToBase (bin/oct/hex dispatch).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1653-L1666
+
+    Resolves __index__ (raising TypeError if absent), then formats the
+    resulting int in the requested base. Returns None (graph break) when the
+    index result is not a Python constant.
+    """
+    index = pynumber_index(tx, obj)
+    format_fn = {2: bin, 8: oct, 16: hex}[base]
+    return ConstantVariable.create(format_fn(index.as_python_constant()))
+
+
 def pyiter_next(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
@@ -1637,10 +1753,13 @@ def generic_getiter(
         res = obj.tp_iter_impl(tx)
         res_T = maybe_get_python_type(res)
         if not pyiter_check(res_T):
-            raise_type_error(
-                tx,
-                f"iter() returned non-iterator of type '{res.python_type_name()}'",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{obj.python_qualified_name()}.__iter__() must return an iterator, not {res.python_qualified_name()}"
+            else:
+                err_str = (
+                    f"iter() returned non-iterator of type '{res.python_type_name()}'"
+                )
+            raise_type_error(tx, err_str)
         return res
     elif pysequence_check(T):
         from .functions import UserFunctionVariable

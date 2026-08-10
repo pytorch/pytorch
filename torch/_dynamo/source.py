@@ -521,7 +521,11 @@ class SkipGuardSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class TrustedSkipGuardSource(ChainedSource):
-    """A guardless source whose value is trusted to remain stable."""
+    """A source whose identity may be folded without a runtime guard.
+
+    The wrapped value is trusted to remain stable for the lifetime of a
+    compiled frame.
+    """
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         self.base.reconstruct(codegen)

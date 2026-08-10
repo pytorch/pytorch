@@ -150,6 +150,7 @@ from ..source import (
     is_from_nonlocal_source,
     is_from_optimizer_source,
     is_from_unspecialized_nn_module_source,
+    is_from_untrusted_skip_guard_source,
     ListGetItemSource,
     LocalSource,
     NNModuleSource,
@@ -830,6 +831,8 @@ class VariableBuilder:
         self.tx.output.current_tracer.traced_sources.add(self.source)
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
+            if is_from_untrusted_skip_guard_source(self.source):
+                side_effect_result.has_untrusted_source_alias = True
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
                 self.install_guards(dup_guard)
@@ -2352,7 +2355,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
-        from .user_defined import _CONSTANT_BASE_TYPES
+        from .ctx_manager import GenericContextWrappingVariable
+        from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
@@ -2367,6 +2371,12 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
             result = UserDefinedConstantVariable(value, source=self.source)
+        elif is_generic_ctx_manager_cls(type(value)):
+            # A generic context manager built inside the compiled region (via
+            # SideEffects.get_variable_cls) must wrap the same way when it is
+            # reconstructed from a source across a graph break, so a `with` on
+            # the reconstructed object can still be entered.
+            result = GenericContextWrappingVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -2552,11 +2562,14 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defined]
-            var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defined]
-                value._dynamo_static_input_type
-            )
+            # A tensor-subclass parameter (e.g. under torch.nn.utils.parametrize)
+            # can be tracked as a UserDefinedObjectVariable, which has no graph
+            # proxy node to annotate. mark_static_address above still marks it,
+            # so only stamp the metadata when there is a real tensor proxy node.
+            if isinstance(var, TensorVariable):
+                var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
+                    value._dynamo_static_input_type  # type: ignore[attr-defined]
+                )
 
     def wrap_module(self, value: torch.nn.Module) -> VariableTracker:
         from ..eval_frame import OptimizedModule
