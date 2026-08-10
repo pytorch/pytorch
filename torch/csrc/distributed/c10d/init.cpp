@@ -4172,6 +4172,12 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_start_time_estimate",
+              &::c10d::nccl2::ProcessGroupNCCL::startTimeEstimate)
+          .def(
+              "_end_time_estimate",
+              &::c10d::nccl2::ProcessGroupNCCL::endTimeEstimate)
+          .def(
               "register_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
@@ -4223,6 +4229,12 @@ Returns:
           "get_error",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getError,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_start_time_estimate",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::startTimeEstimate)
+      .def(
+          "_end_time_estimate",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::endTimeEstimate)
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
