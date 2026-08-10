@@ -16202,6 +16202,9 @@ fn
         # each entry unguarded. A sourceless class attr's VT must not be
         # pinned via keepalive without a matching id_to_variable entry, or
         # this raises KeyError instead of just losing the mutation.
+        # fullgraph=True + frame_count pin that this traces through cleanly,
+        # so a future change can't silently turn the KeyError into a quiet
+        # graph break instead of a fix.
         def fn(t):
             class Holder:
                 items = []
@@ -16212,8 +16215,42 @@ fn
             return y.sum() + len(Holder.items)
 
         t = torch.randn(3, requires_grad=True)
-        opt_fn = torch.compile(fn, backend="eager")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         self.assertEqual(opt_fn(t), fn(t))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation_across_hop_scope_graph_breaks(
+        self,
+    ):
+        # A sourceless class attr's memo is created at whatever scope reads it
+        # first. If that's the top-level scope and a later mutation happens
+        # inside a HOP body (here, a register_hook callback), the mutation is
+        # now caught by the ordinary cross-scope HOP side-effect check instead
+        # of being silently dropped -- this graph breaks rather than losing
+        # the mutation, which is the intended behavior for this memoization.
+        def fn(t):
+            class Holder:
+                items = []
+
+            n = len(Holder.items)
+
+            def hook(g):
+                Holder.items.append(1)
+                return g
+
+            y = t * 2
+            y.register_hook(hook)
+            return y.sum() + n
+
+        t = torch.randn(3, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Mutating a variable from outside the scope of this HOP",
+        ):
+            opt_fn(t)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=False)
     def test___build_class___disabled(self):

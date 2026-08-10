@@ -380,7 +380,10 @@ class SideEffects:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SideEffects):
             raise AssertionError(f"Expected SideEffects, got {type(other)}")
-        # NB: do NOT test keepalive
+        # NB: do NOT test keepalive. sourceless_cls_attrs is also excluded --
+        # unlike keepalive it holds VTs that can affect future tracing, but
+        # there are currently no callers of __eq__/diff that exercise a code
+        # path where two SideEffects could differ only in this field.
         return (
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
