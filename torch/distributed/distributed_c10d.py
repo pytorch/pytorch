@@ -3615,10 +3615,10 @@ def _time_estimator(
         raise NotImplementedError(
             f"collective time estimator is not supported in the current version of backend {backend}"
         )
-    backend._start_time_estimate()  # type: ignore[attr-defined]
+    backend._start_time_estimate()
     cm = _TimeEstimator()
     yield cm
-    cm.estimated_time = backend._end_time_estimate()  # type: ignore[attr-defined]
+    cm.estimated_time = backend._end_time_estimate()
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
