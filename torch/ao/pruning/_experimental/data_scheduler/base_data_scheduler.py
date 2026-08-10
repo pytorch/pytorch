@@ -22,7 +22,7 @@ class BaseDataScheduler:
         schedule_param (str)
             A specific hyperparameter of the passed sparsifier that needs to be scheduled/varied
         last_epoch (int, default=-1)
-            This is specifically is passed when training needs to be resumed from a particular
+            This is specifically passed when training needs to be resumed from a particular
             point.
         verbose (bool, default=False)
             Verbosity of the BaseDataScheduler
@@ -90,7 +90,7 @@ class BaseDataScheduler:
     def get_schedule_param(self):
         r"""
         Abstract method that needs to be implemented by the child class.
-        The expected return type should is a dictionary of name to schedule_param value
+        The expected return type should be a dictionary of name to schedule_param value
         The returned values will be updated in sparsifier when the scheduler step() function
         is called.
 
