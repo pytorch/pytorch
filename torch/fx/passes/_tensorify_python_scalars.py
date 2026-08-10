@@ -12,8 +12,9 @@ import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import _is_tensorify_enabled, get_metrics_context
+from torch._inductor import inductor_prims
 from torch._prims_common import get_computation_dtype
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -80,6 +81,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose"
 
 
 SUPPORTED_OPS = {
+    inductor_prims.fma: inductor_prims.fma,
     torch.ops.aten.mul.Tensor: torch.ops.aten.mul.Tensor,
     torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
@@ -287,7 +289,7 @@ def _tensorify_impl(
             # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32
 
             val = node.meta.get("val")
-            if isinstance(val, FakeTensor):
+            if is_fake_tensor(val):
                 for dim in val.shape:
                     if isinstance(dim, torch.SymInt):
                         for s in dim.node.expr.free_symbols:
@@ -344,6 +346,7 @@ def _tensorify_impl(
                         # sweep does not incorrectly restart analysis for them.
                         tensorified_symbols.update(
                             s
+                            # pyrefly: ignore [missing-attribute]
                             for s in a.meta["val"].node._expr.free_symbols
                             if symbol_is_type(s, SymT.FLOAT)
                         )
@@ -366,7 +369,10 @@ def _tensorify_impl(
                         args.append(a)
 
                 if transform:
-                    replacement_proxy = replacement_op(*args)
+                    # Preserve keyword-only args (e.g. add/sub `alpha`) which
+                    # live in node.kwargs; the loop above only rebuilds
+                    # positional args, so without this they are dropped.
+                    replacement_proxy = replacement_op(*args, **node.kwargs)
 
                     if (
                         compute_dtype != node.meta["val"].dtype
