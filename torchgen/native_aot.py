@@ -1,9 +1,9 @@
 """Discovery and validation of native-AOT declarations.
 
 Ops under torch/_native/ops/<op>/aot.py declare AOT-compiled DSL kernels
-embedded into the op's ATen implementation (contract + validating
-loader: tools/native_aot/decl.py, which this module loads by file
-path). torchgen consumes the declarations to (a) generate
+embedded into the op's ATen implementation (contract:
+tools/native_aot/decl.py; validating loader: torchgen/native_aot_decl.py).
+torchgen consumes the declarations to (a) generate
 NativeAotStubs.h -- one at::native DispatchStub per declared op,
 signature-matched to the structured impl and with no kernel registered
 by default -- and (b) emit a stub consultation between op.meta() and
@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from torchgen.model import DispatchKey
+from torchgen.native_aot_decl import decl_id_for_op as _decl_id, discover_declarations
 
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ class NativeAotManifest:
 
     @property
     def decl_id(self) -> str:
-        return self.op.replace(".", "_")
+        return _decl_id(self.op)
 
     def stub_name(self) -> str:
         return f"{self.decl_id}_aot_stub"
@@ -59,23 +60,6 @@ class NativeAotManifest:
         return self.op == g.functional.func.name.name.base
 
 
-def _decl_module():
-    import importlib.util
-
-    path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "tools",
-        "native_aot",
-        "decl.py",
-    )
-    spec = importlib.util.spec_from_file_location("native_aot_decl", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load module from {path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def parse_native_aot_manifests(
     ops_dir: str,
 ) -> dict[tuple[DispatchKey, str], NativeAotManifest]:
@@ -84,7 +68,7 @@ def parse_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest] = {}
     if not os.path.isdir(ops_dir):
         return manifests
-    for key_str, op in _decl_module().discover_declarations(ops_dir):
+    for key_str, op in discover_declarations(ops_dir):
         key = DispatchKey.parse(key_str)
         manifests[(key, op)] = NativeAotManifest(op=op, dispatch_key=key)
     return manifests
