@@ -3601,13 +3601,15 @@ def get_scale_value(scales, idx):
     return scales[idx]
 
 
+# The 2D variants intentionally do not install Python Autograd or
+# CompositeImplicitAutograd implementations. Their generated autograd formulas
+# preserve native backward's device-specific legacy indexing; differentiating
+# this forward decomposition does not.
 @register_decomposition(aten.upsample_nearest1d.vec)
 @register_decomposition(aten.upsample_nearest2d.vec)
 @register_decomposition(aten.upsample_nearest3d.vec)
 @aten.upsample_nearest1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.vec.py_impl(DispatchKey.Autograd)
-@aten.upsample_nearest2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_nearest2d.vec.py_impl(DispatchKey.Autograd)
 @aten.upsample_nearest3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest3d.vec.py_impl(DispatchKey.Autograd)
 def _upsample_nearest_vec(
@@ -3627,8 +3629,6 @@ def _upsample_nearest_vec(
 @register_decomposition(aten._upsample_nearest_exact3d.vec)
 @aten._upsample_nearest_exact1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact1d.vec.py_impl(DispatchKey.Autograd)
-@aten._upsample_nearest_exact2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten._upsample_nearest_exact2d.vec.py_impl(DispatchKey.Autograd)
 @aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.Autograd)
 def _upsample_nearest_exact_vec(
@@ -3644,11 +3644,45 @@ def _upsample_nearest_exact_vec(
 
 
 def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # For each dim in output_size, compute the set of input indices used
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
     offset = 0.5 if exact else 0.0
+
+    def nearest_indexing_mode():
+        device_type = input.device.type
+        if device_type == "cuda" and num_spatial_dims == 2:
+            return "same_size"
+
+        if device_type == "cpu":
+            use_optimized_kernel = False
+            if num_spatial_dims == 2:
+                if guard_or_false(output_size[0] + output_size[1] <= 128):
+                    use_optimized_kernel = True
+                elif input.is_contiguous(
+                    memory_format=torch.channels_last
+                ) and guard_or_false(input.shape[1] > 3):
+                    use_optimized_kernel = True
+            elif (
+                num_spatial_dims == 3
+                and input.is_contiguous(memory_format=torch.channels_last_3d)
+                and guard_or_false(input.shape[1] > 3)
+            ):
+                use_optimized_kernel = True
+
+            if use_optimized_kernel:
+                return "scale" if exact else "nearest_idx"
+
+            # The generic CPU kernel computes its scale/product in opmath_t.
+            # This differs from nearest_idx's always-float scale for float64.
+            return "scale_opmath"
+
+        return "scale"
+
+    indexing_mode = nearest_indexing_mode()
 
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
@@ -3656,25 +3690,45 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         # Indices are computed as following:
         # scale = isize / osize
         # Case: exact=False
-        # input_index = floor(output_index * scale)
+        # input_index = floor(output_index * scale), except for nearest_idx's
+        # legacy output_size == input_size and output_size == 2 * input_size
+        # special-cases.
         # Same as OpenCV INTER_NEAREST
         #
-        # Case: exact=False
-        # index_f32 = (output_index + 0.5) * scale - 0.5
-        # input_index = round(index_f32)
+        # Case: exact=True
+        # input_index = floor((output_index + 0.5) * scale)
         # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
         isize = input.shape[-num_spatial_dims + d]
 
-        # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
-        scale = (
-            isize / (isize * scales[d])
-            if scales[d] is not None and scales[d] > 0
-            else isize / osize
-        )
+        if indexing_mode in ("nearest_idx", "same_size") and guard_or_false(
+            osize == isize
+        ):
+            input_indices = torch.arange(osize, dtype=torch.int64, device=input.device)
+        elif indexing_mode == "nearest_idx" and guard_or_false(osize == 2 * isize):
+            input_indices = torch.arange(osize, dtype=torch.int64, device=input.device)
+            input_indices = torch.div(input_indices, 2, rounding_mode="floor")
+        else:
+            # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
+            scale = (
+                1.0 / scales[d]
+                if scales[d] is not None and scales[d] > 0
+                else isize / osize
+            )
 
-        output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
-        input_indices = ((output_indices + offset) * scale).to(torch.int64)
+            index_dtype = (
+                torch.float64
+                if indexing_mode == "scale_opmath" and input.dtype == torch.float64
+                else torch.float32
+            )
+            output_indices = torch.arange(osize, dtype=index_dtype, device=input.device)
+            scaled_indices = (output_indices + offset) * scale
+            if index_dtype == torch.float64:
+                # HelperInterpNearest computes in double for float64 inputs but
+                # deliberately rounds through floorf before converting to int.
+                scaled_indices = scaled_indices.to(torch.float32)
+            input_indices = torch.floor(scaled_indices).to(torch.int64)
+            input_indices = torch.clamp(input_indices, max=isize - 1)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)
@@ -3707,9 +3761,8 @@ def upsample_nearest_exact1d(
     return _upsample_nearest(input, output_size, [scales], exact=True)
 
 
+# See the 2D autograd note above the vec decompositions.
 @register_decomposition([aten.upsample_nearest2d.default, aten.upsample_nearest2d.out])
-@aten.upsample_nearest2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest2d(
     input: Tensor,
@@ -3723,8 +3776,6 @@ def upsample_nearest2d(
 @register_decomposition(
     [aten._upsample_nearest_exact2d.default, aten._upsample_nearest_exact2d.out]
 )
-@aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact2d(
     input: Tensor,

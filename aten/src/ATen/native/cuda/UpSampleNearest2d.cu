@@ -154,18 +154,22 @@ __global__ void upsample_nearest2d_backward_out_frame(
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   // note that we do not want to clamp src_y to src_dim_y, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_y =
-      nn_bw_compute_source_index_fn(height_scale, dst_y, src_dim_h);
-  int src_y_up = nn_bw_compute_source_index_fn(
-      height_scale, dst_y + 1, src_dim_h);
+  int src_y = src_dim_h == dst_dim_h
+      ? dst_y
+      : nn_bw_compute_source_index_fn(height_scale, dst_y, src_dim_h);
+  int src_y_up = src_dim_h == dst_dim_h
+      ? dst_y + 1
+      : nn_bw_compute_source_index_fn(height_scale, dst_y + 1, src_dim_h);
 
   int dst_x = dst_idx % dst_dim_w;
   // note that we do not want to clamp src_x to src_dim_w, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_x =
-      nn_bw_compute_source_index_fn(width_scale, dst_x, src_dim_w);
-  int src_x_up = nn_bw_compute_source_index_fn(
-      width_scale, dst_x + 1, src_dim_w);
+  int src_x = src_dim_w == dst_dim_w
+      ? dst_x
+      : nn_bw_compute_source_index_fn(width_scale, dst_x, src_dim_w);
+  int src_x_up = src_dim_w == dst_dim_w
+      ? dst_x + 1
+      : nn_bw_compute_source_index_fn(width_scale, dst_x + 1, src_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -206,11 +210,19 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
     const int h2 = (index / channels / width2) % height2;
     const int n = index / channels / width2 / height2;
 
-    int h1 = nn_bw_compute_source_index_fn(height_scale, h2, height1);
-    int h1_up = nn_bw_compute_source_index_fn(height_scale, h2 + 1, height1);
+    int h1 = height1 == height2
+        ? h2
+        : nn_bw_compute_source_index_fn(height_scale, h2, height1);
+    int h1_up = height1 == height2
+        ? h2 + 1
+        : nn_bw_compute_source_index_fn(height_scale, h2 + 1, height1);
 
-    int w1 = nn_bw_compute_source_index_fn(width_scale, w2, width1);
-    int w1_up = nn_bw_compute_source_index_fn(width_scale, w2 + 1, width1);
+    int w1 = width1 == width2
+        ? w2
+        : nn_bw_compute_source_index_fn(width_scale, w2, width1);
+    int w1_up = width1 == width2
+        ? w2 + 1
+        : nn_bw_compute_source_index_fn(width_scale, w2 + 1, width1);
 
     accscalar_t grad = 0;
     for (int ih = h1; ih < h1_up; ih++) {

@@ -121,6 +121,11 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
+    # Keep the generated autograd formulas for these ops. Native 2D nearest
+    # backward has legacy device-specific indexing semantics that cannot be
+    # recovered by differentiating the forward decomposition.
+    aten.upsample_nearest2d,
+    aten._upsample_nearest_exact2d,
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu

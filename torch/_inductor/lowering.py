@@ -5329,6 +5329,7 @@ def upsample_nearestnd(
 ):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
+    input_dtype = x.get_dtype()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
     i_sizes = [V.graph.sizevars.guard_int(i) for i in i_sizes]
@@ -5339,25 +5340,87 @@ def upsample_nearestnd(
 
     inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
     for i, scale in enumerate(scales_x):
-        if scale is not None:
+        if scale is not None and scale > 0:
             inv_scales[i] = 1.0 / scale
 
-    def scale_fn(x, scale, size):
+    def nearest_indexing_mode():
+        device_type = x.get_device().type
+        if device_type == "cuda" and n == 2:
+            return "same_size"
+
+        if device_type == "cpu":
+            use_optimized_kernel = False
+            if n == 2 and V.graph.sizevars.guard_or_false(
+                sympy.Le(o_sizes[0] + o_sizes[1], 128)
+            ):
+                use_optimized_kernel = True
+
+            x_stride = x.maybe_get_stride()
+            is_channels_last = (
+                x_stride is not None
+                and ir.Layout.is_channels_last_contiguous(x.get_size(), x_stride)
+            )
+            if (
+                n in (2, 3)
+                and is_channels_last
+                and V.graph.sizevars.guard_or_false(sympy.Gt(x.get_size()[1], 3))
+            ):
+                use_optimized_kernel = True
+
+            if use_optimized_kernel:
+                return "scale" if exact else "nearest_idx"
+
+            return "scale_opmath"
+
+        return "scale"
+
+    indexing_mode = nearest_indexing_mode()
+
+    def scale_fn(x, scale, size, osize):
         # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
         #                            = floor(scale * (output_index + 0.5))
         # Nearest: input_index = floor(scale * output_index)
-        x = ops.index_expr(x, torch.float32)
+        if indexing_mode in (
+            "nearest_idx",
+            "same_size",
+        ) and V.graph.sizevars.guard_or_false(sympy.Eq(osize, size)):
+            x = ops.index_expr(x, torch.int32)
+            return ops.indirect_indexing(x, size, check=False)
+        if indexing_mode == "nearest_idx" and V.graph.sizevars.guard_or_false(
+            sympy.Eq(osize, 2 * size)
+        ):
+            x = ops.index_expr(x, torch.int32)
+            x = ops.floordiv(x, ops.constant(2, torch.int32))
+            return ops.indirect_indexing(x, size, check=False)
+
+        index_dtype = (
+            torch.float64
+            if indexing_mode == "scale_opmath" and input_dtype == torch.float64
+            else torch.float32
+        )
+        x = ops.index_expr(x, index_dtype)
         if exact:
-            x = ops.add(x, ops.constant(0.5, torch.float32))
-        x = ops.mul(x, ops.constant(scale, torch.float32))
+            x = ops.add(x, ops.constant(0.5, index_dtype))
+        x = ops.mul(x, ops.constant(scale, index_dtype))
+        if index_dtype == torch.float64:
+            # The generic CPU kernel uses double opmath for float64 input, then
+            # intentionally converts through floorf.
+            x = ops.to_dtype(x, torch.float32)
         x = ops.to_dtype(x, torch.int32)
+        x = ops.minimum(x, ops.index_expr(size - 1, torch.int32))
         return ops.indirect_indexing(x, size, check=False)
 
     def fn(idx):
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
+            [
+                *b,
+                *[
+                    scale_fn(i, s, size, osize)
+                    for i, s, size, osize in zip(x, inv_scales, i_sizes, o_sizes)
+                ],
+            ]
         )
 
     return Pointwise.create(
@@ -6593,10 +6656,25 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
         return result, indices
 
 
+fallback_upsample_nearest2d_backward = fallback_handler(
+    aten.upsample_nearest2d_backward.default, add_to_fallback_set=False
+)
+
+
 @register_lowering(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
     x, output_size=None, input_size=None, scales_h=None, scales_w=None
 ):
+    # The optimized lowering derives its pooling windows from the input and
+    # output sizes. Explicit positive scales use different native indexing
+    # semantics, including device-specific legacy shortcuts.
+    if (scales_h is not None and scales_h > 0) or (
+        scales_w is not None and scales_w > 0
+    ):
+        return fallback_upsample_nearest2d_backward(
+            x, output_size, input_size, scales_h, scales_w
+        )
+
     x.realize_hint()
 
     *_batch, inp_h, inp_w = x.get_size()

@@ -9966,6 +9966,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
+                aten.upsample_nearest2d(a, [37, 38], 1.3, 1.3),
                 aten.upsample_nearest2d(a, [74, 76]),
                 aten.upsample_nearest2d(a, [70, 75]),
                 aten.upsample_nearest2d(a, [45, 74]),
@@ -9980,6 +9981,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (
                 aten.upsample_nearest2d(
                     a, output_size=[37, 38], scales_h=-1, scales_w=-1
+                ),
+                aten.upsample_nearest2d(
+                    a, output_size=[45, 74], scales_h=-1, scales_w=-1
                 ),
             )
 
@@ -10010,6 +10014,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
+
+    def test_upsample_nearest2d_backward_scales(self):
+        def fn(a):
+            return aten.upsample_nearest2d_backward(
+                a,
+                output_size=[2, 6],
+                input_size=[1, 1, 2, 5],
+                scales_h=1.3,
+                scales_w=1.3,
+            )
+
+        self.common(fn, (torch.arange(12.0).reshape(1, 1, 2, 6),))
 
     @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
