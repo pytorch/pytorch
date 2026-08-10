@@ -248,19 +248,77 @@ class TestFlyDSLMXFP8Device(TestCase):
     # regression in LDS staging, register blocking or the staged pipeline shows
     # up as a numerical failure on the specific config that broke.
     @parametrize(
-        "shape,tile",
+        "shape,tile,out_dtype",
         [
             # (m, n, k), (TILE_M, TILE_N, TILE_K, STAGES, M_WARPS, N_WARPS, GROUP_M)
-            ((64, 96, 256), (16, 16, 128, 2, 1, 1, 0)),  # minimal, 1 wave
-            ((64, 64, 512), (64, 64, 128, 2, 1, 1, 0)),  # 4x4 register blocking
-            ((128, 128, 512), (64, 64, 128, 2, 2, 2, 0)),  # 2x2 waves over LDS
-            ((128, 128, 512), (64, 64, 256, 2, 2, 2, 0)),  # two MFMA steps / tile
-            ((128, 128, 1024), (64, 64, 128, 4, 2, 2, 0)),  # 4-stage pipeline
-            ((256, 256, 512), (128, 128, 128, 2, 2, 4, 0)),  # asymmetric waves
-            ((256, 256, 512), (128, 128, 128, 2, 2, 2, 4)),  # GROUP_M swizzle
+            (
+                (64, 96, 256),
+                (16, 16, 128, 2, 1, 1, 0),
+                torch.bfloat16,
+            ),  # minimal, 1 wave
+            (
+                (64, 64, 512),
+                (64, 64, 128, 2, 1, 1, 0),
+                torch.bfloat16,
+            ),  # 4x4 register blocking
+            (
+                (128, 128, 512),
+                (64, 64, 128, 2, 2, 2, 0),
+                torch.bfloat16,
+            ),  # 2x2 waves over LDS
+            (
+                (128, 128, 512),
+                (64, 64, 256, 2, 2, 2, 0),
+                torch.bfloat16,
+            ),  # two MFMA steps / tile
+            (
+                (64, 64, 1024),
+                (64, 64, 512, 2, 1, 1, 0),
+                torch.bfloat16,
+            ),  # four MFMA steps / tile
+            (
+                (128, 128, 512),
+                (64, 64, 128, 3, 2, 2, 0),
+                torch.bfloat16,
+            ),  # odd stage count
+            (
+                (128, 128, 1024),
+                (64, 64, 128, 4, 2, 2, 0),
+                torch.bfloat16,
+            ),  # 4-stage pipeline
+            (
+                (128, 128, 512),
+                (128, 128, 128, 2, 4, 4, 0),
+                torch.bfloat16,
+            ),  # 1024 threads
+            (
+                (256, 256, 512),
+                (128, 128, 128, 2, 2, 4, 0),
+                torch.bfloat16,
+            ),  # asymmetric waves
+            (
+                (1024, 256, 512),
+                (128, 128, 128, 2, 2, 2, 4),
+                torch.bfloat16,
+            ),  # GROUP_M swizzle
+            (
+                (256, 256, 512),
+                (256, 256, 128, 2, 2, 2, 0),
+                torch.bfloat16,
+            ),  # 8x8 deep blocking
+            (
+                (256, 256, 512),
+                (256, 256, 128, 2, 2, 2, 0),
+                torch.float16,
+            ),  # fp16 direct store
+            (
+                (256, 128, 512),
+                (256, 128, 128, 2, 2, 1, 0),
+                torch.bfloat16,
+            ),  # rectangular 8x8
         ],
     )
-    def test_mxfp8_tile_configs_match_reference(self, device, shape, tile):
+    def test_mxfp8_tile_configs_match_reference(self, device, shape, tile, out_dtype):
         if torch.version.hip is None:
             self.skipTest("requires ROCm")
         arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
@@ -278,7 +336,7 @@ class TestFlyDSLMXFP8Device(TestCase):
         m, n, k = shape
         block_m, block_n, block_k, stages, m_waves, n_waves, group_m = tile
         a, b, scale_a, scale_b = self._make_inputs(m, n, k, device)
-        out = torch.zeros(m, n, device=device, dtype=torch.bfloat16)
+        out = torch.zeros(m, n, device=device, dtype=out_dtype)
         scale_a_u8 = scale_a.view(torch.uint8)
         scale_b_u8 = scale_b.view(torch.uint8)
 
@@ -286,7 +344,7 @@ class TestFlyDSLMXFP8Device(TestCase):
             m=m,
             n=n,
             k=k,
-            out_dtype="bfloat16",
+            out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
             block_m=block_m,
             block_n=block_n,
             block_k=block_k,
@@ -309,7 +367,7 @@ class TestFlyDSLMXFP8Device(TestCase):
 
         a_dequant = a.float() * scale_a.float().repeat_interleave(32, 1)
         b_dequant = b.float() * scale_b.float().repeat_interleave(32, 1)
-        reference = (a_dequant @ b_dequant.t()).to(torch.bfloat16)
+        reference = (a_dequant @ b_dequant.t()).to(out_dtype)
         self.assertEqual(out, reference, rtol=2e-2, atol=5e-1)
 
     def test_scaled_mm_v2_flydsl_autotunes_multiple_configs(self, device):

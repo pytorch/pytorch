@@ -1,33 +1,12 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Parameterized gfx950 MXFP8 scaled GEMM.
+"""Tile/Layout gfx950 MXFP8 scaled GEMM.
 
-E4M3 operands with per-32-element E8M0 block scales, folded into the CDNA4
-scaled 16x16x128 MFMA. A is [M, K] and B is [N, K], both row-major over K;
-the output is [M, N] bf16/fp16.
-
-The tiling mirrors the FP16/BF16 gfx950 GEMM in ``gemm_gfx950.py``:
-
-  * LDS blocking      -- a workgroup stages [block_m, block_k] of A and
-                         [block_n, block_k] of B into LDS so every wave in the
-                         group reuses them.
-  * multi-stage       -- ``stages`` LDS buffers are filled by global->LDS DMA;
-    pipelining           the loop waits on a counted ``vmcnt`` so the DMAs for
-                         later stages stay in flight across the MFMAs.
-  * register blocking -- each wave keeps mma_m_repeat x mma_n_repeat f32[4]
-                         accumulators and reuses one LDS read across the repeat
-                         loops.
-
-Together these lift arithmetic intensity from the previous baseline's fixed
-8 flops/byte (one wave, one 16x16 tile, operands straight from global) to
-2*block_m*block_n/(block_m+block_n), which is what lets throughput scale with
-problem size instead of saturating.
-
-The MFMA operand plumbing follows FlyDSL's own tiled MX kernel
-(``kernels/gemm/mxfp4_preshuffle.py``) rather than the CuTe-style
-``make_fragment_A``/``make_tiled_mma`` path used by the FP16 kernel: the scaled
-MFMA takes two extra i32 scale operands, which that path does not carry, so A/B
-fragments are built by hand as rank-1 i32[8] registers.
+E4M3 operands use per-32-element E8M0 block scales in CDNA4 scaled
+16x16x128 MFMA instructions. A is [M, K], B is [N, K], and both are row-major
+over K. TiledMma and TiledCopy describe wave, fragment, and output ownership;
+target-specific direct-to-LDS DMA and the staged waitcnt pipeline remain
+explicit.
 """
 
 import functools
@@ -35,11 +14,8 @@ from dataclasses import dataclass
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl._mlir import ir
 from flydsl._mlir.dialects import llvm
-from flydsl.expr import const_expr, gpu, range_constexpr, rocdl
-from flydsl.expr.typing import T
-from flydsl.expr.typing import Vector as Vec
+from flydsl.expr import const_expr, range_constexpr, rocdl
 
 
 MXFP8_SCALE_BLOCK_K = 32
@@ -50,25 +26,9 @@ GFX950_WAVE_SIZE = 64
 GFX950_DMA_BYTES = 16
 GFX950_LDS_CAPACITY = 163840
 GFX950_MAX_BLOCK_THREADS = 1024
-# Per-wave register blocking depth. Each k step issues Rm + Rn LDS reads and
-# Rm * Rn MFMAs, so the cap directly sets the MFMA-per-LDS-read ratio that this
-# kernel is limited by -- 4x4 gives 2, 8x8 gives 4. It is not an LDS-bandwidth
-# limit (removing the XOR swizzle, i.e. going from 2-way to 16-way bank
-# conflicts, costs only 1.5%) nor an occupancy limit (20 waves/CU at 2x2
-# repeats is slower than 8 waves/CU at 4x4); the MFMA unit idles waiting on
-# ds_read issue slots and latency, which deeper blocking amortizes.
-#
-# Measured on gfx950 with bf16 output: 8x8 uses 224 of 512 VGPRs with no
-# scratch and is 1.17-1.29x faster than 4x4 for M >= 2048, while 16x8 spills
-# and collapses to roughly a fifth of the throughput. The FP16 template caps at
-# 4 because its 2-byte elements make each fragment twice as wide; e4m3 halves
-# that, so the cutoff has to be re-derived rather than inherited.
+# The pre-Layout v2 kernel benefited from 8x8 register blocking. Keep that
+# search bound while v3 resource use is re-measured.
 MXFP8_MAX_MMA_REPEAT = 8
-# 16-byte granules spanned by one 128-K MFMA step.
-MXFP8_GRANULES_PER_MFMA_K = MXFP8_MFMA_K // GFX950_DMA_BYTES
-# The f8f6f4 ABI splits a lane's 32 operand bytes into two 16-byte halves that
-# sit 64 bytes apart inside the 128-K block.
-MXFP8_HI_GRANULE_OFFSET = 4
 
 
 @dataclass(frozen=True)
@@ -89,7 +49,7 @@ class MXFP8GemmParams:
 
     def __cache_signature__(self):
         return (
-            "mxfp8_gfx950_v2",
+            "mxfp8_gfx950_v3",
             self.m,
             self.n,
             self.k,
@@ -110,12 +70,9 @@ class MXFP8GemmDerived:
     heuristics filter so the two can never disagree."""
 
     block_threads: int
-    wave_tile_m: int
-    wave_tile_n: int
     mma_m_repeat: int
     mma_n_repeat: int
     k_halves: int
-    scale_cols: int
     granules_per_row: int
     ldg_a_iters: int
     ldg_b_iters: int
@@ -212,12 +169,9 @@ def mxfp8_gemm_derived(
 
     return MXFP8GemmDerived(
         block_threads=block_threads,
-        wave_tile_m=wave_tile_m,
-        wave_tile_n=wave_tile_n,
         mma_m_repeat=mma_m_repeat,
         mma_n_repeat=mma_n_repeat,
         k_halves=block_k // MXFP8_MFMA_K,
-        scale_cols=block_k // MXFP8_SCALE_BLOCK_K,
         granules_per_row=granules_per_row,
         ldg_a_iters=ldg_a_iters,
         ldg_b_iters=ldg_b_iters,
@@ -292,28 +246,6 @@ def __barrier(vmcnt=0):
     )
 
 
-def buffer_load_lds_inline(rsrc, lds_ptr, global_offset, dma_bytes):
-    buffer_load_asm_dict = {
-        16: "buffer_load_dwordx4",
-        8: "buffer_load_dwordx2",
-        4: "buffer_load_dword",
-    }
-    llvm.InlineAsmOp(
-        None,
-        [
-            llvm.IntToPtrOp(
-                ir.Type.parse("!llvm.ptr<3>"),
-                fx.as_ir_value(fx.ptrtoint(lds_ptr)),
-            ).result,
-            fx.as_ir_value(global_offset),
-            fx.as_ir_value(rsrc),
-        ],
-        f"s_mov_b32 m0, $0\n\t{buffer_load_asm_dict[dma_bytes]} $1, $2, 0 offen sc0 lds",
-        "s,v,s",
-        has_side_effects=True,
-    )
-
-
 @functools.lru_cache(maxsize=256)
 def make_mxfp8_scaled_mm_gfx950(
     *,
@@ -332,9 +264,7 @@ def make_mxfp8_scaled_mm_gfx950(
     """Build a tiled gfx950 MXFP8 scaled GEMM launcher for one tile config."""
     if m <= 0 or n <= 0 or k <= 0:
         raise ValueError("m, n, and k must be positive")
-    d = mxfp8_gemm_derived(
-        block_m, block_n, block_k, stages, m_waves, n_waves, group_m
-    )
+    d = mxfp8_gemm_derived(block_m, block_n, block_k, stages, m_waves, n_waves, group_m)
     if m % block_m or n % block_n or k % block_k:
         raise ValueError(
             f"shape must be divisible by the tile: {m}x{n}x{k} vs "
@@ -353,7 +283,7 @@ def make_mxfp8_scaled_mm_gfx950(
 
     block_threads = d.block_threads
     granules_per_row = d.granules_per_row
-    granule_mask = granules_per_row - 1
+    swizzle_bits = granules_per_row.bit_length() - 1
     scale_k = k // MXFP8_SCALE_BLOCK_K
     tiles_m = m // block_m
     tiles_n = n // block_n
@@ -372,24 +302,7 @@ def make_mxfp8_scaled_mm_gfx950(
         scale_b_u8: fx.Tensor,
         out: fx.Tensor,
     ):
-        sa_u8 = fx.recast_iter(fx.Uint8, fx.get_iter(scale_a_u8))
-        sb_u8 = fx.recast_iter(fx.Uint8, fx.get_iter(scale_b_u8))
-        out_ptr = fx.recast_iter(out_elem, fx.get_iter(out))
-
-        a_rsrc = fx.rocdl.get_buffer_rsrc(
-            fx.get_iter(fx.rocdl.make_buffer_tensor(a, max_size=True))
-        )
-        b_rsrc = fx.rocdl.get_buffer_rsrc(
-            fx.get_iter(fx.rocdl.make_buffer_tensor(b_nk, max_size=True))
-        )
-
-        tid = fx.Int32(fx.thread_idx.x)
-        wave = rocdl.readfirstlane(T.i32, tid // fx.Int32(GFX950_WAVE_SIZE))
-        lane = tid % fx.Int32(GFX950_WAVE_SIZE)
-        lane_16 = lane % fx.Int32(MXFP8_MFMA_N)
-        k_group = lane // fx.Int32(MXFP8_MFMA_N)
-        wave_m = wave // fx.Int32(n_waves)
-        wave_n = wave % fx.Int32(n_waves)
+        tid = fx.thread_idx.x
 
         pid = fx.Int32(fx.block_idx.x)
         if const_expr(use_group_m):
@@ -405,16 +318,36 @@ def make_mxfp8_scaled_mm_gfx950(
         n_base = bid_n * fx.Int32(block_n)
 
         @fx.struct
-        class SharedAB:
-            a: fx.Array[fx.Int8, stages * d.a_stage_bytes, 16]
-            b: fx.Array[fx.Int8, stages * d.b_stage_bytes, 16]
+        class SharedStorage:
+            a: fx.Array[fx.Float8E4M3FN, stages * block_m * block_k, 16]
+            b: fx.Array[fx.Float8E4M3FN, stages * block_n * block_k, 16]
 
-        lds = fx.SharedAllocator().allocate(SharedAB).peek()
-        sA_i8 = fx.recast_iter(fx.Int8, lds.a.ptr)
-        sB_i8 = fx.recast_iter(fx.Int8, lds.b.ptr)
-        sA_i32 = fx.recast_iter(fx.Int32, lds.a.ptr)
-        sB_i32 = fx.recast_iter(fx.Int32, lds.b.ptr)
-        lds_copy = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Int32)
+        storage = fx.SharedAllocator().allocate(SharedStorage).peek()
+        smem_a = storage.a.ptr
+        smem_b = storage.b.ptr
+
+        def make_flat_buffer(tensor, elems):
+            flat = fx.Tensor(
+                fx.make_view(fx.get_iter(tensor), fx.make_layout(elems, 1))
+            )
+            return fx.rocdl.make_buffer_tensor(flat, max_size=True)
+
+        a_flat = fx.logical_divide(make_flat_buffer(a, m * k), fx.make_layout(1, 1))
+        b_flat = fx.logical_divide(make_flat_buffer(b_nk, n * k), fx.make_layout(1, 1))
+        sa_flat = fx.logical_divide(
+            make_flat_buffer(scale_a_u8, m * scale_k), fx.make_layout(1, 1)
+        )
+        sb_flat = fx.logical_divide(
+            make_flat_buffer(scale_b_u8, n * scale_k), fx.make_layout(1, 1)
+        )
+        out_view = fx.Tensor(
+            fx.make_view(
+                fx.get_iter(out),
+                fx.make_layout((m, n), (n, 1)),
+            )
+        )
+        out_buf = fx.rocdl.make_buffer_tensor(out_view, max_size=True)
+        gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
 
         mma_atom = fx.make_mma_atom(
             fx.rocdl.cdna4.MFMA_Scale(
@@ -428,126 +361,223 @@ def make_mxfp8_scaled_mm_gfx950(
                 opsel_b=0,
             )
         )
+        mma_permutation = fx.make_tile(
+            None,
+            None,
+            fx.make_layout(
+                (GFX950_DMA_BYTES, 2, MXFP8_MFMA_K // (2 * GFX950_DMA_BYTES)),
+                (1, MXFP8_MFMA_K // 2, GFX950_DMA_BYTES),
+            ),
+        )
+        tiled_mma = fx.make_tiled_mma(
+            mma_atom,
+            fx.make_layout(
+                (m_waves, n_waves, 1),
+                (n_waves, 1, 0),
+            ),
+            mma_permutation,
+        )
+        thr_mma = tiled_mma.thr_slice(tid)
 
-        def async_load_tile(rsrc, lds_i8, stage_bytes, ldg_iters, rows_base, k_tile, stage):
-            """Stage one [rows, block_k] byte tile from global into LDS.
+        s2r_layout_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float8E4M3FN)
+        s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Float8E4M3FN)
+        thr_copy_A = fx.make_tiled_copy_A(s2r_layout_atom, tiled_mma).get_slice(tid)
+        thr_copy_B = fx.make_tiled_copy_B(s2r_layout_atom, tiled_mma).get_slice(tid)
+        dma_atom = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
+        scale_atom = fx.make_copy_atom(fx.rocdl.BufferCopy8b(), fx.Uint8)
 
-            The DMA writes lanes contiguously from a wave-uniform LDS base, so
-            the destination is fixed and the *source* column is permuted to
-            realize the XOR swizzle (same trick as the FP16 kernel).
-            """
-            stage_off = stage * fx.Int32(stage_bytes)
+        swizzle = fx.static(fx.SwizzleType.get(swizzle_bits, 4, swizzle_bits))
+
+        def make_lds_layout(rows):
+            return fx.make_composed_layout(
+                swizzle,
+                fx.make_ordered_layout((rows, block_k), (1, 0)),
+            )
+
+        a_lds_layout = make_lds_layout(block_m)
+        b_lds_layout = make_lds_layout(block_n)
+        sA = fx.make_view(smem_a, a_lds_layout)
+        sB = fx.make_view(smem_b, b_lds_layout)
+
+        frag_A = thr_mma.make_fragment_A(sA)
+        frag_B = thr_mma.make_fragment_B(sB)
+        frag_C = thr_mma.make_fragment_C(gC)
+        frag_A_retile = thr_copy_A.retile(frag_A)
+        frag_B_retile = thr_copy_B.retile(frag_B)
+        frag_C.fill(0.0)
+        r2g_atom = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), out_elem)
+        thr_copy_C = fx.make_tiled_copy_C(r2g_atom, tiled_mma).get_slice(tid)
+        thr_gC = thr_copy_C.partition_S(gC)
+
+        a_row_coords = fx.make_view(0, fx.make_layout((block_m, block_k), (1, 0)))
+        b_row_coords = fx.make_view(0, fx.make_layout((block_n, block_k), (1, 0)))
+        thr_mma_aRow = thr_mma.partition_A(a_row_coords)
+        thr_mma_bRow = thr_mma.partition_B(b_row_coords)
+        # The scaled-MFMA state selects one E8M0 byte for each 32-K lane group.
+        scale_group = (fx.Int32(tid) % fx.Int32(GFX950_WAVE_SIZE)) // fx.Int32(
+            MXFP8_MFMA_N
+        )
+
+        wave_offset = rocdl.readfirstlane(
+            fx.Int64.ir_type,
+            fx.Int64(
+                fx.Int32(tid)
+                // fx.Int32(GFX950_WAVE_SIZE)
+                * fx.Int32(GFX950_WAVE_SIZE * GFX950_DMA_BYTES)
+            ),
+        )
+
+        def make_wave_lds_ptr(ptr):
+            return ptr + fx.Int32(wave_offset)
+
+        def swizzled_col(row, col, layout):
+            return fx.get_scalar(fx.crd2idx((row, col), layout)) % fx.Int32(block_k)
+
+        def async_load_tile(
+            gmem,
+            smem,
+            stage_bytes,
+            ldg_iters,
+            rows_base,
+            k_tile,
+            stage,
+            layout,
+        ):
+            # Direct-to-LDS stores are linear, so the source coordinate carries
+            # the composed LDS swizzle.
+            lds_ptr = make_wave_lds_ptr(smem + stage * fx.Int32(stage_bytes))
             for i in range_constexpr(ldg_iters):
-                lin = (fx.Int32(i * block_threads) + tid) * fx.Int32(GFX950_DMA_BYTES)
-                row = lin // fx.Int32(block_k)
-                granule = (lin % fx.Int32(block_k)) // fx.Int32(GFX950_DMA_BYTES)
-                src_granule = granule ^ (row & fx.Int32(granule_mask))
-                gmem = (rows_base + row) * fx.Int32(k) + fx.Int32(
-                    k_tile
-                ) * fx.Int32(block_k) + src_granule * fx.Int32(GFX950_DMA_BYTES)
-                wave_base = stage_off + fx.Int32(
-                    (i * block_threads) * GFX950_DMA_BYTES
-                ) + wave * fx.Int32(GFX950_WAVE_SIZE * GFX950_DMA_BYTES)
-                lds_ptr = fx.add_offset(
-                    lds_i8, rocdl.readfirstlane(T.i32, wave_base)
+                lin = (fx.Int32(i * block_threads) + fx.Int32(tid)) * fx.Int32(
+                    GFX950_DMA_BYTES
                 )
-                buffer_load_lds_inline(rsrc, lds_ptr, gmem, GFX950_DMA_BYTES)
+                row = lin // fx.Int32(block_k)
+                dst_col = lin % fx.Int32(block_k)
+                src_col = swizzled_col(row, dst_col, layout)
+                src_offset = (
+                    (rows_base + row) * fx.Int32(k)
+                    + k_tile * fx.Int32(block_k)
+                    + src_col
+                )
+                src = fx.slice(gmem, (None, src_offset))
+                dst = fx.make_view(lds_ptr, fx.make_layout(1, 1))
+                fx.copy(dma_atom, src, dst)
+                if i < ldg_iters - 1:
+                    lds_ptr = lds_ptr + fx.Int32(block_threads * GFX950_DMA_BYTES)
 
         def async_load_a(k_tile, stage):
             async_load_tile(
-                a_rsrc, sA_i8, d.a_stage_bytes, d.ldg_a_iters, m_base, k_tile, stage
+                a_flat,
+                smem_a,
+                d.a_stage_bytes,
+                d.ldg_a_iters,
+                m_base,
+                k_tile,
+                stage,
+                a_lds_layout,
             )
 
         def async_load_b(k_tile, stage):
             async_load_tile(
-                b_rsrc, sB_i8, d.b_stage_bytes, d.ldg_b_iters, n_base, k_tile, stage
+                b_flat,
+                smem_b,
+                d.b_stage_bytes,
+                d.ldg_b_iters,
+                n_base,
+                k_tile,
+                stage,
+                b_lds_layout,
             )
 
-        def read_frag(lds_i32, stage_bytes, stage, row_in_block, kh):
-            """ds_read_b128 x2 -> one i32[8] MFMA operand fragment."""
-            row_swz = row_in_block & fx.Int32(granule_mask)
-            lo_logical = fx.Int32(kh * MXFP8_GRANULES_PER_MFMA_K) + k_group
-            hi_logical = lo_logical + fx.Int32(MXFP8_HI_GRANULE_OFFSET)
-            base_i32 = (
-                stage * fx.Int32(stage_bytes // 4)
-                + row_in_block * fx.Int32(block_k // 4)
+        def load_scale_word(scale, row_global, scale_col):
+            scale_offset = fx.Int32(row_global) * fx.Int32(scale_k) + fx.Int32(
+                scale_col
             )
-
-            def read16(logical):
-                phys = logical ^ row_swz
-                off = base_i32 + phys * fx.Int32(GFX950_DMA_BYTES // 4)
-                frag = fx.make_rmem_tensor(4, fx.Int32)
-                fx.copy(
-                    lds_copy,
-                    fx.make_view(fx.add_offset(lds_i32, off), fx.make_layout(4, 1)),
-                    frag,
-                )
-                return frag
-
-            lo = Vec(fx.memref_load_vec(read16(lo_logical)))
-            hi = Vec(fx.memref_load_vec(read16(hi_logical)))
-            frag = fx.make_rmem_tensor(8, fx.Int32)
-            frag.store(lo.shuffle(hi, list(range(8))))
-            return frag
-
-        def load_scale_word(scale_u8, row_global, k_tile, kh):
-            off = (
-                fx.Int64(row_global) * fx.Int64(scale_k)
-                + fx.Int64(k_tile) * fx.Int64(d.scale_cols)
-                + fx.Int64(kh * (MXFP8_MFMA_K // MXFP8_SCALE_BLOCK_K))
-                + fx.Int64(k_group)
+            scale_reg = fx.make_rmem_tensor(1, fx.Uint8)
+            fx.copy(
+                scale_atom,
+                fx.slice(scale, (None, scale_offset)),
+                scale_reg,
             )
-            scale_byte = fx.ptr_load(scale_u8 + off)
-            # The atom reads one e8m0 byte per 32-K block; broadcasting keeps
-            # it independent of the opsel byte lane.
+            scale_byte = fx.get_scalar(scale_reg[0])
             return scale_byte.to(fx.Int32) * fx.Int32(0x01010101)
 
-        # Row/col of this wave's first 16x16 tile inside the block tile.
-        wave_row0 = wave_m * fx.Int32(d.wave_tile_m)
-        wave_col0 = wave_n * fx.Int32(d.wave_tile_n)
-
-        accs = [
-            fx.make_rmem_tensor(4, fx.Float32)
-            for _ in range_constexpr(d.mma_m_repeat * d.mma_n_repeat)
-        ]
-        for idx in range_constexpr(d.mma_m_repeat * d.mma_n_repeat):
-            accs[idx].store(Vec.filled(4, 0.0, fx.Float32))
+        def scaled_mma(d_frag, a_frag, b_frag, scale_a, scale_b):
+            # Ownership and fragments come from the workgroup TiledMma, while
+            # dynamic E8M0 state is bound on each underlying 16x16 atom call.
+            a_atom = fx.Tensor(
+                fx.make_view(fx.get_iter(a_frag), fx.coalesce(a_frag.layout))
+            )
+            b_atom = fx.Tensor(
+                fx.make_view(fx.get_iter(b_frag), fx.coalesce(b_frag.layout))
+            )
+            fx.gemm(
+                mma_atom,
+                d_frag,
+                a_atom,
+                b_atom,
+                d_frag,
+                scale_a=scale_a,
+                scale_b=scale_b,
+            )
 
         def compute_stage(stage, k_tile):
+            sA_stage = fx.make_view(
+                smem_a + stage * fx.Int32(block_m * block_k),
+                a_lds_layout,
+            )
+            sB_stage = fx.make_view(
+                smem_b + stage * fx.Int32(block_n * block_k),
+                b_lds_layout,
+            )
+            thr_sA = thr_copy_A.partition_S(sA_stage)
+            thr_sB = thr_copy_B.partition_S(sB_stage)
             for kh in range_constexpr(d.k_halves):
-                a_frags = []
+                fx.copy(
+                    s2r_atom,
+                    thr_sB[None, None, kh],
+                    frag_B_retile[None, None, kh],
+                )
+                fx.copy(
+                    s2r_atom,
+                    thr_sA[None, None, kh],
+                    frag_A_retile[None, None, kh],
+                )
+                scale_col = (
+                    k_tile * fx.Int32(block_k // MXFP8_SCALE_BLOCK_K)
+                    + fx.Int32(kh * (MXFP8_MFMA_K // MXFP8_SCALE_BLOCK_K))
+                    + scale_group
+                )
+
                 sa_words = []
                 for mi in range_constexpr(d.mma_m_repeat):
-                    row_in_block = wave_row0 + fx.Int32(mi * MXFP8_MFMA_M) + lane_16
-                    a_frags.append(
-                        read_frag(sA_i32, d.a_stage_bytes, stage, row_in_block, kh)
-                    )
+                    local_row = fx.get_scalar(thr_mma_aRow[0, mi, kh])
                     sa_words.append(
-                        load_scale_word(sa_u8, m_base + row_in_block, k_tile, kh)
+                        load_scale_word(
+                            sa_flat,
+                            m_base + local_row,
+                            scale_col,
+                        )
                     )
-                b_frags = []
+
                 sb_words = []
                 for ni in range_constexpr(d.mma_n_repeat):
-                    col_in_block = wave_col0 + fx.Int32(ni * MXFP8_MFMA_N) + lane_16
-                    b_frags.append(
-                        read_frag(sB_i32, d.b_stage_bytes, stage, col_in_block, kh)
-                    )
+                    local_row = fx.get_scalar(thr_mma_bRow[0, ni, kh])
                     sb_words.append(
-                        load_scale_word(sb_u8, n_base + col_in_block, k_tile, kh)
+                        load_scale_word(
+                            sb_flat,
+                            n_base + local_row,
+                            scale_col,
+                        )
                     )
-                # Register blocking: each LDS read feeds every repeat on the
-                # other axis.
+
                 for ni in range_constexpr(d.mma_n_repeat):
                     for mi in range_constexpr(d.mma_m_repeat):
-                        acc = accs[mi * d.mma_n_repeat + ni]
-                        fx.gemm(
-                            mma_atom,
-                            acc,
-                            a_frags[mi],
-                            b_frags[ni],
-                            acc,
-                            scale_a=sa_words[mi],
-                            scale_b=sb_words[ni],
+                        scaled_mma(
+                            frag_C[(None, 0), mi, ni],
+                            frag_A[None, mi, kh],
+                            frag_B[None, ni, kh],
+                            sa_words[mi],
+                            sb_words[ni],
                         )
 
         # Prologue: fill stages-1 buffers so the steady-state loop always has a
@@ -574,22 +604,10 @@ def make_mxfp8_scaled_mm_gfx950(
             __barrier((stages - 2 - s) * d.ldg_wait_count)
             compute_stage(cur, k_tile)
 
-        # Epilogue: each lane owns 4 rows of every 16x16 accumulator.
-        for mi in range_constexpr(d.mma_m_repeat):
-            row0 = (
-                m_base
-                + wave_row0
-                + fx.Int32(mi * MXFP8_MFMA_M)
-                + k_group * fx.Int32(4)
-            )
-            for ni in range_constexpr(d.mma_n_repeat):
-                col = n_base + wave_col0 + fx.Int32(ni * MXFP8_MFMA_N) + lane_16
-                out4 = Vec(accs[mi * d.mma_n_repeat + ni].load().ir_value()).to(
-                    out_elem
-                )
-                for i in range_constexpr(4):
-                    off = fx.Int64(row0 + fx.Int32(i)) * fx.Int64(n) + fx.Int64(col)
-                    fx.ptr_store(out4[i], out_ptr + off)
+        frag_C_out = fx.make_fragment_like(frag_C, out_elem)
+        frag_C_out.store(frag_C.load().to(out_elem))
+        frag_C_retile = thr_copy_C.retile(frag_C_out)
+        fx.copy(r2g_atom, frag_C_retile, thr_gC)
 
     kernel._func.__name__ = make_mxfp8_gemm_kernel_name(
         MXFP8GemmParams(
