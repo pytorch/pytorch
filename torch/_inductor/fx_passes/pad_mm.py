@@ -490,7 +490,7 @@ def should_pad(
     if op is torch.ops.aten.mm:
         from ..kernel.mm_common import _use_small_mm_pointwise
 
-        m, k, n = hint_symbols((mat1.shape[0], mat1.shape[1], mat2.shape[1]))
+        m, k, n = mat1.shape[0], mat1.shape[1], mat2.shape[1]
         if _use_small_mm_pointwise(
             m, k, n, mat1.device.type, statically_known_true=statically_known_true
         ):
