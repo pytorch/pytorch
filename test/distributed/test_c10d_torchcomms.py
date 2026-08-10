@@ -882,6 +882,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         "pg_group_ranks",
         "pg_backend_config",
         "pg_to_tag",
+        "tags_to_pg",
         "pg_coalesce_state",
         "comms",
     )
@@ -891,6 +892,8 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self._saved_world = {
             attr: getattr(c10d._world, attr).copy() for attr in self._WORLD_ATTRS
         }
+        self._saved_default_pg = c10d._world.default_pg
+        self._saved_group_count = c10d._world.group_count
 
     def tearDown(self):
         for attr, value in self._saved_world.items():
@@ -900,26 +903,28 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
                 container.update(value)
             else:
                 container.extend(value)
+        c10d._world.default_pg = self._saved_default_pg
+        c10d._world.group_count = self._saved_group_count
         super().tearDown()
 
-    def _drive_destroy(self, device_backends):
-        """Register a fake subgroup PG and run ``destroy_process_group`` on it.
-
-        ``device_backends`` maps device type -> backend object; the PG reports
-        those device types and returns the matching backend from
-        ``_get_backend``. Returns the PG mock so callers can assert on teardown.
-        """
+    def _register_pg(self, device_backends, *, name=None):
+        """Register a fake PG whose backends are keyed by device type."""
         pg = mock.MagicMock()
         pg._device_types = list(device_backends)
         pg._get_backend.side_effect = lambda dev: device_backends[dev]
-        name = c10d.GroupName(self.id())
-        pg.group_name = name
+        group_name = c10d.GroupName(self.id() if name is None else name)
+        pg.group_name = group_name
 
         c10d._world.pg_map[pg] = (None, None)
-        c10d._world.pg_names[pg] = name
+        c10d._world.pg_names[pg] = group_name
         c10d._world.pg_group_ranks[pg] = {}
         c10d._world.pg_backend_config[pg] = ""
         c10d._world.pg_to_tag[pg] = None
+        return pg
+
+    def _drive_destroy(self, device_backends):
+        """Register a fake subgroup PG and run ``destroy_process_group`` on it."""
+        pg = self._register_pg(device_backends)
 
         with mock.patch.multiple(
             c10d,
@@ -966,6 +971,39 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeOtherBackend()}
         )
         self.assertEqual(comm.finalize_calls, 1)
+
+    def test_destroy_subgroup_keeps_other_live_comms_tracked(self):
+        world_pg = self._register_pg({}, name="world_pg")
+        comm_a, comm_b = _FakeComm(), _FakeComm()
+        subgroup_a = self._register_pg(
+            {"cuda": _FakeBackendWrapper(comm_a)}, name="subgroup_a"
+        )
+        subgroup_b = self._register_pg(
+            {"cuda": _FakeBackendWrapper(comm_b)}, name="subgroup_b"
+        )
+        c10d._world.default_pg = world_pg
+        c10d._world.comms.extend([comm_a, comm_b])
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d.destroy_process_group(subgroup_a)
+            self.assertEqual(comm_a.finalize_calls, 1)
+            self.assertEqual(comm_b.finalize_calls, 0)
+            self.assertNotIn(subgroup_a, c10d._world.pg_map)
+            self.assertIn(subgroup_b, c10d._world.pg_map)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            c10d.destroy_process_group()
+            self.assertEqual(comm_a.finalize_calls, 1)
+            self.assertEqual(comm_b.finalize_calls, 1)
+            self.assertEqual(c10d._world.comms, [])
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):

@@ -26,7 +26,7 @@ np_dtype_params = [
     subtest(("bool", "bool"), name="bool"),
     subtest(
         ("bool", numpy.dtype("bool")),
-        name="numpy.dtype('bool')",
+        name="numpy_dtype('bool')",
         decorators=[xfail],  # reason="XXX: np.dtype() objects not supported"),
     ),
 ]
@@ -36,10 +36,10 @@ for name in dtype_names:
     np_dtype_params.append(subtest((name, name), name=repr(name)))
 
     np_dtype_params.append(
-        subtest((name, getattr(numpy, name)), name=f"numpy.{name}", decorators=[xfail])
+        subtest((name, getattr(numpy, name)), name=f"numpy_{name}", decorators=[xfail])
     )  # numpy namespaced dtypes not supported
     np_dtype_params.append(
-        subtest((name, numpy.dtype(name)), name=f"numpy.{name!r}", decorators=[xfail])
+        subtest((name, numpy.dtype(name)), name=f"numpy_{name!r}", decorators=[xfail])
     )
 
 

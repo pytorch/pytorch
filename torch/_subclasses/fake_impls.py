@@ -1288,22 +1288,17 @@ def repeat_interleave_tensor(
 
 
 def _compute_cuda_elementwise_output_strides(
-    fake_mode: FakeTensorMode, *args: Any
+    *args: Any, shape: ShapeType
 ) -> tuple[int, ...] | None:
     if any(
         isinstance(arg, torch.Tensor) and arg.layout != torch.strided for arg in args
     ):
         return None
 
-    # Keep torch._refs import lazy; fake_impls is imported during FakeTensor setup.
-    from torch._refs import _maybe_broadcast
-
-    with fake_mode:
-        broadcasted_args = _maybe_broadcast(*args)
     try:
         # CUDA TensorIterator keeps promotion inside the kernel, so output
-        # layout is chosen from the original operands.
-        return utils.compute_tensoriterator_output_strides(*broadcasted_args)
+        # layout is chosen from the original, unexpanded operands.
+        return utils.compute_tensoriterator_output_strides(*args, shape=shape)
     except ValueError:
         return None
 
@@ -2516,7 +2511,9 @@ def make_fast_binary_impl(
             )
 
         if common_device.type == "cuda":
-            strides = _compute_cuda_elementwise_output_strides(mode, *operands)
+            strides = _compute_cuda_elementwise_output_strides(
+                *operands, shape=final_shape
+            )
             if strides is not None:
                 count_label("fast cuda tensoriterator strides")
                 if common_dtype is None:

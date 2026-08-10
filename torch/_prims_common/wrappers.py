@@ -72,37 +72,18 @@ def _maybe_convert_to_dtype(a, dtype):
     )
 
 
-def _maybe_broadcast_for_strides(args):
-    common_shape = None
-    for arg in args:
-        if isinstance(arg, TensorLike):
-            shape = tuple(arg.shape)
-            if any(isinstance(dim, torch.SymInt) for dim in shape):
-                return None
-        elif isinstance(arg, Number):
-            shape = ()
-        else:
-            continue
-
-        try:
-            common_shape = (
-                shape
-                if common_shape is None
-                else utils.infer_size_shapes(common_shape, shape)
-            )
-        except RuntimeError:
-            return None
-
-    if common_shape is None:
-        return None
-
-    result: list[object] = []
-    for arg in args:
-        if isinstance(arg, TensorLike):
-            result.append(arg.expand(common_shape))
-        elif isinstance(arg, Number):
-            result.append(arg)
-    return result
+def _get_tensoriterator_stride_args(bound, type_promoting_arg_names):
+    return [
+        arg
+        for name, value in bound.arguments.items()
+        for arg in pytree.arg_tree_leaves(value)
+        if isinstance(arg, TensorLike)
+        or (
+            isinstance(arg, Number)
+            and type_promoting_arg_names is not None
+            and name in type_promoting_arg_names
+        )
+    ]
 
 
 def _maybe_correct_cuda_tensoriterator_strides(result, args):
@@ -113,13 +94,6 @@ def _maybe_correct_cuda_tensoriterator_strides(result, args):
     if device is None or device.type != "cuda":
         return result
 
-    # Replacing a proxy-traced result with an inputless empty_strided would
-    # disconnect the computation from its inputs and let DCE remove it.
-    from torch.fx.experimental.proxy_tensor import get_proxy_mode
-
-    if get_proxy_mode() is not None:
-        return result
-
     from torch._subclasses.fake_tensor import is_fake_tensor
 
     if not is_fake_tensor(result) and result.device.type != "meta":
@@ -128,27 +102,21 @@ def _maybe_correct_cuda_tensoriterator_strides(result, args):
     if any(isinstance(arg, TensorLike) and arg.layout != torch.strided for arg in args):
         return result
 
-    broadcasted_args = _maybe_broadcast_for_strides(args)
-    if broadcasted_args is None:
-        return result
-
-    first_tensor = next(
-        (arg for arg in broadcasted_args if isinstance(arg, TensorLike)), None
-    )
-    if first_tensor is None or tuple(result.shape) != tuple(first_tensor.shape):
-        return result
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
     try:
-        strides = utils.compute_tensoriterator_output_strides(*broadcasted_args)
+        strides = utils.compute_tensoriterator_output_strides(*args, shape=result.shape)
     except ValueError:
         return result
 
-    if result.stride() == strides:
+    if guard_or_false(sym_eq(result.stride(), strides)):
         return result
-    out = torch.empty_strided(
-        result.shape, strides, dtype=result.dtype, device=result.device
-    )
-    return out.copy_(result)
+
+    # copy_strided is functional, so proxy tracing keeps the data dependency
+    # while recording the corrected output layout.
+    from torch import _prims as prims
+
+    return prims.copy_strided(result, strides)
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
@@ -188,6 +156,10 @@ class elementwise_type_promotion_wrapper:
     strides from the original operands. It must only be enabled for references
     that implement TensorIterator elementwise operators.
 
+    cuda_tensoriterator_promotes_inputs computes those strides after the
+    wrapper's input promotion. This models structured operators like where
+    that promote their value operands before constructing TensorIterator.
+
     The return_dtype will be coerced to the wrapped function's dtype arg if it is available and
     not None.
 
@@ -201,10 +173,12 @@ class elementwise_type_promotion_wrapper:
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
         type_promoting_args: Sequence[str] | None = None,
         correct_cuda_tensoriterator_strides: bool = False,
+        cuda_tensoriterator_promotes_inputs: bool = False,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
         self.correct_cuda_tensoriterator_strides = correct_cuda_tensoriterator_strides
+        self.cuda_tensoriterator_promotes_inputs = cuda_tensoriterator_promotes_inputs
 
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -226,21 +200,15 @@ class elementwise_type_promotion_wrapper:
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
             )
-            stride_args = (
-                [
-                    arg
-                    for name, value in bound.arguments.items()
-                    for arg in pytree.arg_tree_leaves(value)
-                    if isinstance(arg, TensorLike)
-                    or (
-                        isinstance(arg, Number)
-                        and self.type_promoting_arg_names is not None
-                        and name in self.type_promoting_arg_names
-                    )
-                ]
-                if self.correct_cuda_tensoriterator_strides
-                else None
-            )
+
+            stride_args = None
+            if (
+                self.correct_cuda_tensoriterator_strides
+                and not self.cuda_tensoriterator_promotes_inputs
+            ):
+                stride_args = _get_tensoriterator_stride_args(
+                    bound, self.type_promoting_arg_names
+                )
 
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
@@ -248,6 +216,13 @@ class elementwise_type_promotion_wrapper:
                 if x in bound.arguments
             }
             bound.arguments.update(promoted_args)
+            if (
+                self.correct_cuda_tensoriterator_strides
+                and self.cuda_tensoriterator_promotes_inputs
+            ):
+                stride_args = _get_tensoriterator_stride_args(
+                    bound, self.type_promoting_arg_names
+                )
 
             result = fn(**bound.arguments)
 

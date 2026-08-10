@@ -56,7 +56,7 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
-std::optional<Device> device_from_tensor_backend(const TensorBase& tensor) {
+std::optional<Device> device_type_from_tensor_backend(const TensorBase& tensor) {
   if (!tensor.defined()) {
     return std::nullopt;
   }
@@ -64,7 +64,11 @@ std::optional<Device> device_from_tensor_backend(const TensorBase& tensor) {
   // FakeTensor enters C++ meta kernels under the Meta dispatch key, so
   // TensorImpl::device() reports meta.  Its key set still carries the fake
   // backend; recover that backend generically so TensorIterator can apply the
-  // same device checks and stride rules it would use for real tensors.
+  // same device checks and stride rules it would use for real tensors. A key
+  // set only records the device type, not its index. FakeTensorMode validates
+  // full fake devices (including indices) before entering the meta kernel, so
+  // backend-only recovery is sufficient here. Real tensors retain their
+  // indexed device in OperandInfo and do not take this path.
   const auto backend = tensor.key_set().highestBackendKey();
   if (backend == c10::BackendComponent::InvalidBit ||
       backend == c10::BackendComponent::MetaBit) {
@@ -423,7 +427,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
     TORCH_INTERNAL_ASSERT(op.device.has_value());
     if (is_meta_ && op.device->is_meta()) {
-      if (auto device = device_from_tensor_backend(op.tensor_base())) {
+      if (auto device = device_type_from_tensor_backend(op.tensor_base())) {
         op.device = *device;
       }
     }

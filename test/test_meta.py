@@ -2227,6 +2227,89 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out.stride(), strides)
             self.assertEqual(ref_out.stride(), fake_stride)
 
+        with self.subTest(broadcasted_rank_layout=True):
+            a = torch.empty((2, 1), device=device, dtype=torch.float32)
+            b = torch.empty(
+                (1, 2, 1), device=device, dtype=torch.float64
+            ).permute(2, 0, 1)
+            ref_out = torch.add(a, b)
+            self.assertEqual(ref_out.stride(), (1, 1, 2))
+
+            for dynamic in (False, True):
+                with self.subTest(dynamic=dynamic):
+                    with FakeTensorMode(
+                        shape_env=ShapeEnv() if dynamic else None,
+                        static_shapes=not dynamic,
+                    ) as mode:
+                        fake_a = mode.from_tensor(a)
+                        fake_b = mode.from_tensor(b)
+                        fake_out = torch.add(fake_a, fake_b)
+                        ref_fake_out = torch._refs.add(fake_a, fake_b)
+
+                    self.assertEqual(
+                        ref_out.stride(), tuple(int(s) for s in fake_out.stride())
+                    )
+                    self.assertEqual(
+                        ref_out.stride(),
+                        tuple(int(s) for s in ref_fake_out.stride()),
+                    )
+
+        with self.subTest(zero_size_broadcast_layout=True):
+            a = torch.empty_strided(
+                (1,), (1,), device=device, dtype=torch.float32
+            )
+            b = torch.empty_strided(
+                (0, 3), (3, 3), device=device, dtype=torch.float64
+            )
+            ref_out = torch.add(a, b)
+
+            with FakeTensorMode() as mode:
+                fake_a = mode.from_tensor(a)
+                fake_b = mode.from_tensor(b)
+                fake_out = torch.add(fake_a, fake_b)
+                ref_fake_out = torch._refs.add(fake_a, fake_b)
+
+            self.assertEqual(ref_out.stride(), (1, 0))
+            self.assertEqual(ref_out.stride(), fake_out.stride())
+            self.assertEqual(ref_out.stride(), ref_fake_out.stride())
+
+        with self.subTest(symbolic_ref_layout=True):
+            x = double_input
+            scalar = torch.empty(
+                (), device=device, dtype=torch.float32
+            ).expand_as(x)
+            ref_out = torch.atan2(scalar, x)
+
+            with FakeTensorMode(shape_env=ShapeEnv(), static_shapes=False) as mode:
+                fake_scalar = mode.from_tensor(scalar)
+                fake_x = mode.from_tensor(x)
+                fake_out = torch.atan2(fake_scalar, fake_x)
+                ref_fake_out = torch._refs.atan2(fake_scalar, fake_x)
+
+            self.assertEqual(
+                ref_out.stride(), tuple(int(s) for s in fake_out.stride())
+            )
+            self.assertEqual(
+                ref_out.stride(), tuple(int(s) for s in ref_fake_out.stride())
+            )
+
+        with self.subTest(unbacked_symbolic_strides=True):
+            shape_env = ShapeEnv()
+            with FakeTensorMode(shape_env=shape_env, static_shapes=False):
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+                a = torch.empty_strided(
+                    (u0, u1), (u1, 1), device=device, dtype=torch.float32
+                )
+                b = torch.empty_strided(
+                    (u0, u1), (1, u0), device=device, dtype=torch.float64
+                )
+                fake_out = torch.add(a, b)
+                ref_fake_out = torch._refs.add(a, b)
+
+            self.assertEqual(fake_out.ndim, 2)
+            self.assertEqual(fake_out.stride(), ref_fake_out.stride())
+
         with self.subTest(ambiguous_contiguous_layout=True):
             shape = (2, 1, 3, 4)
             strides = (12, 99, 4, 1)
@@ -2300,10 +2383,26 @@ class TestMeta(TestCase):
 
             self.assertEqual(common_device.type, "cuda")
 
+        with self.subTest(fake_device_indices=True):
+            with FakeTensorMode():
+                fake_cuda0 = torch.empty(2, device="cuda:0")
+                fake_cuda1 = torch.empty(2, device="cuda:1")
+                with self.assertRaisesRegex(
+                    RuntimeError, "at least two devices, cuda:0 and cuda:1"
+                ):
+                    torch.add(fake_cuda0, fake_cuda1)
+
         with self.subTest(ref_where_pred_stride=True):
-            pred = complex_input.real > 0
-            a = torch.ones_like(complex_input.real)
-            b = torch.zeros_like(complex_input.real)
+            shape = (2, 3)
+            pred = torch.empty_strided(
+                shape, (0, 1), device=device, dtype=torch.bool
+            ).fill_(True)
+            a = torch.empty_strided(
+                shape, (0, 1), device=device, dtype=torch.float32
+            ).fill_(1)
+            b = torch.empty_strided(
+                shape, (1, 2), device=device, dtype=torch.float64
+            ).fill_(2)
             ref_out = torch.where(pred, a, b)
 
             with FakeTensorMode() as mode:
@@ -2313,6 +2412,7 @@ class TestMeta(TestCase):
                 fake_out = torch._refs.where(fake_pred, fake_a, fake_b)
 
             self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), (3, 1))
             self.assertEqual(ref_out.stride(), fake_out.stride())
 
         with self.subTest(ref_non_elementwise_outputs=True):
@@ -2589,6 +2689,52 @@ class TestMetaKernelRegistrations(TestCase):
             torch.ops.aten.aminmax.out(
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
+
+    def test_grid_sampler_2d_cpu_fallback_meta(self):
+        # The meta kernels' whole contract is output metadata, so compare
+        # shape/stride/dtype against eager for the forward and both backward
+        # outputs. Covers contiguous, channels_last and non-contiguous inputs.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def check(inp, grid):
+            expected = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            grad_out = torch.randn_like(expected)
+            bwd = torch.ops.aten._grid_sampler_2d_cpu_fallback_backward
+            exp_gi, exp_gg = bwd(grad_out, inp, grid, 0, 0, True)
+            with FakeTensorMode() as mode:
+                f_inp, f_grid = mode.from_tensor(inp), mode.from_tensor(grid)
+                f_out = torch._grid_sampler_2d_cpu_fallback(f_inp, f_grid, 0, 0, True)
+                f_gi, f_gg = bwd(
+                    mode.from_tensor(grad_out), f_inp, f_grid, 0, 0, True
+                )
+            for fake, real in ((f_out, expected), (f_gi, exp_gi), (f_gg, exp_gg)):
+                self.assertEqual(fake.shape, real.shape)
+                self.assertEqual(fake.stride(), real.stride())
+                self.assertEqual(fake.dtype, real.dtype)
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        check(inp, grid)
+        check(inp.contiguous(memory_format=torch.channels_last), grid)
+        check(inp.transpose(2, 3).contiguous().transpose(2, 3), grid)
+
+        # The C++ impls run check_grid_sampler_common/_2d themselves, so the
+        # metas must reject the same inputs rather than silently returning a
+        # shape eager would refuse to compute. Use 5D input and grid: the last
+        # grid dim still equals input.ndim - 2, so check_grid_sampler_common
+        # passes and only check_grid_sampler_2d can reject it.
+        bad_inp, bad_grid = torch.randn(2, 3, 4, 5, 6), torch.rand(2, 6, 7, 8, 3)
+        bwd = torch.ops.aten._grid_sampler_2d_cpu_fallback_backward
+        msg = "expected 4D input"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch._grid_sampler_2d_cpu_fallback(bad_inp, bad_grid, 0, 0, True)
+        with FakeTensorMode() as mode:
+            f_inp, f_grid = mode.from_tensor(bad_inp), mode.from_tensor(bad_grid)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch._grid_sampler_2d_cpu_fallback(f_inp, f_grid, 0, 0, True)
+            # the backward meta runs the same checks
+            with self.assertRaisesRegex(RuntimeError, msg):
+                bwd(mode.from_tensor(torch.randn(2, 3, 6, 7)), f_inp, f_grid, 0, 0, True)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):

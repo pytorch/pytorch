@@ -2751,6 +2751,14 @@ Arguments:
             py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
+          .def(
+              "_add_ephemeral_timeout",
+              &::c10d::ProcessGroup::addEphemeralTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Temporarily extends timeouts for subsequently issued work.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "_device_types", &::c10d::ProcessGroup::getDeviceTypes)
           .def(
@@ -2933,7 +2941,7 @@ Arguments:
               &::c10d::ProcessGroup::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -3057,6 +3065,14 @@ Arguments:
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
           .def(
+              "_add_ephemeral_timeout",
+              &::c10d::Backend::addEphemeralTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Temporarily extends timeouts for subsequently issued work.
+
+Unsupported backends ignore this call. This API is experimental and subject to change.)")
+          .def(
               "shrink",
               &::c10d::Backend::shrink,
               py::arg("ranks_to_exclude"),
@@ -3083,7 +3099,7 @@ Arguments:
               &::c10d::Backend::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
@@ -3795,22 +3811,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setTimeout,
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_add_ephemeral_timeout",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const std::chrono::milliseconds& timeout) {
-                self->addEphemeralTimeout(timeout);
-              },
-              py::arg("timeout"))
-          .def(
-              "_verify_work_timeout",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::intrusive_ptr<::c10d::Work>& work,
-                 const std::chrono::milliseconds& timeout) {
-                return self->verifyWorkTimeoutForTest(work, timeout);
-              },
-              py::arg("work"),
-              py::arg("timeout"))
           .def_property_readonly(
               "options",
               &::c10d::ProcessGroupNCCL::getOptions,
@@ -4171,6 +4171,17 @@ Returns:
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "register_mem_pool",
+              &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
+              py::arg("pool"),
+              py::arg("symm") = false)
+          .def(
+              "deregister_mem_pool",
+              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4216,6 +4227,11 @@ Returns:
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "perform_nocolor_split",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
+            self.getPrimary()->performNocolorSplit(device);
+          })
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -4487,6 +4503,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   The process group collective sequence number of the
                   corresponding collective communication.
             )")
+          .def_property_readonly("timeout", &::c10d::Work::getTimeout)
           .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {

@@ -553,61 +553,16 @@ def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
 # non overlapping and dense strides.
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
-def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False, _skip_fast_path=False, ambiguity_check=False
+def _compute_elementwise_output_logical_to_physical_perm_from_strides(
+    shape, operand_strides, *, ambiguity_check=False
 ) -> tuple[list[int], bool]:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if not _skip_checks and len(tensors) == 0:
-        msg = "Can't compute elementwise output strides for zero tensors!"
-        raise ValueError(msg)
-
-    if not _skip_checks:
-        check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
-
-    # Filters the tensors to actual tensors
-    if not _skip_checks:
-        tensors = tuple(
-            a
-            for a in tensors
-            if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
-        )
-
-    # Short-circuits for CPU scalar case
-    if len(tensors) == 0:
-        return [], False
-
-    # Short-circuits for shapes with zero or one dimensions
-    # TODO: are these necessary?
-    ndim = tensors[0].ndim
+    ndim = len(shape)
     if ndim == 0:
         return [], False
     if ndim == 1:
         return [0], False
-
-    # Short-circuits if contiguous or channels last, following the fake fast path.
-    # This reduces the number of guards we end up making
-    is_contiguous = True
-    is_channels_last = True
-    for t in tensors:
-        is_contiguous = is_contiguous and is_contiguous_for_memory_format_or_false(
-            t, memory_format=torch.contiguous_format
-        )
-        is_channels_last = (
-            is_channels_last
-            and is_contiguous_for_memory_format_or_false(
-                t, memory_format=torch.channels_last
-            )
-        )
-
-    if not _skip_fast_path:
-        if is_contiguous and not is_channels_last:
-            return list(range(ndim)), False
-
-        if is_channels_last and not is_contiguous:
-            return [0, *list(range(2, ndim)), 1], False
-
-    shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
         def ge(a, b):
@@ -620,9 +575,9 @@ def compute_elementwise_output_logical_to_physical_perm(
                 return False
             return guard_or_false(a >= b) or guard_or_false(a % b == 0)
 
-        for tensor in tensors:
-            stride_a = tensor.stride()[idx_a]
-            stride_b = tensor.stride()[idx_b]
+        for strides in operand_strides:
+            stride_a = strides[idx_a]
+            stride_b = strides[idx_b]
 
             if guard_or_false(stride_a == 0) or guard_or_false(stride_b == 0):
                 continue
@@ -672,16 +627,175 @@ def compute_elementwise_output_logical_to_physical_perm(
     return list(reversed(perm)), raise_ambiguous
 
 
+def compute_elementwise_output_logical_to_physical_perm(
+    *tensors, _skip_checks=False, _skip_fast_path=False, ambiguity_check=False
+) -> tuple[list[int], bool]:
+    if not _skip_checks and len(tensors) == 0:
+        msg = "Can't compute elementwise output strides for zero tensors!"
+        raise ValueError(msg)
+
+    if not _skip_checks:
+        check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+
+    # Filters the tensors to actual tensors
+    if not _skip_checks:
+        tensors = tuple(
+            a
+            for a in tensors
+            if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+        )
+
+    # Short-circuits for CPU scalar case
+    if len(tensors) == 0:
+        return [], False
+
+    # Short-circuits for shapes with zero or one dimensions
+    # TODO: are these necessary?
+    ndim = tensors[0].ndim
+    if ndim == 0:
+        return [], False
+    if ndim == 1:
+        return [0], False
+
+    # Short-circuits if contiguous or channels last, following the fake fast path.
+    # This reduces the number of guards we end up making
+    is_contiguous = True
+    is_channels_last = True
+    for t in tensors:
+        is_contiguous = is_contiguous and is_contiguous_for_memory_format_or_false(
+            t, memory_format=torch.contiguous_format
+        )
+        is_channels_last = (
+            is_channels_last
+            and is_contiguous_for_memory_format_or_false(
+                t, memory_format=torch.channels_last
+            )
+        )
+
+    if not _skip_fast_path:
+        if is_contiguous and not is_channels_last:
+            return list(range(ndim)), False
+
+        if is_channels_last and not is_contiguous:
+            return [0, *list(range(2, ndim)), 1], False
+
+    return _compute_elementwise_output_logical_to_physical_perm_from_strides(
+        tensors[0].shape,
+        tuple(tensor.stride() for tensor in tensors),
+        ambiguity_check=ambiguity_check,
+    )
+
+
 def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     return _compute_elementwise_output_strides(
         *tensors, preserve_single_tensor_strides=True
     )
 
 
-def compute_tensoriterator_output_strides(*tensors) -> tuple[int, ...]:
-    return _compute_elementwise_output_strides(
-        *tensors, preserve_single_tensor_strides=False
+def compute_tensoriterator_output_strides(*operands, shape) -> tuple[int, ...]:
+    """
+    Computes TensorIterator's output strides from its original operands and
+    broadcasted output shape.
+
+    TensorIterator infers the common shape without expanding its inputs, then
+    represents missing and broadcast dimensions with zero strides. Keeping
+    those zeros is necessary to reproduce its dimension ordering.
+    """
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+
+    if len(operands) == 0:
+        msg = "Can't compute TensorIterator output strides for zero operands!"
+        raise ValueError(msg)
+
+    shape = tuple(shape)
+    ndim = len(shape)
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (1,)
+
+    tensors = tuple(arg for arg in operands if isinstance(arg, TensorLike))
+    operand_shapes = tuple(
+        tuple(arg.shape) if isinstance(arg, TensorLike) else ()
+        for arg in operands
+        if isinstance(arg, (TensorLike, *Number))
     )
+    all_ops_same_shape = len(operand_shapes) == len(operands) and all(
+        len(arg_shape) == ndim and guard_or_false(sym_eq(arg_shape, shape))
+        for arg_shape in operand_shapes
+    )
+
+    if all_ops_same_shape and all(
+        is_contiguous_for_memory_format_or_false(
+            tensor, memory_format=torch.contiguous_format
+        )
+        for tensor in tensors
+    ):
+        return make_contiguous_strides_for(shape)
+
+    if all_ops_same_shape and all(
+        is_contiguous_for_memory_format_or_false(
+            tensor, memory_format=torch.channels_last
+        )
+        for tensor in tensors
+    ):
+        return make_channels_last_strides_for(shape)
+
+    if all_ops_same_shape and tensors:
+        first = tensors[0]
+        if is_non_overlapping_and_dense_or_false(first) and all(
+            guard_or_false(sym_eq(tensor.stride(), first.stride()))
+            and is_non_overlapping_and_dense_or_false(tensor)
+            for tensor in tensors[1:]
+        ):
+            return first.stride()
+
+    operand_strides = []
+    for operand in operands:
+        if isinstance(operand, TensorLike):
+            original_shape = tuple(operand.shape)
+            original_strides = tuple(operand.stride())
+        elif isinstance(operand, Number):
+            original_shape = ()
+            original_strides = ()
+        else:
+            continue
+
+        offset = ndim - len(original_shape)
+        if offset < 0:
+            raise ValueError("Operand rank exceeds TensorIterator output rank")
+
+        strides = [0] * ndim
+        for dim, (size, stride) in enumerate(zip(original_shape, original_strides)):
+            output_dim = offset + dim
+            if guard_or_false(sym_eq(size, 1)) and not guard_or_false(
+                sym_eq(shape[output_dim], 1)
+            ):
+                stride = 0
+            strides[output_dim] = stride
+        operand_strides.append(tuple(strides))
+
+    logical_to_physical_perm, _ = (
+        _compute_elementwise_output_logical_to_physical_perm_from_strides(
+            shape, operand_strides
+        )
+    )
+    permuted_shape = apply_perm(shape, logical_to_physical_perm)
+    if logical_to_physical_perm == list(range(ndim)):
+        # TensorIterator uses the regular contiguous allocator when no
+        # dimension reordering is necessary. It canonicalizes empty strides.
+        new_strides = make_contiguous_strides_for(permuted_shape)
+    else:
+        # The reordered path passes explicit compatible strides to the
+        # allocator. Unlike regular contiguous strides, multiplying by a zero
+        # dimension intentionally makes every slower dimension's stride zero.
+        multiplier = 1
+        new_strides_list = []
+        for dim in reversed(permuted_shape):
+            new_strides_list.append(multiplier)
+            multiplier *= dim
+        new_strides = tuple(reversed(new_strides_list))
+    return tuple(apply_perm(new_strides, invert_perm(logical_to_physical_perm)))
 
 
 def _compute_elementwise_output_strides(
@@ -737,9 +851,11 @@ def _compute_elementwise_output_strides(
     # TensorIterator preserves a shared non-overlapping dense layout after its
     # contiguous and channels-last fast paths. This also preserves arbitrary
     # strides on singleton dimensions.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+
     first = tensors[0]
     shared_dense_layout = num_args == len(tensors) and all(
-        tensor.stride() == first.stride()
+        guard_or_false(sym_eq(tensor.stride(), first.stride()))
         and is_non_overlapping_and_dense_or_false(tensor)
         for tensor in tensors
     )
