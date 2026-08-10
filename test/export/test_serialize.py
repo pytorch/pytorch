@@ -2945,9 +2945,15 @@ class TestSerializeTriton(TestCase):
         self.assertIsNotNone(triton_node)
 
 
-instantiate_device_type_tests(TestSerializeAccelerator, globals(), except_for="cpu")
-instantiate_device_type_tests(TestDeserializeAccelerator, globals(), except_for="cpu")
-instantiate_device_type_tests(TestSaveLoadAccelerator, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestSerializeAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDeserializeAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestSaveLoadAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(TestSerializeTriton, globals(), except_for="cpu")
 
 
