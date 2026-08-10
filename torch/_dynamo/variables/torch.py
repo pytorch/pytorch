@@ -2795,6 +2795,53 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
                 raise_observed_exception(error_type, tx, args=[msg])
 
+            sym_expr = (
+                predicate_vt.sym_num
+                if isinstance(predicate_vt, SymNodeVariable)
+                else None
+            )
+            if isinstance(sym_expr, torch.SymBool):
+                if tx.output.shape_env._has_branch_local_shape_refinement():
+                    static_expr = tx.output.shape_env._maybe_evaluate_static(
+                        sym_expr.node.expr
+                    )
+                    if static_expr is not None and bool(static_expr):
+                        return ConstantVariable.create(None)
+
+                    if not callable(message_eager) and error_type is RuntimeError:
+                        assert_msg = (
+                            str(message_eager)
+                            if message_eager is not None
+                            else (
+                                "Expected cond to be True, but got False. (Could this "
+                                "error message be improved? If so, please report an "
+                                "enhancement request to PyTorch.) Runtime assertion failed "
+                                f"for expression {sym_expr.node.expr}"
+                            )
+                        )
+                        assert_proxy = tx.output.create_proxy(
+                            "call_function",
+                            torch.ops.aten._assert_scalar.default,
+                            *proxy_args_kwargs(
+                                (
+                                    predicate_vt,
+                                    ConstantVariable.create(assert_msg),
+                                ),
+                                {},
+                            ),
+                        )
+                        assert_proxy.node.meta["branch_local_assert_expr"] = (
+                            sym_expr.node.expr
+                        )
+                        tx.output.shape_env._assume_branch_local_shape_expr(
+                            sym_expr.node.expr
+                        )
+                        return ConstantVariable.create(None)
+
+                    # Preserve the existing proxy path below for callable messages
+                    # and specialized exception types. It cannot provide local
+                    # refinement, but it retains their established compiled behavior.
+
             predicate_proxy = predicate_vt.as_proxy()
 
             proxy_args: tuple[Any, ...]

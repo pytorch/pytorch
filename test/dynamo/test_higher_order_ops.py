@@ -2034,6 +2034,25 @@ def forward(self, child : torch.Tensor, const_unused : int):
             torch._dynamo.reset()
             backend.graphs.clear()
 
+    def test_cond_branch_python_shape_guard(self):
+        cnt = CompileCounter()
+
+        def fn(x):
+            def true_fn(x):
+                if x.shape[1] == 12:
+                    return x + 1
+                return x + 100
+
+            def false_fn(x):
+                return x - 1
+
+            return torch.cond(x.shape[0] > 1, true_fn, false_fn, (x,))
+
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(2, 12)), torch.ones(2, 12))
+        self.assertEqual(opt_fn(torch.zeros(2, 13)), torch.full((2, 13), 100.0))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
