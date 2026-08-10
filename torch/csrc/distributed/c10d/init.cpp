@@ -2952,7 +2952,7 @@ Arguments:
               &::c10d::ProcessGroup::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def_property_readonly(
               "supports_abort_hooks",
               &::c10d::ProcessGroup::supportsAbortHooks,
@@ -3118,7 +3118,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               &::c10d::Backend::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def_property_readonly(
               "supports_abort_hooks",
               &::c10d::Backend::supportsAbortHooks,
@@ -4206,6 +4206,9 @@ Returns:
           .def(
               "deregister_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4251,6 +4254,11 @@ Returns:
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "perform_nocolor_split",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
+            self.getPrimary()->performNocolorSplit(device);
+          })
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -4306,6 +4314,9 @@ Returns:
       .value(
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::OpType::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::OpType::ALLGATHER_INTO_TENSOR_COALESCED)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")

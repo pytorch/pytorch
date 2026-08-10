@@ -63,6 +63,15 @@ TORCH_API void waitForNcclCompletion(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+TORCH_API void waitForNcclChildComm(
+    NcclApi& nccl_api,
+    ncclComm_t parent_comm,
+    ncclComm_t* child_comm,
+    ncclResult_t status,
+    bool expect_child,
+    std::chrono::milliseconds timeout,
+    std::string_view operation);
+
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
  public:
@@ -242,6 +251,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const c10::intrusive_ptr<::c10d::Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<::c10d::Backend::Options>& opts) override;
+  void performNocolorSplit(at::Device device);
   c10::intrusive_ptr<::c10d::Backend> shrink(
       const std::vector<int64_t>& ranks_to_exclude,
       int shrink_flags = 0,
@@ -275,7 +285,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
     return true;
+#else
+    return false;
+#endif
   }
   ::c10d::ReconfigureHandle get_reconfigure_handle() const override;
   c10::intrusive_ptr<::c10d::Work> reconfigure(
@@ -287,9 +301,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // registers each mempool segment with the communicator and WindowNCCL
   // lazily upgrades the segment to a collective NCCL_WIN_COLL_SYMMETRIC
   // window on first use. Requires NCCL 2.29+ at runtime.
-  bool supportsWindow() const override {
-    return true;
-  }
+  bool supportsWindow() const override;
   c10::intrusive_ptr<::c10d::Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
 
@@ -367,12 +379,20 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Tears the NCCL communicator down. This NEVER terminates the process --
   // a user-initiated abort()/shutdown() must be survivable, matching
   // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
-  // watchdog-detected timeout or async error follow it with abortProcess().
+  // watchdog-detected timeout or async error use handleWatchdogFailure().
   void abortNcclComm();
-  // Terminates the process (after running the abort hooks) if
-  // TORCH_NCCL_ASYNC_ERROR_HANDLING asks for a tear-down and we are not in
-  // reconfigurable mode. `reason` is logged after "Aborting process on rank N
-  // due to ", so it must describe the actual trigger.
+  // Applies the cleanup/process-teardown action selected by
+  // TORCH_NCCL_ASYNC_ERROR_HANDLING. Reconfigurable communicators are revoked
+  // instead, independent of the selected mode.
+  void handleWatchdogFailure(const std::string& reason);
+  // Blocking wait has no watchdog, so the waiting thread tears down a failed
+  // communicator before surfacing the exception.
+  void handleBlockingWaitFailure(
+      WorkNCCL::WorkStatus status,
+      int64_t reconfigure_uuid);
+  // Terminates the process (after running the abort hooks) if requested by the
+  // async error mode. `reason` is logged after "Aborting process on rank N due
+  // to ", so it must describe the actual trigger.
   void abortProcess(const std::string& reason);
   // Signals the watchdog thread to exit and reaps it. Detaches instead of
   // joining when called from the watchdog thread itself.
@@ -602,6 +622,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     INITIALIZED,
     FINALIZED,
   } init_state_{InitializationState::UNINITIALIZED};
+  std::mutex reconfigure_mutex_;
 
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
@@ -611,6 +632,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
   std::mutex event_pool_mutex_;
+  const bool event_cache_enabled_;
   // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
   // pool never holds events whose timing mode disagrees with it.
   std::atomic<bool> timing_enabled_{false};
@@ -625,11 +647,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool is_high_priority_stream_{false};
   std::string name_;
 
-  // Whether a watchdog-detected timeout or async error takes the process down,
-  // read from TORCH_NCCL_ASYNC_ERROR_HANDLING so both NCCL backends fail the
-  // same way. Only the tear-down half of the mode applies here: our watchdog
-  // deliberately leaves the communicator for the next collective to abort.
-  const bool abort_process_on_timeout_or_error_;
+  const ::c10d::ErrorHandlingMode async_error_handling_;
+  const bool blocking_wait_;
 
   c10::intrusive_ptr<Options> options_c10d_;
 

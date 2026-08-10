@@ -88,13 +88,27 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      abort_process_on_timeout_or_error_(
-          SHOULD_TEAR_DOWN(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
-              ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
-              ::c10d::SkipCleanUp)))),
+      event_cache_enabled_(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
+      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
+          ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
+          ::c10d::SkipCleanUp))),
+      blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+
+  if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
+    auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+    options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
+  }
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
+      "with RCCL");
+#endif
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
@@ -269,6 +283,10 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
+  TORCH_CHECK(
+      supportsWindow(),
+      "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
+      "supported on ROCm");
   // Trigger the lazy bootstrap: prefer the tensor's device, then the bound
   // device, then the current CUDA device.
   if (init_state_ != InitializationState::INITIALIZED) {
@@ -288,6 +306,16 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     window->tensor_register(*tensor);
   }
   return window;
+}
+
+bool ProcessGroupNCCL::supportsWindow() const {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
+  int runtime_version = 0;
+  return ncclGetVersion(&runtime_version) == ncclSuccess &&
+      runtime_version >= NCCL_VERSION(2, 29, 0);
+#else
+  return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------
