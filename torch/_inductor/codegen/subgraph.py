@@ -198,6 +198,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
+            # A subgraph GraphLowering must not inherit the top-level backward's
+            # donated indices (different index space, caller-held inputs); see
+            # SubgraphLowering. Benchmark-only path, same latent bug.
+            donate_inputs=False,
             name=f"benchmark_{safe_name}",
         )
 
