@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import itertools
 import threading
 from collections import defaultdict
 from collections.abc import Callable
@@ -44,6 +45,12 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 invoke_subgraph_counter = 0
+
+# Unique per-checkpoint-region id, stamped as node.meta["ac_graph_id"] by the
+# SAC caching dispatch mode (see _checkpoint_context_fn handling in
+# trace_joint_graph_as_bwd) so the partitioner's cleanup_recompute_tags can order
+# save/recompute boundaries.
+_sac_ac_graph_id = itertools.count()
 
 
 # During the tracing of the joint graph, we construct this information. This is
@@ -746,6 +753,48 @@ def trace_joint_graph_as_bwd(
     else:
         fn = subgraph
 
+    # Selective activation checkpointing: if this is a checkpoint region carrying
+    # a context_fn policy, run the *forward* under the policy's caching dispatch
+    # mode so its ops -- and, crucially, the nodes they decompose into -- are
+    # tagged node.meta["recompute"] exactly as the tag path / eager SAC do (the
+    # mode stamps fx_traceback.current_meta, which decompositions inherit). The
+    # partitioner then honors those tags. Only the forward is wrapped; the joint's
+    # grad computation must stay untagged. The tags survive onto the joint graph
+    # this traces, which run_joint_graph_passes_on_hops partitions.
+    sg = (
+        subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
+    )
+    checkpoint_context_fn = None
+    if isinstance(sg, torch.fx.GraphModule) and hasattr(sg, "meta"):
+        checkpoint_context_fn = sg.meta.get("_checkpoint_context_fn")
+    if checkpoint_context_fn is not None:
+        fwd_ctx, recomp_ctx = checkpoint_context_fn()
+        # We only support the create_selective_checkpoint_contexts form, whose
+        # forward context is a _CachingTorchDispatchMode. For that form the second
+        # (recompute) context is a _CachedTorchDispatchMode that, in *eager* SAC,
+        # replays cached values so MUST_SAVE ops are not re-run -- a mechanism this
+        # path replaces structurally (the partitioner genuinely saves the MUST_SAVE
+        # ops; the shared slice recomputes only the rest), so recomp_ctx is
+        # correctly not entered here. An arbitrary custom context_fn's recompute
+        # context may carry semantics we can't reproduce, so reject it rather than
+        # silently drop it.
+        if not isinstance(fwd_ctx, _CachingTorchDispatchMode):
+            raise NotImplementedError(
+                "checkpoint_via_invoke_subgraph supports selective checkpointing "
+                "only via create_selective_checkpoint_contexts; a custom context_fn "
+                f"(forward context {type(fwd_ctx).__name__}) is not supported "
+                "because its recomputation context can't be preserved on this path."
+            )
+        del recomp_ctx
+        # Plumb a unique ac_graph_id so _CachingTorchDispatchMode tags every node
+        # (mirrors wrap.py's context_fn_with_graph_id).
+        fwd_ctx.ac_graph_id = next(_sac_ac_graph_id)
+        _fw_fn = fn
+
+        def fn(*args):
+            with fwd_ctx:
+                return _fw_fn(*args)
+
     # This joint_fn is inserted as the backward graph as is. This simplifies the
     # min-cut partitioner work later on.
     #   Input signature - (*primals, *tangents)
@@ -1274,15 +1323,23 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
                     subgraph, subgraph_decomp_table=subgraph_decomp_table
                 )(*operands)
 
-        # Propagate nested_region_config from the original subgraph to the
-        # re-traced graph so it's available for regional compilation.
-        if (
-            isinstance(subgraph, torch.fx.GraphModule)
-            and hasattr(subgraph, "meta")
-            and "nested_region_config" in subgraph.meta
-            and "nested_region_config" not in graph.meta
-        ):
-            graph.meta["nested_region_config"] = subgraph.meta["nested_region_config"]
+        # Propagate region metadata from the original subgraph to the re-traced
+        # graph (which starts with empty meta) so it survives to the proxy node
+        # and the partitioner. nested_region_config drives regional compilation;
+        # _checkpoint_region marks a checkpoint region for recompute-as-call, and
+        # _checkpoint_context_fn is the SAC policy that trace_joint_graph_as_bwd
+        # runs the forward under (its caching dispatch mode tags save/recompute).
+        # Without this, downstream would rely on the incoming subgraph arg still
+        # carrying the meta -- re-propagate for parity with the tag path (see
+        # wrap.py after its own reenter_make_fx).
+        if isinstance(subgraph, torch.fx.GraphModule) and hasattr(subgraph, "meta"):
+            for key in (
+                "nested_region_config",
+                "_checkpoint_region",
+                "_checkpoint_context_fn",
+            ):
+                if key in subgraph.meta and key not in graph.meta:
+                    graph.meta[key] = subgraph.meta[key]
 
         from torch._guards import detect_fake_mode
 
@@ -1365,6 +1422,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 
     call_id = _current_invoke_subgraph_call_id()
 
+    # The SAC context_fn is read from the subgraph's gm.meta (by
+    # trace_joint_graph_as_bwd, which runs the forward under it); it does not need
+    # to travel on node.meta. Only _checkpoint_region is propagated to node.meta so
+    # run_joint_graph_passes_on_hops can scope AC handling to checkpoint regions.
     if nested_config is not None or call_id is not None or is_checkpoint_region:
         node = out_proxy.node
         if "custom" not in node.meta:
