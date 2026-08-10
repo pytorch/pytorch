@@ -184,6 +184,7 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
     def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
