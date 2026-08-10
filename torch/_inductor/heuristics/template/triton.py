@@ -2762,7 +2762,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         return True
 
     @staticmethod
-    def _generate_autows_default_configs() -> list[BaseConfig]:
+    def _generate_autows_configs() -> list[BaseConfig]:
         """autoWS configs for DEFAULT search. Placeholder pending benchmark data."""
         return [
             BlackwellGPUGemmConfig(
@@ -2789,7 +2789,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         ]
 
     @staticmethod
-    def _generate_autows_configs() -> list[BaseConfig]:
+    def _generate_autows_exhaustive_configs() -> list[BaseConfig]:
         configs: list[BaseConfig] = []
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
             [32, 64, 128, 256], repeat=3
@@ -3186,8 +3186,8 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         if _use_template_autows():
-            self.mm_configs = self._generate_autows_default_configs()
-            self.exhaustive_configs = self._generate_autows_configs()
+            self.mm_configs = self._generate_autows_configs()
+            self.exhaustive_configs = self._generate_autows_exhaustive_configs()
         else:
             self.mm_configs = self.blackwell_persistent_mm_configs
             self.exhaustive_configs = self._generate_exhaustive_configs()

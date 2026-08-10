@@ -750,9 +750,10 @@ class TestBlackwellAutoWSConfigs(TestCase):
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
 
         mixin = BlackwellTMATemplateConfigMixin
-        self.assertEqual(heuristic.mm_configs, mixin._generate_autows_default_configs())
+        self.assertEqual(heuristic.mm_configs, mixin._generate_autows_configs())
         self.assertEqual(
-            len(heuristic.exhaustive_configs), len(mixin._generate_autows_configs())
+            len(heuristic.exhaustive_configs),
+            len(mixin._generate_autows_exhaustive_configs()),
         )
         for cfg in heuristic.mm_configs:
             self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
