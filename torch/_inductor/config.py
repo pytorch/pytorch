@@ -2236,6 +2236,10 @@ class triton:
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
+    # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
+    # (no-op on archs/Triton builds without meta-WS).
+    enable_template_autows = os.environ.get("ENABLE_TEMPLATE_AUTOWS", "0") == "1"
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 

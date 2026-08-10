@@ -1151,7 +1151,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         // input is read at compile-time Tin.
         const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
         if (cast_ilp) {
-          std::array<uint32_t, 3> size_outtype_numel = {
+          c10::metal::vec3<uint32_t> size_outtype_numel = {
               static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())), out_type, length};
           mtl_setBytes(computeEncoder, size_outtype_numel, 2);
           mtl_dispatch1DJob(
@@ -1242,7 +1242,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
       const auto out_type = static_cast<uint32_t>(dst_dtype);
       const auto elem_size = static_cast<uint32_t>(c10::elementSize(dst_dtype));
       if (use_ilp) {
-        std::array<uint32_t, 3> size_outtype_numel = {elem_size, out_type, numel};
+        c10::metal::vec3<uint32_t> size_outtype_numel = {elem_size, out_type, numel};
         mtl_setBytes(computeEncoder, size_outtype_numel, 2);
         mtl_dispatch1DJob(
             computeEncoder, cplState, (numel + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
