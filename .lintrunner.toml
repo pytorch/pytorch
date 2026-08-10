@@ -210,6 +210,8 @@ exclude_patterns = [
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'torch/headeronly/util/complex_utils.h',
+    'torch/headeronly/cuda/Atomic.h',
+    'torch/headeronly/cuda/KernelUtils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -1066,6 +1068,15 @@ command = [
     'tools/linter/adapters/testowners_linter.py',
     '--',
     '@{{PATHSFILE}}',
+]
+
+[[linter]]
+code = 'CODEOWNERS_TAXONOMY'
+include_patterns = ['**']
+command = [
+    'python3',
+    'scripts/codeowners/check_taxonomy.py',
+    '--lintrunner',
 ]
 
 [[linter]]

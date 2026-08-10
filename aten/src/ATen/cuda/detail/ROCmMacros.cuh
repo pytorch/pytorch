@@ -1,1 +1,1 @@
-#include <torch/headeronly/cuda/ROCmMacros.h>
+#include <torch/headeronly/cuda/detail/ROCmMacros.h>

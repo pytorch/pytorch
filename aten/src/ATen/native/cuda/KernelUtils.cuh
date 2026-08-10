@@ -1,6 +1,6 @@
 #pragma once
+#include <torch/headeronly/cuda/Atomic.h>
 #include <torch/headeronly/cuda/KernelUtils.h>
-#include <ATen/cuda/Atomic.cuh>
 
 #if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
 #include <cuda_bf16.h>
@@ -11,7 +11,7 @@
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 
-#include <ATen/cuda/detail/ROCmMacros.cuh>
+#include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
 namespace at::native {

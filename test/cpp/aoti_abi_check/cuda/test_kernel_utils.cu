@@ -7,16 +7,27 @@
 #include <cuda_runtime.h>
 
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
 
-#define SKIP_IF_NO_CUDA()                                       \
-  do {                                                          \
-    int n = 0;                                                  \
-    if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) {      \
-      GTEST_SKIP() << "No CUDA device available";               \
-    }                                                           \
+#define SKIP_IF_NO_CUDA()                                  \
+  do {                                                     \
+    int n = 0;                                             \
+    if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) { \
+      GTEST_SKIP() << "No CUDA device available";          \
+    }                                                      \
+  } while (0)
+
+#define CUDA_ASSERT_OK(expr)                                            \
+  do {                                                                  \
+    cudaError_t err_ = (expr);                                          \
+    if (err_ != cudaSuccess) {                                          \
+      throw std::runtime_error(                                         \
+          std::string(#expr) + " failed: " + cudaGetErrorString(err_)); \
+    }                                                                   \
   } while (0)
 
 template <typename scalar_t, typename index_t>
@@ -34,53 +45,42 @@ __global__ void scatter_add_kernel(
 }
 
 template <typename scalar_t, typename index_t>
-__global__ void specialized_add_kernel(
-    scalar_t* out,
-    index_t index,
-    index_t numel) {
+__global__ void specialized_add_kernel(scalar_t* out, index_t numel) {
   torch::headeronly::fastSpecializedAtomicAdd(
-      out, index, numel, static_cast<scalar_t>(1));
+      out, index_t{0}, numel, static_cast<scalar_t>(1));
 }
 
-// Runs `indices` through fastAtomicAdd against a buffer of `buf_numel`, with
-// the tensor base offset `out_offset` elements into the allocation, and returns
-// the whole buffer. The offset lets us place the tensor on an odd 16-bit
-// alignment, which is the case the Half/BFloat16 vectorized path handles.
+// Scatters +1 into each of `indices` of a `numel`-element tensor starting
+// `offset` elements into `buf`. Returns the whole buffer, so writes landing
+// outside the tensor are visible.
 template <typename scalar_t, typename index_t = int64_t>
 std::vector<scalar_t> scatterAdd(
+    std::vector<scalar_t> buf,
     const std::vector<index_t>& indices,
-    int64_t buf_numel,
-    int64_t out_offset,
-    index_t out_numel,
-    bool fast_atomics) {
+    index_t numel,
+    bool fast_atomics,
+    int64_t offset = 0) {
   const int64_t n = static_cast<int64_t>(indices.size());
+  const size_t bytes = buf.size() * sizeof(scalar_t);
   scalar_t* d_buf = nullptr;
   index_t* d_idx = nullptr;
-  EXPECT_EQ(cudaMalloc(&d_buf, buf_numel * sizeof(scalar_t)), cudaSuccess);
-  EXPECT_EQ(cudaMalloc(&d_idx, n * sizeof(index_t)), cudaSuccess);
-  EXPECT_EQ(cudaMemset(d_buf, 0, buf_numel * sizeof(scalar_t)), cudaSuccess);
-  EXPECT_EQ(
-      cudaMemcpy(
-          d_idx, indices.data(), n * sizeof(index_t), cudaMemcpyHostToDevice),
-      cudaSuccess);
+  CUDA_ASSERT_OK(cudaMalloc(&d_buf, bytes));
+  CUDA_ASSERT_OK(cudaMalloc(&d_idx, n * sizeof(index_t)));
+  CUDA_ASSERT_OK(cudaMemcpy(d_buf, buf.data(), bytes, cudaMemcpyHostToDevice));
+  CUDA_ASSERT_OK(cudaMemcpy(
+      d_idx, indices.data(), n * sizeof(index_t), cudaMemcpyHostToDevice));
 
   constexpr int threads = 256;
-  const int blocks = static_cast<int>((n + threads - 1) / threads);
-  scatter_add_kernel<scalar_t, index_t><<<blocks, threads>>>(
-      d_buf + out_offset, d_idx, n, out_numel, fast_atomics);
-  EXPECT_EQ(cudaGetLastError(), cudaSuccess);
+  scatter_add_kernel<scalar_t, index_t>
+      <<<static_cast<int>((n + threads - 1) / threads), threads>>>(
+          d_buf + offset, d_idx, n, numel, fast_atomics);
+  CUDA_ASSERT_OK(cudaGetLastError());
+  CUDA_ASSERT_OK(cudaDeviceSynchronize());
 
-  std::vector<scalar_t> host(buf_numel);
-  EXPECT_EQ(
-      cudaMemcpy(
-          host.data(),
-          d_buf,
-          buf_numel * sizeof(scalar_t),
-          cudaMemcpyDeviceToHost),
-      cudaSuccess);
+  CUDA_ASSERT_OK(cudaMemcpy(buf.data(), d_buf, bytes, cudaMemcpyDeviceToHost));
   cudaFree(d_buf);
   cudaFree(d_idx);
-  return host;
+  return buf;
 }
 
 template <typename scalar_t>
@@ -93,25 +93,60 @@ void testScatterAdd(bool fast_atomics) {
     indices[i] = i % numel;
     expected[i % numel]++;
   }
-  const auto out = scatterAdd<scalar_t>(indices, numel, 0, numel, fast_atomics);
+  const auto out = scatterAdd<scalar_t>(
+      std::vector<scalar_t>(numel), indices, numel, fast_atomics);
   for (int64_t j = 0; j < numel; ++j) {
     EXPECT_EQ(static_cast<float>(out[j]), static_cast<float>(expected[j]))
         << "slot " << j << " fast_atomics=" << fast_atomics;
   }
 }
 
-// The `numel` argument exists so the vectorized Half/BFloat16 path can fall
-// back to a scalar atomic rather than pairing with an out-of-bounds neighbour.
+// Everything fastAtomicAdd does beyond gpuAtomicAdd is Half/BFloat16 only: it
+// issues one (fast) 32-bit __half2/__nv_bfloat162 atomic covering the target
+// *and* an adjacent element, padding the neighbour's lane with +0. `numel`
+// exists so it can decline to do that when the neighbour is outside the tensor.
+//
+// A +0 write is invisible when doing a value check BUT one observable trace
+// is the sign bit: IEEE 754 gives (-0.0) + (+0.0) == +0.0. So we seed memory
+// with -0.0 to make out of bound writes detectable.
+constexpr uint16_t kNegZero = 0x8000; // -0.0 in both fp16 and bf16
+
+// A slot the vectorized path wrote to comes back as +0.0; one it skipped still
+// holds the -0.0 it was seeded with. Both read as 0.0 as a float, so the raw
+// bits are the only way to tell them apart.
 template <typename scalar_t>
-void testStaysInBounds() {
+bool wasWritten(scalar_t v) {
+  return v.x != kNegZero;
+}
+
+template <typename scalar_t>
+void testVectorizedBounds() {
   constexpr int64_t buf_numel = 34;
   constexpr int64_t numel = 32;
-  const auto buf = scatterAdd<scalar_t>(
-      {0, numel - 1}, buf_numel, /*out_offset=*/1, numel, /*fast_atomics=*/true);
-  for (int64_t j = 0; j < buf_numel; ++j) {
-    const float want = (j == 1 || j == numel) ? 1.0f : 0.0f;
-    EXPECT_EQ(static_cast<float>(buf[j]), want) << "slot " << j;
+  constexpr int64_t offset = 1; // odd 16-bit alignment, e.g., in a view
+  std::vector<scalar_t> buf(buf_numel);
+  for (auto& v : buf) {
+    v.x = kNegZero;
   }
+
+  // The tensor is buf[1..32]. At this offset odd indices pair right and even
+  // ones pair left, so index 0 could only pair left and index numel-1 only
+  // right -- both neighbours are outside the tensor, so both must fall back to
+  // a scalar atomic. Indices 5 and 16 have legal neighbours and must pair, one
+  // in each direction; they are the positive control proving a pair write is
+  // detectable here at all.
+  const auto out = scatterAdd<scalar_t>(
+      std::move(buf), {0, 5, 16, numel - 1}, numel, /*fast_atomics=*/true, offset);
+
+  EXPECT_EQ(static_cast<float>(out[offset]), 1.0f);
+  EXPECT_EQ(static_cast<float>(out[offset + 5]), 1.0f);
+  EXPECT_EQ(static_cast<float>(out[offset + 16]), 1.0f);
+  EXPECT_EQ(static_cast<float>(out[offset + numel - 1]), 1.0f);
+
+  EXPECT_TRUE(wasWritten(out[offset + 6])) << "index 5 should pair right";
+  EXPECT_TRUE(wasWritten(out[offset + 15])) << "index 16 should pair left";
+  EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start of the tensor";
+  EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
 }
 
 } // namespace
@@ -128,24 +163,22 @@ TEST(TestFastAtomicAdd, ScatterAdd) {
   }
 }
 
-TEST(TestFastAtomicAdd, StaysInBounds) {
+TEST(TestFastAtomicAdd, VectorizedBounds) {
   SKIP_IF_NO_CUDA();
-  testStaysInBounds<torch::headeronly::Half>();
-  testStaysInBounds<torch::headeronly::BFloat16>();
+  testVectorizedBounds<torch::headeronly::Half>();
+  testVectorizedBounds<torch::headeronly::BFloat16>();
 }
 
 TEST(TestFastAtomicAdd, FastSpecializedAtomicAdd) {
   SKIP_IF_NO_CUDA();
   float* d = nullptr;
-  ASSERT_EQ(cudaMalloc(&d, 2 * sizeof(float)), cudaSuccess);
-  ASSERT_EQ(cudaMemset(d, 0, 2 * sizeof(float)), cudaSuccess);
-  specialized_add_kernel<float, int64_t><<<1, 1>>>(d, 0, 2);
-  EXPECT_EQ(cudaGetLastError(), cudaSuccess);
-  float host[2] = {-1.0f, -1.0f};
-  ASSERT_EQ(
-      cudaMemcpy(host, d, 2 * sizeof(float), cudaMemcpyDeviceToHost),
-      cudaSuccess);
-  EXPECT_EQ(host[0], 1.0f);
-  EXPECT_EQ(host[1], 0.0f);
+  CUDA_ASSERT_OK(cudaMalloc(&d, sizeof(float)));
+  CUDA_ASSERT_OK(cudaMemset(d, 0, sizeof(float)));
+  specialized_add_kernel<float, int64_t><<<1, 1>>>(d, 1);
+  CUDA_ASSERT_OK(cudaGetLastError());
+  CUDA_ASSERT_OK(cudaDeviceSynchronize());
+  float host = -1.0f;
+  CUDA_ASSERT_OK(cudaMemcpy(&host, d, sizeof(float), cudaMemcpyDeviceToHost));
+  EXPECT_EQ(host, 1.0f);
   cudaFree(d);
 }

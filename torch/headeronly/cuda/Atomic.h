@@ -11,7 +11,7 @@
 #endif
 
 #if defined(USE_ROCM)
-#include <torch/headeronly/cuda/ROCmMacros.h>
+#include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
 template <typename T>
@@ -435,7 +435,7 @@ inline __device__ float gpuAtomicMul(float* address, float val) {
 
 template <typename T>
 __host__ __device__ T safe_max(T a, T b) {
-  T max = at::_isnan(b) ? b : std::max<T>(a, b);
+  T max = torch::headeronly::_isnan(b) ? b : std::max<T>(a, b);
   return max;
 }
 
@@ -494,7 +494,7 @@ inline __device__ float gpuAtomicMax(float* address, float val) {
 
 template <typename T>
 __host__ __device__ T safe_min(T a, T b) {
-  T min = at::_isnan(b) ? b : std::min<T>(a, b);
+  T min = torch::headeronly::_isnan(b) ? b : std::min<T>(a, b);
   return min;
 }
 

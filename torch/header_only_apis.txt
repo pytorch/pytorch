@@ -63,10 +63,6 @@ fastSpecializedAtomicAdd
 # torch/headeronly/util/NumericUtils.h
 _isnan
 _isinf
-exp
-log
-log1p
-tan
 
 # ATen/core/PhiloxRNGEngine.h
 Philox4_32
