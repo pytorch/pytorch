@@ -1348,21 +1348,24 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # module (set by InvokeSubgraphAutogradOp.backward) but may be wrapped
     # by FunctionalizeCtxWrapper — unwrap to find it.
     nested_config = None
+    # Marks regions lowered from torch.utils.checkpoint (see the front-door in
+    # CheckpointHigherOrderVariable). Propagated to node meta so downstream
+    # passes (run_joint_graph_passes_on_hops) can scope AC-specific handling to
+    # checkpoint regions rather than all invoke_subgraph HOPs.
+    is_checkpoint_region = False
     orig_subgraph = (
         subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
     )
     for gm in (graph, orig_subgraph):
-        if (
-            isinstance(gm, torch.fx.GraphModule)
-            and hasattr(gm, "meta")
-            and "nested_region_config" in gm.meta
-        ):
-            nested_config = gm.meta["nested_region_config"]
-            break
+        if isinstance(gm, torch.fx.GraphModule) and hasattr(gm, "meta"):
+            if nested_config is None and "nested_region_config" in gm.meta:
+                nested_config = gm.meta["nested_region_config"]
+            if gm.meta.get("_checkpoint_region"):
+                is_checkpoint_region = True
 
     call_id = _current_invoke_subgraph_call_id()
 
-    if nested_config is not None or call_id is not None:
+    if nested_config is not None or call_id is not None or is_checkpoint_region:
         node = out_proxy.node
         if "custom" not in node.meta:
             node.meta["custom"] = {}
@@ -1370,6 +1373,8 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             node.meta["custom"]["nested_region_config"] = nested_config
         if call_id is not None:
             node.meta["custom"]["call_id"] = call_id
+        if is_checkpoint_region:
+            node.meta["custom"]["_checkpoint_region"] = True
 
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(

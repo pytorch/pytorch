@@ -456,6 +456,16 @@ selective_decompose: bool = False
 enable_complex_wrapper: bool = False
 
 
+# Experimental: lower torch.utils.checkpoint regions to invoke_subgraph instead
+# of tag_activation_checkpoint. This keeps the region as a shared HOP through the
+# partitioner and makes the backward recompute re-invoke the *same* compiled
+# forward subgraph -- rather than a separately-compiled duplicate that can drift
+# (gh-186572). Recompute is coupled to this flag (a checkpoint region always
+# recomputes), so enabling it never silently degrades checkpoint into
+# save-everything. RNG in a checkpointed region is not yet supported (rejected).
+checkpoint_via_invoke_subgraph: bool = False
+
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
 
