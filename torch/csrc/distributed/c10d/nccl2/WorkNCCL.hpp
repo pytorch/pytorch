@@ -120,6 +120,8 @@ class WorkNCCL : public c10d::Work {
   std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
   ProcessGroupNCCL* comm_; // non-owning; see class comment
+  int64_t reconfigure_uuid_{-1};
+  bool blocking_wait_{false};
   std::unique_ptr<at::cuda::CUDAEvent> start_event_;
   std::unique_ptr<at::cuda::CUDAEvent> end_event_;
   at::cuda::CUDAStream stream_;
