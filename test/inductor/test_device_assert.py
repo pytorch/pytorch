@@ -109,7 +109,6 @@ instantiate_device_type_tests(
     TestTorchDeviceAssertTriggerAccelerator,
     globals(),
     except_for="cpu",
-    allow_mps=True,
     allow_xpu=True,
 )
 
