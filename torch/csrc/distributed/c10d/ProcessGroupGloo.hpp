@@ -84,7 +84,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-    std::chrono::milliseconds getTimeout() const;
+    std::chrono::milliseconds getTimeout() const override;
     virtual const std::vector<at::Tensor> getInputTensors() = 0;
     virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {
@@ -259,6 +259,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     static c10::intrusive_ptr<Options> create_default(
         std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads{2};
   };
@@ -268,6 +272,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
   }
 
   bool supportsSplitting() const override {
+    return true;
+  }
+
+  bool supportsReconfigure() const override {
     return true;
   }
 
@@ -315,6 +323,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
+  ErrorType getError() override {
+    return ErrorType::SUCCESS;
+  }
+
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
@@ -325,6 +337,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
       const c10::intrusive_ptr<Backend::Options>& opts,
       const int& rank,
       const int& size) override;
+
+  ReconfigureHandle get_reconfigure_handle() const override;
+
+  c10::intrusive_ptr<Work> reconfigure(const ReconfigureOptions& opts) override;
 
   const std::vector<uint64_t>& groupRanks() const;
 
@@ -437,10 +453,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
       const BarrierOptions& opts = BarrierOptions(),
       bool waitAllRanks = false) override;
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
-
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
@@ -453,6 +465,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
  protected:
   std::shared_ptr<::gloo::rendezvous::Store> store_;
   const c10::intrusive_ptr<Options> options_;
+  c10::intrusive_ptr<Store> c10dStore_;
+
+  bool initialized_{false};
+  int64_t reconfigureUuid_{-1};
 
   // Every Gloo context represents a set of connections to its peers.
   // In order to use more than one device (or allow for parallelism on
@@ -475,6 +491,13 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // to contexts being used in a round-robin fashion.
   std::shared_ptr<::gloo::Context> getContext(uint32_t tag);
 
+  void checkInitialized() const;
+
+  void connectContexts(
+      int rank,
+      int size,
+      const c10::intrusive_ptr<Store>& store);
+
   // Entrypoint for worker threads.
   void runLoop(int workerIndex);
 
@@ -494,6 +517,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
   size_t local_id_;
+  mutable std::vector<uint64_t> defaultRanks_;
   std::shared_ptr<ProcessGroupStatus> pgStatus_ =
       std::make_shared<ProcessGroupStatus>();
 };

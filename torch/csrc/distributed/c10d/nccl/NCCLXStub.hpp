@@ -62,6 +62,10 @@ class NCCLXStub : public Backend {
     return nccl_->barrier(opts);
   }
 
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    nccl_->setTimeout(timeout);
+  }
+
  private:
   c10::intrusive_ptr<ProcessGroupNCCL> nccl_;
 };

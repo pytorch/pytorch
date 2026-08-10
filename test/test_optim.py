@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -40,6 +41,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -187,6 +189,20 @@ class TestOptimRenewed(TestCase):
                         optim.step()
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
+
+    @onlyCPU
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_with_empty_param_group(self, device, dtype, optim_info):
+        # An empty param group means there is nothing to optimize, so step() should
+        # be a no-op rather than raising. See https://github.com/pytorch/pytorch/issues/70352
+        optim_cls = optim_info.optim_cls
+        optimizer = optim_cls([{"params": []}])
+
+        if optim_info.step_requires_closure:
+            loss = torch.tensor(3.0, device=device, dtype=dtype)
+            self.assertEqual(optimizer.step(lambda: loss), loss)
+        else:
+            self.assertIsNone(optimizer.step())
 
     @parametrize("contiguous", [True, False])
     @parametrize("with_lrsched", [True, False])
@@ -437,6 +453,19 @@ class TestOptimRenewed(TestCase):
     )
     def test_rosenbrock_sparse(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
+
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and optim_cls.__name__ == "SGD"
+            and not with_lrsched
+            and torch.device(device).type == "cuda"
+            and dtype == torch.float64
+        ):
+            self.skipTest(
+                "order/state-dependent sparse SGD step timeout on ROCm 7.14+ "
+                "(with_lrsched=False, SGD, cuda, float64)"
+            )
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         # Fused impls do not support sparse gradients
@@ -967,7 +996,8 @@ class TestOptimRenewed(TestCase):
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
 
-    @onlyCUDA
+    @skipMPS  # MPS does not support float64
+    @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float64],
@@ -1126,6 +1156,51 @@ class TestOptimRenewed(TestCase):
             )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
+    # Test vectorization path splits for fused kernels. Ensure the scalar path
+    # and vectorized path compute the same thing.
+    # See https://github.com/pytorch/pytorch/issues/191763.
+    # fp64 is left out so this runs on MPS; it shares the same code w/ fp32
+    @optims(
+        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        dtypes=(torch.float32, torch.float16, torch.bfloat16),
+    )
+    # Vectorized::size() is at most 32 elements (AVX512, bf16/fp16), so 64 tests
+    # two full blocks with no remainder, and 65 adds a scalar remainder.
+    @parametrize("numel", [64, 65])
+    def test_fused_vectorized_block_matches_scalar(
+        self, device, dtype, optim_info, numel
+    ):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
+            kwargs = deepcopy(optim_input.kwargs)
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
+                # capturable is not supported on CPU
+                continue
+            param_numel, param_single = (
+                torch.nn.Parameter(torch.full((n,), 0.25, device=device, dtype=dtype))
+                for n in (numel, 1)
+            )
+            opt_numel = optim_cls([param_numel], fused=True, **kwargs)
+            opt_single = optim_cls([param_single], fused=True, **kwargs)
+            for step in range(3):
+                grad_value = 0.125 * (step + 1)
+                param_numel.grad = torch.full_like(param_numel, grad_value)
+                param_single.grad = torch.full_like(param_single, grad_value)
+                opt_numel.step()
+                opt_single.step()
+                self.assertEqual(param_numel, param_single.expand(numel))
+                state = opt_numel.state[param_numel]
+                ref_state = opt_single.state[param_single]
+                self.assertEqual(state.keys(), ref_state.keys())
+                for k, v in state.items():
+                    # the shape guard skips step and SGD's None momentum_buffer
+                    if torch.is_tensor(v) and v.shape == param_numel.shape:
+                        self.assertEqual(v, ref_state[k].expand(numel))
+
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=(torch.float32,),
@@ -1181,6 +1256,8 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
+    @skipMPS  # MPS fused optimizer does not properly handle found_inf
+    @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
@@ -1809,13 +1886,14 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(state_dict)
             optimizer.step(closure)
 
-    @onlyCUDA
+    @skipMPS  # Muon optimizer creates float64 tensors internally, unsupported on MPS
+    @onlyAccelerator
     @optims(optim_db, dtypes=[torch.float32])
-    def test_state_dict_with_cuda_params(self, device, dtype, optim_info):
+    def test_state_dict_cross_device(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
-        # We limit our configs to CPU only, because we will be moving them to CUDA later
+        # We limit our configs to CPU only, because we will be moving them to the target device later
         cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             "cpu", dtype, optim_info, skip=("differentiable",)
         )
@@ -1829,10 +1907,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in cpu_optim_inputs:
             if (
                 "fused" in optim_input.kwargs
-                and "cuda" not in optim_info.supports_fused_on
+                and _get_device_type(device) not in optim_info.supports_fused_on
             ):
                 self.skipTest(
-                    f"cuda is not supported for fused on {optim_cls.__name__}"
+                    f"{_get_device_type(device)} is not supported for fused on {optim_cls.__name__}"
                 )
             params = [
                 Parameter(torch.randn(2, 3, device="cpu", dtype=dtype))
@@ -1851,36 +1929,36 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             with torch.no_grad():
-                params_cuda = [p.to(device="cuda") for p in params]
-                for i, p in enumerate(params_cuda):
-                    p.grad = params[i].grad.to(device="cuda")
-            optimizer_cuda = optim_cls(params_cuda, **optim_input.kwargs)
+                params_device = [p.to(device=device) for p in params]
+                for i, p in enumerate(params_device):
+                    p.grad = params[i].grad.to(device=device)
+            optimizer_device = optim_cls(params_device, **optim_input.kwargs)
 
             state_dict_cpu = deepcopy(optimizer.state_dict())
-            state_dict_cuda = deepcopy(optimizer.state_dict())
-            optimizer_cuda.load_state_dict(state_dict_cuda)
+            state_dict_device = deepcopy(optimizer.state_dict())
+            optimizer_device.load_state_dict(state_dict_device)
 
-            # Make sure state_dict_cuda isn't modified by merely calling load_state_dict
-            self.assertEqual(state_dict_cpu, state_dict_cuda)
+            # Make sure state_dict_device isn't modified by merely calling load_state_dict
+            self.assertEqual(state_dict_cpu, state_dict_device)
 
             # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
             capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
             fused = state_dict_cpu["param_groups"][0].get("fused", False)
-            new_state_dict = optimizer_cuda.state_dict()
-            for state_cpu, state_cuda in zip(
+            new_state_dict = optimizer_device.state_dict()
+            for state_cpu, state_device in zip(
                 state_dict_cpu["state"].values(), new_state_dict["state"].values()
             ):
                 if "step" in state_cpu and torch.is_tensor(state_cpu["step"]):
                     self.assertEqual(
-                        state_cuda["step"].device.type,
-                        "cuda" if capturable or fused else "cpu",
+                        state_device["step"].device.type,
+                        _get_device_type(device) if capturable or fused else "cpu",
                     )
 
             for _ in range(5):
                 optimizer.step(closure)
-                optimizer_cuda.step(closure)
-                self.assertEqual(params, params_cuda)
-                self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
+                optimizer_device.step(closure)
+                self.assertEqual(params, params_device)
+                self.assertEqual(optimizer.state_dict(), optimizer_device.state_dict())
 
     @staticmethod
     def _state_dict_pre_hook(optimizer: Optimizer) -> None:
@@ -2024,69 +2102,125 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
 
     @optims(optim_db, dtypes=[torch.float32])
-    def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
-            nonlocal data
-            data += 2
+    @parametrize("hook_type", ["pre", "post"])
+    def test_step_local_hook(self, device, dtype, optim_info, hook_type):
+        # total number of times the hook has been called
+        count = 0
+        # marks that the optimizer's step body has executed
+        body_ran = False
 
-        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
-
-        def dummy_closure():
+        def closure():
+            nonlocal body_ran
+            body_ran = True
             return 1
 
-        closure = dummy_closure if optim_info.step_requires_closure else None
-
-        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
-            device, dtype, optim_info
-        )
-        for optim_input in all_optim_inputs:
-            optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = 2
-            hook_handle = optim.register_step_post_hook(post_hook)
-
-            optim.step(closure)
-            optim.step(closure)
-            # check if post hooks were registered
-            self.assertEqual(data, 6)
-
-            # remove handles, take step and verify that hook is no longer registered
-            hook_handle.remove()
-
-            optim.step(closure)
-            self.assertEqual(data, 6)
-
-    @optims(optim_db, dtypes=[torch.float32])
-    def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
-            nonlocal data
-            data += 2
+        def hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+            nonlocal count
+            if hook_type == "pre":
+                self.assertFalse(body_ran)
+            else:
+                self.assertTrue(body_ran)
+            count += 1
 
         # Create a random 2D tensor for compatibility with Muon.
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
-        def dummy_closure():
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        for optim_input in all_optim_inputs:
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            # a second optimizer to prove a local hook stays isolated to the
+            # optimizer it is registered on
+            optim2 = SGD(params)
+            count = 0
+            register = (
+                optim.register_step_pre_hook
+                if hook_type == "pre"
+                else optim.register_step_post_hook
+            )
+            hook_handle = register(hook)
+
+            # reset the marker before each step
+            body_ran = False
+            optim.step(closure)
+            body_ran = False
+            optim.step(closure)
+            # check if hooks were triggered accordingly
+            self.assertEqual(count, 2)
+
+            # a local hook does not fire for a different optimizer
+            body_ran = False
+            optim2.step(closure)
+            self.assertEqual(count, 2)
+
+            # remove handles, take step and verify that hook is no longer registered
+            hook_handle.remove()
+            body_ran = False
+            optim.step(closure)
+            self.assertEqual(count, 2)
+
+    @optims(optim_db, dtypes=[torch.float32])
+    @parametrize("hook_type", ["pre", "post"])
+    def test_step_global_hook(self, device, dtype, optim_info, hook_type):
+        # total number of times the hook has been called
+        count = 0
+        # marks that the optimizer's step body has executed
+        body_ran = False
+
+        def closure():
+            nonlocal body_ran
+            body_ran = True
             return 1
 
-        closure = dummy_closure if optim_info.step_requires_closure else None
+        def hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+            nonlocal count
+            if hook_type == "pre":
+                self.assertFalse(body_ran)
+            else:
+                self.assertTrue(body_ran)
+            count += 1
+
+        # Create an arbitrary 2D tensor for compatibility with Muon.
+        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
         for optim_input in all_optim_inputs:
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = 5
-            hook_handle = optim.register_step_pre_hook(pre_hook)
+            optim2 = SGD(params)
+            count = 0
+            register = (
+                register_optimizer_step_pre_hook
+                if hook_type == "pre"
+                else register_optimizer_step_post_hook
+            )
+            hook_handle = register(hook)
+            try:
+                # reset the marker before each step
+                body_ran = False
+                optim.step(closure)
+                body_ran = False
+                optim.step(closure)
+                # check if hooks were triggered accordingly
+                self.assertEqual(count, 2)
 
-            optim.step(closure)
-            optim.step(closure)
-            # check if pre hooks were registered
-            self.assertEqual(data, 9)
+                # a global hook also fires for a different optimizer
+                body_ran = False
+                optim2.step(closure)
+                self.assertEqual(count, 3)
 
-            # remove handles, take step and verify that hook is no longer registered
-            hook_handle.remove()
-
-            optim.step(closure)
-            self.assertEqual(data, 9)
+                # remove handles, take step and verify that hook is no longer registered
+                hook_handle.remove()
+                body_ran = False
+                optim.step(closure)
+                body_ran = False
+                optim2.step(closure)
+                self.assertEqual(count, 3)
+            finally:
+                # global hooks persist in module-level state; always clean up
+                hook_handle.remove()
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
@@ -2229,24 +2363,25 @@ class TestOptimRenewed(TestCase):
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
 
-    @onlyCUDA
+    @skipMPS  # MPS does not support float64
+    @onlyAccelerator
     @optims(
-        [
-            optim
-            for optim in optim_db
-            if "cpu" in optim.supports_fused_on and "cuda" in optim.supports_fused_on
-        ],
+        [optim for optim in optim_db if "cpu" in optim.supports_fused_on],
         dtypes=floating_types_and(
             torch.bfloat16,
             torch.float16,
         ),
     )
-    def test_fused_cpu_matches_cuda(self, device, dtype, optim_info):
+    def test_fused_cpu_matches_device(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{_get_device_type(device)} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in optim_inputs:
             inpts, models, optimizers = [], [], []
-            for dev in ("cpu", "cuda"):
+            for dev in ("cpu", _get_device_type(device)):
                 kwargs = optim_input.kwargs
                 kwargs["fused"] = True
                 inpt = torch.tensor(

@@ -1,7 +1,9 @@
-# mypy: allow-untyped-defs
 import inspect
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from functools import wraps
+from typing import Any, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._custom_ops
@@ -24,11 +26,22 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 
+if TYPE_CHECKING:
+    from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
+    from torch.fx.experimental.proxy_tensor import _ProxyTracer
+    from torch.fx.proxy import Proxy
+    from torch.utils.hooks import RemovableHandle
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
 class ExportTracepoint(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("_export_tracepoint")
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
@@ -37,7 +50,10 @@ _export_tracepoint = ExportTracepoint()
 
 
 @_export_tracepoint.py_impl(ProxyTorchDispatchMode)
-def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
+def export_tracepoint_dispatch_mode(
+    mode: ProxyTorchDispatchMode, *args: Any, **kwargs: Any
+) -> Any:
+    # pyrefly: ignore[missing-attribute]  # TODO tracer is PythonKeyTracer here, not _GraphAppendingTracerEx
     p_args, p_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, (args, kwargs))
     proxy = mode.tracer.create_proxy(
         "call_function", _export_tracepoint, p_args, p_kwargs
@@ -46,13 +62,16 @@ def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
 
 
 @register_fake(_export_tracepoint, skip_cache=True)
-def export_tracepoint_fake_tensor_mode(*args, **kwargs):
+def export_tracepoint_fake_tensor_mode(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return args
 
 
 @_export_tracepoint.py_functionalize_impl
-def export_tracepoint_functional(ctx, *args, **kwargs):
+def export_tracepoint_functional(
+    ctx: "BaseFunctionalizeAPI", *args: Any, **kwargs: Any
+) -> tuple[Any, ...]:
     unwrapped_args = ctx.unwrap_tensors(args)
+    # pyrefly: ignore[bad-argument-type]  # TODO unwrap_tensors accepts pytrees at runtime
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
 
     with ctx.redispatch_to_next():
@@ -66,18 +85,24 @@ _export_tracepoint.py_impl(DispatchKey.Autograd)(
 
 
 @_export_tracepoint.py_impl(DispatchKey.CPU)
-def export_tracepoint_cpu(*args, **kwargs):
+def export_tracepoint_cpu(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return args
 
 
-def _wrap_submodule(mod, path, module_call_specs):
+def _wrap_submodule(
+    mod: torch.nn.Module,
+    path: str,
+    module_call_specs: dict[str, dict[str, pytree.TreeSpec]],
+) -> tuple["RemovableHandle", "RemovableHandle"]:
     if not isinstance(mod, torch.nn.Module):
         raise AssertionError(f"expected torch.nn.Module, got {type(mod)}")
     if path == "":
         raise AssertionError("path must not be empty")
     submodule = torch.fx.graph_module._get_attr(mod, path)
 
-    def update_module_call_signatures(path, in_spec, out_spec):
+    def update_module_call_signatures(
+        path: str, in_spec: pytree.TreeSpec, out_spec: pytree.TreeSpec
+    ) -> None:
         if path in module_call_specs:
             if module_call_specs[path]["in_spec"] != in_spec:
                 raise AssertionError(
@@ -89,21 +114,28 @@ def _wrap_submodule(mod, path, module_call_specs):
                 )
         module_call_specs[path] = {"in_spec": in_spec, "out_spec": out_spec}
 
-    def check_flattened(flat_args):
+    def check_flattened(flat_args: list[Any]) -> None:
         for a in flat_args:
             if not (isinstance(a, (torch.Tensor, str, int, float, bool)) or a is None):
                 raise AssertionError(
                     f"Only Tensors or scalars are supported as pytree flattened inputs, got: {a}"
                 )
 
-    def pre_hook(module, args, kwargs):
+    def pre_hook(
+        module: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
         check_flattened(flat_args)
         flat_args = _export_tracepoint(*flat_args, kind="module_call_inputs", path=path)
         args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
         return args, kwargs
 
-    def post_hook(module, args, kwargs, res):
+    def post_hook(
+        module: torch.nn.Module,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        res: Any,
+    ) -> Any:
         _, in_spec = pytree.tree_flatten((args, kwargs))
         flat_res, out_spec = pytree.tree_flatten(res)
         check_flattened(flat_res)
@@ -117,11 +149,16 @@ def _wrap_submodule(mod, path, module_call_specs):
 
 
 @contextmanager
-def _wrap_submodules(f, preserve_signature, module_call_signatures):
-    handles = []
+def _wrap_submodules(
+    f: torch.nn.Module | Callable[..., object],
+    preserve_signature: Iterable[str],
+    module_call_signatures: dict[str, dict[str, pytree.TreeSpec]],
+) -> Generator[None, None, None]:
+    handles: list[RemovableHandle] = []
 
     try:
         for path in preserve_signature:
+            # pyrefly: ignore[bad-argument-type]  # TODO f is an nn.Module at runtime (asserted in _wrap_submodule)
             handles.extend(_wrap_submodule(f, path, module_call_signatures))
         yield
     finally:
@@ -129,15 +166,17 @@ def _wrap_submodules(f, preserve_signature, module_call_signatures):
             handle.remove()
 
 
-def _mark_strict_experimental(cls):
-    def call(self, *args):
+def _mark_strict_experimental(cls: type[_R]) -> type[_R]:
+    def call(self: Any, *args: Any) -> Any:
         return strict_mode(self, args)
 
-    cls.__call__ = call
+    cls.__call__ = call  # type: ignore[attr-defined]
     return cls
 
 
-def _register_func_spec_proxy_in_tracer(tracer, name, spec):
+def _register_func_spec_proxy_in_tracer(
+    tracer: "_ProxyTracer", name: str, spec: pytree.TreeSpec
+) -> "Proxy":
     """
     This is a wrapper utility method on top of tracer to cache the
     already registered subclass spec attribute. This is useful because
@@ -145,25 +184,29 @@ def _register_func_spec_proxy_in_tracer(tracer, name, spec):
     create multiple attributes/proxies for given attribute.
     """
     fx_name = name + "0"
+    # pyrefly: ignore[missing-attribute]  # TODO tracer is PythonKeyTracer here, not _GraphAppendingTracerEx
     if hasattr(tracer.root, fx_name):
+        # pyrefly: ignore[missing-attribute]  # TODO tracer is PythonKeyTracer here, not _GraphAppendingTracerEx
         if getattr(tracer.root, fx_name) != spec:
             raise AssertionError(f"spec mismatch for {fx_name}")
         return tracer.create_proxy("get_attr", fx_name, (), {})
 
+    # pyrefly: ignore[missing-attribute]  # TODO tracer is PythonKeyTracer here, not _GraphAppendingTracerEx
     qualname = tracer.get_fresh_qualname(name)
+    # pyrefly: ignore[missing-attribute]  # TODO tracer is PythonKeyTracer here, not _GraphAppendingTracerEx
     setattr(tracer.root, qualname, spec)
     return tracer.create_proxy("get_attr", qualname, (), {})
 
 
 def _emit_flat_apply_call(
     *,
-    tracer,
+    tracer: "_ProxyTracer",
     spec_name: str,
-    const_target_for_apply,
-    graphable_args,
-    track_value,
+    const_target_for_apply: Callable[..., object],
+    graphable_args: pytree.PyTree,
+    track_value: object,
     call_spec_cache_key: str,
-):
+) -> None:
     # Flatten to graphable form and record the spec on the FX root
     flat_args, in_spec = to_graphable(graphable_args)
     qualname = tracer.get_fresh_qualname(spec_name)  # type: ignore[union-attr]
@@ -177,6 +220,7 @@ def _emit_flat_apply_call(
     )
 
     # Map runtime args -> proxies (always via tracer.unwrap_proxy now)
+    # pyrefly: ignore[missing-attribute]  # TODO tracer is PythonKeyTracer here, not _GraphAppendingTracerEx
     flat_proxy_args = pytree.tree_map(tracer.unwrap_proxy, flat_args)
 
     # Emit flat_apply and track result structure
@@ -186,11 +230,13 @@ def _emit_flat_apply_call(
     track_tensor_tree(track_value, out_proxy, constant=None, tracer=tracer)
 
 
-def _is_init(fn):
+def _is_init(fn: object) -> bool:
     return callable(fn) and fn.__name__ == "__init__"
 
 
-def mark_subclass_constructor_exportable_experimental(constructor_subclass):
+def mark_subclass_constructor_exportable_experimental(
+    constructor_subclass: Callable[_P, None],
+) -> Callable[_P, None]:
     """
     Experimental decorator that makes subclass to be traceable in export
     with pre-dispatch IR. To make your subclass traceable in export, you need to:
@@ -218,7 +264,7 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
             f"If __init__ doesn't exist on your subclass, please add it. Look at DTensor.__init__ implementation for example"
         )
 
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:
         constructor_subclass(*args, **kwargs)
 
         if not torch.compiler.is_exporting():
@@ -264,7 +310,7 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
     return wrapper
 
 
-def allow_in_pre_dispatch_graph(func):
+def allow_in_pre_dispatch_graph(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Experimental decorator that adds user function to export pre-dispatch graph. Note that
     we only support custom autograd function/subclass constructors today. To use this function:
@@ -282,6 +328,7 @@ def allow_in_pre_dispatch_graph(func):
 
     """
     if _is_init(func):
+        # pyrefly: ignore[bad-return, bad-argument-type]  # TODO _is_init(func) implies func returns None
         return mark_subclass_constructor_exportable_experimental(func)
 
     if not (_is_init(func) or func.__name__ == "apply"):
@@ -295,7 +342,7 @@ def allow_in_pre_dispatch_graph(func):
         )
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if not torch.compiler.is_exporting():
             return func(*args, **kwargs)
 
