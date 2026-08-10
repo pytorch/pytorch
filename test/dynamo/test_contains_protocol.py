@@ -20,7 +20,7 @@ import types
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test, xfailIfPy314Plus
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +270,7 @@ class _ContainsBase:
         self.assertEqual(
             has_method,
             self.has_contains,
-            f"{self.thetype.__name__} __contains__ presence mismatch",
+            lambda msg: f"{msg}\n{self.thetype.__name__} __contains__ presence mismatch",
         )
 
     @make_dynamo_test
@@ -281,7 +281,7 @@ class _ContainsBase:
         self.assertEqual(
             has_method,
             self.has_iter,
-            f"{self.thetype.__name__} __iter__ presence mismatch",
+            lambda msg: f"{msg}\n{self.thetype.__name__} __iter__ presence mismatch",
         )
 
     @make_dynamo_test
@@ -292,7 +292,7 @@ class _ContainsBase:
         self.assertEqual(
             has_method,
             self.has_getitem,
-            f"{self.thetype.__name__} __getitem__ presence mismatch",
+            lambda msg: f"{msg}\n{self.thetype.__name__} __getitem__ presence mismatch",
         )
 
 
@@ -697,6 +697,160 @@ class SetInSetTest(torch._dynamo.test_case.TestCase):
         s1 = {9}
         s2 = {frozenset({1, 2})}
         self.assertTrue(s1 not in s2)
+
+
+class DoNotTestEq(Exception):
+    pass
+
+
+class StopCompares:
+    def __eq__(self, other):
+        raise DoNotTestEq
+
+
+class ContainsOrderTest(torch._dynamo.test_case.TestCase):
+    """
+    Sequence __contains__ must compare elements in order via
+    PyObject_RichCompareBool(item, search, Py_EQ), short-circuiting on the first
+    match.  A custom __eq__ with side effects (here, a short-circuiting raise)
+    must be observable.  Ref: Objects/listobject.c::list_contains.
+    """
+
+    def setUp(self):
+        self.old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self.old
+        return super().tearDown()
+
+    @make_dynamo_test
+    def test_list_contains_short_circuits_before_raising_eq(self):
+        # 1 matches the first element, so StopCompares().__eq__ is never invoked.
+        self.assertTrue(1 in [1, StopCompares()])
+
+    @make_dynamo_test
+    def test_list_contains_propagates_raising_eq(self):
+        with self.assertRaises(DoNotTestEq):
+            _ = 1 in [StopCompares(), 1]
+
+    @make_dynamo_test
+    def test_tuple_contains_propagates_raising_eq(self):
+        with self.assertRaises(DoNotTestEq):
+            _ = 1 in (StopCompares(), 1)
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class DictViewContainsTest(torch._dynamo.test_case.TestCase):
+    """
+    Membership in dict views: d.keys()/d.items()/d.values().
+    - keys: hashed key lookup (dictkeys_contains).
+    - items: (key, value) lookup then PyObject_RichCompareBool on the stored
+      value (dictitems_contains).
+    - values: linear scan comparing each stored value (PySequence_Contains).
+    Ref: Objects/dictobject.c.
+    """
+
+    @make_dynamo_test
+    def test_keys_contains(self):
+        d = {"a": 1, "b": 2}
+        self.assertTrue("a" in d)
+        self.assertFalse("c" in d)
+
+    @make_dynamo_test
+    def test_items_contains(self):
+        d = {"a": 1, "b": 2}
+        self.assertTrue(("a", 1) in d.items())
+        # key present, value mismatch
+        self.assertFalse(("a", 2) in d.items())
+        # key absent
+        self.assertFalse(("c", 1) in d.items())
+
+    @make_dynamo_test
+    def test_items_contains_non_pair(self):
+        # A hashable item that is not a (key, value) pair can never be in
+        # items(); exercises the generic (non-2-tuple) path of
+        # DictItemsVariable.sq_contains. CPython returns False.
+        d = {"a": 1, "b": 2}
+        self.assertFalse(5 in d.items())
+        self.assertFalse((1, 2, 3) in d.items())
+
+    @make_dynamo_test
+    def test_values_contains(self):
+        d = {"a": 1, "b": 2}
+        self.assertTrue(2 in d.values())
+        self.assertFalse(3 in d.values())
+
+    @make_dynamo_test
+    def test_items_contains_value_eq_raises(self):
+        # dictitems_contains compares the stored value via
+        # PyObject_RichCompareBool(found, value, Py_EQ), so a stored value whose
+        # __eq__ raises must propagate.
+        d = {1: StopCompares()}
+        with self.assertRaises(DoNotTestEq):
+            _ = (1, 0) in d.items()
+
+    @make_dynamo_test
+    def test_values_contains_eq_raises(self):
+        # `x in d.values()` scans values comparing each via
+        # PyObject_RichCompareBool; a stored value whose __eq__ raises propagates.
+        d = {1: StopCompares()}
+        with self.assertRaises(DoNotTestEq):
+            _ = 0 in d.values()
+
+
+class ContainsNoneWithIter:
+    """__contains__ = None blocks the slot even though __iter__ exists."""
+
+    __contains__ = None
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
+class ContainsPropertyAttrError:
+    """Pre-3.14 slot_sq_contains PROPAGATES a bind-time AttributeError
+    (unlike slot_tp_iter, which blanket-clears lookup errors)."""
+
+    @property
+    def __contains__(self):  # noqa: PLE0302
+        raise AttributeError("gone")
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
+class ContainsNonBool:
+    def __contains__(self, item):
+        return 2
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
+    """slot_sq_contains lookup semantics (Objects/typeobject.c)."""
+
+    @make_dynamo_test
+    def test_contains_none_is_not_a_container(self):
+        raised = False
+        try:
+            _ = 1 in ContainsNoneWithIter()
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not a container", str(e))
+        self.assertTrue(raised)
+
+    # 3.14 slot_sq_contains clears a bind-time AttributeError and falls back to
+    # iteration; <3.14 propagates it. Dynamo does not model the 3.14 clearing yet.
+    @xfailIfPy314Plus
+    @make_dynamo_test
+    def test_contains_property_attribute_error_propagates(self):
+        with self.assertRaises(AttributeError):
+            _ = 1 in ContainsPropertyAttrError()
+
+    @make_dynamo_test
+    def test_contains_nonbool_return_coerced_to_bool(self):
+        self.assertIs(1 in ContainsNonBool(), True)
 
 
 if __name__ == "__main__":

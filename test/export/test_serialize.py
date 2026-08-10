@@ -36,7 +36,6 @@ import torch._dynamo as torchdynamo
 import torch._export.serde.schema as schema
 import torch.export._trace
 import torch.utils._pytree as pytree
-from torch._dynamo.source import ConstantSource
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.schema import ArgumentKind
@@ -51,21 +50,14 @@ from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     GraphModuleSerializer,
     serialize,
-    serialize_torch_artifact,
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
+from torch._library.opaque_object import get_opaque_type_name, register_custom_class
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
-from torch.fx.experimental.symbolic_shapes import (
-    DimDynamic,
-    is_concrete_int,
-    ShapeEnv,
-    StatelessSymbolicContext,
-    ValueRanges,
-)
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -80,7 +72,7 @@ from torch.testing._internal.torchbind_impls import init_torchbind_implementatio
 
 
 @dataclass(frozen=True)
-class _OpaqueConfig(torch._opaque_base.OpaqueBase):
+class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
     scale: int
 
     def __fx_repr__(self):
@@ -90,16 +82,16 @@ class _OpaqueConfig(torch._opaque_base.OpaqueBase):
         )
 
 
-register_opaque_type(_OpaqueConfig, typ="value")
+register_custom_class(_OpaqueConfig, typ="constant")
 
 
-class _OpaqueEngine(torch._opaque_base.OpaqueBase):
+class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
     def __init__(self, multiplier: int):
         super().__init__()
         self.multiplier = multiplier
 
 
-register_opaque_type(_OpaqueEngine, typ="reference")
+register_custom_class(_OpaqueEngine, typ="symbolic")
 
 
 def get_filtered_export_db_tests():
@@ -1371,41 +1363,32 @@ class TestDeserialize(TestCase):
     def test_deserialize_fake_tensor_constant_with_symbolic_size(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x):
-                return x + 1
+                return x.data * 2
 
-        ep = torch.export.export(
-            Foo(),
-            (torch.randn(2, 3),),
-            dynamic_shapes={"x": {0: Dim("batch")}},
-        )
-        serialized = ExportedProgramSerializer().serialize(ep)
+        # PyTorch 2.8 allowed non-strict export to lift the FakeTensor produced
+        # by x.data into constants, including its symbolic batch dimension.
+        # Deserialization must remain compatible with those archives.
+        with self.assertWarnsRegex(
+            UserWarning,
+            "We found a fake tensor in the exported program constant's list",
+        ):
+            with torch._export.config.patch(error_on_lifted_constant_tensors=False):
+                ep = torch.export.export(
+                    Foo(),
+                    (torch.randn(2, 3),),
+                    dynamic_shapes={"x": {0: Dim("batch")}},
+                    strict=False,
+                )
 
-        real_constant = torch.empty(2, 3)
-        shape_env = ShapeEnv()
-        with FakeTensorMode(shape_env=shape_env) as fake_mode:
-            fake_constant = fake_mode.from_tensor(
-                real_constant,
-                source=ConstantSource("fake_constant"),
-                symbolic_context=StatelessSymbolicContext(
-                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
-                    constraint_sizes=[None, None],
-                ),
-            )
-
+        self.assertEqual(len(ep.constants), 1)
+        constant_name, fake_constant = next(iter(ep.constants.items()))
+        self.assertIsInstance(fake_constant, FakeTensor)
         self.assertFalse(is_concrete_int(fake_constant.shape[0]))
-        serialized.constants = serialize_torch_artifact(
-            {"fake_constant": fake_constant}
-        )
 
         with torch.serialization.safe_globals([_reconstruct_fake_tensor]):
-            loaded_ep = ExportedProgramDeserializer().deserialize(
-                serialized.exported_program,
-                serialized.state_dict,
-                serialized.constants,
-                serialized.example_inputs,
-            )
+            loaded_ep = deserialize(serialize(ep))
 
-        loaded_constant = loaded_ep.constants["fake_constant"]
+        loaded_constant = loaded_ep.constants[constant_name]
         self.assertIsInstance(loaded_constant, FakeTensor)
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
@@ -1432,6 +1415,67 @@ class TestDeserialize(TestCase):
                     return torch.ops.mylib.foo(a, b, c)
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
+    def test_list_of_int_and_float_lists_custom_op(self):
+        # Example program: a custom op that takes List[List[int]] and
+        # List[List[float]] arguments. Round-tripping it (export -> serialize ->
+        # deserialize) exercises the serde nested-list path end to end: these
+        # args must serialize as as_int_lists / as_float_lists, for both
+        # non-empty and empty lists.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::apply_groups",
+                "(Tensor x, int[][] int_groups, float[][] float_groups) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::apply_groups", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::apply_groups")
+            def apply_groups_impl(x, int_groups, float_groups):
+                bias = sum(v for group in int_groups for v in group) + sum(
+                    v for group in float_groups for v in group
+                )
+                return x + bias
+
+            class NonEmpty(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.apply_groups(
+                        x, [[1, 2], [3, 4, 5]], [[1.5], [2.5, 3.5]]
+                    )
+
+            class Empty(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.apply_groups(x, [], [])
+
+            # The round-trips must succeed; before nested-list support was added,
+            # serialization raised SerializeError on List[List[int/float]] args.
+            self.check_graph(NonEmpty(), (torch.randn(3),))
+            self.check_graph(Empty(), (torch.randn(3),))
+
+            # Pin down the exact serialized argument kinds and values.
+            def _serialized_op_args(mod):
+                ep = torch.export.export(mod, (torch.randn(3),), strict=True)
+                serialized = ExportedProgramSerializer().serialize(ep)
+                nodes = [
+                    n
+                    for n in serialized.exported_program.graph_module.graph.nodes
+                    if n.target and "apply_groups" in n.target
+                ]
+                self.assertEqual(len(nodes), 1)
+                return {i.name: i.arg for i in nodes[0].inputs}
+
+            args = _serialized_op_args(NonEmpty())
+            self.assertEqual(args["int_groups"].type, "as_int_lists")
+            self.assertEqual(args["int_groups"].as_int_lists, [[1, 2], [3, 4, 5]])
+            self.assertEqual(args["float_groups"].type, "as_float_lists")
+            self.assertEqual(args["float_groups"].as_float_lists, [[1.5], [2.5, 3.5]])
+
+            empty_args = _serialized_op_args(Empty())
+            self.assertEqual(empty_args["int_groups"].type, "as_int_lists")
+            self.assertEqual(empty_args["int_groups"].as_int_lists, [])
+            self.assertEqual(empty_args["float_groups"].type, "as_float_lists")
+            self.assertEqual(empty_args["float_groups"].as_float_lists, [])
 
     def test_unbacked_bindings_serialize(self):
         from torch._export.utils import _get_shape_env_from_gm
@@ -2360,6 +2404,108 @@ class TestSaveLoad(TestCase):
         self.assertEqual(unf.int_buffer.dtype, torch.uint8)
         self.assertEqual(unf.int_buffer2.dtype, torch.uint8)
         self.assertEqual(unf.float_buffer.dtype, torch.float32)
+
+    def test_save_load_multiple_dtypes(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p_f32 = torch.nn.Parameter(torch.randn(4, 4, dtype=torch.float32))
+                self.p_f16 = torch.nn.Parameter(
+                    torch.randn(4, 4, dtype=torch.float16), requires_grad=False
+                )
+                self.register_buffer("b_i8", torch.ones(4, 4, dtype=torch.int8))
+                self.register_buffer("b_f64", torch.randn(4, 4, dtype=torch.float64))
+
+            def forward(self, x):
+                return (
+                    x
+                    + self.p_f32
+                    + self.p_f16.float()
+                    + self.b_i8.float()
+                    + self.b_f64.float()
+                )
+
+        m = M()
+        inp = (torch.randn(4, 4),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+        unf = unflatten(loaded_ep)
+        self.assertEqual(unf.p_f32.dtype, torch.float32)
+        self.assertEqual(unf.p_f16.dtype, torch.float16)
+        self.assertEqual(unf.b_i8.dtype, torch.int8)
+        self.assertEqual(unf.b_f64.dtype, torch.float64)
+
+    def test_save_load_requires_grad_preserved(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(8, 8))
+                self.frozen = torch.nn.Parameter(torch.randn(8, 8), requires_grad=False)
+                self.register_buffer("buf", torch.randn(8, 8))
+
+            def forward(self, x):
+                return x @ self.w + self.frozen + self.buf
+
+        m = M()
+        inp = (torch.randn(1, 8),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+        loaded_sd = loaded_ep.state_dict
+        self.assertTrue(loaded_sd["w"].requires_grad)
+        self.assertFalse(loaded_sd["frozen"].requires_grad)
+        self.assertFalse(loaded_sd["buf"].requires_grad)
+
+    def test_save_load_large_tensor(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1024, 1024)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M()
+        inp = (torch.randn(1, 1024),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_save_load_cuda_tensor(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().cuda()
+        inp = (torch.randn(1, 64, device="cuda"),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        loaded_sd = loaded_ep.state_dict
+        for name, param in loaded_sd.items():
+            self.assertEqual(
+                param.device.type, "cuda", lambda msg: f"{msg}\n{name} not on cuda"
+            )
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
     def test_from_node_metadata_serialization(self):
         """Test that from_node metadata is properly serialized and deserialized."""
