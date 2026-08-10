@@ -2,6 +2,7 @@
 
 import copy
 import gc
+import importlib.util
 import inspect
 import logging
 import os
@@ -344,6 +345,7 @@ class Capability:
     class lib:
         """Third-party library capabilities (triton, etc.)."""
 
+        safetensors = "lib.safetensors"
         triton = "lib.triton"
 
     class attention:
@@ -351,6 +353,62 @@ class Capability:
 
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
+
+    class distributed:
+        """Distributed runtime capabilities."""
+
+        backend = "distributed.backend"
+        dtensor = "distributed.dtensor"
+        fsdp = "distributed.fsdp"
+
+    class memory:
+        """Device memory capabilities."""
+
+        non_blocking_copy = "memory.non_blocking_copy"
+
+    class stream:
+        """Device stream capabilities."""
+
+        generic = "stream.generic"
+
+
+def _check_capabilities(test_case, required_capabilities) -> None:
+    capabilities = type(test_case).get_capabilities()
+    missing = set(required_capabilities) - capabilities.keys()
+    unsupported = {
+        cap
+        for cap in required_capabilities
+        if cap in capabilities and not capabilities[cap]
+    }
+
+    if missing:
+        raise unittest.SkipTest(
+            f"Missing capabilities on device '{type(test_case).device_type}': "
+            f"{', '.join(sorted(missing))}"
+        )
+    if unsupported:
+        raise unittest.SkipTest(
+            f"Unsupported capabilities: {', '.join(sorted(unsupported))}"
+        )
+
+
+def _distributed_backend_available(device_type: str) -> bool:
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        return False
+    try:
+        backend = dist.get_default_backend_for_device(device_type)
+    except (AttributeError, ValueError):
+        return False
+    return dist.is_backend_available(backend)
+
+
+def _device_module_available(device_type: str) -> bool:
+    try:
+        return torch.get_device_module(device_type).is_available()
+    except (AttributeError, RuntimeError):
+        return False
 
 
 class DeviceTypeTestBase(TestCase):
@@ -438,7 +496,22 @@ class DeviceTypeTestBase(TestCase):
     # the current device supports them.
     @classmethod
     def _capabilities(cls) -> dict[type, dict[str, Callable[[], bool]]]:
-        return {}
+        return {
+            Capability.lib: {
+                Capability.lib.safetensors: lambda: importlib.util.find_spec(
+                    "safetensors"
+                )
+                is not None,
+            }
+        }
+
+    def setUp(self) -> None:
+        test_method = getattr(self, self._testMethodName)
+        required_capabilities = getattr(test_method, "_required_capabilities", ())
+        if required_capabilities:
+            _check_capabilities(self, required_capabilities)
+
+        super().setUp()
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -799,19 +872,38 @@ class CPUTestBase(DeviceTypeTestBase):
     def _capabilities(cls):
         from torch.utils._triton import has_triton
 
-        return {
-            Capability.dtype: {
-                Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: False,
-            },
-            Capability.lib: {
-                Capability.lib.triton: lambda: has_triton(),
-            },
-            Capability.attention: {
-                Capability.attention.flash_attention: lambda: False,
-                Capability.attention.mem_efficient_attention: lambda: False,
-            },
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: True,
+                    Capability.dtype.bf16: lambda: False,
+                },
+                Capability.attention: {
+                    Capability.attention.flash_attention: lambda: False,
+                    Capability.attention.mem_efficient_attention: lambda: False,
+                },
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: False,
+                },
+                Capability.memory: {
+                    Capability.memory.non_blocking_copy: lambda: False,
+                },
+                Capability.stream: {
+                    Capability.stream.generic: lambda: False,
+                },
+            }
+        )
+        capabilities[Capability.lib].update(
+            {Capability.lib.triton: lambda: has_triton()}
+        )
+        return capabilities
 
 
 class CUDATestBase(DeviceTypeTestBase):
@@ -836,19 +928,44 @@ class CUDATestBase(DeviceTypeTestBase):
         )
         from torch.utils._triton import has_triton
 
-        return {
-            Capability.dtype: {
-                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-                Capability.dtype.bf16: lambda: SM80OrLater,
-            },
-            Capability.lib: {
-                Capability.lib.triton: lambda: has_triton(),
-            },
-            Capability.attention: {
-                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-                Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-            },
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                    Capability.dtype.bf16: lambda: SM80OrLater,
+                },
+                Capability.attention: {
+                    Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+                    Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                },
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.memory: {
+                    Capability.memory.non_blocking_copy: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.stream: {
+                    Capability.stream.generic: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+            }
+        )
+        capabilities[Capability.lib].update(
+            {Capability.lib.triton: lambda: has_triton()}
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -935,19 +1052,44 @@ class XPUTestBase(DeviceTypeTestBase):
     def _capabilities(cls):
         from torch.utils._triton import has_triton
 
-        return {
-            Capability.dtype: {
-                Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: False,
-            },
-            Capability.lib: {
-                Capability.lib.triton: lambda: has_triton(),
-            },
-            Capability.attention: {
-                Capability.attention.flash_attention: lambda: True,
-                Capability.attention.mem_efficient_attention: lambda: True,
-            },
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: True,
+                    Capability.dtype.bf16: lambda: False,
+                },
+                Capability.attention: {
+                    Capability.attention.flash_attention: lambda: True,
+                    Capability.attention.mem_efficient_attention: lambda: True,
+                },
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.memory: {
+                    Capability.memory.non_blocking_copy: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.stream: {
+                    Capability.stream.generic: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+            }
+        )
+        capabilities[Capability.lib].update(
+            {Capability.lib.triton: lambda: has_triton()}
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -1217,33 +1359,17 @@ def requires_capabilities(*caps: str):
     Wraps the test to call ``type(self).get_capabilities()`` at runtime
     and skip if any required capability is missing.
     """
-    caps_set = set(caps)
+    caps_set = frozenset(caps)
 
     def decorator(fn):
         @wraps(fn)
         def wrapper(self, *args, **kwargs):
-            caps = type(self).get_capabilities()
-
-            unsupported = set()
-            missing = set()
-            for c in caps_set:
-                if c in caps:
-                    if not caps[c]:
-                        unsupported.add(c)
-                else:
-                    missing.add(c)
-
-            if missing:
-                raise unittest.SkipTest(
-                    f"Missing capabilities on device '{type(self).device_type}': "
-                    f"{', '.join(sorted(missing))}"
-                )
-            if unsupported:
-                raise unittest.SkipTest(
-                    f"Unsupported capabilities: {', '.join(sorted(unsupported))}"
-                )
+            _check_capabilities(self, caps_set)
             return fn(self, *args, **kwargs)
 
+        wrapper._required_capabilities = (
+            frozenset(getattr(fn, "_required_capabilities", ())) | caps_set
+        )
         return wrapper
 
     return decorator
