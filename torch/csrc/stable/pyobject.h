@@ -1,17 +1,21 @@
 #pragma once
 
 #include <torch/csrc/stable/c/shim.h>
+#include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/macros.h>
+#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/csrc/stable/version.h>
+#include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
-// Header-only helpers converting between a Python torch.Tensor (passed as a raw
-// PyObject* / void*) and torch::stable::Tensor. These are libtorch-only to link
-// against, but require libtorch_python to be loaded at runtime (see the Python
-// interop shims section in torch/csrc/stable/c/shim.h). The GIL must be held by
-// the caller.
+// Header-only helpers converting between Python objects (passed as raw
+// PyObject* / void*) and their torch::stable equivalents: torch.Tensor <->
+// torch::stable::Tensor, torch.dtype <-> ScalarType, torch.device <->
+// torch::stable::Device. These are libtorch-only to link against, but require
+// libtorch_python to be loaded at runtime (see the Python interop shims section
+// in torch/csrc/stable/c/shim.h). The GIL must be held by the caller.
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
@@ -32,6 +36,45 @@ inline void* tensor_to_pyobject(const Tensor& t, void* py_type = nullptr) {
   void* raw = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_tensor_to_pyobject(t.get(), py_type, &raw));
+  return raw;
+}
+
+// Read the ScalarType out of a Python torch.dtype (PyObject* passed as void*).
+inline torch::headeronly::ScalarType dtype_from_pyobject(void* py_obj) {
+  int32_t dtype = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_dtype_from_pyobject(py_obj, &dtype));
+  return torch::stable::detail::to<torch::headeronly::ScalarType>(
+      torch::stable::detail::from(dtype));
+}
+
+// Wrap a ScalarType as a new-reference Python torch.dtype.
+inline void* dtype_to_pyobject(torch::headeronly::ScalarType dtype) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_dtype_to_pyobject(
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype)),
+      &raw));
+  return raw;
+}
+
+// Read the Device out of a Python torch.device (PyObject* passed as void*).
+inline Device device_from_pyobject(void* py_obj) {
+  int32_t device_type = 0;
+  int32_t device_index = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_device_from_pyobject(py_obj, &device_type, &device_index));
+  DeviceType extension_device_type = torch::stable::detail::to<DeviceType>(
+      torch::stable::detail::from(device_type));
+  return Device(extension_device_type, static_cast<DeviceIndex>(device_index));
+}
+
+// Wrap a Device as a new-reference Python torch.device.
+inline void* device_to_pyobject(const Device& device) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_device_to_pyobject(
+      torch::stable::detail::to<int32_t>(
+          torch::stable::detail::from(device.type())),
+      static_cast<int32_t>(device.index()),
+      &raw));
   return raw;
 }
 

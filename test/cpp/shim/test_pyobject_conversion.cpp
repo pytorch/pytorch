@@ -1,6 +1,6 @@
-// Checks that the PyObject<->Tensor conversion shims fall back to a clean error
-// (rather than crashing) when libtorch_python is not loaded. This binary links
-// only libtorch, so the conversion vtable is the default no-op.
+// Checks that the PyObject<->Tensor/dtype/device conversion shims fall back to
+// a clean error (rather than crashing) when libtorch_python is not loaded. This
+// binary links only libtorch, so the conversion vtable is the default no-op.
 
 #include <gtest/gtest.h>
 
@@ -25,4 +25,35 @@ TEST(TorchPyObjectConversion, NoopErrorsWithoutLibtorchPython) {
       AOTI_TORCH_FAILURE);
   EXPECT_EQ(py_out, nullptr);
   aoti_torch_delete_tensor_object(ath);
+}
+
+TEST(TorchPyObjectConversion, DtypeNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  int32_t dtype_out = -1;
+  EXPECT_EQ(torch_dtype_from_pyobject(&dummy, &dtype_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(dtype_out, -1);
+
+  void* py_out = nullptr;
+  EXPECT_EQ(
+      torch_dtype_to_pyobject(aoti_torch_dtype_float32(), &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, DeviceNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  int32_t device_type_out = -1;
+  int32_t device_index_out = -1;
+  EXPECT_EQ(
+      torch_device_from_pyobject(&dummy, &device_type_out, &device_index_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(device_type_out, -1);
+  EXPECT_EQ(device_index_out, -1);
+
+  void* py_out = nullptr;
+  EXPECT_EQ(
+      torch_device_to_pyobject(
+          aoti_torch_device_type_cpu(), /*device_index=*/-1, &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
 }

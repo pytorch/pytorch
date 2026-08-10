@@ -681,9 +681,10 @@ torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
   });
 }
 
-// PyObject <-> Tensor conversions. These are the only stable shims that need
-// functionality from libtorch_python; they reach it through a vtable that
-// libtorch_python registers at load time (torch::detail::PyObjectConversion*).
+// PyObject <-> Tensor/dtype/device conversions. These are the only stable
+// shims that need functionality from libtorch_python; they reach it through a
+// vtable that libtorch_python registers at load time
+// (torch::detail::PyObjectConversion*).
 // If libtorch_python is not loaded the call raises a clear error. PyObject*
 // crosses the ABI as an opaque void* so this stays free of Python.h.
 AOTI_TORCH_EXPORT AOTITorchError
@@ -710,6 +711,59 @@ torch_tensor_to_pyobject(AtenTensorHandle ath, void* py_type, void** ret) {
     *ret = torch::detail::getPyObjectConversionImpl().tensor_to_pyobject(
         *torch::aot_inductor::tensor_handle_to_tensor_pointer(ath),
         static_cast<PyObject*>(py_type));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_dtype_from_pyobject(void* py_obj, int32_t* ret_dtype) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_dtype != nullptr, "ret_dtype must not be null");
+    // The dtype code crossing the ABI is the c10::ScalarType enum value, the
+    // same encoding as aoti_torch_dtype_*().
+    *ret_dtype = static_cast<int32_t>(
+        torch::detail::getPyObjectConversionImpl().dtype_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_dtype_to_pyobject(int32_t dtype, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().dtype_to_pyobject(
+        static_cast<c10::ScalarType>(dtype));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_device_from_pyobject(
+    void* py_obj,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_device_type != nullptr, "ret_device_type must not be null");
+    TORCH_CHECK(
+        ret_device_index != nullptr, "ret_device_index must not be null");
+    // device_type uses the same encoding as aoti_torch_device_type_*().
+    const at::Device device =
+        torch::detail::getPyObjectConversionImpl().device_from_pyobject(
+            static_cast<PyObject*>(py_obj));
+    *ret_device_type = static_cast<int32_t>(device.type());
+    *ret_device_index = static_cast<int32_t>(device.index());
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
+    int32_t device_type,
+    int32_t device_index,
+    void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().device_to_pyobject(
+        at::Device(
+            static_cast<c10::DeviceType>(device_type),
+            static_cast<c10::DeviceIndex>(device_index)));
   });
 }
 
