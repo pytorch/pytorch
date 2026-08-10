@@ -3749,7 +3749,8 @@ class SIMDScheduling(BaseScheduling):
             deferred_nodes = [
                 node
                 for node in parent_nodes
-                if not node.is_reduction()
+                if isinstance(node, scheduler.SchedulerNode)
+                and not node.is_reduction()
                 and node.get_operation_names() & source_ancestors
                 and not node.get_operation_names() & reduction_ancestors
                 and SIMDKernel.is_compatible((numel, rnumel), node.get_ranges())

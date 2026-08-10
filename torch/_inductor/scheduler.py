@@ -601,6 +601,7 @@ class NestedReduction:
     # MXFP6 is the largest interleaved packing form currently exercised.
     MAX_INTERLEAVED_SUB_PARENT_FACTOR = 4
     MAX_SUB_PARENT_FACTOR = MAX_INTERLEAVED_SUB_PARENT_FACTOR
+
     class GroupedAxis(enum.Enum):
         R = enum.auto()
         X = enum.auto()
@@ -1792,7 +1793,11 @@ class NestedReduction:
             domain_context, pointwise_domains
         ):
             return None
-        domain_by_node = dict(pointwise_domains)
+        local_reduction_input_nodes = OrderedSet(
+            node
+            for node, domain in pointwise_domains
+            if domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
+        )
         sub_parent_nodes = OrderedSet(
             node
             for node, domain in pointwise_domains
@@ -1814,8 +1819,7 @@ class NestedReduction:
             parent_nodes=tuple(
                 sn
                 for sn in outer_node.get_nodes()
-                if domain_by_node.get(sn)
-                is not cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
+                if sn not in local_reduction_input_nodes
             ),
             parent_numel=outer_numel,
             parent_rnumel=outer_rnumel,
