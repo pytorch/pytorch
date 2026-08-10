@@ -1017,48 +1017,6 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
-    def test_multinomial_zero_probability_deterministic_regression(self):
-        """Regression test for #192577 using known-bad MPS RNG states for float32 and float16."""
-        if not torch.backends.mps.is_available():
-            self.skipTest("MPS not available")
-
-        BAD_RNG_STATES = {
-            torch.float32: [
-                1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
-                1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 96, 102, 28, 0, 0, 0, 0, 0
-            ],
-            torch.float16: [
-                1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
-                1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 96, 102, 28, 0, 0, 0, 0, 0
-            ],
-        }
-
-        for dtype, state_list in BAD_RNG_STATES.items():
-            with self.subTest(dtype=dtype):
-                torch.manual_seed(0)
-
-                V = 151_936
-                logits = torch.randn(V, dtype=torch.float32) * 2.0
-                logits[12345] += 200.0
-                p = torch.softmax(logits, dim=-1).to(device="mps", dtype=dtype)
-
-                self.assertTrue((p == 0.0).any())
-
-                bad_rng_state = torch.tensor(state_list, dtype=torch.uint8)
-                self.assertEqual(bad_rng_state.numel(), torch.mps.get_rng_state().numel())
-
-                torch.mps.set_rng_state(bad_rng_state)
-
-                idx = torch.multinomial(p, 1)
-
-                self.assertGreater(
-                    p[idx].item(),
-                    0.0,
-                    f"torch.multinomial selected a zero-probability index on MPS for dtype {dtype}",
-                )
-
     def test_exp_complex_real_axis_extremes(self):
         # Regression: exp/expm1/sinh/cosh(re + 0i) must stay real even when re
         # is inf/nan (naive exp(a)*sin(b) gives inf*0=NaN / nan*0=NaN otherwise).

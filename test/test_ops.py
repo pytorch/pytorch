@@ -24,7 +24,6 @@ from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
-    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
