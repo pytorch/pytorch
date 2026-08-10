@@ -38,6 +38,10 @@ static_assert(
 #define NCCL_HAS_COLLNET
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 3)
+#define NCCL_HAS_COMM_NAME
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
 #define NCCL_HAS_CTA_POLICY
 #endif

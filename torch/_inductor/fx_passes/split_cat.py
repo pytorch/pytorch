@@ -1920,7 +1920,7 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
                 for select_node in select_nodes
             ):
                 continue
-            # We only consider the case where selece slice dim and cat node has same dim
+            # We only consider the case where select slice dim and cat node has same dim
             if select_nodes[0].args[1] != cat_dim:
                 continue
             if not is_node_meta_valid(cat_node):
