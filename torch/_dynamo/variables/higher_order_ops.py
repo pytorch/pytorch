@@ -4447,9 +4447,18 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         from torch.utils.checkpoint import noop_context_fn
 
         context_fn = None
-        if "context_fn" in kwargs and kwargs["context_fn"] is not noop_context_fn:
-            ctx = kwargs.pop("context_fn")
-            if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
+        if "context_fn" in kwargs:
+            # Realize first: the value may be a LazyVariableTracker, and the type
+            # checks / error message below need the concrete variant.
+            ctx = kwargs.pop("context_fn").realize()
+            # Resolve the underlying fn regardless of the VT flavor: a skipped fn
+            # exposes it as .value, an inlined one as .fn. Explicit
+            # context_fn=noop_context_fn is the default no-op; treat it as no
+            # context_fn either way.
+            underlying = getattr(ctx, "value", None) or getattr(ctx, "fn", None)
+            if underlying is noop_context_fn:
+                context_fn = None
+            elif isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
@@ -4457,21 +4466,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
-                    f"checkpoint not implemented for {type(ctx)} context_fn"
+                    f"checkpoint not implemented for {type(ctx).__name__} context_fn"
                 )
-
-        if (
-            context_fn is not None
-            and torch._functorch.config.checkpoint_via_invoke_subgraph
-        ):
-            # Selective activation checkpointing routes the policy through the
-            # tag path's re-trace; the invoke_subgraph path does not consume it
-            # yet, so reject rather than silently ignoring the policy.
-            raise NotImplementedError(
-                "context_fn (selective activation checkpointing) is not yet "
-                "supported with torch._functorch.config.checkpoint_via_invoke_subgraph; "
-                "disable the flag or remove context_fn."
-            )
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
@@ -4512,6 +4508,11 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             "torch.utils.checkpoint.checkpoint",
         )
         if context_fn is not None:
+            # Selective activation checkpointing: the policy is stashed on the
+            # subgraph gm.meta. During joint tracing (trace_joint_graph_as_bwd)
+            # the region's forward is run under this policy's caching dispatch
+            # mode, which tags the region's nodes save/recompute for the
+            # partitioner. Without a context_fn the region recomputes wholesale.
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
 
         if torch._functorch.config.checkpoint_via_invoke_subgraph:
@@ -4525,7 +4526,53 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             # time but must survive to the partitioner for recompute-as-call.
             # checkpoint_kwargs (determinism_check, debug) only affect the eager
             # checkpoint impl on the tag path and are inert here; preserve_rng_state
-            # is moot since RNG regions are rejected downstream.
+            # is moot since top-level RNG is force-saved (drawn once) and only RNG
+            # in a nested subgraph is rejected downstream.
+            #
+            # Reject effectful ops here, on the Dynamo-traced region body: the
+            # recompute path can't thread effect tokens and the region's compiled
+            # backward would silently produce no gradients. This is the reliable
+            # detection point -- by the time the region is a joint the effectful op
+            # has been lifted out of the graph the partitioner sees.
+            from torch._higher_order_ops.effects import _get_effect
+
+            def _is_effectful(n: torch.fx.Node) -> bool:
+                if n.op != "call_function":
+                    return False
+                # Dynamo-level targets can be OpOverloadPackets (e.g. a custom op
+                # called as torch.ops.ns.foo); resolve to overloads, the concrete
+                # identifiers _get_effect accepts. Non-op targets (plain builtins)
+                # can't be effectful.
+                target = n.target
+                if isinstance(target, torch._ops.OpOverloadPacket):
+                    candidates = [getattr(target, o) for o in target.overloads()]
+                elif isinstance(
+                    target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+                ):
+                    candidates = [target]
+                else:
+                    return False
+                for c in candidates:
+                    try:
+                        if _get_effect(c) is not None:
+                            return True
+                    except Exception:
+                        pass
+                return False
+
+            for m in checkpointed_gmod.modules():
+                if not isinstance(m, torch.fx.GraphModule):
+                    continue
+                effectful = next((n for n in m.graph.nodes if _is_effectful(n)), None)
+                if effectful is not None:
+                    raise NotImplementedError(
+                        "checkpoint_via_invoke_subgraph does not support effectful "
+                        f"ops ({effectful.target}) inside the checkpointed region; "
+                        "the recompute path can't thread effect tokens and the "
+                        "backward would silently produce no gradients. Move it out "
+                        "of the region or disable the flag."
+                    )
+
             checkpointed_gmod.meta["_checkpoint_region"] = True
             p_args = (p_args[0], body_name, *p_args[1:])
             return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
