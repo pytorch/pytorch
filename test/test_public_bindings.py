@@ -357,12 +357,14 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cutlass.cuda_template",
             "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cutedsl._inline_asm",  # depends on cutlass
+            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
             "torch._inductor.codegen.cpp_template_kernel",
             "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
