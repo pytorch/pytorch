@@ -11,6 +11,8 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+
+from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
     get_gpu_shared_memory,
     get_gpu_type,
@@ -71,11 +73,13 @@ else:
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
+HAS_MTIA_AND_TRITON = torch.mtia.is_available() and HAS_TRITON
+
 HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or HAS_MTIA_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
@@ -390,6 +394,12 @@ class MockGraphHandler:
         self.removed_buffers = OrderedSet()
         self.constants = {}
         self.scheduler = None
+
+    def try_get_buffer(self, buffer_name: str):
+        return self.name_to_buffer.get(buffer_name)
+
+    def get_buffer(self, buffer_name: str):
+        return self.name_to_buffer[buffer_name]
 
     def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""

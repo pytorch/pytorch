@@ -38,6 +38,15 @@ _share_memory_map: dict[int, threading.RLock] = {}
 T = TypeVar("T", bound="_StorageBase | TypedStorage")
 
 
+def _throws_on_data_ptr_access(storage: _StorageBase | TypedStorage) -> _bool:
+    # Whether storage.data_ptr() would raise (e.g. FakeTensor,
+    # FunctionalTensor, or a cudagraph-invalidated storage). Non-throwing
+    # replacement for wrapping data_ptr() in a try/except RuntimeError.
+    return torch._C._storage_throw_on_immutable_data_ptr(
+        storage._cdata
+    ) or torch._C._storage_throw_on_mutable_data_ptr(storage._cdata)
+
+
 class _StorageBase:
     _cdata: Any
     is_sparse: _bool = False
@@ -352,11 +361,11 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: str | torch.device = "cuda"):
+    def is_pinned(self, device: DeviceLikeType | None = None):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -368,11 +377,11 @@ class _StorageBase:
             .is_pinned(device)
         )
 
-    def pin_memory(self, device: str | torch.device = "cuda"):
+    def pin_memory(self, device: DeviceLikeType | None = None):
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -552,6 +561,7 @@ def _new_dtypes():
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.bcomplex32,
         torch.uint16,
         torch.uint32,
         torch.uint64,
@@ -1164,11 +1174,11 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: str | torch.device = "cuda"):
+    def is_pinned(self, device: DeviceLikeType | None = None):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -1177,11 +1187,11 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device: str | torch.device = "cuda"):
+    def pin_memory(self, device: DeviceLikeType | None = None):
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+            device (str or torch.device): The device to pin memory on (default: ``None``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
