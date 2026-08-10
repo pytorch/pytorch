@@ -11,7 +11,12 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.runtime.triton_compat import (
+    HAS_WARP_SPEC,
+    triton_allocator_context,
+    triton_null_allocator,
+    TritonNullAllocator,
+)
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -50,6 +55,8 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _InductorTritonAllocator,
+    _maybe_set_inductor_triton_allocator,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -438,6 +445,199 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+
+    def _get_triton_allocator_state(self):
+        if triton_allocator_context is None:
+            self.skipTest("requires Triton's allocator context")
+        return triton_allocator_context
+
+    def _get_triton_default_allocator(self):
+        if triton_null_allocator is not None:
+            return triton_null_allocator
+        if TritonNullAllocator is not None:
+            return TritonNullAllocator()
+        self.skipTest("requires Triton's null allocator")
+
+    def _make_fake_launcher_autotuner(self, launcher, *, cached=False):
+        autotuner = CachingAutotuner.__new__(CachingAutotuner)
+        autotuner._cached_launcher = launcher if cached else None
+        autotuner.device_props = MagicMock()
+        autotuner.device_props.type = "cuda"
+        autotuner.triton_meta = {"signature": {}}
+        autotuner.inductor_meta = {}
+        autotuner.triton_interpret = False
+        autotuner._plugins = []
+        autotuner.launchers = [] if cached else [launcher]
+        autotuner._cache_eligible = False
+        autotuner.cuda_kernel_saved = False
+        autotuner.cpu_kernel_saved = False
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner._pre_launch = lambda *args, **kwargs: None
+        autotuner._post_launch = lambda: None
+        return autotuner
+
+    def _make_observing_launcher(self, allocator_context, observed_allocators):
+        def launcher(*args, stream):
+            observed_allocators.append(allocator_context.get())
+            return "ok"
+
+        launcher.cache_hash = "fake_cache_hash"
+        launcher.config = MagicMock()
+        launcher.store_cubin = False
+        return launcher
+
+    @parametrize("cached", [False, True])
+    @unittest.skipIf(
+        not hasattr(triton, "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_allocator_preserves_user_allocator(self, cached):
+        allocator_context = self._get_triton_allocator_state()
+        original_allocator = allocator_context.get()
+        observed_allocators = []
+
+        try:
+
+            def user_allocator(size, align, stream):
+                return "sentinel"
+
+            triton.set_allocator(user_allocator)
+            launcher = self._make_observing_launcher(
+                allocator_context, observed_allocators
+            )
+            autotuner = self._make_fake_launcher_autotuner(launcher, cached=cached)
+
+            self.assertEqual(autotuner.run(stream=None), "ok")
+            self.assertEqual(observed_allocators, [user_allocator])
+            self.assertIs(allocator_context.get(), user_allocator)
+        finally:
+            allocator_context.set(original_allocator)
+
+    @unittest.skipIf(
+        not hasattr(triton, "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_allocator_preserves_user_allocator_with_raising_getattr(self):
+        allocator_context = self._get_triton_allocator_state()
+        original_allocator = allocator_context.get()
+        observed_allocators = []
+
+        class UserAllocator:
+            def __call__(self, size, align, stream):
+                return "sentinel"
+
+            def __getattr__(self, name):
+                raise AssertionError(f"unexpected getattr({name})")
+
+        try:
+            user_allocator = UserAllocator()
+            triton.set_allocator(user_allocator)
+            launcher = self._make_observing_launcher(
+                allocator_context, observed_allocators
+            )
+            autotuner = self._make_fake_launcher_autotuner(launcher)
+
+            self.assertEqual(autotuner.run(stream=None), "ok")
+            self.assertEqual(observed_allocators, [user_allocator])
+            self.assertIs(allocator_context.get(), user_allocator)
+        finally:
+            allocator_context.set(original_allocator)
+
+    @unittest.skipIf(
+        not hasattr(triton, "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_allocator_preserves_null_allocator_subclass(self):
+        if TritonNullAllocator is None:
+            self.skipTest("requires Triton's null allocator type")
+
+        allocator_context = self._get_triton_allocator_state()
+        original_allocator = allocator_context.get()
+        observed_allocators = []
+
+        def user_allocator_call(self, size, align, stream):
+            return "sentinel"
+
+        user_allocator_type = type(
+            "UserAllocator",
+            (TritonNullAllocator,),
+            {"__call__": user_allocator_call},
+        )
+
+        try:
+            user_allocator = user_allocator_type()
+            triton.set_allocator(user_allocator)
+            launcher = self._make_observing_launcher(
+                allocator_context, observed_allocators
+            )
+            autotuner = self._make_fake_launcher_autotuner(launcher)
+
+            self.assertEqual(autotuner.run(stream=None), "ok")
+            self.assertEqual(observed_allocators, [user_allocator])
+            self.assertIs(allocator_context.get(), user_allocator)
+        finally:
+            allocator_context.set(original_allocator)
+
+    @parametrize("cached", [False, True])
+    @parametrize("use_null_allocator_type", [False, True])
+    @unittest.skipIf(
+        not hasattr(triton, "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_allocator_installed_for_default_allocator(
+        self, cached, use_null_allocator_type
+    ):
+        allocator_context = self._get_triton_allocator_state()
+        if use_null_allocator_type:
+            if TritonNullAllocator is None:
+                self.skipTest("requires Triton's null allocator type")
+            null_allocator = TritonNullAllocator()
+        else:
+            if triton_null_allocator is None:
+                self.skipTest("requires Triton's null allocator singleton")
+            null_allocator = triton_null_allocator
+        original_allocator = allocator_context.get()
+        observed_allocators = []
+
+        try:
+            allocator_context.set(null_allocator)
+            launcher = self._make_observing_launcher(
+                allocator_context, observed_allocators
+            )
+            autotuner = self._make_fake_launcher_autotuner(launcher, cached=cached)
+
+            self.assertEqual(autotuner.run(stream=None), "ok")
+            self.assertEqual(len(observed_allocators), 1)
+            self.assertIsInstance(observed_allocators[0], _InductorTritonAllocator)
+            self.assertEqual(observed_allocators[0].device_type, "cuda")
+            self.assertIs(allocator_context.get(), observed_allocators[0])
+        finally:
+            allocator_context.set(original_allocator)
+
+    @unittest.skipIf(
+        not hasattr(triton, "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_allocator_maps_hip_device_to_cuda(self):
+        allocator_context = self._get_triton_allocator_state()
+        null_allocator = self._get_triton_default_allocator()
+        original_allocator = allocator_context.get()
+
+        try:
+            allocator_context.set(null_allocator)
+            _maybe_set_inductor_triton_allocator("hip")
+            allocator = allocator_context.get()
+
+            self.assertIsInstance(allocator, _InductorTritonAllocator)
+            self.assertEqual(allocator.device_type, "cuda")
+            with patch(
+                "torch._inductor.runtime.triton_heuristics.torch.empty"
+            ) as empty:
+                self.assertIs(allocator(8, 16, None), empty.return_value)
+                empty.assert_called_once_with(8, dtype=torch.int8, device="cuda")
+        finally:
+            allocator_context.set(original_allocator)
 
     @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
     def test_template_function_ws(self):

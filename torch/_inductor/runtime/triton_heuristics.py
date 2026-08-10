@@ -98,6 +98,10 @@ from .triton_compat import (
     OutOfResources,
     PTXASError,
     triton,
+    triton_allocator_context,
+    triton_null_allocator,
+    triton_set_allocator,
+    TritonNullAllocator,
 )
 from .triton_helpers import get_constexprs
 
@@ -160,6 +164,37 @@ if get_args(_KernelType) != _T.__constraints__:
 
 log = logging.getLogger(__name__)
 autotuning_inputs_log = torch._logging.getArtifactLogger(__name__, "autotuning_inputs")
+
+
+class _InductorTritonAllocator:
+    def __init__(self, device_type: str) -> None:
+        self.device_type = device_type
+
+    def __call__(self, size: int, align: int, stream: int | None):
+        return torch.empty(size, dtype=torch.int8, device=self.device_type)
+
+
+def _maybe_set_inductor_triton_allocator(device_type: str) -> None:
+    if triton_allocator_context is None or triton_set_allocator is None:
+        return
+
+    current_allocator = triton_allocator_context.get()
+    is_null_allocator = (
+        triton_null_allocator is not None and current_allocator is triton_null_allocator
+    ) or (
+        TritonNullAllocator is not None
+        and type(current_allocator) is TritonNullAllocator
+    )
+    is_inductor_allocator = isinstance(current_allocator, _InductorTritonAllocator)
+    if not (is_null_allocator or is_inductor_allocator):
+        return
+
+    torch_device_type = "cuda" if device_type == "hip" else device_type
+    if is_inductor_allocator and current_allocator.device_type == torch_device_type:
+        return
+
+    triton_set_allocator(_InductorTritonAllocator(torch_device_type))
+
 
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
@@ -2446,6 +2481,7 @@ class CachingAutotuner(KernelInterface):
             and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
         ):
+            _maybe_set_inductor_triton_allocator(self.device_props.type)
             return fast(*args, stream=stream)
 
         debug_mode = get_active_debug_mode()
@@ -2457,14 +2493,7 @@ class CachingAutotuner(KernelInterface):
                 kernel_name=self.fn.__name__, kwargs=kernel_kwargs
             )
 
-        if hasattr(triton, "set_allocator"):
-
-            def alloc_fn(size: int, align: int, stream: int | None):
-                return torch.empty(
-                    size, dtype=torch.int8, device=self.device_props.type
-                )
-
-            triton.set_allocator(alloc_fn)
+        _maybe_set_inductor_triton_allocator(self.device_props.type)
 
         if self.triton_interpret:
             args, grid = self._interpret_args_grid(args, self.configs[0])
