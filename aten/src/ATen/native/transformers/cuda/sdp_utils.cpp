@@ -101,8 +101,8 @@ bool check_prefer_cudnn_attention() {
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
     auto minor = dprops->minor;
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
     return cudnn_version > 91500 &&
         ((major == 8 && (minor == 6 || minor == 9)) ||
          ((major == 9 || major == 10) && (!minor || minor == 3)));
