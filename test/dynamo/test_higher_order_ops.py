@@ -1051,7 +1051,7 @@ class GraphModule(torch.nn.Module):
             out_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[s77, s27]", s77: "Sym(s77)", s27: "Sym(s27)", L_y_: "f32[s27, s94]", s94: "Sym(s94)"):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", L_x_: "f32[s77, s27]", s94: "Sym(s94)", L_y_: "f32[s27, s94]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
@@ -5648,9 +5648,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_v_: "f32[3, 3]", L_x_: "f32[3, 3]"):
-        l_v_ = L_v_
+    def forward(self, L_x_: "f32[3, 3]", L_v_: "f32[3, 3]"):
         l_x_ = L_x_
+        l_v_ = L_v_
 
         _jvp_increment_nesting = torch._functorch.predispatch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
