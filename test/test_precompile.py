@@ -174,14 +174,8 @@ class TestPrecompile(TestCase):
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
     )
     @torch._inductor.config.patch({"compile_threads": 1})
-    def test_cache_primes_inductor_on_reload(self):
-        # The cache is a pure acceleration. load() feeds it to load_cache_artifacts to
-        # PRIME the inductor kernel caches, then execs the self-contained python_code --
-        # which loads the precompiled Triton kernels instead of recompiling. The composed
-        # python_code runs its inlined kernels directly (no compile_fx re-entry, so no
-        # FxGraphCache lookup); the observable acceleration is the Triton bundler
-        # rehydrating the static autotuner on the cold reload. Mirrors
-        # test/inductor/test_compile_to_python.py test_warm_load_rehydrates_static_launcher.
+    def test_cache_reload_without_eager_static_launcher_rehydration(self):
+        # A cold load should use JIT instead of eagerly rehydrating the static launcher.
         import torch._inductor.config as ind_config
 
         if ind_config.force_disable_caches or not ind_config.fx_graph_cache:
@@ -206,7 +200,7 @@ class TestPrecompile(TestCase):
             counters.clear()
             f_c = torch.compiler.precompile.load(code, cache)
             self.assertEqual(f_c(m, x), m(x))
-            self.assertGreater(
+            self.assertEqual(
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
@@ -554,12 +548,12 @@ class TestPrecompile(TestCase):
             self.assertEqual(cg, ig)
 
     def test_eager_param_ordering_agrees_with_inductor(self):
-        # The eager driver has its OWN _extract_param_buffers copy (in
-        # _EAGER_DRIVER_SOURCE), most prone to silent drift from
+        # Both backends now emit the same _extract_param_buffers (from
+        # torch._precompile_driver), which must stay in sync with
         # torch._precompile._intern_param_buffers. The test above cross-checks only the
         # cached vs inductor-inlined paths; cross-check the EAGER backend too, on the same
         # multi-module + tied-weight + backward step, so an ordering divergence in the
-        # eager copy shows as a scattered-grad mismatch against the inductor cached path.
+        # shared driver shows as a scattered-grad mismatch against the inductor cached path.
         torch.manual_seed(0)
         a = torch.nn.Linear(4, 4, bias=False)
         b = torch.nn.Linear(4, 4, bias=False)

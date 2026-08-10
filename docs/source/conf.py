@@ -463,8 +463,10 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
-    # deprecated aliases of all_gather_single / reduce_scatter_single
+    # deprecated aliases of all_gather_single / reduce_scatter_single /
+    # gather_single
     "all_gather_into_tensor",
+    "gather_into_tensor",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
@@ -2403,6 +2405,10 @@ def process_docstring(app, what_, name, obj, options, lines):
         # Remove all xdoctest directives
         re.compile(r"\s*>>>\s*#\s*x?doctest:\s*.*"),
         re.compile(r"\s*>>>\s*#\s*x?doc:\s*.*"),
+        # Remove lines marked `# docs: hide`. These run under the doctest
+        # runner but are hidden from rendered docs (e.g. a filterwarnings call
+        # that silences a warning an intentionally-deprecated example emits).
+        re.compile(r"\s*>>>.*#\s*docs:\s*hide\s*$"),
     ]
     filtered_lines = [
         line for line in lines if not any(pat.match(line) for pat in remove_directives)

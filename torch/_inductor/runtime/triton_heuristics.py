@@ -350,9 +350,11 @@ def _combo_has_reduction_subkernel(inductor_meta: InductorMeta) -> bool:
     combo_meta = inductor_meta.get("combo_grid_meta")
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return False
-    # No-bench stitched combos use a single fixed config and don't autotune;
-    # don't add scaling candidates for them.
-    if "stitched_num_warps" in combo_meta:
+    # Stitched combos fix the reduction blocks at codegen time: no-bench uses a
+    # single config, compile-time autotune passes the chosen blocks via
+    # default_config and only autotunes launch candidates. Neither runtime-scales
+    # rblock, so don't add scaling candidates for them.
+    if "stitched_num_warps" in combo_meta or "stitched_launch_candidates" in combo_meta:
         return False
     return any(
         combo_meta.get(f"heuristic_{i}") == "reduction"
@@ -528,6 +530,19 @@ def get_caching_autotuner_plugins(
     return plugins
 
 
+def _resolve_load_device(device: int | None, device_type: str) -> int | None:
+    # compile-on-one-rank: a None device is the rank-agnostic marker; resolve it to the
+    # current device at load time so a shared kernel's cubin loads on the running rank's
+    # GPU rather than a baked compile-time index. CPU has no device index and its
+    # DeviceGuard is a no-op -- resolving its None to 0 makes the guard call
+    # exchange_device, which CPU does not implement -- so leave CPU as-is.
+    if device is not None or device_type == "cpu":
+        return device
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    return get_interface_for_device(device_type.replace("hip", "cuda")).current_device()
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -562,6 +577,8 @@ class CachingAutotuner(KernelInterface):
 
         self.fn = fn
         self.device_props: DeviceProperties = triton_meta["device"]
+        # device may be None under compile-on-one-rank (rank-agnostic); it is resolved to
+        # the current device at load time (see _resolve_load_device), not baked here.
         self.triton_meta: TritonMeta = cast(
             TritonMeta,
             {
@@ -1047,8 +1064,11 @@ class CachingAutotuner(KernelInterface):
         launchers = []
         exc = None
         try:
+            load_device = _resolve_load_device(
+                self.triton_meta["device"], self.device_props.type
+            )
             # DeviceGuard ensures each launcher's binary loads onto the right device.
-            with DeviceGuard(device_interface, cast(int, self.triton_meta["device"])):
+            with DeviceGuard(device_interface, cast(int, load_device)):
                 for result in self.compile_results:
                     launcher, exc = self._make_launcher(result)
                     if launcher is not None:
@@ -1209,21 +1229,23 @@ class CachingAutotuner(KernelInterface):
 
         cfg_kwargs = {**cfg.kwargs}
         if self.device_props.type == "hip":
-            # `compile_meta["signature"]` contains the actual Triton kernel argument
-            # names, including constexprs such as XBLOCK_0/XBLOCK_1 for combo kernels.
-            # Any HIP config kwarg that is *not* in that signature is not a kernel
+            kernel_arg_names = OrderedSet(compile_meta["signature"])
+            combo_meta = self.inductor_meta.get("combo_grid_meta") or {}
+            kernel_arg_names.update(combo_meta.get("block_arg_names", ()))
+            # AttrsDescriptor signatures omit constexprs, so combo block argument
+            # names are carried separately in combo_grid_meta.
+            # Any HIP config kwarg that is *not* in that set is not a kernel
             # argument at all; it is a backend compile option that should be forwarded
             # to triton.compile via `options`, not materialized as a constexpr.
-            signature_arg_names = OrderedSet(compile_meta["signature"])
             backend_options = {
                 key: value
                 for key, value in cfg_kwargs.items()
-                if key not in signature_arg_names
+                if key not in kernel_arg_names
             }
             cfg_kwargs = {
                 key: value
                 for key, value in cfg_kwargs.items()
-                if key in signature_arg_names
+                if key in kernel_arg_names
             }
             if backend_options:
                 # Stash backend-only options separately so they do not get mixed into
@@ -1944,7 +1966,8 @@ class CachingAutotuner(KernelInterface):
 
         self._ensure_kernel_loaded()
 
-        signature_keys = OrderedSet(self.triton_meta["signature"])
+        combo_meta = self.inductor_meta.get("combo_grid_meta") or {}
+        block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
         best_config = launcher.config
         current_kwargs = dict(best_config.kwargs)
         base_num_warps = best_config.num_warps
@@ -1983,7 +2006,7 @@ class CachingAutotuner(KernelInterface):
                 trial_kwargs = dict(current_kwargs)
                 for idx in member_indices:
                     _update_combo_kernel_kwargs(
-                        trial_kwargs, cfg.kwargs, idx, skip_rblock, signature_keys
+                        trial_kwargs, cfg.kwargs, idx, skip_rblock, block_arg_names
                     )
 
                 if trial_kwargs == current_kwargs:
@@ -2583,6 +2606,12 @@ class CachingAutotuner(KernelInterface):
         ):
             return None
 
+        # The _FastCudaLauncher vectorcall bypasses run(), so it can't do the
+        # variable-length TMA descriptor expansion; fall back to the regular
+        # (still static) launcher.
+        if self.inductor_meta.get("host_tma_descriptor_args"):
+            return None
+
         # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
         # launchers use SYCL kernels stored in PyCapsules.
         if self.device_props.type not in ("cuda", "hip"):
@@ -2603,6 +2632,11 @@ class CachingAutotuner(KernelInterface):
             if not callable(runner):
                 return None
             kernel = runner.__self__
+            # compile-on-one-rank kernels keep their loaded handles per device, so
+            # kernel.function is None; the fast launcher binds a single device's
+            # function pointer, so fall back to the per-device static launcher.
+            if getattr(kernel, "device_agnostic", False):
+                return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
@@ -2738,6 +2772,45 @@ class CompileResult(Generic[_T]):
         self.inductor_meta = inductor_meta
 
     def make_launcher(self) -> LauncherType: ...
+
+    def _host_tma_pre_runner_lines(
+        self, runner_args: list[str], call_args: list[str]
+    ) -> tuple[list[str], list[str]]:
+        """Build host-side TMA descriptors in the launcher and swap them in for
+        the raw tensor args. Shared by the dynamic and static launchers."""
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        pre_runner_lines: list[str] = []
+        if not host_tma_args:
+            return pre_runner_lines, runner_args
+        if not has_triton_stable_tma_api():
+            raise RuntimeError(
+                "host-side TMA requires a Triton with the stable TMA API "
+                "(triton.tools.tensor_descriptor.TensorDescriptor)"
+            )
+        cfg_kwargs = self.config.kwargs
+        all_constants = self.compile_meta["constants"]
+        for inner_name, desc_info in host_tma_args.items():
+            if inner_name not in call_args or not isinstance(desc_info, dict):
+                continue
+            block_shape_vals = _resolve_dims(
+                desc_info["block_shape"], cfg_kwargs, all_constants
+            )
+            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
+            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
+            if block_shape_vals is None or shape_vals is None or stride_vals is None:
+                continue
+            desc_var = f"{inner_name}_host_tma_desc"
+            aligned_var = f"{inner_name}_aligned"
+            # _host_tma_aligned clones (warning once) only if misaligned.
+            pre_runner_lines.append(
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+            )
+            pre_runner_lines.append(
+                f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
+                f" {stride_vals}, {block_shape_vals})"
+            )
+            runner_args = [desc_var if a == inner_name else a for a in runner_args]
+        return pre_runner_lines, runner_args
 
     def _gen_launcher_code(
         self, scope, def_args, runner_args, pre_runner_lines=None
@@ -2945,7 +3018,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
         )
         binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
-            triton_cache_dir(self.compile_meta.get("device", 0)),
+            triton_cache_dir(
+                _resolve_load_device(self.compile_meta.get("device"), device_type)
+            ),
             triton_hash_to_path_key(self.kernel.hash),
             f"{self.kernel.name}{binary_ext}",
         )
@@ -2966,9 +3041,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        device = self.compile_meta.get("device", 0)
-        if device is None:
-            device = 0
+        # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
+        # kernel, so the launcher must keep its loaded handles per device.
+        self.kernel.device_agnostic = self.compile_meta.get("device") is None
+        device = _resolve_load_device(
+            self.compile_meta.get("device"),
+            self.compile_meta.get("device_type", "cuda"),
+        )
         self.kernel.load_kernel(device)
         scope = {
             "runner": self.kernel.run,
@@ -3008,7 +3087,18 @@ class StaticTritonCompileResult(CompileResult[_T]):
 
         # StaticallyLaunchedCudaKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
         runner_args = ["grid_0", "grid_1", "grid_2", "stream", *call_args]
-        launcher = self._gen_launcher_code(scope, def_args, runner_args)
+        pre_runner_lines, runner_args = self._host_tma_pre_runner_lines(
+            runner_args, call_args
+        )
+        if self.inductor_meta.get("host_tma_descriptor_args"):
+            # _host_tma_pre_runner_lines already validated the stable TMA API.
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            scope["_host_tma_aligned"] = _host_tma_aligned
+            scope["TensorDescriptor"] = TensorDescriptor
+        launcher = self._gen_launcher_code(
+            scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
+        )
         launcher.config = self.config  # type: ignore[attr-defined]
         launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
         launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
@@ -3206,49 +3296,15 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 *call_args,
             ]
 
-        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
-        pre_runner_lines: list[str] = []
-        if host_tma_args:
-            if not has_triton_stable_tma_api():
-                raise RuntimeError(
-                    "host-side TMA requires a Triton with the stable TMA API "
-                    "(triton.tools.tensor_descriptor.TensorDescriptor)"
-                )
+        pre_runner_lines, runner_args = self._host_tma_pre_runner_lines(
+            runner_args, call_args
+        )
+        if self.inductor_meta.get("host_tma_descriptor_args"):
+            # _host_tma_pre_runner_lines already validated the stable TMA API.
             from triton.tools.tensor_descriptor import TensorDescriptor
 
             scope["_host_tma_aligned"] = _host_tma_aligned
             scope["TensorDescriptor"] = TensorDescriptor
-            cfg_kwargs = cfg.kwargs
-            all_constants = compile_meta["constants"]
-
-            for inner_name, desc_info in host_tma_args.items():
-                if inner_name not in call_args or not isinstance(desc_info, dict):
-                    continue
-                block_shape_vals = _resolve_dims(
-                    desc_info["block_shape"], cfg_kwargs, all_constants
-                )
-                shape_vals = _resolve_dims(
-                    desc_info["shape"], cfg_kwargs, all_constants
-                )
-                stride_vals = _resolve_dims(
-                    desc_info["strides"], cfg_kwargs, all_constants
-                )
-                if (
-                    block_shape_vals is None
-                    or shape_vals is None
-                    or stride_vals is None
-                ):
-                    continue
-                desc_var = f"{inner_name}_host_tma_desc"
-                aligned_var = f"{inner_name}_aligned"
-                pre_runner_lines.append(
-                    f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
-                )
-                pre_runner_lines.append(
-                    f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
-                    f" {stride_vals}, {block_shape_vals})"
-                )
-                runner_args = [desc_var if a == inner_name else a for a in runner_args]
 
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
@@ -3304,7 +3360,11 @@ def _find_names(obj):
 
     frame = inspect.currentframe()
     while frame is not None:
-        frame.f_locals
+        # On CPython <= 3.12 this access materializes the frame's locals
+        # dict so gc.get_referrers below can find obj inside it. On 3.13+
+        # f_locals is a fresh write-through proxy (PEP 667) and this loop
+        # is a no-op, so function-local names are not discoverable there.
+        _ = frame.f_locals
         frame = frame.f_back
     obj_names = []
     for referrer in gc.get_referrers(obj):
@@ -4029,6 +4089,7 @@ def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...
         combo_meta.get(f"tile_hint_{i}"),
         sub_meta.get("add_persistent_rblock", False),
         sub_meta.get("has_loadstore_with_contiguous_rdim"),
+        sub_meta.get("uses_device_tma", False),
         tuple(sorted(tma.items())),
         tuple(sorted(tiling_scores.items())),
     )
@@ -4039,17 +4100,16 @@ def _update_combo_kernel_kwargs(
     cfg_kwargs: dict[str, Any],
     subkernel_idx: int,
     skip_rblock: bool,
-    signature_keys: OrderedSet[str],
+    block_arg_names: OrderedSet[str],
 ) -> None:
     for key, value in cfg_kwargs.items():
         if skip_rblock and key.startswith("R") and "BLOCK" in key:
             continue
         suffixed_key = f"{key}_{subkernel_idx}"
-        # Only suffix keys that actually exist in the combo kernel signature.
-        # Signature keys are real per-subkernel constexpr args such as XBLOCK_0.
+        # Only suffix keys emitted as combo kernel block arguments.
         # Everything else must stay unsuffixed so HIP-specific compile options like
         # waves_per_eu continue to flow through the backend-options path above.
-        kwargs[suffixed_key if suffixed_key in signature_keys else key] = value
+        kwargs[suffixed_key if suffixed_key in block_arg_names else key] = value
 
 
 def _handle_combo_kernel_per_subkernel_blocks(
@@ -4085,10 +4145,27 @@ def _handle_combo_kernel_per_subkernel_blocks(
     # default_config holds BLOCK keys for the grid lambda; backend kwargs
     # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
     stitched_warps = combo_meta.get("stitched_num_warps")
-    if stitched_warps is not None:
+    if "stitched_launch_candidates" in combo_meta or stitched_warps is not None:
+        # Compile-time autotune emits the distinct winner launch configs (kwargs, num_warps,
+        # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
+        # are passed as args via default_config. No-bench mode has no candidates and reuses
+        # default_config for the explicitly recorded combo block arguments.
+        if "stitched_launch_candidates" in combo_meta:
+            launch_candidates = combo_meta["stitched_launch_candidates"]
+            block_config = combo_meta.get("default_config") or {}
+            return [
+                triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
+                for kwargs, nw, ns in launch_candidates
+            ]
+        block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
+        block_config = {
+            k: v
+            for k, v in (combo_meta.get("default_config") or {}).items()
+            if k in block_arg_names
+        }
         return [
             triton.Config(
-                combo_meta["stitched_backend_kwargs"],
+                {**block_config, **combo_meta["stitched_backend_kwargs"]},
                 num_warps=stitched_warps,
                 num_stages=combo_meta["stitched_num_stages"],
             )
@@ -4104,7 +4181,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
-    signature_keys = OrderedSet(triton_meta.get("signature", ()))
+    block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
     group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -4128,9 +4205,11 @@ def _handle_combo_kernel_per_subkernel_blocks(
             cfgs = pointwise(
                 size_hints_i,
                 triton_meta=triton_meta,
-                tile_hint=TileHint.SQUARE
-                if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
-                else TileHint.DEFAULT,
+                tile_hint=(
+                    TileHint.SQUARE
+                    if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
+                    else TileHint.DEFAULT
+                ),
                 filename=filename,
                 min_elem_per_thread=min_elem_per_thread,
                 inductor_meta=inductor_meta_i,
@@ -4163,7 +4242,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
         _update_combo_kernel_kwargs(
-            combined_kwargs, cfg.kwargs, i, skip_rblock, signature_keys
+            combined_kwargs, cfg.kwargs, i, skip_rblock, block_arg_names
         )
         for key in cfg.kwargs:
             if skip_rblock and key.startswith("R") and "BLOCK" in key:

@@ -1087,7 +1087,16 @@ def get_kernel_metadata(
                     return ""
                 shape_annotation = f"{stringify_shape(layout.size)}"
                 stride_annotation = f"{stringify_shape(layout.stride)}"
-                device_annotation = f"{layout.device}"
+                # Under compile-on-one-rank, render the bare device type so this kernel
+                # provenance comment is byte-identical across ranks.
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                device = layout.device
+                device_annotation = (
+                    device.type
+                    if (_coor_enabled() and device is not None)
+                    else f"{device}"
+                )
 
                 return (
                     f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
@@ -4215,13 +4224,13 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
-    - Control flow nodes (Conditional, WhileLoop)
+    - Control flow nodes (Switch, WhileLoop)
     - Ops with sparse tensor outputs
     """
     from . import ir
 
     # Control flow nodes are cudagraph-unsafe
-    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+    if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
@@ -4520,12 +4529,16 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_package_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(torch.__file__))
+    )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
         "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            "TORCH_CUSTOM_PYTHONPATH",
+            os.pathsep.join((torch_package_root, *sys.path)),
         ),
     }
 
