@@ -83,6 +83,26 @@ requires_distributed = functools.partial(
 )
 
 
+# A throwaway effectful op (defined once at import to avoid re-registration) used
+# to exercise the effectful-op rejection in the checkpoint_via_invoke_subgraph path.
+@torch.library.custom_op("_sac_test::side_effect", mutates_args=())
+def _sac_side_effect(x: torch.Tensor) -> None:
+    return None
+
+
+@_sac_side_effect.register_fake
+def _(x):
+    return None
+
+
+from torch._higher_order_ops.effects import _EffectType as _SacEffectType
+
+
+torch.library._register_effectful_op(
+    torch.ops._sac_test.side_effect.default, _SacEffectType.ORDERED
+)
+
+
 def checkpoint_wrapper(fn):
     def inner(*args):
         return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
@@ -158,6 +178,32 @@ def count_ops_recursive(gm, args, freq=None, freq_ge=None, op=None):
     if freq_ge is not None and actual < freq_ge:
         raise AssertionError(
             f"Expected {op} to occur >= {freq_ge} times across {gm} and its subgraphs, got {actual}."
+        )
+    return gm
+
+
+def count_sac_slice_calls(gm):
+    """Count invoke_subgraph calls to a SAC shared recompute slice, across gm and
+    all nested subgraph modules. The forward and backward of a selectively
+    checkpointed region each invoke the same shared slice, so a shared slice
+    shows up as one such call in the fw graph and one in the bw graph."""
+    from torch._higher_order_ops import invoke_subgraph
+
+    count = 0
+    for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.find_nodes(op="call_function", target=invoke_subgraph):
+            if isinstance(node.args[1], str) and node.args[1].startswith("sac_slice_"):
+                count += 1
+    return count
+
+
+def count_sac_slice_calls_assert(gm, args, expected):
+    actual = count_sac_slice_calls(gm)
+    if actual != expected:
+        raise AssertionError(
+            f"Expected {expected} SAC shared-slice call(s) in {gm}, got {actual}."
         )
     return gm
 
@@ -430,9 +476,12 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, "aot_eager", x, y)
 
     @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
-    def test_checkpoint_via_invoke_subgraph_rejects_context_fn(self, device):
-        # Selective checkpointing (context_fn) is not supported on this path yet;
-        # it must raise rather than silently ignore the policy.
+    def test_checkpoint_via_invoke_subgraph_sac_saves_expensive(self, device):
+        # Selective checkpointing: a policy that MUST_SAVE mm keeps the matmul in
+        # the forward (saved, not recomputed) and recomputes only the cheap
+        # sigmoid. The saved mm means the backward does NOT recompute it -- so mm
+        # appears once in fw and only as the two grad mms in bw (2), versus 3 for
+        # vanilla whole-region recompute (2 grad + 1 recomputed).
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -450,31 +499,471 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
-        with self.assertRaisesRegex(Exception, "selective activation checkpointing"):
-            torch.compile(fn, fullgraph=True, backend="eager")(x, y)
+        fw_compiler = functools.partial(
+            count_ops_recursive, freq=1, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops_recursive, freq=2, op=torch.ops.aten.mm.default
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
 
     @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
-    def test_checkpoint_via_invoke_subgraph_rejects_rng(self, device):
-        # RNG in a recompute-as-call region is unsupported: re-invoking the
-        # forward would draw fresh values, so it must raise rather than corrupt.
+    def test_checkpoint_via_invoke_subgraph_sac_shared_slice(self, device):
+        # The recomputed slice (sigmoid) is extracted into one shared subgraph
+        # invoked by both the forward and the backward, so it lowers from a single
+        # GraphModule and cannot drift. Assert exactly one sac_slice call shows up
+        # in the fw graph and one in the bw graph.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        fw_compiler = functools.partial(count_sac_slice_calls_assert, expected=1)
+        bw_compiler = functools.partial(count_sac_slice_calls_assert, expected=1)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_recompute_all_fallback(self, device):
+        # A policy that recomputes everything is equivalent to vanilla AC: it must
+        # fall back to whole-region recompute (no shared slice), and the interior
+        # mm is recomputed in the backward (3 mms: 2 grad + 1 recomputed).
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(create_selective_checkpoint_contexts, []),
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        fw_compiler = functools.partial(
+            count_ops_recursive, freq=1, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops_recursive, freq=3, op=torch.ops.aten.mm.default
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_cycle_fallback(self, device):
+        # A saved value that depends on a recomputed one can't be expressed as a
+        # single shared slice, so the region transparently falls back to
+        # whole-region recompute. Grads must still match eager. Here the policy
+        # saves the second mm but recomputes the first, which feeds it. Fresh
+        # per-call state (a new closure per context_fn()) so the forward and the
+        # policy-replay each count from zero.
+        def context_fn():
+            seen = [0]
+
+            def policy(ctx, func, *args, **kwargs):
+                if func is torch.ops.aten.mm.default:
+                    seen[0] += 1
+                    if seen[0] == 2:
+                        return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            return create_selective_checkpoint_contexts(policy)
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, context_fn=context_fn
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_multi_output(self, device):
+        # var_mean is a genuine tuple-output aten op: recomputing it in the slice
+        # exercises the tuple-output handling (the producer stays in the slice
+        # body but is never returned directly; its getitems carry the values).
+        # Grads must match eager.
+        def gn(x, y):
+            h = torch.matmul(x, y)
+            v, m = torch.var_mean(h, dim=-1, keepdim=True)
+            return (h - m) * torch.rsqrt(v + 1e-5)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_multi_output_bw_getitems(self, device):
+        # A recomputed multi-output op whose backward needs getitems the forward
+        # doesn't (native_layer_norm exposes mean/rstd used only by its own
+        # backward). A single shared slice can't express this, so it must
+        # transparently fall back to whole-region recompute -- not crash -- and
+        # still produce correct gradients.
+        def gn(x, w):
+            h = torch.matmul(x, w)
+            return torch.ops.aten.native_layer_norm(
+                h, (h.shape[-1],), None, None, 1e-5
+            )[0]
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                w,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, w)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_policy_inspects_list_arg(self, device):
+        # A policy that keys off an op taking a node-list arg (aten.cat) exercises
+        # the arg-tree fake-val mapping in the policy replay (the policy must see
+        # tensors, not fx.Nodes, inside the list).
+        seen_cat = []
+
+        def policy(ctx, func, *args, **kwargs):
+            if func is torch.ops.aten.cat.default:
+                seen_cat.append(all(isinstance(t, torch.Tensor) for t in args[0]))
+                return CheckpointPolicy.MUST_SAVE
+            if func is torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def gn(x, y):
+            a = torch.matmul(x, y)
+            return torch.cat([a.relu(), a.sigmoid()], dim=-1).sum(-1, keepdim=True) * a
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy
+                ),
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+        # The policy saw aten.cat with a list of real tensors (not fx.Nodes).
+        self.assertTrue(seen_cat and all(seen_cat))
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_factory_slice(self, device):
+        # A recomputed factory op (aten.arange) has no external node inputs, so
+        # the shared slice has zero operands. This must not crash the extraction
+        # and grads must match eager.
+        def gn(x, y):
+            h = torch.matmul(x, y)
+            c = torch.arange(h.shape[-1], device=x.device, dtype=x.dtype)
+            return h * c
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_rejects_cpu_offload(self, device):
+        # CPU-offload checkpoint policies aren't implemented on this path; they
+        # must raise rather than silently save/recompute the tensor on device.
+        def policy(ctx, func, *args, **kwargs):
+            if func is torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy
+                ),
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "CPU-offload"):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                x, y
+            ).sum().backward()
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_policy_on_hop(self, device):
+        # A policy may target a HigherOrderOperator (create_selective_checkpoint_
+        # contexts accepts HOPs), and the replay must consult it for HOP nodes,
+        # not just aten ops. A single-use nested_compile_region is inlined before
+        # the replay, so call it twice to keep it a preserved invoke_subgraph HOP
+        # in the joint graph. Assert the policy actually saw invoke_subgraph
+        # (structural) and that grads match eager (correctness).
+        from torch._higher_order_ops import invoke_subgraph
+        from torch.compiler import nested_compile_region
+
+        @nested_compile_region
+        def inner(a):
+            return a.sigmoid()
+
+        mm = torch.ops.aten.mm.default
+        seen = []
+
+        def policy(ctx, func, *args, **kwargs):
+            seen.append(func)
+            if func is mm or func is invoke_subgraph:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def gn(x, y):
+            # Two call sites keep `inner` a preserved HOP (a single-use region is
+            # inlined and the policy would never see invoke_subgraph).
+            return inner(torch.matmul(x, y)) + inner(torch.matmul(y, x))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy
+                ),
+            )
+
+        def clone(t):
+            return t.detach().clone().requires_grad_(t.requires_grad)
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        xe, ye = clone(x), clone(y)
+        fn(xe, ye).sum().backward()
+        # Compile fn directly (not a deepcopy) so `seen` is the shared list.
+        xc, yc = clone(x), clone(y)
+        torch.compile(fn, fullgraph=True, backend="aot_eager")(xc, yc).sum().backward()
+        self.assertEqual(xc.grad, xe.grad)
+        self.assertEqual(yc.grad, ye.grad)
+        # The region's caching dispatch mode consulted the policy on the preserved
+        # HOP under compile (eager SAC only sees the inner aten ops).
+        self.assertIn(invoke_subgraph, seen)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_saves_decomposed_op(self, device):
+        # The policy is applied by the region's dispatch mode during tracing (not
+        # replayed post-hoc), so a MUST_SAVE on a composite op that AOT decomposes
+        # (silu -> primitives) is still honored: silu is saved and only the
+        # remainder recomputed, keeping the region selective (a shared slice
+        # exists) rather than falling back to whole-region recompute. Uses a
+        # decomposition table so silu actually decomposes.
+        from torch._decomp import core_aten_decompositions
+
+        def gn(x, y):
+            return torch.matmul(torch.nn.functional.silu(torch.matmul(x, y)), y)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.silu.default],
+                ),
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        # One shared slice in fw and bw proves silu (decomposed) was saved and the
+        # region stayed selective; a whole-region fallback would have zero.
+        backend = aot_autograd(
+            fw_compiler=functools.partial(count_sac_slice_calls_assert, expected=1),
+            bw_compiler=functools.partial(count_sac_slice_calls_assert, expected=1),
+            partition_fn=min_cut_rematerialization_partition,
+            decompositions=core_aten_decompositions(),
+        )
+        self._validate(fn, backend, x, y)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_dynamic_shapes(self, device):
+        # Selective checkpointing composes with dynamic shapes (symints flowing
+        # through the saved/recomputed split).
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            ).sum()
+
+        def make():
+            return (
+                torch.randn(8, 4, device=device, requires_grad=True),
+                torch.randn(4, 4, device=device, requires_grad=True),
+            )
+
+        torch.manual_seed(0)
+        xe, ye = make()
+        fn(xe, ye).backward()
+        torch.manual_seed(0)
+        xc, yc = make()
+        torch.compile(fn, fullgraph=True, backend="aot_eager", dynamic=True)(
+            xc, yc
+        ).backward()
+        self.assertEqual(xc.grad, xe.grad)
+        self.assertEqual(yc.grad, ye.grad)
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_inductor(self, device):
+        # End-to-end through Inductor: a selectively checkpointed region (save the
+        # matmul, recompute the norm) produces gradients matching eager.
+        def gn(x, w):
+            h = torch.matmul(x, w)
+            scale = torch.rsqrt((h.float() * h.float()).mean(-1, keepdim=True) + 1e-6)
+            return h * scale.to(h.dtype)
+
+        def fn(x, w):
+            y = torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                w,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts,
+                    [torch.ops.aten.mm.default],
+                ),
+            )
+            return (y * 3.0 + x).sum()
+
+        x = torch.randn(
+            512, 512, dtype=torch.float32, device=device, requires_grad=True
+        )
+        w = torch.randn(
+            512, 512, dtype=torch.float32, device=device, requires_grad=True
+        )
+        self._validate(fn, "inductor", x, w)
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_sac_rejects_custom_context_fn(self, device):
+        # Only the create_selective_checkpoint_contexts form (a
+        # _CachingTorchDispatchMode forward context) is supported: its recompute
+        # context is replaced structurally by the partition. A custom context_fn
+        # whose recompute semantics can't be reproduced must raise rather than be
+        # silently dropped.
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, context_fn=_invalid_context_gen
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "custom context_fn"):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                x, y
+            ).sum().backward()
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rng_dropout(self, device):
+        # RNG (dropout) is force-saved (drawn once on the forward, saved, reused by
+        # the backward) rather than recomputed, so the backward uses the SAME mask
+        # as the forward -- matching eager checkpoint, not a ban. _validate checks
+        # the compiled output and gradients equal eager, and
+        # _compare_orig_and_checkpointed_fns checks they equal the non-checkpointed
+        # version.
         def gn(x, y):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.5, training=True)
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
 
-        x = torch.randn(4, 4, device=device, requires_grad=True)
-        y = torch.randn(4, 4, device=device, requires_grad=True)
-        with self.assertRaisesRegex(Exception, "does not support RNG"):
-            torch.compile(fn, fullgraph=True, backend="aot_eager")(
-                x, y
-            ).sum().backward()
+        x = torch.randn(16, 16, device=device, requires_grad=True)
+        y = torch.randn(16, 16, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
     def test_checkpoint_via_invoke_subgraph_rejects_nested_rng(self, device):
-        # RNG inside a nested HOP within the checkpoint region must also be
-        # rejected -- the ban scans nested subgraph modules recursively, not just
-        # the region's top-level graph.
+        # RNG that can be force-saved is now supported, but RNG inside a nested
+        # HOP within the region is recomputed atomically (re-run) and can't be
+        # force-saved, so it must still be rejected. The scan recurses into nested
+        # subgraph modules.
         from torch.compiler import nested_compile_region
 
         @nested_compile_region
@@ -496,6 +985,76 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, fullgraph=True, backend="aot_eager")(
                 x, y
             ).sum().backward()
+
+    @requires_distributed()
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_collective(self):
+        # A collective inside a checkpoint region is recomputed on the backward --
+        # the same as the standard partitioner does for user-annotated AC regions
+        # (deterministic and symmetric across ranks) -- not force-saved, not banned.
+        # A single-rank gloo group makes the collective well-defined; verify the
+        # checkpointed version matches eager and the non-checkpointed version.
+        import torch.distributed._functional_collectives as ft_c
+
+        dist.init_process_group(
+            backend="gloo", store=dist.HashStore(), rank=0, world_size=1
+        )
+        try:
+
+            def gn(x, y):
+                h = torch.matmul(x, y)
+                h = ft_c.all_reduce(h, "sum", dist.group.WORLD)
+                return torch.sigmoid(h)
+
+            def fn(x, y):
+                return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+
+            x = torch.randn(8, 8, requires_grad=True)
+            y = torch.randn(8, 8, requires_grad=True)
+            self._validate(fn, "aot_eager", x, y)
+            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        finally:
+            dist.destroy_process_group()
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_rejects_effectful(self, device):
+        # An effectful op in the region breaks the compiled backward -- the
+        # recompute rewrites don't thread effect tokens, so gradients silently come
+        # back as None -- so it is rejected loudly on the Dynamo-traced region body
+        # (before the effectful op is lifted out of the joint the partitioner sees).
+        def gn(x, y):
+            h = torch.matmul(x, y)
+            torch.ops._sac_test.side_effect(h)
+            return torch.sigmoid(h)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=False)
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "does not support effectful ops"):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                x, y
+            ).sum().backward()
+
+    @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
+    def test_checkpoint_via_invoke_subgraph_explicit_noop_context_fn(self, device):
+        # Explicit context_fn=noop_context_fn must be treated as no policy (the
+        # region recomputes wholesale), not misread as an unsupported custom
+        # context_fn -- regardless of which VariableTracker flavor it realizes to.
+        from torch.utils.checkpoint import noop_context_fn
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, context_fn=noop_context_fn
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        self._validate(fn, "aot_eager", x, y)
 
     @torch._functorch.config.patch(checkpoint_via_invoke_subgraph=True)
     @torch._dynamo.config.patch(inline_invoke_subgraph=True)

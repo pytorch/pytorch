@@ -462,7 +462,27 @@ enable_complex_wrapper: bool = False
 # forward subgraph -- rather than a separately-compiled duplicate that can drift
 # (gh-186572). Recompute is coupled to this flag (a checkpoint region always
 # recomputes), so enabling it never silently degrades checkpoint into
-# save-everything. RNG in a checkpointed region is not yet supported (rejected).
+# save-everything.
+#
+# RNG is handled like the standard partitioner: rather than recomputing (which
+# would re-draw, e.g. a different dropout mask), the RNG op is force-saved so the
+# backward reuses the forward's values. Collectives are recomputed, matching the
+# standard partitioner's behavior for user-annotated AC regions (deterministic
+# and symmetric across ranks). Effectful ops (with_effects) are rejected, since
+# the recompute rewrites can't preserve their effect-token ordering; so is RNG
+# inside a nested subgraph module (it would be recomputed atomically).
+#
+# Selective activation checkpointing via a context_fn from
+# create_selective_checkpoint_contexts is honored: the region's forward is traced
+# under the policy's dispatch mode (the same mechanism the tag path and eager SAC
+# use, so an op's decompositions are tagged too), the partitioner saves the
+# MUST_SAVE ops, and the recomputed slice is extracted into a single shared
+# subgraph invoked from both the forward and backward so it, too, cannot drift.
+# Regions that can't be expressed as one shared slice (e.g. a saved value depends
+# on a recomputed one) transparently fall back to whole-region recompute.
+# CPU-offload policies are rejected (this path emits no host/device transfers), as
+# are arbitrary custom context_fns (only the create_selective_checkpoint_contexts
+# form is supported, since its recompute context is replaced structurally).
 checkpoint_via_invoke_subgraph: bool = False
 
 
