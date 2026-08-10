@@ -19420,6 +19420,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for _ in range(4):
             self.assertEqual(compiled(x, a, b), fn(x, a, b))
 
+    def test_eye_uint16_index(self):
+        # Inductor uses uint16 indices for this size; the output remains float32.
+        def fn(x):
+            return torch.eye(x.shape[-1], device=x.device)
+
+        self.common(fn, (torch.zeros(10, 256, device=self.device),))
+
     # end of class CommonTemplate - add new tests here
 
 
