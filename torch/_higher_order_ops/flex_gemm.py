@@ -354,6 +354,14 @@ def flex_gemm(
     if kernel_options is None:
         kernel_options = {}
     public_gemm_op = gemm_op
+    if public_gemm_op in (
+        torch.ops.aten._scaled_mm_v2,
+        torch.ops.aten._scaled_mm_v2.default,
+    ):
+        raise RuntimeError(
+            "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
+            "use torch.nn.functional.scaled_mm"
+        )
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
 
     if public_gemm_op is torch.nn.functional.scaled_mm:
