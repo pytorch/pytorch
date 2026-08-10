@@ -2184,9 +2184,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         else:
             allow_tf32 = False
 
-        return {
+        extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
         }
+        # Only the bmm / baddbmm / mm_plus_mm templates render the K loop
+        # conditionally via ASCENDING_K; plain mm and the other mm-family
+        # templates never reference it. Inject the flag here (op-aware) rather
+        # than in the shared options dict so the other templates' cache keys
+        # stay unchanged. The value is True on XPU, whose Triton->SPIR-V backend
+        # miscompiles the descending-K loop (see ascending_k).
+        if op_name in ("bmm", "baddbmm", "mm_plus_mm"):
+            extra_kwargs["ASCENDING_K"] = self.ascending_k
+        return extra_kwargs
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
         return True
@@ -2493,7 +2502,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
-            ASCENDING_K=self.ascending_k,  # Loop style for mm_plus_mm / bmm (XPU)
             ACC_TYPE=self._get_acc_type(out_dtype),
             num_stages=triton_config.num_stages,
             num_warps=triton_config.num_warps,
