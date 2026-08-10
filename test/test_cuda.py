@@ -8048,6 +8048,26 @@ class TestCachingHostAllocatorConfig(TestCase):
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(stats["allocations.current"], 0)
 
+    def test_unrounded_bucket_no_undersized_reuse(self):
+        # Unrounded requests (above round_threshold) that are still cached
+        # (below max_cached_size) share a Log2_64_Ceil bucket despite differing
+        # sizes. A later, larger request in the same bucket must not be handed
+        # back a smaller cached block, which would overflow the buffer.
+        MB = 1024 * 1024
+        # 150 MB and 200 MB both map to Log2_64_Ceil bucket 28.
+        small = 150 * MB
+        large = 200 * MB
+
+        with caching_host_allocator_max_round_threshold_and_max_cached_size(128, 1024):
+            a = torch.empty(small, dtype=torch.uint8, pin_memory=True)
+            small_ptr = a.data_ptr()
+            del a
+            gc.collect()
+
+            b = torch.empty(large, dtype=torch.uint8, pin_memory=True)
+            # Must not reuse the smaller cached block.
+            self.assertNotEqual(b.data_ptr(), small_ptr)
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorCudaGraph(TestCase):
