@@ -1507,19 +1507,25 @@ What the standard build actually exports is narrower than the default `ARCHS`:
 
 ```python
 # tools/native_aot/export.py
-# Architectures the standard build exports AOT kernels for: Blackwell
-# only, for now. Entries outside this set are skipped (not failed), so
-# a mixed arch list ("7.5 9.0a 10.0a") exports just the Blackwell
-# subset and other builds proceed without artifacts. Single-arch also
-# keeps the flat artifacts layout the embedded link globs (multi-arch
-# nests per-arch trees, which the link does not walk).
-EXPORT_SMS = ("sm_100", "sm_100a", "sm_103", "sm_103a")
+# Arch allow-list for the AUTOMATIC export path: which entries of the main
+# build's TORCH_CUDA_ARCH_LIST are ELIGIBLE for AOT kernels. Blackwell only,
+# for now. A filter, never a build list -- it cannot cause an export, only
+# permit one, and an explicit `--arch` bypasses it entirely.
+# ... (see the file for the full rationale)
+EXPORTABLE_ARCHES = ("sm_100", "sm_100a")
 ```
+
+Both spellings of the same compute capability are listed because they are
+distinct nvcc targets and different builds use different ones for the SAME
+hardware: `10.0a` (arch-conditional, what `tcgen05`/`wgmma` need) in
+`.github/workflows/b200-native-aot.yml`, plain `10.0` in every other Blackwell
+job and in the shipped manywheel lists. Omitting either would make those builds
+silently export nothing.
 
 So on a Hopper builder with `TORCH_CUDA_ARCH_LIST=9.0a`, export prints "nothing
 to export" and stage 2 skips: no artifacts, no error, stock aten and JIT
 behavior. On-device export (unset `TORCH_CUDA_ARCH_LIST` plus a local GPU) is
-not filtered by `EXPORT_SMS`, so a local Hopper dev build can still export for
+not filtered by `EXPORTABLE_ARCHES`, so a local Hopper dev build can still export for
 its own device.
 
 Multi-arch export (`--arch sm_90a sm_100a`) nests artifacts under
@@ -1573,7 +1579,7 @@ It skips (printing why, leaving a normal artifacts-free build) when:
   * DSL runtime not importable (nvidia_cutlass_dsl or tvm_ffi, the
     same pair torch/_native/cutedsl_utils.py gates the JIT layer on)
   * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
-    for now -- see export.EXPORT_SMS); on-device export runs when the
+    for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
     arch list is unset and a supported GPU is present
 ```
 
@@ -1726,7 +1732,7 @@ plus the need for stock-aten references in tests.
   reason.
 * **`ATEN_OP` must resolve to exactly one structured group.** Ambiguous base
   names are a hard codegen error, not a silent pick.
-* **Blackwell-only export in the standard build.** `EXPORT_SMS` is
+* **Blackwell-only export in the standard build.** `EXPORTABLE_ARCHES` is
   `("sm_100", "sm_100a", "sm_103", "sm_103a")`. Other arches in
   `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
   artifacts. On-device export is unrestricted, so a local sm_90 build can export
@@ -1783,7 +1789,7 @@ Build tooling (`tools/native_aot/`):
 | file | role |
 | ---- | ---- |
 | `decl.py` | the declaration contract (module docstring), the `AotDeclaration` protocol, `decl_id`, and the validating loader / discovery. Stdlib-only: torchgen and the export tool load it by file path. |
-| `export.py` | stage-2 export driver: grid fan-out, spawn pool, per-point compile via the toolchain, sidecars, staleness (`sources_current`), `EXPORT_SMS`, `archs_from_cuda_arch_list`. |
+| `export.py` | stage-2 export driver: grid fan-out, spawn pool, per-point compile via the toolchain, sidecars, staleness (`sources_current`), `EXPORTABLE_ARCHES`, `archs_from_cuda_arch_list`. |
 | `toolchains.py` | one class per DSL: build-result validation, compile/export, launcher codegen; `TOOLCHAINS` registry. |
 | `gen_aot_lib.py` | declarations + sidecars -> `aot_<decl_id>_<key>.cpp`: arch gate, prelude, dispatch chain, stub registration, covers op; `precomputed_args`, `covers_signature`, orphan cleanup. |
 | `build_stage2.py` | the driver: skip ladder, export, generate, targeted `torch_cuda` relink, copy into the installed torch, optional wheel patch. |

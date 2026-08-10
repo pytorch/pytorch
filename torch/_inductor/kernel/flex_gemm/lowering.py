@@ -17,6 +17,7 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
 )
+from torch._inductor import config
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
@@ -474,7 +475,14 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
-    if kernel_options.get("backend", "TRITON") == "QUACK":
+    backend = kernel_options.get("backend", "TRITON")
+    if backend == "NVGEMM":
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="NVGEMM",
+        ):
+            return process_subgraph_nodes(subgraph.graph_module, list(args))
+    if backend == "QUACK":
         return lower_quack_flex_gemm(
             gemm_op, subgraph, args, gemm_kwargs, kernel_options
         )
