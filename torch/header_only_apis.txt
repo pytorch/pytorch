@@ -48,6 +48,10 @@ HeaderOnlyArrayRef
 # c10/util/complex.h, torch/headeronly/util/complex.h
 complex
 
+# torch/headeronly/util/complex_utils.h
+is_complex
+scalar_value_type
+
 # ATen/NumericUtils.h, c10/util/generic_math.h
 div_floor_floating
 div_floor_integer
