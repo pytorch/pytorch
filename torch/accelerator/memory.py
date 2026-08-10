@@ -42,6 +42,15 @@ def empty_host_cache() -> None:
     torch._C._accelerator_emptyHostCache()
 
 
+def _flatten_stats(result: list[tuple[str, Any]], prefix: str, value: Any) -> None:
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            nested_prefix = f"{prefix}.{key}" if prefix else key
+            _flatten_stats(result, nested_prefix, nested_value)
+    else:
+        result.append((prefix, value))
+
+
 def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     r"""Return a dictionary of accelerator device memory allocator statistics for a given device index.
 
@@ -109,15 +118,7 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     stats = torch._C._accelerator_getDeviceStats(device_index)
     flat_stats = []
 
-    def flatten(prefix: str, value: Any) -> None:
-        if isinstance(value, dict):
-            for k, v in value.items():
-                nested_prefix = f"{prefix}.{k}" if prefix else k
-                flatten(nested_prefix, v)
-        else:
-            flat_stats.append((prefix, value))
-
-    flatten("", stats)
+    _flatten_stats(flat_stats, "", stats)
     flat_stats.sort()
     # pyrefly: ignore [no-matching-overload]
     return OrderedDict(flat_stats)
@@ -208,6 +209,8 @@ def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetAccumulatedStats(device_index)
 
@@ -225,6 +228,8 @@ def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetPeakStats(device_index)
 

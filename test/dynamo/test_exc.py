@@ -2,6 +2,7 @@
 
 import linecache
 import os
+import pickle
 import re
 import sys
 import tempfile
@@ -14,6 +15,10 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    InvalidBackend,
+    ResetRequired,
+    ShortenTraceback,
     TorchDynamoException,
     Unsupported,
     UserError,
@@ -84,6 +89,57 @@ class ExcTests(LoggingTestCase):
         self.assertEqual(err.msg, "bad input")
         self.assertEqual(err.message, "bad input")
         self.assertEqual(str(err), "bad input")
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_backend_compiler_failed_pickles_without_frame(self):
+        def backend_fn(gm, example_inputs):
+            exc = RuntimeError("backend exploded")
+            exc.frame = sys._getframe()
+            raise exc
+
+        def fn(x):
+            return x + 1
+
+        with self.assertRaises(BackendCompilerFailed) as cm:
+            torch.compile(fn, backend=backend_fn)(torch.ones(1))
+
+        err = cm.exception
+
+        restored = pickle.loads(pickle.dumps(err))
+
+        self.assertIsInstance(restored, BackendCompilerFailed)
+        self.assertEqual(restored.args, err.args)
+        self.assertEqual(str(restored), str(err))
+        self.assertEqual(restored.backend_name, "backend_fn")
+        self.assertIsInstance(restored.inner_exception, RuntimeError)
+        self.assertEqual(str(restored.inner_exception), "backend exploded")
+        self.assertEqual(
+            restored.inner_exception._dynamo_original_exception_type,
+            "builtins.RuntimeError",
+        )
+        self.assertIsNone(restored.first_useful_frame)
+
+    def test_dynamo_exceptions_pickle_without_rerunning_init(self):
+        cases = [
+            InvalidBackend("bad_backend"),
+            ResetRequired(),
+            ShortenTraceback("shortened", first_useful_frame=sys._getframe()),
+            UserError(UserErrorType.INVALID_INPUT, "bad input"),
+        ]
+
+        for err in cases:
+            with self.subTest(exc_type=type(err).__name__):
+                restored = pickle.loads(pickle.dumps(err))
+
+                self.assertIsInstance(restored, type(err))
+                self.assertEqual(restored.args, err.args)
+                self.assertEqual(str(restored), str(err))
+
+        self.assertIsNone(pickle.loads(pickle.dumps(cases[2])).first_useful_frame)
+        self.assertEqual(
+            pickle.loads(pickle.dumps(cases[3])).error_type,
+            UserErrorType.INVALID_INPUT,
+        )
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
@@ -293,6 +349,32 @@ User code traceback:
         # check for record existence
         self.getRecord(records, "Graph break in user code")
 
+    @make_logging_test(graph_breaks=True)
+    def test_reraised_observed_exception_graph_break_log(self, records):
+        def inner(d):
+            return d["abc"]
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(d):
+            try:
+                inner(d)
+            except Exception:  # noqa: TRY203
+                raise
+
+        with self.assertRaisesRegex(KeyError, "abc"):
+            fn({"def": torch.randn(3, 4)})
+
+        full_records = [
+            r for r in records if "Graph break in user code" in r.getMessage()
+        ]
+        self.assertEqual(len(full_records), 1)
+
+        msg = full_records[0].getMessage()
+        self.assertIn('return d["abc"]', msg)
+        self.assertNotIn("\n    raise\n", msg)
+        self.assertNotIn("During handling of the above exception", msg)
+        self.assertFalse(any(record.exc_info is not None for record in records))
+
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
         def fn001(x):
@@ -308,6 +390,20 @@ User code traceback:
             """\
 backend='relu_compile_error_TESTING_ONLY' raised:
 ReluCompileError:""",
+        )
+
+    @skipIf(not TEST_Z3, "z3 not installed")
+    def test_z3op_sym_not(self):
+        import z3
+
+        from torch.fx.experimental.validator import TranslationValidator, z3op
+
+        validator = TranslationValidator()
+        b = z3.Bool("b")
+
+        self.assertTrue(z3op(torch.sym_not, validator)(b).eq(z3.Not(b)))
+        self.assertTrue(
+            z3.simplify(z3op(torch.sym_not, validator)(1)).eq(z3.BoolVal(False))
         )
 
     @skipIf(not TEST_Z3, "z3 not installed")
@@ -327,7 +423,7 @@ ReluCompileError:""",
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 
@@ -389,7 +485,7 @@ Failed Source Expressions:
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 
