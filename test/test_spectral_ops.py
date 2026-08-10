@@ -257,13 +257,13 @@ class TestFFT(TestCase):
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
-        with self.assertRaisesRegex(RuntimeError, "rfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfft expects a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
-        with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
     @skipCPUIfNoFFT
@@ -706,7 +706,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
@@ -1485,7 +1485,7 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     def test_istft_throws(self, device):
         """istft should throw exception for invalid parameters"""
-        stft = torch.zeros((3, 5, 2), device=device)
+        stft = torch.zeros((3, 5, 2), device=device, dtype=torch.cfloat)
         # the window is size 1 but it hops 20 so there is a gap which throw an error
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4,
@@ -1495,8 +1495,8 @@ class TestFFT(TestCase):
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
         # Input cannot be empty
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2), device=device, dtype=torch.cfloat), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2), device=device, dtype=torch.cfloat), 2)
 
     @skipIfTorchDynamo("Failed running call_function")
     @onlyNativeDeviceTypes

@@ -3733,7 +3733,7 @@ def stft(
     else:
         return_complex_ = return_complex
 
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
         lambda: "stft expected a tensor of floating point or complex values",
     )
@@ -3831,11 +3831,11 @@ def istft(
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
     win_length_ = win_length if win_length is not None else n_fft
 
-    torch._check(
+    torch._check_type(
         utils.is_complex_dtype(input.dtype),
         lambda: (
-            "istft input and window must be on the same device but got self on "
-            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+            "istft requires a complex-valued input tensor matching the "
+            "output from stft with return_complex=True."
         ),
     )
     n_frames = input.size(-1)
