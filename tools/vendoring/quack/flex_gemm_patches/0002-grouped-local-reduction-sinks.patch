@@ -1,11 +1,40 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index c8d1e0a38ffdd74a3372d505ff1d691c81bf8dda..18311da46430caef6ae4ebbbc953b884c5865e71 100644
+index 5a23741f5bebc0d7ba4bd85235c1683479fbb562..16ad60f14157eb74749af97acdd2a32d334ad060 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -180,0 +181 @@ from quack.epilogue.visit import _EpiModMixinBase
 +from quack.grouped_reduce import GroupedFeedMainMixin
-@@ -611,0 +613 @@ class EpiMod:
+@@ -316,0 +318,5 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
++            if const_expr(kind == "value"):
++                fragment = ops_by_name[name].fn_prepare(self, epi_loop_tensors[name], False)
++                assert fragment is not None
++                values[name] = fragment.load()
++                continue
+@@ -318 +324 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+-                "TensorSSA callbacks support c/row/col/tile/scalar operands"
++                "TensorSSA callbacks support c/row/col/tile/scalar/value operands"
+@@ -414,4 +420,2 @@ class EpiMod:
+-        if fragmentwise and (self.mode != "element" or prepass is not None):
+-            raise ValueError(
+-                "TensorSSA callbacks support element mode without an accumulator prepass"
+-            )
++        if fragmentwise and self.mode != "element":
++            raise ValueError("TensorSSA callbacks support element mode only")
+@@ -611,0 +616 @@ class EpiMod:
 +                GroupedFeedMainMixin,
+@@ -1966 +1971,8 @@ def gemm_epilogue(
+-def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
++def fragment_epilogue(
++    outputs=(),
++    ops=None,
++    outs=None,
++    extra_ops=(),
++    prepass=None,
++    prepass_outs=(),
++):
+@@ -1975,0 +1988,2 @@ def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
++            prepass=prepass,
++            prepass_outs=prepass_outs,
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
 index 663cb513f681091c865c894c3cd9077c5410f1d0..5cc96cfaa41933b9cf939fbc12c784ab1b4618d6 100644
 --- a/quack/epilogue/ops.py
@@ -432,10 +461,10 @@ index 663cb513f681091c865c894c3cd9077c5410f1d0..5cc96cfaa41933b9cf939fbc12c784ab
 -        # The SIBLING's stats planes (its to_params stashed the shape).
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..527b4427189cb50db093913da3ae5e0656407c51
+index 0000000000000000000000000000000000000000..052df3a75497c07e0ea2949a64df162a86c6a529
 --- /dev/null
 +++ b/quack/grouped_reduce.py
-@@ -0,0 +1,1379 @@
+@@ -0,0 +1,1418 @@
 +# Copyright (c) 2026, Han Guo, Tri Dao.
 +"""Grouped local reductions inside a GEMM epilogue tile (FlexGEMM parity).
 +
@@ -999,6 +1028,44 @@ index 0000000000000000000000000000000000000000..527b4427189cb50db093913da3ae5e06
 +                f"{self.name}: compressed aux buffer must be contiguous in its last dim"
 +            )
 +        return (torch2cute_dtype_map[value.dtype], value.ndim)
++
++    def host_validate(
++        self,
++        value,
++        *,
++        m,
++        n,
++        tile_M,
++        tile_N,
++        batch,
++        varlen_m,
++        swap_ab=False,
++        **_,
++    ):
++        """Validate compressed output geometry against the GEMM problem."""
++        if varlen_m:
++            raise ValueError(f"{self.name}: grouped reductions do not support varlen_m")
++        if value is None:
++            if getattr(self, "keep_tensorless", False):
++                return
++            raise ValueError(f"{self.name}: compressed aux buffer is required")
++        self.host_arg_key(value)
++        dim = m if self.axis == 0 else n
++        physical_axis = 1 - self.axis if swap_ab else self.axis
++        tile = tile_M if physical_axis == 0 else tile_N
++        if dim % self.group:
++            raise ValueError(
++                f"{self.name}: group {self.group} must divide the grouped dim "
++                f"{dim} (axis={self.axis})"
++            )
++        if tile % self.group or self.group > tile:
++            raise ValueError(
++                f"{self.name}: group {self.group} must divide the CTA tile extent {tile}"
++            )
++        expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
++        actual = tuple(value.shape)
++        if actual != expected:
++            raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
 +
 +    def host_fake_arg(self, key, fctx):
 +        from quack.compile_utils import make_fake_tensor
@@ -1576,6 +1643,7 @@ index 0000000000000000000000000000000000000000..527b4427189cb50db093913da3ae5e06
 +    """Axis-1 sum sink whose scalar finalizer also receives a prepass value."""
 +
 +    scaled = True
++    supports_swap_ab = False
 +
 +    def __init__(self, name, *, axis, group, combine="add", finalize=None):
 +        if (

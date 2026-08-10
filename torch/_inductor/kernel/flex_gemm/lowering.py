@@ -7,6 +7,7 @@ lowering and routes QUACK requests through shared analysis and one EpiMod choice
 
 from __future__ import annotations
 
+import importlib.machinery
 import importlib.util
 from typing import Any
 
@@ -79,6 +80,19 @@ def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
 
 class QuackScaledMmUnsupported(NotImplementedError):
     """Request ordinary lowering before FlexGEMM mutates the graph or realizes IR."""
+
+
+def has_flex_gemm_quack() -> bool:
+    """Whether the installed QuACK package contains the FlexGEMM EpiOps."""
+    spec = importlib.util.find_spec("quack")
+    return (
+        spec is not None
+        and spec.submodule_search_locations is not None
+        and importlib.machinery.PathFinder.find_spec(
+            "quack.grouped_reduce", spec.submodule_search_locations
+        )
+        is not None
+    )
 
 
 def scaled_mm_node_tuple(value: Any, name: str) -> tuple[torch.fx.Node, ...]:
@@ -518,9 +532,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, output_size
     )
-    if importlib.util.find_spec("quack") is None:
+    if not has_flex_gemm_quack():
         raise NotImplementedError(
-            "FlexGEMM QUACK backend requires the external quack package"
+            "FlexGEMM QUACK backend requires the patched external quack package"
         )
     packed_uint8_main = main_transform is not None and output_meta.dtype is torch.uint8
     if (
@@ -661,7 +675,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             aux_out_indices=aux_out_indices,
             local_reduce=template_local_reduce,
             main_transform=main_transform,
-            tensorwise=epimod_source.tensorwise,
+            fragmentwise=epimod_source.fragmentwise,
             tuned=tuned,
         ),
     )

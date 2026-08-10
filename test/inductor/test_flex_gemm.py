@@ -128,6 +128,34 @@ class TestFlexGemmRuntimeImport(TestCase):
         importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
         self.assertNotIn("quack", sys.modules)
 
+    def test_quack_support_probe_requires_grouped_reduce(self):
+        from torch._inductor.kernel.flex_gemm import lowering
+
+        package_spec = SimpleNamespace(submodule_search_locations=("/tmp/quack",))
+        with (
+            mock.patch.object(
+                lowering.importlib.util, "find_spec", return_value=package_spec
+            ),
+            mock.patch.object(
+                lowering.importlib.machinery.PathFinder,
+                "find_spec",
+                return_value=None,
+            ),
+        ):
+            self.assertFalse(lowering.has_flex_gemm_quack())
+
+        with (
+            mock.patch.object(
+                lowering.importlib.util, "find_spec", return_value=package_spec
+            ),
+            mock.patch.object(
+                lowering.importlib.machinery.PathFinder,
+                "find_spec",
+                return_value=SimpleNamespace(),
+            ),
+        ):
+            self.assertTrue(lowering.has_flex_gemm_quack())
+
 
 class TestFlexGemmOutputLayout(TestCase):
     def test_builtin_layout_contracts(self):
@@ -1054,9 +1082,14 @@ class FlexGemmTestCase(TestCase):
         self.assertIn("result_type=cutlass.Float8E8M0FNU", code)
 
     def assertNvfp4ScaleCode(self, code, max_value=6.0):
-        """Check direct E4M3 scale rounding in a generated finalizer."""
-        self.assertIn(f"epi_math.reciprocal({max_value!r}", code)
-        self.assertIn("torch.float8_e4m3fn", code)
+        """Check direct E4M3 scale rounding in generated code."""
+        scalar_reciprocal = f"epi_math.reciprocal({max_value!r}"
+        if scalar_reciprocal in code:
+            self.assertIn("torch.float8_e4m3fn", code)
+        else:
+            self.assertIn("/ cute.full_like(", code)
+            self.assertIn(f", {max_value!r})", code)
+            self.assertIn("cutlass.Float8E4M3FN", code)
 
     def assertMatchesEpilogue(
         self, actual, expected, high_precision_expected, reduction_size
@@ -2015,7 +2048,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("'main':", code)
         self.assertIn("FlexGemmGroupedMainOutputTransform(", code)
         self.assertIn(f"group={group}", code)
-        self.assertIn("tensorwise=True", code)
+        self.assertIn("fragmentwise=True", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -2763,7 +2796,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
         self.assertTrue((aux.view(torch.uint8) == 255).all())
         self.assertMxScaleCode(code, "floor")
-        self.assertIn("tensorwise=False", code)
+        self.assertIn("fragmentwise=True", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -2792,7 +2825,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         torch.testing.assert_close(actual, epilogue_fn(a @ b))
         self.assertNvfp4ScaleCode(code)
-        self.assertIn("tensorwise=False", code)
+        self.assertIn("fragmentwise=True", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -2862,7 +2895,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             aux.view(torch.uint8), expected_aux.squeeze(-1).view(torch.uint8)
         )
         self.assertMxScaleCode(code)
-        self.assertIn("tensorwise=False", code)
+        self.assertIn("fragmentwise=True", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3094,7 +3127,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         (False, True),
         name_fn=lambda tuned: "tuned" if tuned else "untuned",
     )
-    def test_mm_dynamic_shapes_reads_captured_tensor_epilogue_arg(self, case, tuned):
+    def test_mm_dynamic_shapes_reads_captured_fragment_epilogue_arg(self, case, tuned):
         torch._dynamo.reset()
         _, shape_fn = case
 
@@ -3136,7 +3169,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_reads_bool_mask_captured_tensor_epilogue_arg(self, case):
+    def test_mm_reads_bool_mask_captured_fragment_epilogue_arg(self, case):
         _, shape_fn = case
 
         def epilogue_fn(acc, mask):
@@ -3168,7 +3201,40 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_preserves_integer_scalar_captured_tensor_epilogue_arg(self):
+    def test_mm_reads_bool_mask_captured_scalar_feed_main_arg(self):
+        m, k, n, group = 128, 64, 64, 8
+
+        def epilogue_fn(acc, mask):
+            x = acc.float().view(-1, group, n)
+            mean = x.mean(1, keepdim=True)
+            centered = (x - mean).view(m, n)
+            return torch.where(mask, centered, -centered)
+
+        def fn(a, b, mask):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, mask),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        mask = torch.randint(0, 2, (m, n), device="cuda", dtype=torch.bool)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b, mask)
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, mask),
+            epilogue_fn(a.double() @ b.double(), mask),
+            a.shape[1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_preserves_integer_scalar_captured_fragment_epilogue_arg(self):
         def epilogue_fn(acc, selector):
             acc_float = acc.float()
             return torch.where(selector.bitwise_and(1).bool(), acc_float, -acc_float)
@@ -3211,7 +3277,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_promotes_low_precision_captured_tensor_epilogue_arg(self, case):
+    def test_mm_promotes_low_precision_captured_fragment_epilogue_arg(self, case):
         kind, shape_fn = case
 
         def epilogue_fn(acc, scale):
@@ -5931,6 +5997,34 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_n_reduce_prepass_rejects_bool_capture(self):
+        m, k, n, group = 128, 64, 128, 16
+
+        def epilogue_fn(acc, mask):
+            x = acc.float().view(m, -1, group)
+            selected = torch.where(mask.view_as(x), x, x * 0.5)
+            scale = selected.sum(-1, keepdim=True)
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b, mask):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, mask),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+        mask = torch.randint(0, 2, (m, n), device="cuda", dtype=torch.bool)
+        with self.assertRaisesRegex(
+            Exception, "accumulator prepasses do not support captured bool tensors"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, mask)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("group", (64, 128))
     def test_mm_local_n_reduce_feed_main_rejects_multi_fragment_group(self, group):
         torch._dynamo.reset()
@@ -6267,7 +6361,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertFlexGemmGeneratedCode(code)
-        FileCheck().check("@cute.jit").check("tensorwise=True").check_not(
+        FileCheck().check("@cute.jit").check("fragmentwise=True").check_not(
             "epi_math"
         ).run(code)
 
@@ -6283,7 +6377,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_generated_code_reads_captured_tensor_epilogue_arg(self, case):
+    def test_mm_generated_code_reads_captured_fragment_epilogue_arg(self, case):
         kind, shape_fn = case
 
         def epilogue_fn(acc, scale):
@@ -6321,7 +6415,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_generated_code_reads_multiple_captured_tensor_epilogue_args(self):
+    def test_mm_generated_code_reads_multiple_captured_fragment_epilogue_args(self):
         def fn(a, b, col_bias, row_scale, tile_bias):
             return flex_gemm(
                 torch.mm,
@@ -7933,7 +8027,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         )
         self.assertEqual(actual, expected)
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
-        self.assertIn("tensorwise=True", code)
+        self.assertIn("fragmentwise=True", code)
         self.assertIn("('swap_ab', True)", code)
 
     def test_mm_tuple_aux_blocked_128x4_rejects_axis_m(self, device):
@@ -8016,7 +8110,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertIn("@cute.jit", code)
-        self.assertIn("tensorwise=True", code)
+        self.assertIn("fragmentwise=True", code)
         self.assertIn("('swap_ab', True)", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
@@ -8068,7 +8162,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertIn("@cute.jit", code)
-        self.assertIn("tensorwise=True", code)
+        self.assertIn("fragmentwise=True", code)
         self.assertIn("('swap_ab', True)", code)
         self.assertIn(f"group={group}", code)
 
