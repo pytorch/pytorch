@@ -21,10 +21,14 @@ The cross-toolchain contract, in order of flow:
   3. ``gen_launcher(sidecar)`` emits C++ with the toolchain-independent
      signature every manifest ``body`` programs against:
 
-         void launch_<prefix>(const at::Tensor&..., <scalars>..., cudaStream_t)
+         void launch_<prefix>(const at::Tensor&..., <scalars>..., c10::Stream)
 
      Everything above the launcher (guard chain, cond, DispatchStub
-     registration) is toolchain-blind.
+     registration) is toolchain-blind. The stream crosses that boundary
+     as a device-agnostic c10::Stream, so the shared contract carries no
+     CUDA type; each launcher body narrows it to the raw handle its own
+     C ABI needs (cute_dsl_*_wrapper takes a cudaStream_t). Declarations
+     pass at::cuda::getCurrentCUDAStream(), which converts implicitly.
 
 Properties consumed by the driver scripts:
   * ``artifact_exts``: extensions written next to the sidecar; the first
@@ -63,43 +67,11 @@ class Toolchain:
 
         ``arch`` is an sm string ("sm_90a") or None for detect-from-
         device. With an explicit arch no toolchain touches the CUDA
-        driver, so export runs on GPU-less machines (CuTeDSL reads
-        CUTE_DSL_ARCH -- set by the export tool BEFORE cutlass imports,
-        it is cached at first read; Triton kinds build an explicit
-        GPUTarget)."""
+        driver, so export runs on GPU-less machines, and the arch is
+        per-compile state rather than per-process: CuTeDSL passes
+        --gpu-arch, Triton kinds install a fixed GPUTarget driver. One
+        process may therefore export for several arches."""
         raise NotImplementedError
-
-    @staticmethod
-    def _sm_number(arch: str) -> int:
-        # "sm_90a" / "sm_100" -> 90 / 100 (Triton GPUTarget arch int).
-        import re
-
-        m = re.fullmatch(r"sm_(\d+)a?", arch)
-        if not m:
-            raise ValueError(f"arch must look like sm_90a, got {arch!r}")
-        return int(m.group(1))
-
-    @classmethod
-    def _activate_triton_target(cls, arch: str):
-        """Point triton's active driver at an explicit GPUTarget so
-        compilation never queries a device (create_binder calls
-        driver.active.get_current_target() unconditionally; the stock
-        CudaDriver answers it via torch.cuda.current_device, which
-        initializes CUDA and throws on GPU-less machines). Returns the
-        GPUTarget. Process-wide, matching CUTE_DSL_ARCH's semantics on
-        the CuTeDSL side; export workers are per-arch processes."""
-        import triton
-        from triton.backends.compiler import GPUTarget
-        from triton.backends.nvidia.driver import CudaDriver
-
-        target = GPUTarget("cuda", cls._sm_number(arch), 32)
-
-        class _FixedTargetDriver(CudaDriver):
-            def get_current_target(self):
-                return target
-
-        triton.runtime.driver.set_active(_FixedTargetDriver())
-        return target
 
     def gen_launcher(self, sidecar: dict) -> str:
         """Emit the launch_<prefix>() helper for one sidecar."""
@@ -122,23 +94,61 @@ class CuteDslToolchain(Toolchain):
 {prefix}_Kernel_Module_t {prefix}_module;
 c10::once_flag {prefix}_loaded;
 
-void launch_{prefix}({tparams}, cudaStream_t stream) {{
+void launch_{prefix}({tparams}, c10::Stream stream) {{
   c10::call_once({prefix}_loaded, [] {{ {prefix}_Kernel_Module_Load(&{prefix}_module); }});
 {fills}
-  int32_t rc = cute_dsl_{prefix}_wrapper(&{prefix}_module, {call_args}, stream);
+  int32_t rc = cute_dsl_{prefix}_wrapper(&{prefix}_module, {call_args},
+                                         c10::cuda::CUDAStream(stream).stream());
   TORCH_CHECK(rc == 0, "{prefix} launch failed with code ", rc);
 }}
 """
 
+    _warmed_up = False
+
+    @classmethod
+    def _warm_up_exporter(cls) -> None:
+        """Build one JIT engine in this process so export_to_c works for
+        ANY --gpu-arch.
+
+        export_to_c ultimately calls export_module_to_bytes(...,
+        enable_pic=True), which needs the LLVM machinery that only gets
+        initialized when the DSL creates a JIT engine. dsl.py creates one
+        when `num_kernels == 0 or compile_gpu_arch == envar.arch`, so
+        without this a cross-arch export is the FIRST compile in a fresh
+        process and dies with "Failed to dump object file with PIC
+        relocation" -- while the very same call succeeds if any
+        engine-creating compile ran before it.
+
+        A kernel-free @cute.jit takes the num_kernels == 0 branch, so it
+        initializes the engine for any target: ~0.12s, once per process,
+        no CUDA device needed (verified GPU-less). That is what lets one
+        worker export for any mix of arches.
+        """
+        if cls._warmed_up:
+            return
+        # Defined in a helper module, not here: this file has `from
+        # __future__ import annotations`, which turns the jit function's
+        # parameter annotation into a string the DSL cannot resolve
+        # ("NameError: name 'Float32' is not defined").
+        from tools.native_aot.cutedsl_warmup import warm_up
+
+        warm_up()
+        cls._warmed_up = True
+
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
-        # arch: handled process-wide via CUTE_DSL_ARCH (set by export.py
-        # before any cutlass import; the DSL caches it at first read).
         import cutlass.cute as cute
 
         # Optional compile options (e.g. --enable-assertions). Must match
         # what the op's JIT wrapper passes (minus --enable-tvm-ffi, which
         # would change the exported ABI) or the two routes' SASS diverges.
         opts = b.get("options")
+        if arch:
+            # --gpu-arch is authoritative: dsl.py prefers
+            # compile_options.gpu_arch over the CUTE_DSL_ARCH env var, so
+            # one process can export for several arches (verified: three
+            # arches, three distinct objects, one pid).
+            opts = f"{opts} --gpu-arch {arch}" if opts else f"--gpu-arch {arch}"
+            self._warm_up_exporter()
         compiled = cute.compile(
             b["fn"], *b["fake_args"], **({"options": opts} if opts else {})
         )
@@ -168,7 +178,7 @@ void launch_{prefix}({tparams}, cudaStream_t stream) {{
                 # reads through it (declaration's read_only promise).
                 fills.append(f"  {n}_s.data = const_cast<void*>({n}.const_data_ptr());")
             else:
-                fills.append(f"  {n}_s.data = {n}.data_ptr();")
+                fills.append(f"  {n}_s.data = {n}.mutable_data_ptr();")
             for slot, dim in enumerate(a.get("dynamic_sizes", [])):
                 fills.append(
                     f"  {n}_s.dynamic_shapes[{slot}] = static_cast<int32_t>({n}.size({dim}));"

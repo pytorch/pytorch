@@ -17,14 +17,13 @@ on what actually launches; drift between it and covered_axes is benign
 """
 
 import functools
-import importlib.util
 import os
 from collections.abc import Callable
 from typing import Any
 
 import torch
-
-from ._spec_grid import expand_specs
+from torchgen.native_aot_decl import decl_id_for_op, load_by_path
+from torchgen.native_aot_spec_grid import expand_specs
 
 
 _OPS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ops")
@@ -59,9 +58,7 @@ class _Coverage:
             if ns is not None:
                 try:
                     # covers op name = decl_id (dots sanitized).
-                    self._cpp_covers = getattr(
-                        ns, f"covers_{self._op.replace('.', '_')}"
-                    )
+                    self._cpp_covers = getattr(ns, f"covers_{decl_id_for_op(self._op)}")
                 except (AttributeError, RuntimeError):
                     pass
         return self._cpp_covers
@@ -115,15 +112,12 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
         if not os.path.exists(path):
             continue
         # Loaded by file path (not package import) so tests can point
-        # _OPS_DIR at fixture directories. The full contract validation
-        # lives in tools/native_aot/decl.py (torchgen/export); here we
-        # need only the coverage pieces. A module is either one
-        # declaration or a family exporting declarations().
-        spec = importlib.util.spec_from_file_location(f"{entry}_aot", path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"cannot load declaration module from {path}")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        # _OPS_DIR at fixture directories. Deliberately skips the
+        # validating loader (load_declarations): the contract is checked
+        # at codegen time, and here we need only the coverage pieces. A
+        # module is either one declaration or a family exporting
+        # declarations().
+        mod = load_by_path(f"{entry}_aot", path)
         family = getattr(mod, "declarations", None)
         for d in family() if family is not None else [mod]:
             coverage[(d.ATEN_OP, d.DISPATCH_KEY)] = _Coverage(

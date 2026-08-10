@@ -75,6 +75,10 @@ class LazyBackend : public Backend {
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return primary_->getBackendOptions();
   }
+  void setGroupUid(const std::string& pg_uid) override {
+    Backend::setGroupUid(pg_uid);
+    primary_->setGroupUid(pg_uid);
+  }
 
   // ---- P2P: dispatched to per-peer 2-rank pair comms ----
   c10::intrusive_ptr<Work> send(
@@ -159,6 +163,12 @@ class LazyBackend : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts) override {
     return primary_->gather(outputTensors, inputTensors, opts);
+  }
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts) override {
+    return primary_->gather_single(outputBuffer, inputBuffer, opts);
   }
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
@@ -249,16 +259,38 @@ class LazyBackend : public Backend {
     }
   }
   ErrorType getError() override {
-    return primary_->getError();
+    auto error = primary_->getError();
+    if (error != ErrorType::SUCCESS) {
+      return error;
+    }
+    for (const auto& channel : snapshotPairComms()) {
+      error = channel->getError();
+      if (error != ErrorType::SUCCESS) {
+        return error;
+      }
+    }
+    return ErrorType::SUCCESS;
   }
   void suspend() override {
     primary_->suspend();
+    for (const auto& channel : snapshotPairComms()) {
+      channel->suspend();
+    }
   }
   void resume() override {
     primary_->resume();
+    for (const auto& channel : snapshotPairComms()) {
+      channel->resume();
+    }
   }
   std::unordered_map<std::string, uint64_t> getMemoryStats() override {
-    return primary_->getMemoryStats();
+    auto stats = primary_->getMemoryStats();
+    for (const auto& channel : snapshotPairComms()) {
+      for (const auto& [name, value] : channel->getMemoryStats()) {
+        stats[name] += value;
+      }
+    }
+    return stats;
   }
   void registerAbortHook(int64_t hook_id, AbortHook hook) override {
     abort_hooks_.emplace(hook_id, hook);
@@ -392,6 +424,16 @@ class LazyBackend : public Backend {
   }
 
  private:
+  std::vector<c10::intrusive_ptr<T>> snapshotPairComms() const {
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    std::vector<c10::intrusive_ptr<T>> channels;
+    channels.reserve(pair_comms_.size());
+    for (const auto& [_, channel] : pair_comms_) {
+      channels.push_back(channel);
+    }
+    return channels;
+  }
+
   // Per-pair monotonically increasing counter so successive pair-comm
   // allocations for the same {lo,hi} produce distinct names (and therefore
   // distinct store-bootstrap key namespaces). Both ranks of a pair increment
