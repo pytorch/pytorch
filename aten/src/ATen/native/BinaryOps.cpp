@@ -1409,9 +1409,8 @@ std::tuple<Tensor, Tensor> divmod(const Scalar& self, const Tensor& other) {
 
 std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Scalar& other) {
   // Returns a tuple (quotient, remainder) as per Python divmod semantics
-  auto scaler_tensor = wrapped_scalar_tensor(other);
-  auto quotient = at::floor_divide(self, scaler_tensor);
-  auto remainder = at::remainder(self, scaler_tensor);
+  auto quotient = at::floor_divide(self, other);
+  auto remainder = at::remainder(self, other);
   return std::make_tuple(quotient, remainder);
 }
 
