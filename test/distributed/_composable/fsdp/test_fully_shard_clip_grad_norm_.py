@@ -9,9 +9,11 @@ from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     MI350_ARCH,
     run_tests,
     skipIfRocmArch,
@@ -97,6 +99,8 @@ class _TestClipGradNormBase(FSDPTest):
 
 
 class TestClipGradNormWorldSize2(_TestClipGradNormBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
@@ -123,6 +127,8 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 4)
@@ -159,6 +165,20 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
                 0.5, norm_type, ref_model, ref_optim, model, optim, inp, dp_mesh
             )
 
+
+instantiate_device_type_tests(
+    TestClipGradNormWorldSize2,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestClipGradNormWorldSize4,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
