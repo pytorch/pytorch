@@ -170,7 +170,7 @@ try:
 
     # Implementation of Python semantics as Z3 expressions.
     #
-    # Z3 Real-Int theory has operators with semantics that differ that of
+    # Z3 Real-Int theory has operators with semantics that differ from that of
     # Python. Therefore, in order to get it right, we need to implement
     # the (Python) semantics we are relying on in Z3.
     @dataclass
@@ -284,7 +284,7 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_}
+        boolean_ops = {operator.not_, torch.sym_not}
         as_bool = op in boolean_ops
 
         # Lifts the function into 'z3.ExprRef' domain.
@@ -335,6 +335,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_not: lift(z3.Not),
             torch.sym_sum: lift(ops.sym_sum),
             torch.sym_ite: lift(lambda b, t, f: z3.If(b, t, f)),
             torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
@@ -456,19 +457,6 @@ try:
 
         def floor_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
             return self._ops.floor(x)
-
-        def expr_cond_pair(
-            self, expr: z3.ExprRef, cond: z3.BoolRef
-        ) -> tuple[z3.ExprRef, z3.BoolRef]:
-            return (expr, cond)
-
-        def piecewise(self, *pairs: tuple[z3.ExprRef, z3.BoolRef]) -> z3.ExprRef:
-            if not pairs:
-                raise AssertionError("expected at least one Piecewise pair")
-            result = pairs[-1][0]
-            for expr, cond in reversed(pairs[:-1]):
-                result = z3.If(cond, expr, result)
-            return result
 
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {

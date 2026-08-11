@@ -227,6 +227,38 @@ class TestMkldnn(TestCase):
                               'double precision floating point',
                               lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
+    def test_to_dense_torch_func_vjp(self):
+        root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn()
+
+        def method(x):
+            return x.to_dense()
+
+        def op(x):
+            return torch.ops.aten.to_dense.default(x)
+
+        for func in (method, op):
+            out, vjp_fn = torch.func.vjp(func, root)
+            self.assertFalse(out.is_mkldnn)
+            (grad,) = vjp_fn(torch.ones_like(out))
+            self.assertFalse(grad.is_mkldnn)
+            self.assertEqual(grad, torch.ones_like(out))
+
+    def test_sparse_to_dense_torch_func_vjp(self):
+        root = torch.randn(4, 5, dtype=torch.float32).to_sparse()
+
+        def method(x):
+            return x.to_dense()
+
+        def op(x):
+            return torch.ops.aten.to_dense.default(x)
+
+        for func in (method, op):
+            out, vjp_fn = torch.func.vjp(func, root)
+            self.assertEqual(out.layout, torch.strided)
+            (grad,) = vjp_fn(torch.ones_like(out))
+            self.assertEqual(grad.layout, torch.sparse_coo)
+            self.assertEqual(grad.to_dense(), torch.ones_like(out))
+
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
 

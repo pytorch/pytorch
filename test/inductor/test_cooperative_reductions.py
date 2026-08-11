@@ -143,13 +143,24 @@ class CooperativeReductionTests(TestCase):
         torch._dynamo.reset()
 
     def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1):
-        # Define fixed tolerances
-        RTOL = 1e-5
-        ATOL = 1e-6
+        # Cooperative reductions accumulate in a different order than eager, so a
+        # single fixed tolerance is too tight for large-magnitude reductions
+        # (e.g. sum over ~1M elements). Scale rtol with the input dtype's
+        # precision, keeping atol tight and the float64/default path tight. sum is
+        # a large-magnitude relative-error problem, so rtol alone covers it; a loose
+        # atol would slash sensitivity for small-magnitude outputs (softmax ~1e-6,
+        # mean over 1M ~1e-3) sharing this parametrization.
+        RTOL, ATOL = {
+            torch.float16: (1e-2, 1e-6),
+            torch.bfloat16: (1e-2, 1e-6),
+            torch.float32: (1e-3, 1e-6),
+        }.get(dtype, (1e-5, 1e-6))
 
-        # calculate reference value in higher precision when input dtype is float16
+        # Compute the reference in float64 for reduced-precision inputs so the
+        # eager baseline does not itself carry the same accumulation error that
+        # the compiled reduction does.
         ref_dtype = dtype
-        if dtype == torch.float16:
+        if dtype in (torch.float16, torch.float32):
             ref_dtype = torch.float64
 
         # Cast to the determined reference dtype
