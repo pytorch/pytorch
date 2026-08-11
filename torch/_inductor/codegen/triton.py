@@ -5273,8 +5273,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
         # Eager tree-reduces each tile before accumulating tiles linearly.
-        strict_sum = self._strict_sum_rblock() is not None and reduction_type == "sum"
+        strict_sum = self._strict_sum_rblock() is not None and reduction_type in (
+            "sum",
+            "prod",
+        )
         strict_sum_loop = strict_sum and not self.persistent_reduction
+        # Inner-tree combiner used to linear-accumulate the per-tile trees:
+        # "+" for sum, "*" for prod (identity 0.0 / 1.0 comes from `default`).
+        strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
         # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
@@ -5607,7 +5613,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 if strict_sum and not self.features.has_strict_sum_multirow_reduction():
                     zero = constant_repr(cast(Any, default))
-                    _result = f"{zero} + ({_result})"
+                    _result = f"{zero} {strict_op} ({_result})"
                 result_var = self.cse.generate(
                     self.compute, _result, dtype=_dtype, shape=_shape
                 )
@@ -5761,7 +5767,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dtype=chunk_dtype,
                     shape=chunk_shape,
                 )
-                self.compute.writeline(f"{accumulator} = {accumulator} + {chunk}")
+                self.compute.writeline(
+                    f"{accumulator} = {accumulator} {strict_op} {chunk}"
+                )
                 self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
