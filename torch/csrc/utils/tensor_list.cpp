@@ -11,9 +11,9 @@ using namespace at;
 
 namespace torch::utils {
 
-// Recursively materialize a fake tensor into nested Python lists via item(),
-// which routes through the active fake mode (returning symbolic scalars, or
-// raising for unbacked values) rather than reading storage that fakes lack.
+// A fake tensor has no real storage, so the default tolist() (which reads the
+// data pointer) does not work. Recurse with item() instead, which dispatches
+// through the active fake mode rather than touching storage.
 PyObject* fake_tensor_to_list(const Tensor& tensor) {
   if (tensor.dim() == 0) {
     return py::cast(tensor.item()).release().ptr();
