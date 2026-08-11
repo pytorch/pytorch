@@ -95,7 +95,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # 16 workers: this still creates a GPU-attached SubprocPool (unlike a single
     # thread, which runs compilation inline with no pool) but bounds the number of
     # concurrent GPU-attached workers below the oversubscription threshold.
-    export TORCHINDUCTOR_COMPILE_THREADS=32
+    export TORCHINDUCTOR_COMPILE_THREADS=4
 fi
 
 export VALGRIND=ON
