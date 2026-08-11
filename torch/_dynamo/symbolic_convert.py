@@ -547,11 +547,11 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
         def fn(x: Any) -> None:
-            assert x, "msg"  # noqa: S101
+            assert x, "msg"  # noqa: S101  # function is to recognize assert statements in user code
     else:
 
         def fn(x: Any) -> None:
-            assert x  # noqa: S101
+            assert x  # noqa: S101  # function is to recognize assert statements in user code
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
@@ -2269,11 +2269,10 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
-        name = inst.argval
-        var = self.symbolic_locals.get(name)
+        var = self.symbolic_locals.get(inst.argval)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[name]
+        del self.symbolic_locals[inst.argval]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
@@ -2706,7 +2705,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.getattro_impl(
+        tb = exc.tp_getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2878,7 +2877,7 @@ class InstructionTranslatorBase(
                     "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.getattro_impl(
+            tb = val.tp_getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2897,7 +2896,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.getattro_impl(self, "__traceback__")
+            tb = val.tp_getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -3360,10 +3359,11 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
-                "LOAD_ATTR method variant should have been normalized by "
-                "remove_load_attr_method_variant in cleaned_instructions"
-            )
+            if inst.arg is None or inst.arg % 2 != 0:
+                raise AssertionError(
+                    "LOAD_ATTR method variant should have been normalized by "
+                    "remove_load_attr_method_variant in cleaned_instructions"
+                )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -3397,7 +3397,7 @@ class InstructionTranslatorBase(
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid getattro_impl here because it
+        # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -3951,8 +3951,7 @@ class InstructionTranslatorBase(
         #         frame N stack + locals,
         #         ...,
         #         frame 2 stack + locals,
-        #     ],
-        #     [frame 1 stack + locals],
+        #     ], *(frame 1 stack + locals)
         # ]
         cg.extend_output(
             [
@@ -3970,25 +3969,17 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
-        if ContinueExecutionCache.uses_boxed_call(resume_codes[-1]):
-            cg.extend_output(
-                [
-                    # [remaining resumes, frames, [frame 1 stack + locals]]
-                    create_instruction("BUILD_LIST", arg=3),
-                ]
-            )
-        else:
-            cg.extend_output(
-                [
-                    *create_rot_n(3),
-                    create_instruction("BUILD_LIST", arg=2),
-                    *create_swap(2),
-                    # [remaining resumes, frames], frame 1 stack + locals
-                    create_instruction("LIST_EXTEND", arg=1),
-                ]
-            )
+        cg.extend_output(
+            [
+                *create_rot_n(3),
+                create_instruction("BUILD_LIST", arg=2),
+                *create_swap(2),
+                # [resumes, frames (popped)], frame 1 stack + locals
+                create_instruction("LIST_EXTEND", arg=1),
+            ]
+        )
 
-        # TOS: resume 1, resume call args
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
