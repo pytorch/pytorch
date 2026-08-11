@@ -311,6 +311,24 @@ def create_process_group(backend):
 
 
 class TestPyBackend(TestCase):
+    def test_partial_capability_overrides(self) -> None:
+        # A Python backend need not define every capability property. The ones
+        # it leaves out must fall back to the C++ default rather than resolving
+        # to Backend's own binding, which would call back in and recurse.
+        class PartialBackend(C10DBackend):
+            @property
+            def supports_reconfigure(self):
+                return True
+
+        backend = PartialBackend(0, 1)
+        group = create_process_group(backend)
+
+        self.assertTrue(backend.supports_reconfigure)
+        self.assertTrue(group.supports_reconfigure)
+        self.assertFalse(group.supports_window)
+        for attr in ("supports_splitting", "supports_coalescing"):
+            self.assertFalse(getattr(backend, attr))
+
     def test_attr_overrides(self) -> None:
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)

@@ -80,6 +80,20 @@ class LazyBackend : public Backend {
     primary_->setGroupUid(pg_uid);
   }
 
+  // Only the capabilities this wrapper actually routes to the primary are
+  // forwarded; the rest (shrinking, abort hooks) fall back to the base default
+  // even when the primary supports them.
+  BackendCapabilities capabilities() const override {
+    constexpr BackendCapabilities kForwarded = {
+        BackendCapability::Coalescing,
+        BackendCapability::TimeEstimation,
+        BackendCapability::Window,
+        BackendCapability::Reconfigure,
+        BackendCapability::Splitting,
+        BackendCapability::CompletionHooks};
+    return primary_->capabilities() & kForwarded;
+  }
+
   // ---- P2P: dispatched to per-peer 2-rank pair comms ----
   c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& tensors,
@@ -101,9 +115,6 @@ class LazyBackend : public Backend {
   }
 
   // Batched P2P stays on the primary (multiple peers per group).
-  bool supportsCoalescing() const override {
-    return primary_->supportsCoalescing();
-  }
   void startCoalescing() override {
     primary_->startCoalescing();
     coalescing_active_ = true;
@@ -113,9 +124,6 @@ class LazyBackend : public Backend {
     return primary_->endCoalescing();
   }
 
-  bool supportsTimeEstimation() const override {
-    return primary_->supportsTimeEstimation();
-  }
   void startTimeEstimate() override {
     primary_->startTimeEstimate();
   }
@@ -224,9 +232,6 @@ class LazyBackend : public Backend {
   }
 
   // ---- Windows / memory: forwarded to the primary comm ----
-  bool supportsWindow() const override {
-    return primary_->supportsWindow();
-  }
   c10::intrusive_ptr<Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) override {
     return primary_->new_window(tensor);
@@ -324,9 +329,6 @@ class LazyBackend : public Backend {
       channel->unregisterAbortHook(hook_id);
     }
   }
-  bool supportsCompletionHooks() const override {
-    return primary_->supportsCompletionHooks();
-  }
   void registerCompletionHook(int64_t hook_id, CompletionHook hook) override {
     completion_hooks_.emplace(hook_id, hook);
     primary_->registerCompletionHook(hook_id, hook);
@@ -346,9 +348,6 @@ class LazyBackend : public Backend {
 
   // Reconfigure: the primary reconfigures in place; stale pair comms (built
   // for the previous membership) are aborted and rebuilt lazily on demand.
-  bool supportsReconfigure() const override {
-    return primary_->supportsReconfigure();
-  }
   ReconfigureHandle get_reconfigure_handle() const override {
     return primary_->get_reconfigure_handle();
   }
@@ -365,9 +364,6 @@ class LazyBackend : public Backend {
   }
 
   // ---- Splitting: split the collective (primary) comm only ----
-  bool supportsSplitting() const override {
-    return primary_->supportsSplitting();
-  }
   // Split just the primary comm; the child is a bare backend for the subgroup.
   // We deliberately don't split the P2P pair comms: like a reconfigure, they
   // encode the parent membership's global ranks and can't be carried into the

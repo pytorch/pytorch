@@ -502,12 +502,19 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertIsInstance(wrapper, _ProcessGroupWrapper)
             unwrapped = wrapper.wrapped_pg
 
-            # Verify wrapper forwards property/method calls to wrapped backend
+            # Verify wrapper forwards property/method calls to wrapped backend.
+            # These all come from the wrapped backend's capabilities() bitset,
+            # so the wrapper cannot forward a subset of them by accident.
             self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
             self.assertEqual(wrapper.supports_coalescing, unwrapped.supports_coalescing)
             self.assertEqual(
                 wrapper._supports_time_estimate, unwrapped._supports_time_estimate
             )
+            self.assertEqual(wrapper.supports_shrinking, unwrapped.supports_shrinking)
+            self.assertEqual(
+                wrapper.supports_reconfigure, unwrapped.supports_reconfigure
+            )
+            self.assertEqual(wrapper.supports_window, unwrapped.supports_window)
             self.assertEqual(
                 wrapper.supports_tensor_alloc(device),
                 unwrapped.supports_tensor_alloc(device),
@@ -608,6 +615,20 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
     def test_collective_hang(self):
         pg = self._create_wrapper_pg(timeout=2.0)
         self._test_collective_hang(pg)
+
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_wrapper_forwards_capabilities(self):
+        """
+        Gloo advertises reconfigure support, so this catches a wrapper that
+        forwards only some of the wrapped backend's capabilities. See #173538.
+        """
+        wrapper = self._create_wrapper_pg(with_new_group=False)
+        unwrapped = wrapper.wrapped_pg
+
+        self.assertTrue(unwrapped.supports_reconfigure)
+        self.assertEqual(wrapper.supports_reconfigure, unwrapped.supports_reconfigure)
+        self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
+        self.assertEqual(wrapper.supports_window, unwrapped.supports_window)
 
     # NOTE: these tests are separated by debug level instead of combined into
     # one due to https://github.com/pytorch/pytorch/issues/55967, they can be

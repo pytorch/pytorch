@@ -382,14 +382,31 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
   return window;
 }
 
-bool ProcessGroupNCCL::supportsWindow() const {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
-  int runtime_version = 0;
-  return ncclGetVersion(&runtime_version) == ncclSuccess &&
-      runtime_version >= NCCL_VERSION(2, 29, 0);
-#else
-  return false;
+::c10d::BackendCapabilities ProcessGroupNCCL::capabilities() const {
+  ::c10d::BackendCapabilities caps = {
+      ::c10d::BackendCapability::Coalescing,
+      ::c10d::BackendCapability::Splitting,
+      ::c10d::BackendCapability::AbortHooks,
+      ::c10d::BackendCapability::CompletionHooks};
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  caps |= ::c10d::BackendCapability::TimeEstimation;
 #endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  caps |= ::c10d::BackendCapability::Shrinking;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+  caps |= ::c10d::BackendCapability::Reconfigure;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
+  // Windows additionally need the runtime NCCL to be new enough, not just the
+  // headers we compiled against.
+  int runtime_version = 0;
+  caps.set(
+      ::c10d::BackendCapability::Window,
+      ncclGetVersion(&runtime_version) == ncclSuccess &&
+          runtime_version >= NCCL_VERSION(2, 29, 0));
+#endif
+  return caps;
 }
 
 // ---------------------------------------------------------------------------

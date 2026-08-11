@@ -1,5 +1,8 @@
 #pragma once
 
+#include <iterator>
+#include <utility>
+
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/py/PyProcessGroup.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -361,35 +364,29 @@ class PyBackend : public Backend {
   // These are bound as def_property_readonly, so Python subclasses override
   // them with @property. get_override won't find @property descriptors, so
   // we use py::getattr to access them through normal Python attribute
-  // resolution, which handles both @property and regular methods.
+  // resolution, which handles both @property and regular methods. Each
+  // capability keeps its own Python property; only the C++ side is bundled.
 
-  bool supportsSplitting() const override {
-    return getPropertyOverride(
-        "supports_splitting", Backend::supportsSplitting());
-  }
-
-  bool supportsCoalescing() const override {
-    return getPropertyOverride(
-        "supports_coalescing", Backend::supportsCoalescing());
-  }
-
-  bool supportsTimeEstimation() const override {
-    return getPropertyOverride(
-        "_supports_time_estimate", Backend::supportsTimeEstimation());
-  }
-
-  bool supportsShrinking() const override {
-    return getPropertyOverride(
-        "supports_shrinking", Backend::supportsShrinking());
-  }
-
-  bool supportsReconfigure() const override {
-    return getPropertyOverride(
-        "supports_reconfigure", Backend::supportsReconfigure());
-  }
-
-  bool supportsWindow() const override {
-    return getPropertyOverride("supports_window", Backend::supportsWindow());
+  BackendCapabilities capabilities() const override {
+    static constexpr std::pair<BackendCapability, const char*> kProperties[] = {
+        {BackendCapability::Splitting, "supports_splitting"},
+        {BackendCapability::Coalescing, "supports_coalescing"},
+        {BackendCapability::TimeEstimation, "_supports_time_estimate"},
+        {BackendCapability::Shrinking, "supports_shrinking"},
+        {BackendCapability::Reconfigure, "supports_reconfigure"},
+        {BackendCapability::Window, "supports_window"},
+        {BackendCapability::AbortHooks, "supports_abort_hooks"},
+        {BackendCapability::CompletionHooks, "supports_completion_hooks"},
+    };
+    static_assert(
+        std::size(kProperties) == kNumBackendCapabilities,
+        "every BackendCapability needs a Python property name here");
+    pybind11::gil_scoped_acquire gil;
+    BackendCapabilities caps = Backend::capabilities();
+    for (const auto& [cap, name] : kProperties) {
+      caps.set(cap, getPropertyOverride(name, caps.has(cap)));
+    }
+    return caps;
   }
 
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
@@ -519,13 +516,22 @@ class PyBackend : public Backend {
     pybind11::gil_scoped_acquire gil;
     auto self = pybind11::cast(this);
     auto cls = pybind11::type::of(self);
-    if (pybind11::hasattr(cls, name)) {
-      auto attr = cls.attr(name);
-      if (!pybind11::isinstance<pybind11::cpp_function>(attr)) {
-        return pybind11::getattr(self, name).cast<bool>();
-      }
+    if (!pybind11::hasattr(cls, name)) {
+      return defaultValue;
     }
-    return defaultValue;
+    auto attr = cls.attr(name);
+    if (pybind11::isinstance<pybind11::cpp_function>(attr)) {
+      return defaultValue;
+    }
+    // If the attribute resolves to the very same object Backend itself binds,
+    // the subclass did not override it and we merely inherited the C++
+    // def_property_readonly. Reading it would call straight back into this
+    // Backend and recurse until the stack runs out.
+    auto base = pybind11::type::of<Backend>();
+    if (pybind11::hasattr(base, name) && attr.is(base.attr(name))) {
+      return defaultValue;
+    }
+    return pybind11::getattr(self, name).cast<bool>();
   }
 };
 

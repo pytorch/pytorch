@@ -79,12 +79,32 @@ See [`Backend.hpp`][Backend.hpp] for the full list of virtual methods and their 
 
 ### Optional Capabilities
 
-Backends can advertise optional capabilities by overriding the following methods:
+Backends advertise optional capabilities by overriding `capabilities()`, which
+returns the set of `BackendCapability` bits the backend supports. Any bit left
+out of the returned set is unsupported.
 
-| Method                    | Default  | Description                                           |
-| :---                      | :---     | :---                                                  |
-| `supportsSplitting()`     | `false`  | Process group splitting support                       |
-| `supportsCoalescing()`    | `false`  | Coalesced collective operations                       |
+| Capability                            | Description                            |
+| :---                                  | :---                                   |
+| `BackendCapability::Splitting`        | Process group splitting support        |
+| `BackendCapability::Coalescing`       | Coalesced collective operations        |
+| `BackendCapability::TimeEstimation`   | Collective time estimation             |
+| `BackendCapability::Shrinking`        | Communicator shrinking                 |
+| `BackendCapability::Reconfigure`      | Fault-tolerant reconfiguration         |
+| `BackendCapability::Window`           | One-sided (RMA) windows                |
+| `BackendCapability::AbortHooks`       | Hooks run before the backend aborts    |
+| `BackendCapability::CompletionHooks`  | Hooks run when an operation completes  |
+
+```cpp
+c10d::BackendCapabilities capabilities() const override {
+  return {
+      c10d::BackendCapability::Splitting,
+      c10d::BackendCapability::Coalescing};
+}
+```
+
+Build the set from a braced list rather than combining bits one at a time:
+`std::bitset` cannot be mutated in a constant expression until C++23, so only
+the braced form folds at compile time.
 
 ## Implementation
 

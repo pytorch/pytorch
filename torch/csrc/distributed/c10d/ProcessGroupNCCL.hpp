@@ -824,20 +824,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return std::string(NCCL_BACKEND_NAME);
   }
 
-  bool supportsSplitting() const override {
-    return true;
-  }
-
-  bool supportsCoalescing() const override {
-    return true;
-  }
-
-  bool supportsTimeEstimation() const override {
+  BackendCapabilities capabilities() const override {
+    BackendCapabilities caps = {
+        BackendCapability::Splitting, BackendCapability::Coalescing};
 #ifdef NCCL_SIM_INFO_INITIALIZER
-    return true;
-#else
-    return false;
+    caps |= BackendCapability::TimeEstimation;
 #endif
+#ifdef NCCL_HAS_COMM_SHRINK
+    caps |= BackendCapability::Shrinking;
+#endif
+    return caps;
   }
 
   void setTimeout(std::chrono::milliseconds timeout) override {
@@ -1022,14 +1018,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool isInitialized();
 
   ErrorType getError() override;
-
-  bool supportsShrinking() const override {
-#ifdef NCCL_HAS_COMM_SHRINK
-    return true;
-#else
-    return false;
-#endif
-  }
 
   // Backend-style shrink override that returns a Backend instance.
   c10::intrusive_ptr<Backend> shrink(

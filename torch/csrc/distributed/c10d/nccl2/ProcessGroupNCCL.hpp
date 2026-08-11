@@ -227,26 +227,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       int srcRank,
       int tag) override;
 
-  bool supportsCoalescing() const override {
-    return true;
-  }
-  bool supportsTimeEstimation() const override {
-#ifdef NCCL_SIM_INFO_INITIALIZER
-    return true;
-#else
-    return false;
-#endif
-  }
-  bool supportsSplitting() const override {
-    return true;
-  }
-  bool supportsShrinking() const override {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-    return true;
-#else
-    return false;
-#endif
-  }
+  // Out of line: the window capability needs a runtime ncclGetVersion check.
+  ::c10d::BackendCapabilities capabilities() const override;
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
   void startTimeEstimate() override;
@@ -295,13 +277,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // current communicator generation (if any) and bootstraps a fresh ncclComm
   // over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
-  bool supportsReconfigure() const override {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
-    return true;
-#else
-    return false;
-#endif
-  }
   ::c10d::ReconfigureHandle get_reconfigure_handle() const override;
   c10::intrusive_ptr<::c10d::Work> reconfigure(
       const ::c10d::ReconfigureOptions& opts) override;
@@ -312,7 +287,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // registers each mempool segment with the communicator and WindowNCCL
   // lazily upgrades the segment to a collective NCCL_WIN_COLL_SYMMETRIC
   // window on first use. Requires NCCL 2.29+ at runtime.
-  bool supportsWindow() const override;
   c10::intrusive_ptr<::c10d::Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
 
@@ -339,15 +313,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // if it is not one already. Collective: all ranks must call it together.
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
-  bool supportsAbortHooks() const override {
-    return true;
-  }
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
 
-  bool supportsCompletionHooks() const override {
-    return true;
-  }
   void registerCompletionHook(int64_t hook_id, ::c10d::CompletionHook hook)
       override;
   void unregisterCompletionHook(int64_t hook_id) override;

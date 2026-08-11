@@ -36,8 +36,12 @@ class TORCH_API ProcessGroupNCCLLazy
     return std::string(kBackendName);
   }
 
-  bool supportsReconfigure() const override {
-    return false;
+  // Reconfigure is deliberately dropped: the wrapper would otherwise forward
+  // the primary's support, but the pair comms cannot be carried across one.
+  ::c10d::BackendCapabilities capabilities() const override {
+    auto caps = ::c10d::LazyBackend<ProcessGroupNCCL>::capabilities();
+    caps.set(::c10d::BackendCapability::Reconfigure, false);
+    return caps;
   }
 
   ::c10d::ReconfigureHandle get_reconfigure_handle() const override {

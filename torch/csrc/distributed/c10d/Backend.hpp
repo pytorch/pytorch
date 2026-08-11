@@ -1,5 +1,8 @@
 #pragma once
 
+#include <bitset>
+#include <cstddef>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -29,6 +32,12 @@
 // interface. Downstream backends can guard their overrides with #ifdef.
 #define C10D_BACKEND_HAS_WINDOW 1
 
+// Feature macro: when defined, c10d::Backend (and ProcessGroup) advertise
+// their static capabilities through a single virtual, capabilities(), rather
+// than one virtual per capability. Downstream backends can guard their
+// overrides with #ifdef to build against both old and new c10d headers.
+#define C10D_BACKEND_HAS_CAPABILITIES 1
+
 // Feature macro: when defined, c10d::Backend exposes abort-hook registration
 // and c10d::ProcessGroup additionally exposes pre/post collective hooks (see
 // Hooks.hpp). Downstream backends can guard their overrides with #ifdef.
@@ -47,6 +56,85 @@ enum class ErrorType {
   // TODO, do we need to distinguish between remote timeout or remote COMM
   // errors?
   REMOTE_ERROR = 3
+};
+
+// A static, backend-wide capability. These describe what a backend can do at
+// all Values are bit positions; COUNT must stay
+// last so it always equals the number of capabilities.
+enum class BackendCapability : size_t {
+  Splitting,
+  Coalescing,
+  TimeEstimation,
+  Shrinking,
+  Reconfigure,
+  Window,
+  AbortHooks,
+  CompletionHooks,
+  // Add new capability here
+  COUNT,
+  // DO NOT EDIT BEYOND COUNT
+};
+
+inline constexpr size_t kNumBackendCapabilities =
+    static_cast<size_t>(BackendCapability::COUNT);
+static_assert(
+    kNumBackendCapabilities <= 64,
+    "capability sets are assembled through a 64-bit mask");
+
+// The set of capabilities a backend advertises. Backends report all of them at
+// once via a single Backend::capabilities() virtual: the capability list grows
+// over time, and one virtual per capability costs every backend a vtable slot
+// while making each query an indirect call that cannot be folded.
+//
+// std::bitset's mutating members (set / operator|= / test) are not constexpr
+// until C++23, but its unsigned-long-long constructor and const operator[]
+// are. Compile-time sets are therefore assembled as a raw mask and handed to
+// the bitset once, and always read back through operator[].
+class BackendCapabilities {
+ public:
+  constexpr BackendCapabilities() = default;
+
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  constexpr BackendCapabilities(BackendCapability cap) : bits_(maskOf({cap})) {}
+
+  constexpr BackendCapabilities(std::initializer_list<BackendCapability> caps)
+      : bits_(maskOf(caps)) {}
+
+  constexpr bool has(BackendCapability cap) const {
+    return bits_[static_cast<size_t>(cap)];
+  }
+
+  BackendCapabilities& set(BackendCapability cap, bool value) {
+    bits_.set(static_cast<size_t>(cap), value);
+    return *this;
+  }
+
+  BackendCapabilities& operator|=(BackendCapabilities other) {
+    bits_ |= other.bits_;
+    return *this;
+  }
+
+  // Masking is useful for wrappers that only forward a subset of the wrapped
+  // backend's capabilities.
+  BackendCapabilities operator&(BackendCapabilities other) const {
+    return BackendCapabilities(bits_ & other.bits_);
+  }
+
+ private:
+  using Bits = std::bitset<kNumBackendCapabilities>;
+
+  explicit constexpr BackendCapabilities(Bits bits) : bits_(bits) {}
+
+  static constexpr unsigned long long maskOf(
+      std::initializer_list<BackendCapability> caps) {
+    unsigned long long mask = 0;
+    for (auto cap : caps) {
+      mask |= 1ULL << static_cast<size_t>(cap);
+    }
+    return mask;
+  }
+
+  Bits bits_;
 };
 
 namespace {
@@ -154,19 +242,27 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     use_pg_for_symm_mem_rendezvous_ = value;
   }
 
-  virtual bool supportsSplitting() const {
-    return false;
+  // Advertise this backend's static capabilities. Subclasses override this
+  // single method instead of one accessor per capability; the supportsX()
+  // accessors below are non-virtual views onto the returned set.
+  virtual BackendCapabilities capabilities() const {
+    return {};
   }
 
-  virtual bool supportsCoalescing() const {
-    return false;
+  bool supportsSplitting() const {
+    return capabilities().has(BackendCapability::Splitting);
   }
 
-  // Experimental collective time-estimation API. Backends that return true
-  // must simulate collectives issued between startTimeEstimate() and
-  // endTimeEstimate(), which returns the estimated duration in microseconds.
-  virtual bool supportsTimeEstimation() const {
-    return false;
+  bool supportsCoalescing() const {
+    return capabilities().has(BackendCapability::Coalescing);
+  }
+
+  // Experimental collective time-estimation API. Backends advertising
+  // BackendCapability::TimeEstimation must simulate collectives issued between
+  // startTimeEstimate() and endTimeEstimate(), which returns the estimated
+  // duration in microseconds.
+  bool supportsTimeEstimation() const {
+    return capabilities().has(BackendCapability::TimeEstimation);
   }
 
   virtual void startTimeEstimate() {
@@ -183,8 +279,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support time estimation"));
   }
 
-  virtual bool supportsShrinking() const {
-    return false;
+  bool supportsShrinking() const {
+    return capabilities().has(BackendCapability::Shrinking);
   }
 
   // Shrink the backend by excluding specified ranks. Backends that support
@@ -218,12 +314,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   // Fault Tolerance / Reconfigure API
   //
-  // Backends that support dynamic membership override these.
-  // supportsReconfigure advertises support; get_reconfigure_handle returns an
-  // opaque handle that peers exchange out-of-band; reconfigure (re)initializes
-  // the communicator with a new set of peers.
-  virtual bool supportsReconfigure() const {
-    return false;
+  // Backends that support dynamic membership advertise
+  // BackendCapability::Reconfigure and override these.
+  // get_reconfigure_handle returns an opaque handle that peers exchange
+  // out-of-band; reconfigure (re)initializes the communicator with a new set
+  // of peers.
+  bool supportsReconfigure() const {
+    return capabilities().has(BackendCapability::Reconfigure);
   }
 
   virtual ReconfigureHandle get_reconfigure_handle() const {
@@ -245,12 +342,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   // Window & One-sided (RMA) API
   //
-  // Backends that support one-sided operations advertise it via supportsWindow
-  // and return a concrete c10d::Window from new_window. The optional tensor, if
-  // provided, is registered with the new window. new_window is collective: all
-  // ranks in the backend must call it in the same order.
-  virtual bool supportsWindow() const {
-    return false;
+  // Backends that support one-sided operations advertise
+  // BackendCapability::Window and return a concrete c10d::Window from
+  // new_window. The optional tensor, if provided, is registered with the new
+  // window. new_window is collective: all ranks in the backend must call it in
+  // the same order.
+  bool supportsWindow() const {
+    return capabilities().has(BackendCapability::Window);
   }
 
   virtual c10::intrusive_ptr<Window> new_window(
@@ -265,10 +363,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Abort hooks are invoked before the backend aborts on a timeout or error,
   // letting users capture debug information. Hooks are keyed by an opaque
   // hook_id so they can be individually unregistered. Backends that implement
-  // them must advertise it via supportsAbortHooks, so a caller can tell "this
-  // backend has no abort hooks" from a registration that genuinely failed.
-  virtual bool supportsAbortHooks() const {
-    return false;
+  // them must advertise BackendCapability::AbortHooks, so a caller can tell
+  // "this backend has no abort hooks" from a registration that genuinely
+  // failed.
+  bool supportsAbortHooks() const {
+    return capabilities().has(BackendCapability::AbortHooks);
   }
 
   virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
@@ -296,10 +395,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // collect its work queue. Same hook_id keying and same capability query as
   // the abort hooks above; see Hooks.hpp for what is reported and the threading
   // contract. A backend without them leaves its consumers to poll, so
-  // supportsCompletionHooks is what lets a caller choose a fallback rather than
-  // catch a throw.
-  virtual bool supportsCompletionHooks() const {
-    return false;
+  // BackendCapability::CompletionHooks is what lets a caller choose a fallback
+  // rather than catch a throw.
+  bool supportsCompletionHooks() const {
+    return capabilities().has(BackendCapability::CompletionHooks);
   }
 
   virtual void registerCompletionHook(

@@ -82,8 +82,8 @@ class FakeProcessGroup : public Backend {
     // Backend base class emits for unsupported backends.
   }
 
-  bool supportsSplitting() const override {
-    return true;
+  BackendCapabilities capabilities() const override {
+    return {BackendCapability::Splitting};
   }
 
   // Create a sub-group from a subset of the parent's ranks. The fake backend

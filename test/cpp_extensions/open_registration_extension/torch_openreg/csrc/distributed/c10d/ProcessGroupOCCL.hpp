@@ -59,10 +59,6 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     return std::string(OCCL_BACKEND_NAME);
   }
 
-  bool supportsSplitting() const override {
-    return false;
-  }
-
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }

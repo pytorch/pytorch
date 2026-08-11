@@ -586,16 +586,8 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {
   return backend_->endCoalescing();
 }
 
-bool ProcessGroupWrapper::supportsSplitting() const {
-  return backend_->supportsSplitting();
-}
-
-bool ProcessGroupWrapper::supportsCoalescing() const {
-  return backend_->supportsCoalescing();
-}
-
-bool ProcessGroupWrapper::supportsTimeEstimation() const {
-  return backend_->supportsTimeEstimation();
+BackendCapabilities ProcessGroupWrapper::capabilities() const {
+  return backend_->capabilities();
 }
 
 void ProcessGroupWrapper::startTimeEstimate() {
@@ -604,10 +596,6 @@ void ProcessGroupWrapper::startTimeEstimate() {
 
 float ProcessGroupWrapper::endTimeEstimate() {
   return backend_->endTimeEstimate();
-}
-
-bool ProcessGroupWrapper::supportsShrinking() const {
-  return backend_->supportsShrinking();
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::shrink(

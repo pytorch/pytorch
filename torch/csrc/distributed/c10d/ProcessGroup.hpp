@@ -1077,13 +1077,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
   }
 
+  // Capabilities of the default backend; see Backend.hpp for semantics.
+  virtual BackendCapabilities capabilities() const {
+    return getDefaultBackend()->capabilities();
+  }
+
   // Fault Tolerance / Reconfigure API. Forwards to the default backend; see
   // Backend.hpp for semantics.
-  virtual bool supportsReconfigure() const {
+  bool supportsReconfigure() const {
     TORCH_CHECK(
         !hasMultipleBackends(),
         "ProcessGroup reconfigure APIs do not support process groups with multiple backends.");
-    return getDefaultBackend()->supportsReconfigure();
+    return capabilities().has(BackendCapability::Reconfigure);
   }
 
   virtual ReconfigureHandle get_reconfigure_handle() const {
@@ -1102,8 +1107,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Window & One-sided (RMA) API. Forwards to the default backend; see
   // Backend.hpp and Window.hpp for semantics.
-  virtual bool supportsWindow() const {
-    return getDefaultBackend()->supportsWindow();
+  bool supportsWindow() const {
+    return capabilities().has(BackendCapability::Window);
   }
 
   virtual c10::intrusive_ptr<Window> new_window(
@@ -1117,8 +1122,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // opaque hook_id so they can be individually unregistered. Registration is
   // expected to happen at setup time, not concurrently with collectives. See
   // Hooks.hpp.
-  virtual bool supportsAbortHooks() const {
-    return getDefaultBackend()->supportsAbortHooks();
+  bool supportsAbortHooks() const {
+    return capabilities().has(BackendCapability::AbortHooks);
   }
 
   virtual void registerAbortHook(int64_t hook_id, AbortHook hook) {
@@ -1132,8 +1137,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Completion hooks forward to the default backend for the same reason abort
   // hooks do: completion is detected inside the backend, not by the dispatcher
   // kernels that fire the pre/post hooks below.
-  virtual bool supportsCompletionHooks() const {
-    return getDefaultBackend()->supportsCompletionHooks();
+  bool supportsCompletionHooks() const {
+    return capabilities().has(BackendCapability::CompletionHooks);
   }
 
   virtual void registerCompletionHook(int64_t hook_id, CompletionHook hook) {

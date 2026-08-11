@@ -271,12 +271,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
     return std::string(GLOO_BACKEND_NAME);
   }
 
-  bool supportsSplitting() const override {
-    return true;
-  }
-
-  bool supportsReconfigure() const override {
-    return true;
+  BackendCapabilities capabilities() const override {
+    return {BackendCapability::Splitting, BackendCapability::Reconfigure};
   }
 
   // Helper functions to create a new device object.
