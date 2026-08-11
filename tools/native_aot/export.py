@@ -23,8 +23,8 @@ naming the missing keys.
 
 Idempotent: existing artifacts are skipped unless --force.
 
-Spec points compile on a forkserver process pool; results are
-byte-identical to a serial run (verified by test). --jobs follows the
+Spec points compile on a forkserver process pool. Each point is
+independent, so results do not depend on --jobs. --jobs follows the
 torch build's parallelism (MAX_JOBS, then CMAKE_BUILD_PARALLEL_LEVEL,
 then half the CPU count); --jobs 1 forces serial. Plain fork is
 unusable: the parent has initialized CUDA and forked workers inherit a
@@ -174,10 +174,32 @@ def export_point(
     identically inline and as a pool job. ``arch`` is an explicit sm
     string, passed through to the toolchain (CuTeDSL takes it as
     --gpu-arch, Triton as a fixed GPUTarget); no process-global state, so
-    one process may serve any mix of arches."""
-    build = load_builder(op_pkg, kernel_module)
-    b = build(point)
+    one process may serve any mix of arches.
+
+    A missing DSL runtime is FATAL here, not a skip: a declaration that
+    reaches this point targets this build's backend (build_stage2 filtered
+    on Toolchain.BACKENDS), so its kernels were asked for, and exporting
+    only some of them would ship a wheel that silently underperforms.
+    Build without the DSL wheels via TORCH_NATIVE_AOT=0 instead. The
+    ImportError arm exists because a builder cannot be asked its kind
+    without importing its runtime -- build() constructs the kernel."""
+    try:
+        build = load_builder(op_pkg, kernel_module)
+        b = build(point)
+    except ImportError as e:
+        raise RuntimeError(
+            f"{op_pkg}: cannot export, DSL runtime not installed "
+            f"({e.name or e}). Install it, or set TORCH_NATIVE_AOT=0 to "
+            f"build without embedded DSL kernels."
+        ) from e
     tc = toolchains.get_toolchain(b.get("kind", "cutedsl"))
+    missing = tc.missing_runtimes()
+    if missing:
+        raise RuntimeError(
+            f"{op_pkg}: cannot export, {tc.kind} needs {', '.join(missing)}. "
+            f"Install them, or set TORCH_NATIVE_AOT=0 to build without "
+            f"embedded DSL kernels."
+        )
     tc.validate_build_result(b)
     prefix = b["prefix"]
     extra = tc.export(b, out_dir, arch=arch)
@@ -353,7 +375,7 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
 # Which TORCH_CUDA_ARCH_LIST entries are ELIGIBLE for AOT kernels on the
 # automatic export path. A filter, never a build list: it cannot cause an
 # export, only permit one, and an explicit --arch bypasses it. So a list
-# with no eligible entry exports nothing and stage 2 skips silently.
+# with no eligible entry exports nothing and stage 2 skips, printing why.
 #
 # Distinct from a declaration's ARCHS (what the KERNELS support, sm_90+);
 # this says what the standard build SHIPS. Both spellings of a CC are
@@ -386,7 +408,7 @@ def main() -> None:
         help="parallel compile processes (forkserver). Default follows "
         "the torch build's parallelism: MAX_JOBS, then "
         "CMAKE_BUILD_PARALLEL_LEVEL, then half the CPU count -- the same "
-        "precedence tools/setup_helpers/cmake.py hands to ninja.",
+        "pair pyproject.toml's [tool.scikit-build.env] hands to cmake.",
     )
     parser.add_argument(
         "--arch",
