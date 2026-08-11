@@ -1050,29 +1050,55 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.writeline("}")
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str, **_
+        self,
+        kernel: str,
+        args: list[str],
+        device: str,
+        *,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
+        **_,
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
-        wrapped_args = []
-        for arg in args:
+        def borrow_as_tensor_if_needed(expr: str) -> str:
             # We only really *need* borrow_arrayref_tensor_as_tensor for
             # ArrayRefTensors. The code flowing into here uses `0` for nullptr, which
             # borrow_arrayref_tensor_as_tensor would blindly coerce to int, so just
             # avoid wrapping integers.  Name matching is to find tensor is hacky, but
             # fixing all the ArrayRefTensor issues is not a priority for now.
-            if isinstance(arg, str) and arg.startswith(
+            if isinstance(expr, str) and expr.startswith(
                 ("buf", "arg", "wrap_with_raii_handle_if_needed")
             ):
                 self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
-                arg = f"borrow_arrayref_tensor_as_tensor({arg})"
-            wrapped_args.append(arg)
+                return f"borrow_arrayref_tensor_as_tensor({expr})"
+            return expr
 
+        wrapped_args = [borrow_as_tensor_if_needed(arg) for arg in args]
+
+        # The profiling handles are passed to aoti_torch_tensor_to_ivalue, which
+        # takes an AtenTensorHandle. ArrayRefTensor has no conversion to one, so
+        # borrow it as a tensor exactly like the positional args above.
         super().generate_c_shim_extern_kernel_call(
-            kernel, wrapped_args, device, debug_args=args
+            kernel,
+            wrapped_args,
+            device,
+            debug_args=args,
+            input_handles=(
+                None
+                if input_handles is None
+                else [borrow_as_tensor_if_needed(handle) for handle in input_handles]
+            ),
+            num_scalars=num_scalars,
+            output_handle=(
+                None
+                if output_handle is None
+                else borrow_as_tensor_if_needed(output_handle)
+            ),
         )
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
@@ -1086,6 +1112,19 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        input_handles: list[str] | None = None,
+    ):
+        # ArrayRef tensors are not AtenTensorHandle, so we cannot call
+        # aoti_torch_tensor_to_ivalue on them.  Emit RAIIAtenRecordFunctionHandle
+        # without input metadata instead.
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        self.writeline(
+            f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+        )
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
