@@ -1386,7 +1386,7 @@ class TestBinaryUfuncsDevice(TestCase):
         ref = [num * (1 / d) for d in denom]
         self.assertEqual(res, ref, atol=0, rtol=0)
 
-    # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
+    # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message
     @skipCPUIf(True, "test requires distinct CPU and accelerator devices")
     def test_cross_device_inplace_error_msg(self, device):
@@ -1686,8 +1686,8 @@ class TestBinaryUfuncsDevice(TestCase):
                 actual = base.pow(exponent)
                 self.assertEqual(actual, expected.to(actual))
                 actual = base.clone()
-                # When base is a 0-dim cpu tensor and exp is a cuda tensor, we exp `pow` to work but `pow_` to fail, since
-                # `pow` will try to create the output tensor on a cuda device, but `pow_` needs to use the cpu tensor as the output
+                # When base is a 0-dim cpu tensor and exp is a device tensor, we exp `pow` to work but `pow_` to fail, since
+                # `pow` will try to create the output tensor on a device, but `pow_` needs to use the cpu tensor as the output
                 if (
                     isinstance(exponent, torch.Tensor)
                     and base.dim() == 0
@@ -1882,8 +1882,8 @@ class TestBinaryUfuncsDevice(TestCase):
                 self._test_pow(base, tensor)
 
     @onlyOn(["cuda", "xpu"])
-    def test_cuda_tensor_pow_scalar_tensor(self, device):
-        cuda_tensors = [
+    def test_device_tensor_pow_scalar_tensor(self, device):
+        device_tensors = [
             torch.randn((3, 3), device=device),
             torch.tensor(3.0, device=device),
         ]
@@ -1892,30 +1892,30 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.tensor(-3),
             torch.tensor(1),
         ]
-        for base, exp in product(cuda_tensors, scalar_tensors):
+        for base, exp in product(device_tensors, scalar_tensors):
             self._test_pow(base, exp)
 
     @onlyOn(["cuda", "xpu"])
-    def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
-        cuda_tensors = [
+    def test_cpu_tensor_pow_device_scalar_tensor(self, device):
+        device_tensors = [
             torch.tensor(5.0, device=device_type),
             torch.tensor(-3, device=device_type),
         ]
-        for exp in cuda_tensors:
+        for exp in device_tensors:
             base = torch.randn((3, 3), device="cpu")
             regex = f"Expected all tensors to be on the same device, but found at least two devices, {device_type}.* and cpu!"
             self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
-        for exp in cuda_tensors:
-            # Binary ops with a cpu + cuda tensor are allowed if the cpu tensor has 0 dimension
+        for exp in device_tensors:
+            # Binary ops with a cpu + device tensor are allowed if the cpu tensor has 0 dimension
             base = torch.tensor(3.0, device="cpu")
             self._test_pow(base, exp)
 
     @dtypes(torch.complex64, torch.complex128)
-    def test_pow_cuda_complex_extremal_passing(self, device, dtype):
+    def test_pow_device_complex_extremal_passing(self, device, dtype):
         t = torch.tensor(complex(-1.0, float("inf")), dtype=dtype, device=device)
-        cuda_out = t.pow(2)
+        device_out = t.pow(2)
         cpu_out = t.cpu().pow(2)
-        self.assertEqual(cpu_out, cuda_out)
+        self.assertEqual(cpu_out, device_out)
 
     @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
@@ -2029,8 +2029,8 @@ class TestBinaryUfuncsDevice(TestCase):
             for x, y, z in zip(a.tolist(), b.tolist(), c.tolist()):
                 self.assertEqual(x + y, z)
 
-    # Tests that CUDA tensors on different devices cannot be used in the same
-    # binary operation, and that CUDA "scalars" cannot be used in the same
+    # Tests that device tensors on different devices cannot be used in the same
+    # binary operation, and that device "scalars" cannot be used in the same
     # binary operation as non-scalar CPU tensors.
     @deviceCountAtLeast(2)
     @onlyOn(["cuda", "xpu"])
@@ -2068,7 +2068,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
     # This test ensures that a scalar Tensor can be safely used
     # in a binary operation in conjunction with a Tensor on all
-    # available CUDA devices
+    # available devices
     @deviceCountAtLeast(2)
     @onlyOn(["cuda", "xpu"])
     def test_binary_op_scalar_device_unspecified(self, devices):
@@ -2536,7 +2536,7 @@ class TestBinaryUfuncsDevice(TestCase):
             ):
                 torch_op(b, a)
 
-        # test cuda tensor and cpu scalar
+        # test device tensor and cpu scalar
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
         a_np = np.array(1)
         b_np = np.array([3, 0, 4])
@@ -3370,7 +3370,7 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
         if torch.device(device).type in ["cuda", "xpu"]:
-            # test using cpu scalar with cuda.
+            # test using cpu scalar with device.
             x = torch.randn(10, device=device).to(dtype)
             y = torch.tensor(2.0).to(dtype)
             actual1 = torch.hypot(x, y)
@@ -4980,13 +4980,10 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(x * 2.5, x * torch.tensor(2.5, device=device, dtype=dtype))
 
 
-class TestChebyshevNanPropagation(TestCase):
+class TestChebyshevNanPropagationDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_chebyshev_nan_noncontiguous(self, device):
-        if self.device_type not in ("cpu", "cuda"):
-            self.skipTest("NaN uninitialized return is only fixed for CPU and CUDA")
-
         nan = float("nan")
         ops = [
             (torch.special.chebyshev_polynomial_t, 3),
@@ -5139,7 +5136,7 @@ generate_not_implemented_tests(TestBinaryUfuncsDevice)
 
 
 instantiate_device_type_tests(
-    TestChebyshevNanPropagation, globals(), only_for=("cpu", "cuda")
+    TestChebyshevNanPropagationDevice, globals(), only_for=("cpu", "cuda")
 )
 instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
