@@ -6309,6 +6309,176 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(N, K, self.device), example_inputs)
 
     @unittest.skipIf(
+        config.triton.native_matmul, "different kernel name when native matmul"
+    )
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_input_shapes(self):
+        # Verify that kernel profiling records tensor input shapes,
+        # scalar args, output handles, and ReinterpretView logical shapes.
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                # addmm: exercises scalar args (alpha, beta) and output handle
+                out = torch.nn.functional.linear(a, self.weight, self.bias)
+                # mm with transposed view: exercises ReinterpretView input path
+                return torch.mm(out.t(), a)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Verify that tensor inputs are converted to IValues for
+            # shape recording (3-arg RAIIAtenRecordFunctionHandle form).
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            # Verify dummy scalar IValues are generated for non-tensor args.
+            FileCheck().check("aoti_torch_int64_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            # Verify output tensor is included in IValues for out-variant
+            # kernels.
+            FileCheck().check_regex(r"tmp_.*_output\b").run(code)
+            # Verify ReinterpretView inputs use reinterpret_tensor_wrapper
+            # for correct logical shapes in profiling.
+            FileCheck().check("reinterpret_tensor_wrapper").run(code)
+
+            self.check_model(Model(N, K, self.device), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_conv_input_shapes(self):
+        # Convolution is a single-output ExternKernelAlloc, so it flows through
+        # the alloc codegen path; verify its tensor inputs are recorded with
+        # shapes when profiling is enabled (3-arg RAIIAtenRecordFunctionHandle
+        # with an IValue vector).
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, padding=1).to(device)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = Model(self.device)
+        x = torch.randn(2, 3, 16, 16, device=self.device)
+        example_inputs = (x,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Conv tensor inputs are converted to IValues for shape recording,
+            # collected into a vector, and passed to the record function.
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            # Conv on CUDA uses TF32, which differs from the fp32 reference by
+            # ~1e-3; the profiling assertions above are this test's focus.
+            self.check_model(Model(self.device), example_inputs, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_multi_output_fallback_input_shapes(self):
+        # A tuple-returning fallback (scaled_dot_product_attention) is the
+        # representative kernel reaching generate_c_shim_fallback_kernel;
+        # zero-output and dict-returning fallbacks route there too. Its q/k/v
+        # are transposed views, so this pins down that the recorded shapes are
+        # the logical view shapes and not the base buffers.
+        #
+        # A fused backend is required: without one SDPA decomposes to math and
+        # emits no extern shim. CPU always has one; XPU has no fp32 fused path.
+        if self.device == "xpu":
+            raise unittest.SkipTest("XPU has no fused fp32 SDPA backend")
+        if self.device != "cpu" and not (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        ):
+            raise unittest.SkipTest("Some archs don't support fused SDPA")
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v):
+                # transpose() makes each operand a ReinterpretView whose logical
+                # shape differs from its base buffer.
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+                )
+
+        example_inputs = tuple(
+            torch.randn(4, 8, 2, 16, device=self.device) for _ in range(3)
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # The handle must be the reinterpret expression, not a bare buffer
+            # name: a base-buffer handle would record the wrong shape while
+            # still looking populated to a trace consumer. The IValue variable
+            # carries the shim name, so match it in the same line to pin the
+            # assertion to this kernel rather than any transposed GEMM.
+            FileCheck().check_regex(
+                r"aoti_torch_tensor_to_ivalue\(wrap_with_raii_handle_if_needed\("
+                r"reinterpret_tensor_wrapper.*"
+                r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
+            ).run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_tensor_list_input_shapes(self):
+        # A tensor-list fallback collapses its whole list into a single codegen
+        # arg, so the profiling handles for its ReinterpretView inputs have no
+        # positional correspondence with the kernel's args.
+        if self.device != "cpu":
+            raise unittest.SkipTest("aten.cat only falls back to ATen for cpu uint8")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                # Slicing makes every list element a ReinterpretView, and four
+                # elements outnumber the kernel's args.
+                return torch.cat([a[:, :2], b[:, :2], c[:, :2], d[:, :2]], dim=1)
+
+        example_inputs = tuple(
+            torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=self.device)
+            for _ in range(4)
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            FileCheck().check("aoti_torch_cpu_cat").run(code)
+            # A handle for the fourth input proves the handles are derived per
+            # input: the kernel's args collapse the whole list into a single
+            # entry, so a positional args lookup cannot reach index 3.
+            FileCheck().check("tmp_aoti_torch_cpu_cat_input_3").run(code)
+            # The IValue variable name is built from the loop index alone, so
+            # pin the handle expression too: the slices must be recorded as
+            # reinterpret views rather than their base buffers.
+            FileCheck().check(
+                "aoti_torch_tensor_to_ivalue(wrap_with_raii_handle_if_needed("
+                "reinterpret_tensor_wrapper"
+            ).run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
