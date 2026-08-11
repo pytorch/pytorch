@@ -1,0 +1,499 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 16ad60f14157eb74749af97acdd2a32d334ad060..1b97bd87ef2a55edd2a937612df42267c3c8764d 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -1054,0 +1055 @@ class EpiMod:
++                        swap_ab=swap_ab,
+@@ -1087,0 +1089 @@ class EpiMod:
++                    swap_ab=swap_ab,
+@@ -1136,0 +1139 @@ class EpiMod:
++                        swap_ab=swap_ab,
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index 5cc96cfaa41933b9cf939fbc12c784ab1b4618d6..d8174e0aaeaf0088704597a1b42734013331eec7 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -2575 +2575 @@ class GroupedColStatsOut(EpiOp):
+-    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
++    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
+@@ -2976 +2976 @@ class ColVecSelect(EpiOp):
+-    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
++    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
+diff --git a/quack/gemm_base.py b/quack/gemm_base.py
+index dbc9a17028fdb53160988d0f496b1d73b6da90fe..cb87afc353c73fd50b3db93027554a1933db6f07 100644
+--- a/quack/gemm_base.py
++++ b/quack/gemm_base.py
+@@ -174,0 +175,5 @@ class GemmBase:
++        if const_expr(mA is not None and mB is not None):
++            kernel_m, kernel_n = cute.size(mA, mode=[0]), cute.size(mB, mode=[0])
++            self.caller_m, self.caller_n = (
++                (kernel_n, kernel_m) if const_expr(self.a_transposed) else (kernel_m, kernel_n)
++            )
+diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
+index e9b803889fc75ae02fb661836a8949d366d6b7f7..6427d45c45c88b4d926f5a05f56c71c82c48198e 100644
+--- a/quack/gemm_runtime/identity.py
++++ b/quack/gemm_runtime/identity.py
+@@ -37 +37 @@ from typing import NamedTuple, Optional
+-def semantic_value_key(value, seen):
++def semantic_value_key(value, seen, *, force_source=False):
+@@ -45,3 +45,5 @@ def semantic_value_key(value, seen):
+-    keyer). Everything else raises: a value we cannot fingerprint must never
+-    reach the compile cache, because a too-coarse key silently reuses the
+-    wrong kernel.
++    keyer). ``force_source`` fingerprints an installed external callback root
++    by source too, for caller-authored code outside the QuACK package; its
++    dependencies retain the stable installed-function policy. Everything else
++    raises: a value we cannot fingerprint must never reach the compile
++    cache, because a too-coarse key silently reuses the wrong kernel.
+@@ -61 +63 @@ def semantic_value_key(value, seen):
+-            semantic_value_key(qsk(value), seen),
++            semantic_value_key(qsk(value), seen, force_source=force_source),
+@@ -66 +68,4 @@ def semantic_value_key(value, seen):
+-        return ("tuple", tuple(semantic_value_key(v, seen) for v in value))
++        return (
++            "tuple",
++            tuple(semantic_value_key(v, seen, force_source=force_source) for v in value),
++        )
+@@ -68 +73,4 @@ def semantic_value_key(value, seen):
+-        return ("list", tuple(semantic_value_key(v, seen) for v in value))
++        return (
++            "list",
++            tuple(semantic_value_key(v, seen, force_source=force_source) for v in value),
++        )
+@@ -72 +80,9 @@ def semantic_value_key(value, seen):
+-            tuple(sorted((repr(k), semantic_value_key(v, seen)) for k, v in value.items())),
++            tuple(
++                sorted(
++                    (
++                        repr(k),
++                        semantic_value_key(v, seen, force_source=force_source),
++                    )
++                    for k, v in value.items()
++                )
++            ),
+@@ -75 +91,6 @@ def semantic_value_key(value, seen):
+-        return ("set", tuple(sorted(repr(semantic_value_key(v, seen)) for v in value)))
++        return (
++            "set",
++            tuple(
++                sorted(repr(semantic_value_key(v, seen, force_source=force_source)) for v in value)
++            ),
++        )
+@@ -78,2 +98,0 @@ def semantic_value_key(value, seen):
+-    if inspect.isfunction(value):
+-        return function_semantic_key(value, seen)
+@@ -83,2 +102,2 @@ def semantic_value_key(value, seen):
+-            function_semantic_key(value.__func__, seen),
+-            semantic_value_key(value.__self__, seen),
++            function_semantic_key(value.__func__, seen, force_source=force_source),
++            semantic_value_key(value.__self__, seen, force_source=force_source),
+@@ -86,2 +105,2 @@ def semantic_value_key(value, seen):
+-    if isinstance(value, (types.BuiltinFunctionType, types.MethodWrapperType)):
+-        return ("builtin", getattr(value, "__module__", None), value.__qualname__)
++    if inspect.isfunction(value):
++        return function_semantic_key(value, seen, force_source=force_source)
+@@ -90,3 +109,6 @@ def semantic_value_key(value, seen):
+-        # Decorator wrappers (functools.wraps chains: lru_cache, dsl_user_op,
+-        # cute.jit): the semantics live in the wrapped function.
+-        return ("wrapped", semantic_value_key(wrapped, seen))
++        raise TypeError(
++            f"cannot fingerprint decorated callable object {value!r}; use a "
++            "function/method wrapper or implement __quack_semantic_key__"
++        )
++    if isinstance(value, (types.BuiltinFunctionType, types.MethodWrapperType)):
++        return ("builtin", getattr(value, "__module__", None), value.__qualname__)
+@@ -96,3 +118,3 @@ def semantic_value_key(value, seen):
+-            semantic_value_key(value.func, seen),
+-            semantic_value_key(value.args, seen),
+-            semantic_value_key(value.keywords, seen),
++            semantic_value_key(value.func, seen, force_source=force_source),
++            semantic_value_key(value.args, seen, force_source=force_source),
++            semantic_value_key(value.keywords, seen, force_source=force_source),
+@@ -112 +134,4 @@ def semantic_value_key(value, seen):
+-                (f.name, semantic_value_key(getattr(value, f.name), seen))
++                (
++                    f.name,
++                    semantic_value_key(getattr(value, f.name), seen, force_source=force_source),
++                )
+@@ -157,9 +182,4 @@ def _is_extern_function(fn) -> bool:
+-def function_semantic_key(fn, seen=None):
+-    """Fingerprint source plus the globals/closures that can change its math."""
+-    seen = set() if seen is None else seen
+-    ident = (fn.__module__, fn.__qualname__)
+-    if ident in seen:
+-        return ("function_ref", *ident)
+-    seen.add(ident)
+-    if _is_extern_function(fn):
+-        return ("extern_function", *ident)
++def _function_source_digest(fn, *, exact: bool = False) -> str:
++    """Hash one function body, optionally bypassing ``inspect`` unwrapping."""
++    code = getattr(fn, "__code__", None)
++    source_target = code if exact and code is not None else fn
+@@ -167 +187 @@ def function_semantic_key(fn, seen=None):
+-        source = inspect.getsource(fn).encode()
++        source = inspect.getsource(source_target).encode()
+@@ -169 +188,0 @@ def function_semantic_key(fn, seen=None):
+-        code = getattr(fn, "__code__", None)
+@@ -172,0 +192,53 @@ def function_semantic_key(fn, seen=None):
++    return hashlib.sha256(source).hexdigest()
++
++
++def function_semantic_key(fn, seen=None, *, force_source=False):
++    """Fingerprint a function root plus stable semantic keys for dependencies."""
++    seen = set() if seen is None else seen
++    ident = (fn.__module__, fn.__qualname__)
++    marker = ("function_id", id(fn))
++    if marker in seen:
++        return ("function_ref", *ident)
++    seen.add(marker)
++    if not force_source and _is_extern_function(fn):
++        return ("extern_function", *ident)
++
++    wrapped = getattr(fn, "__wrapped__", None)
++    if wrapped is not None:
++        try:
++            closure_vars = inspect.getclosurevars(fn)
++            nonlocals = closure_vars.nonlocals
++            globals_ = closure_vars.globals
++        except TypeError:
++            nonlocals = {}
++            globals_ = {}
++        wrapper_deps = tuple(
++            (
++                name,
++                ("wrapper_ref",)
++                if value is fn
++                else (
++                    ("wrapped_ref",)
++                    if value is wrapped
++                    else semantic_value_key(value, seen, force_source=False)
++                ),
++            )
++            for name, value in sorted(nonlocals.items())
++            if not name.startswith("__")
++        )
++        wrapper_globals = tuple(
++            (name, semantic_value_key(value, seen, force_source=False))
++            for name, value in sorted(globals_.items())
++            if not name.startswith("__")
++        )
++        return (
++            "decorated_function",
++            *ident,
++            _function_source_digest(fn, exact=True),
++            semantic_value_key(fn.__defaults__, seen, force_source=False),
++            semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
++            wrapper_deps,
++            wrapper_globals,
++            semantic_value_key(wrapped, seen, force_source=force_source),
++        )
++
+@@ -182 +254 @@ def function_semantic_key(fn, seen=None):
+-        (name, semantic_value_key(value, seen))
++        (name, semantic_value_key(value, seen, force_source=False))
+@@ -189,3 +261,3 @@ def function_semantic_key(fn, seen=None):
+-        hashlib.sha256(source).hexdigest(),
+-        semantic_value_key(fn.__defaults__, seen),
+-        semantic_value_key(fn.__kwdefaults__, seen),
++        _function_source_digest(fn),
++        semantic_value_key(fn.__defaults__, seen, force_source=False),
++        semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
+diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
+index 052df3a75497c07e0ea2949a64df162a86c6a529..e7e010b1415799d995c47b01e437cc85295137b4 100644
+--- a/quack/grouped_reduce.py
++++ b/quack/grouped_reduce.py
+@@ -112,0 +113 @@ import operator
++from dataclasses import dataclass
+@@ -127,0 +129 @@ from quack.epilogue.ops import (
++from quack.gemm_runtime.identity import semantic_value_key
+@@ -245,3 +247,3 @@ def grouped_reduce_out_shape(m: int, n: int, group: int, axis: int, batch: int |
+-def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
+-    """Physical element count for a batch of padded 128x4 blocked matrices."""
+-    return batch * 512 * ((rows + 127) // 128) * ((cols + 3) // 4)
++@dataclass(frozen=True)
++class GroupedLocalReduceOutputLayout:
++    """Caller-owned physical carrier exposed as a logical grouped-output tensor.
+@@ -248,0 +251,28 @@ def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
++    ``tensor_fn(carrier, transposed)`` runs while tracing a concrete GEMM
++    candidate and returns the rank-3 caller-oriented compressed matrix, or its
++    transposed kernel orientation. ``carrier_shape_fn(batch, rows, cols)``
++    validates the runtime carrier; ``fake_shape_fn`` rebuilds its symbolic
++    signature in async workers. QuACK fingerprints and invokes the callbacks
++    but does not interpret the physical layout.
++    """
++
++    name: str
++    tensor_fn: object
++    carrier_shape_fn: object
++    fake_shape_fn: object
++    carrier_ndim: int
++    supports_config_fn: object | None = None
++
++    def __post_init__(self) -> None:
++        if not self.name:
++            raise ValueError("output layout name must be non-empty")
++        if not all(
++            callable(fn) for fn in (self.tensor_fn, self.carrier_shape_fn, self.fake_shape_fn)
++        ):
++            raise TypeError(
++                "output layout tensor, carrier-shape, and fake-shape callbacks must be callable"
++            )
++        if self.supports_config_fn is not None and not callable(self.supports_config_fn):
++            raise TypeError("output layout config predicate must be callable")
++        if self.carrier_ndim <= 0:
++            raise ValueError("output layout carrier rank must be positive")
+@@ -250,6 +280,9 @@ def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
+-def blocked_128x4_carrier_view(carrier, rows: int, cols: int, batch: int = 1):
+-    """Attach logical matrix extents to a flat blocked carrier without moving data."""
+-    expected = blocked_128x4_numel(rows, cols, batch)
+-    if carrier.ndim != 1 or not carrier.is_contiguous() or carrier.numel() != expected:
+-        raise ValueError(
+-            f"blocked 128x4 carrier must be contiguous rank 1 with {expected} elements"
++    def cache_key(self):
++        """Return source-derived callback identity for the persistent kernel key."""
++        return (
++            self.name,
++            semantic_value_key(self.tensor_fn, set(), force_source=True),
++            semantic_value_key(self.carrier_shape_fn, set(), force_source=True),
++            semantic_value_key(self.fake_shape_fn, set(), force_source=True),
++            self.carrier_ndim,
++            semantic_value_key(self.supports_config_fn, set(), force_source=True),
+@@ -257,4 +289,0 @@ def blocked_128x4_carrier_view(carrier, rows: int, cols: int, batch: int = 1):
+-    return carrier.as_strided(
+-        (batch, rows, cols),
+-        (expected // batch, 0, 0),
+-    )
+@@ -463,0 +493,8 @@ class _GroupedSlice(NamedTuple):
++class _GroupedOutputLayoutParams(NamedTuple):
++    """Logical bounds paired with a caller-owned physical output view."""
++
++    tensor: object
++    logical_extent: object
++    logical_groups: object
++
++
+@@ -485,0 +523 @@ class GroupedReduceBase(EpiOp):
++        output_layout: GroupedLocalReduceOutputLayout | None = None,
+@@ -501,0 +540 @@ class GroupedReduceBase(EpiOp):
++        self.output_layout = output_layout
+@@ -509 +548,5 @@ class GroupedReduceBase(EpiOp):
+-        extra = tuple(sorted(set(vars(self)) - {"name", "axis", "group", "combine", "finalize"}))
++        extra = tuple(
++            sorted(
++                set(vars(self)) - {"name", "axis", "group", "combine", "finalize", "output_layout"}
++            )
++        )
+@@ -520,0 +564 @@ class GroupedReduceBase(EpiOp):
++            None if self.output_layout is None else self.output_layout.cache_key(),
+@@ -524,2 +568,8 @@ class GroupedReduceBase(EpiOp):
+-        """Whether a native GEMM config can preserve this grouped geometry."""
+-        return grouped_reduce_supports_config(config, self.axis, self.group)
++        """Whether a native GEMM config preserves the reduction and output layout."""
++        if not grouped_reduce_supports_config(config, self.axis, self.group):
++            return False
++        return (
++            self.output_layout is None
++            or self.output_layout.supports_config_fn is None
++            or self.output_layout.supports_config_fn(config, self.axis, self.group)
++        )
+@@ -528 +578,11 @@ class GroupedReduceBase(EpiOp):
+-        """Describe an unsupported group against the available config frontier."""
++        """Describe an unsupported group or caller-owned output layout."""
++        if (
++            self.output_layout is not None
++            and self.output_layout.supports_config_fn is not None
++            and not any(
++                self.output_layout.supports_config_fn(config, self.axis, self.group)
++                for config in configs
++                if grouped_reduce_supports_config(config, self.axis, self.group)
++            )
++        ):
++            return f"output layout {self.output_layout.name!r} has no supported GemmConfig"
+@@ -557 +617,7 @@ class GroupedReduceBase(EpiOp):
+-        if value.ndim not in (2, 3):
++        if self.output_layout is not None:
++            if value.ndim != self.output_layout.carrier_ndim:
++                raise ValueError(
++                    f"{self.name}: {self.output_layout.name} carrier must be rank "
++                    f"{self.output_layout.carrier_ndim}"
++                )
++        elif value.ndim not in (2, 3):
+@@ -578 +644 @@ class GroupedReduceBase(EpiOp):
+-        """Validate compressed output geometry against the GEMM problem."""
++        """Validate caller-owned carrier geometry against the GEMM problem."""
+@@ -584 +650,4 @@ class GroupedReduceBase(EpiOp):
+-            raise ValueError(f"{self.name}: compressed aux buffer is required")
++            kind = (
++                "compressed aux buffer" if self.output_layout is None else "output-layout carrier"
++            )
++            raise ValueError(f"{self.name}: {kind} is required")
+@@ -598 +667,14 @@ class GroupedReduceBase(EpiOp):
+-        expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
++        if self.output_layout is None:
++            expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
++            actual = tuple(value.shape)
++            if actual != expected:
++                raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
++            return
++        rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
++        expected = tuple(
++            self.output_layout.carrier_shape_fn(
++                1 if batch is None else batch,
++                rows,
++                cols,
++            )
++        )
+@@ -601 +683,4 @@ class GroupedReduceBase(EpiOp):
+-            raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
++            raise ValueError(
++                f"{self.name}: {self.output_layout.name} carrier must have shape "
++                f"{expected}, got {actual}"
++            )
+@@ -607 +691,0 @@ class GroupedReduceBase(EpiOp):
+-        groups = cute.sym_int()
+@@ -608,0 +693,10 @@ class GroupedReduceBase(EpiOp):
++        if self.output_layout is not None:
++            rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
++            shape = self.output_layout.fake_shape_fn(fctx.l, rows, cols)
++            return make_fake_tensor(
++                dtype,
++                shape,
++                leading_dim=self.output_layout.carrier_ndim - 1,
++                divisibility=1,
++            )
++        groups = cute.sym_int()
+@@ -621,0 +716,9 @@ class GroupedReduceBase(EpiOp):
++        if self.output_layout is not None:
++            tensor = self.output_layout.tensor_fn(tensor, gemm.a_transposed)
++            assert cute.rank(tensor) == 3
++            logical_extent, logical_groups = (
++                (gemm.caller_m, gemm.caller_n // self.group)
++                if self.axis == 1
++                else (gemm.caller_n, gemm.caller_m // self.group)
++            )
++            return {self.name: _GroupedOutputLayoutParams(tensor, logical_extent, logical_groups)}
+@@ -771,0 +875,7 @@ class GroupedReduceBase(EpiOp):
++        if const_expr(self.output_layout is not None):
++            logical_extent = param.logical_extent
++            logical_groups = param.logical_groups
++            param = param.tensor
++        else:
++            logical_extent = None
++            logical_groups = None
+@@ -787,2 +897,7 @@ class GroupedReduceBase(EpiOp):
+-            limit_groups = mReduce.shape[1]
+-            limit = min(varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M, tile_M)
++            if const_expr(self.output_layout is not None):
++                assert not varlen_manager.varlen_m
++                limit_groups = logical_groups
++            else:
++                logical_extent = varlen_manager.len_m(batch_idx)
++                limit_groups = cute.size(mReduce, mode=[1])
++            limit = min(logical_extent - tile_coord_mnkl[0] * tile_M, tile_M)
+@@ -791,2 +906,7 @@ class GroupedReduceBase(EpiOp):
+-            limit_groups = mReduce.shape[0]
+-            limit = min(cute.size(mReduce, mode=[1]) - tile_coord_mnkl[1] * tile_N, tile_N)
++            if const_expr(self.output_layout is not None):
++                assert not varlen_manager.varlen_m
++                limit_groups = logical_groups
++            else:
++                logical_extent = cute.size(mReduce, mode=[1])
++                limit_groups = cute.size(mReduce, mode=[0])
++            limit = min(logical_extent - tile_coord_mnkl[1] * tile_N, tile_N)
+@@ -967,97 +1086,0 @@ class GroupedLocalReduce(GroupedReduceBase):
+-class Blocked128x4GroupedLocalReduce(GroupedLocalReduce):
+-    """Axis-1 grouped sink stored directly into a padded cuBLAS 128x4 carrier.
+-
+-    The host passes a zero-stride metadata view shaped ``(batch, rows, groups)``
+-    over the flat carrier. The kernel ignores those strides, uses the shape for
+-    exact tail predicates, and owns the physical swizzle and batch padding.
+-    """
+-
+-    def __init__(self, name, *, axis=1, group, combine="add", finalize=None):
+-        if axis != 1:
+-            raise NotImplementedError("blocked 128x4 grouped outputs support axis 1 only")
+-        super().__init__(name, axis=axis, group=group, combine=combine, finalize=finalize)
+-
+-    def supports_config(self, config) -> bool:
+-        """Start with the SM100 tile family validated by the vendor contract."""
+-        return (
+-            getattr(config, "device_capacity", None) == 10
+-            and config.tile_m in (128, 256)
+-            and config.tile_n >= 128
+-            and grouped_reduce_supports_config(config, self.axis, self.group)
+-        )
+-
+-    def host_arg_key(self, value):
+-        if value is None:
+-            return None
+-        from quack.cute_dsl_utils import torch2cute_dtype_map
+-
+-        if value.ndim != 3 or value.stride()[1:] != (0, 0):
+-            raise ValueError(
+-                f"{self.name}: blocked carrier must use a (batch, rows, groups) metadata view"
+-            )
+-        return (torch2cute_dtype_map[value.dtype],)
+-
+-    def host_fake_arg(self, key, fctx):
+-        from quack.compile_utils import make_fake_tensor
+-
+-        (dtype,) = key
+-        m, n = (fctx.n, fctx.m) if fctx.swapped else (fctx.m, fctx.n)
+-        return make_fake_tensor(
+-            dtype,
+-            (fctx.l, m, n // self.group),
+-            leading_dim=None,
+-            divisibility=1,
+-        )
+-
+-    def to_params(self, gemm, args):
+-        return {self.name: getattr(args, self.name)}
+-
+-    @cute.jit
+-    def _store_groups(
+-        self,
+-        gemm,
+-        param,
+-        state,
+-        epi_coord,
+-        tile_coord_mnkl,
+-        varlen_manager,
+-        values,
+-        finalize=True,
+-    ):
+-        """Map caller-oriented group leaders to the blocked carrier index."""
+-        tile_M, tile_N = gemm.cta_tile_shape_mnk[:2]
+-        physical_axis = state.geom.axis
+-        rows, groups = param.shape[1], param.shape[2]
+-        row_blocks = cute.ceil_div(rows, 128)
+-        col_blocks = cute.ceil_div(groups, 4)
+-        batch_stride = 512 * row_blocks * col_blocks
+-        raw = cute.make_tensor(
+-            param.iterator,
+-            cute.make_layout(param.shape[0] * batch_stride),
+-        )
+-        coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
+-        leader_off = const_expr(
+-            self.group - state.geom.cols if self._is_temporal(state.geom) else 0
+-        )
+-        for i in cutlass.range(cute.size(coord), unroll_full=True):
+-            row_idx, n_idx = coord[i][0], coord[i][1]
+-            pos = n_idx if const_expr(physical_axis == 1) else row_idx
+-            if pos % self.group == leader_off:
+-                if const_expr(physical_axis == 1):
+-                    logical_row = tile_coord_mnkl[0] * tile_M + row_idx
+-                    logical_group = (tile_coord_mnkl[1] * tile_N + n_idx) // self.group
+-                else:
+-                    logical_row = tile_coord_mnkl[1] * tile_N + n_idx
+-                    logical_group = (tile_coord_mnkl[0] * tile_M + row_idx) // self.group
+-                if logical_row < rows and logical_group < groups:
+-                    block = (logical_row // 128) * col_blocks + logical_group // 4
+-                    within = (logical_row % 32) * 16 + (logical_row // 32 % 4) * 4
+-                    index = (
+-                        tile_coord_mnkl[3] * batch_stride + block * 512 + within + logical_group % 4
+-                    )
+-                    value = self.finalize_value(values[i]) if const_expr(finalize) else values[i]
+-                    if const_expr(param.element_type != Float32):
+-                        value = value.to(param.element_type)
+-                    raw[index] = value
+-
+-
