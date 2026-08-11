@@ -65,6 +65,7 @@ from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
+import torch._library.utils as library_utils
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -4051,6 +4052,67 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
+_FAKE_TENSOR_DATA_PTR_ERROR = (
+    "Cannot access data pointer of Tensor (e.g. FakeTensor, FunctionalTensor)."
+)
+
+
+def _is_custom_op_fake_tensor_subclass_data_ptr_error(
+    node: torch.fx.Node, args: Any, kwargs: Any, cause: BaseException
+) -> bool:
+    if node.op != "call_function":
+        return False
+
+    target = node.target
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        overloads = tuple(target.overloads())
+        if len(overloads) == 1:
+            target = getattr(target, overloads[0])
+        else:
+            try:
+                overload = torch._C._jit_resolve_packet(
+                    target._qualified_op_name, *args, **kwargs
+                )
+            except RuntimeError:
+                return False
+            target = getattr(target, overload)
+
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    if library_utils.is_builtin(target) or not library_utils.has_fake_kernel(target):
+        return False
+    current_cause: BaseException | None = cause
+    seen_causes: set[int] = set()
+    while current_cause is not None and id(current_cause) not in seen_causes:
+        seen_causes.add(id(current_cause))
+        try:
+            if _FAKE_TENSOR_DATA_PTR_ERROR in str(current_cause):
+                break
+        except Exception:
+            pass
+        next_cause = current_cause.__cause__
+        if next_cause is None and not current_cause.__suppress_context__:
+            next_cause = current_cause.__context__
+        current_cause = next_cause
+    else:
+        return False
+
+    def is_fake_traceable_wrapper_subclass(value: torch.Tensor) -> bool:
+        # This is a best-effort diagnostic classifier running while another
+        # exception is already being handled. User-defined ``__tensor_flatten__``
+        # and attribute methods called by these checks may raise, which must not
+        # mask the original data pointer error.
+        try:
+            return is_traceable_wrapper_subclass(value) and is_fake(value)
+        except Exception:
+            return False
+
+    return any(
+        is_fake_traceable_wrapper_subclass(value)
+        for value in library_utils.iter_tensors(args, kwargs)
+    )
+
+
 def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
     from .exc import TorchRuntimeError, Unsupported
 
@@ -4330,6 +4392,30 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
+        elif _is_custom_op_fake_tensor_subclass_data_ptr_error(node, args, kwargs, e):
+            if not node.users:
+                tx.output.graph.erase_node(node)
+            unimplemented(
+                gb_type="Custom op Tensor subclass data pointer access",
+                context=f"{node.op} {node.target}",
+                explanation=(
+                    "A custom op with a fake implementation received an argument "
+                    "containing a fake Tensor subclass and attempted to access a data "
+                    "pointer during fake-value propagation. The access may have come "
+                    "from the fake implementation itself, or from the custom op "
+                    "implementation if the subclass's `__torch_dispatch__` passed "
+                    "the wrapper through."
+                ),
+                hints=[
+                    "Fake implementations must use only PyTorch operations and may not directly access tensor storage or data.",
+                    "If the custom op implementation ran, handle FakeTensor-wrapped subclass inputs there, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.",
+                    "This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors.",
+                ],
+                # Suppress the original C++ message because it recommends wrapping
+                # the kernel in a custom op, but this operator is already a custom op.
+                from_exc=None,
+            )
+
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         from .exc import (
             FakeTensorObservedException,

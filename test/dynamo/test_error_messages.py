@@ -17,7 +17,11 @@ import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import (
+    _is_custom_op_fake_tensor_subclass_data_ptr_error,
+    counters,
+)
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -970,6 +974,261 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 from user code:
    File "test_error_messages.py", line N, in fn
     return torch.ops.mylib.error_messages_faketensor(x)""",
+        )
+
+    def test_custom_op_tensor_subclass_data_ptr_error(self):
+        passthrough_ops = set()
+
+        class ScaledTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, scale):
+                t = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    dtype=data.dtype,
+                    device=data.device,
+                )
+                t._data = data
+                t._scale = scale
+                return t
+
+            def __repr__(self):
+                return f"ScaledTensor(shape={self.shape}, scale={self._scale})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"scale": self._scale}
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return ScaledTensor(inner_tensors["_data"], metadata["scale"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func.name() in passthrough_ops:
+                    return super().__torch_dispatch__(func, types, args, kwargs or {})
+
+                def unwrap(t):
+                    return t._data if isinstance(t, ScaledTensor) else t
+
+                return func(
+                    *python_pytree.tree_map(unwrap, args),
+                    **python_pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        @torch.library.custom_op(
+            "mylib::error_messages_tensor_subclass_custom_op",
+            mutates_args=(),
+        )
+        def tensor_subclass_custom_op(x: torch.Tensor) -> torch.Tensor:
+            if isinstance(x, ScaledTensor):
+                x._data.data_ptr()
+                return ScaledTensor(x._data * 2, x._scale)
+            x.data_ptr()
+            return x * 2
+
+        @tensor_subclass_custom_op.register_fake
+        def _(x):
+            if isinstance(x, ScaledTensor):
+                return ScaledTensor(x._data.new_empty(x.shape), x._scale)
+            return x.new_empty(x.shape)
+
+        passthrough_ops.add(
+            torch.ops.mylib.error_messages_tensor_subclass_custom_op.default.name()
+        )
+
+        def fn(x):
+            return torch.ops.mylib.error_messages_tensor_subclass_custom_op(x)
+
+        input_tensor = ScaledTensor(torch.randn(3), 0.5)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(input_tensor),
+            """\
+Custom op Tensor subclass data pointer access
+  Explanation: A custom op with a fake implementation received an argument containing a fake Tensor subclass and attempted to access a data pointer during fake-value propagation. The access may have come from the fake implementation itself, or from the custom op implementation if the subclass's `__torch_dispatch__` passed the wrapper through.
+  Hint: Fake implementations must use only PyTorch operations and may not directly access tensor storage or data.
+  Hint: If the custom op implementation ran, handle FakeTensor-wrapped subclass inputs there, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.
+  Hint: This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors.
+
+  Developer debug context: call_function mylib.error_messages_tensor_subclass_custom_op
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9566.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return torch.ops.mylib.error_messages_tensor_subclass_custom_op(x)""",
+        )
+
+        def non_fullgraph_fn(x):
+            return torch.ops.mylib.error_messages_tensor_subclass_custom_op(x)
+
+        result = torch.compile(non_fullgraph_fn, backend="eager")(input_tensor)
+        self.assertIsInstance(result, ScaledTensor)
+        self.assertEqual(result._scale, input_tensor._scale)
+        self.assertEqual(result._data, input_tensor._data * 2)
+
+        @torch.library.custom_op(
+            "mylib::error_messages_tensor_subclass_bad_fake_impl",
+            mutates_args=(),
+        )
+        def tensor_subclass_bad_fake_impl(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @tensor_subclass_bad_fake_impl.register_fake
+        def _(x):
+            x.data_ptr()
+            return x.new_empty(x.shape)
+
+        def bad_fake_impl_fn(x):
+            return torch.ops.mylib.error_messages_tensor_subclass_bad_fake_impl(x)
+
+        with self.assertRaisesRegex(
+            Unsupported, "fake implementation itself"
+        ) as bad_fake_cm:
+            torch.compile(bad_fake_impl_fn, backend="eager", fullgraph=True)(
+                input_tensor
+            )
+        bad_fake_msg = str(bad_fake_cm.exception)
+        self.assertIn(
+            "The access may have come from the fake implementation itself",
+            bad_fake_msg,
+        )
+        self.assertIn(
+            "Fake implementations must use only PyTorch operations",
+            bad_fake_msg,
+        )
+
+        @torch.library.custom_op(
+            "mylib::error_messages_tensor_subclass_custom_op_without_fake",
+            mutates_args=(),
+        )
+        def tensor_subclass_custom_op_without_fake(
+            x: torch.Tensor,
+        ) -> torch.Tensor:
+            if isinstance(x, ScaledTensor):
+                x._data.data_ptr()
+                return ScaledTensor(x._data * 2, x._scale)
+            x.data_ptr()
+            return x * 2
+
+        passthrough_ops.add(
+            torch.ops.mylib.error_messages_tensor_subclass_custom_op_without_fake.default.name()
+        )
+
+        def no_fake_fn(x):
+            return (
+                torch.ops.mylib.error_messages_tensor_subclass_custom_op_without_fake(x)
+            )
+
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "Cannot access data pointer of Tensor"
+        ) as no_fake_cm:
+            torch.compile(no_fake_fn, backend="eager", fullgraph=True)(input_tensor)
+        self.assertNotIn(
+            "Custom op Tensor subclass data pointer access",
+            str(no_fake_cm.exception),
+        )
+
+        class UninspectableTensor(ScaledTensor):
+            def __tensor_flatten__(self):
+                raise AssertionError("test diagnostic failure")
+
+        graph = torch.fx.Graph()
+        placeholder = graph.placeholder("x")
+        node = graph.call_function(
+            torch.ops.mylib.error_messages_tensor_subclass_custom_op.default,
+            (placeholder,),
+        )
+        fake_mode = FakeTensorMode()
+        fake_input = ScaledTensor(fake_mode.from_tensor(torch.randn(3)), 0.5)
+
+        @torch.library.custom_op(
+            "mylib::error_messages_tensor_subclass_overloaded",
+            mutates_args=(),
+        )
+        def overloaded_custom_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @torch.library.custom_op(
+            "mylib::error_messages_tensor_subclass_overloaded.int",
+            mutates_args=(),
+        )
+        def overloaded_custom_op_int(x: torch.Tensor, value: int) -> torch.Tensor:
+            return x + value
+
+        @overloaded_custom_op_int.register_fake
+        def _(x, value):
+            return x.new_empty(x.shape)
+
+        overloaded_node = graph.call_function(
+            torch.ops.mylib.error_messages_tensor_subclass_overloaded,
+            (placeholder, 1),
+        )
+        self.assertTrue(
+            _is_custom_op_fake_tensor_subclass_data_ptr_error(
+                overloaded_node,
+                (fake_input, 1),
+                {},
+                RuntimeError(
+                    "Cannot access data pointer of Tensor (e.g. FakeTensor, "
+                    "FunctionalTensor)."
+                ),
+            )
+        )
+        self.assertTrue(
+            _is_custom_op_fake_tensor_subclass_data_ptr_error(
+                node,
+                (fake_input,),
+                {},
+                RuntimeError(
+                    "Cannot access data pointer of Tensor (e.g. FakeTensor, "
+                    "FunctionalTensor)."
+                ),
+            )
+        )
+        wrapped_error = RuntimeError("wrapped custom op error")
+        wrapped_error.__cause__ = RuntimeError(
+            "Cannot access data pointer of Tensor (e.g. FakeTensor, FunctionalTensor)."
+        )
+        self.assertTrue(
+            _is_custom_op_fake_tensor_subclass_data_ptr_error(
+                node,
+                (fake_input,),
+                {},
+                wrapped_error,
+            )
+        )
+        context_error = RuntimeError("implicitly wrapped custom op error")
+        context_error.__context__ = wrapped_error.__cause__
+        self.assertTrue(
+            _is_custom_op_fake_tensor_subclass_data_ptr_error(
+                node,
+                (fake_input,),
+                {},
+                context_error,
+            )
+        )
+        self.assertFalse(
+            _is_custom_op_fake_tensor_subclass_data_ptr_error(
+                node,
+                (fake_input,),
+                {},
+                RuntimeError(
+                    "Cannot access data pointer of Tensor that doesn't have storage"
+                ),
+            )
+        )
+        self.assertFalse(
+            _is_custom_op_fake_tensor_subclass_data_ptr_error(
+                node,
+                (UninspectableTensor(torch.randn(3), 0.5),),
+                {},
+                RuntimeError(
+                    "Cannot access data pointer of Tensor (e.g. FakeTensor, "
+                    "FunctionalTensor)."
+                ),
+            )
         )
 
     def test_fx_node_error_bad_user_code(self):

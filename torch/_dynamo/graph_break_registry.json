@@ -1127,6 +1127,28 @@
       "Hints": []
     }
   ],
+  "GB9566": [
+    {
+      "Gb_type": "Custom op Tensor subclass data pointer access",
+      "Context": "{node.op} {node.target}",
+      "Explanation": "A custom op with a fake implementation received an argument containing a fake Tensor subclass and attempted to access a data pointer during fake-value propagation. The access may have come from the fake implementation itself, or from the custom op implementation if the subclass's `__torch_dispatch__` passed the wrapper through.",
+      "Hints": [
+        "Fake implementations must use only PyTorch operations and may not directly access tensor storage or data.",
+        "If the custom op implementation ran, handle FakeTensor-wrapped subclass inputs there, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.",
+        "This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors."
+      ]
+    },
+    {
+      "Gb_type": "Custom op Tensor subclass data pointer access",
+      "Context": "",
+      "Explanation": "A Tensor subclass argument reached a custom op while Dynamo was running fake tensor propagation: {msg}",
+      "Hints": [
+        "A Tensor subclass argument reached this custom op during fake-value propagation. In this case, the subclass's `__torch_dispatch__` may run the custom op implementation instead of the registered fake impl.",
+        "This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors.",
+        "Handle FakeTensor-wrapped subclass inputs in the custom op implementation, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations."
+      ]
+    }
+  ],
   "GB0074": [
     {
       "Gb_type": "Invoking an nn.Module inside a higher order operator",
