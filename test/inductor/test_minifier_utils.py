@@ -2,12 +2,14 @@
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.debug_utils import NNModuleToString
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.repro.aoti import (
     AOTIMinifierError,
     export_for_aoti_minifier,
     get_module_string,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -93,7 +95,7 @@ class MinifierUtilsTests(TestCase):
             model_string.strip(),
             """\
 # from torch.nn import *
-# class Repro_0_true_graph_0(torch.nn.Module):
+# class true_graph_0_0(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
 
@@ -104,9 +106,7 @@ class MinifierUtilsTests(TestCase):
 #         return (clone,)
 
 
-
-# from torch.nn import *
-# class Repro_1_false_graph_0(torch.nn.Module):
+# class false_graph_0_1(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
 
@@ -117,13 +117,11 @@ class MinifierUtilsTests(TestCase):
 #         return (clone,)
 
 
-
-# from torch.nn import *
 # class Repro(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
-#         self.true_graph_0 = Repro_0_true_graph_0()
-#         self.false_graph_0 = Repro_1_false_graph_0()
+#         self.true_graph_0 = true_graph_0_0()
+#         self.false_graph_0 = false_graph_0_1()
 
 
 
@@ -137,6 +135,32 @@ class MinifierUtilsTests(TestCase):
 #         getitem = cond[0];  cond = None
 #         return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )
+
+    def test_cond_subgraph_roundtrips(self):
+        # torch.cond attaches its branches as nested GraphModule submodules.
+        # NNModuleToString.convert must serialize them as real nested classes
+        # that reconstruct -- not the invalid, body-less `<lambda>()` placeholder.
+        def fn(pred, x):
+            return torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
+        pred = torch.tensor(False)
+        x = torch.randn(4)
+        gm = make_fx(fn, tracing_mode="real")(pred, x)
+
+        result = NNModuleToString.convert(gm)
+
+        # The branch bodies must be present, with no invalid placeholder.
+        self.assertIn("sin", result)
+        self.assertIn("cos", result)
+        self.assertNotIn("<lambda>", result)
+
+        # The generated source must reconstruct a module whose forward matches
+        # the original graph for both branches.
+        ns = {"torch": torch}
+        exec(result, ns)
+        repro = ns["Repro"]()
+        self.assertEqual(repro(torch.tensor(False), x), gm(torch.tensor(False), x))
+        self.assertEqual(repro(torch.tensor(True), x), gm(torch.tensor(True), x))
 
 
 if __name__ == "__main__":

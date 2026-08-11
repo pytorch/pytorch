@@ -137,7 +137,7 @@ class CollectiveTest(TorchDispatchMode):
                 self.test.assertEqual(
                     pg.size(),
                     4,
-                    f"Error: Expected pg.size() to be 4, but got {pg.size()}",
+                    lambda msg: f"{msg}\nError: Expected pg.size() to be 4, but got {pg.size()}",
                 )
                 self.test.assertNotEqual(
                     pg.name(), "", "Error: pg.name() should not be an empty string"
@@ -153,7 +153,7 @@ class CollectiveTest(TorchDispatchMode):
                 self.test.assertEqual(
                     computed_size,
                     expected_size,
-                    msg=f"Size mismatch for {func.__name__}: expected {expected_size}, got {computed_size}",
+                    msg=lambda msg: f"{msg}\nSize mismatch for {func.__name__}: expected {expected_size}, got {computed_size}",
                 )
 
         if (

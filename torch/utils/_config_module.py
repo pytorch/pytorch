@@ -1,11 +1,15 @@
 import contextlib
 import copy
+import functools
 import hashlib
 import importlib
 import inspect
 import io
+import keyword
+import math
 import os
 import pickle
+import sys
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -318,7 +322,7 @@ class _ConfigEntry:
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
-    # Used to work arounds bad assumptions in unittest.mock.patch
+    # Used to work around bad assumptions in unittest.mock.patch
     # The code to blame is
     # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
     # Essentially, mock.patch requires, that if __dict__ isn't accessible
@@ -431,7 +435,11 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                config.hide = False
+                # Avoid a redundant instance-__dict__ write: hide defaults to False on
+                # the class and is only ever set True by __delattr__ (the mock.patch
+                # workaround), so only clear it when it is actually set.
+                if config.hide:
+                    config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -553,7 +561,7 @@ class ConfigModule(ModuleType):
     ) -> dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
 
-        This function is design to provide a single point which handles
+        This function is designed to provide a single point which handles
         accessing config options and exporting them into a dictionary.
         This is used by a number of different user facing export methods
         which all have slightly different semantics re: how and what to
@@ -685,61 +693,97 @@ class ConfigModule(ModuleType):
         # additional imports required
         imports = set()
 
-        def is_valid_python_expr(value: str) -> bool:
+        def skipped_config_line(mod: str, key: str) -> str:
+            return (
+                f"# {mod}.{key} omitted because its value is not representable "
+                "as Python source"
+            )
+
+        def importable_ref(func: Any) -> tuple[str, str] | None:
             try:
-                compile(value, "<config>", "eval")
-            except SyntaxError:
-                return False
-            return True
-
-        def callable_reference(v: Any) -> str | None:
-            # functools.partial has no attributes below but is a callable.
-            if not callable(v):
-                return None
-
-            module_name = getattr(v, "__module__", None)
-            qualname = getattr(v, "__qualname__", getattr(v, "__name__", None))
-            if not isinstance(module_name, str) or not isinstance(qualname, str):
-                return None
-            if not qualname or "<" in qualname or ">" in qualname:
-                return None
-
-            if module_name == "builtins":
-                ref = qualname
-            else:
-                if not module_name or module_name == "__main__":
+                module_name = getattr(func, "__module__", None)
+                qualname = getattr(func, "__qualname__", None)
+                if (
+                    not callable(func)
+                    or not isinstance(module_name, str)
+                    or not isinstance(qualname, str)
+                    or not module_name
+                    or not qualname
+                    or module_name == "__main__"
+                    or "<" in qualname
+                ):
                     return None
-                try:
-                    resolved: Any = importlib.import_module(module_name)
-                    for attr in qualname.split("."):
-                        resolved = getattr(resolved, attr)
-                except Exception:
+                names = module_name.split(".") + qualname.split(".")
+                if any(
+                    not name.isidentifier() or keyword.iskeyword(name) for name in names
+                ):
                     return None
-                if resolved is not v:
+                resolved = sys.modules.get(module_name)
+                if resolved is None:
                     return None
-                ref = f"{module_name}.{qualname}"
-                imports.add(module_name)
-
-            if not is_valid_python_expr(ref):
+                for name in qualname.split("."):
+                    resolved = getattr(resolved, name)
+                if resolved is not func:
+                    return None
+                import_name = "" if module_name == "builtins" else module_name
+                prefix = f"{import_name}." if import_name else ""
+                return f"{prefix}{qualname}", import_name
+            except Exception:
                 return None
-            return ref
 
         def callable_references(values: list | set) -> list[str] | None:
             refs = []
-            for item in values:
-                ref = callable_reference(item)
-                if ref is None:
+            import_names = set()
+            for value in values:
+                func_info = importable_ref(value)
+                if func_info is None:
                     return None
-                refs.append(ref)
+                func_ref, import_name = func_info
+                refs.append(func_ref)
+                if import_name:
+                    import_names.add(import_name)
+            imports.update(import_names)
             return refs
 
-        def skipped_config_line(mod: str, k: str, v: Any) -> str:
-            value_type = type(v)
-            return (
-                f"# {mod}.{k} omitted because its value of type "
-                f"{value_type.__module__}.{value_type.__qualname__} "
-                "is not representable as Python source"
-            )
+        def serialize_partial_arg(val: Any) -> str:
+            if type(val) in (type(None), bool, int, str, bytes) or (
+                type(val) is float and math.isfinite(val)
+            ):
+                return repr(val)
+            if type(val) not in (list, tuple, dict):
+                raise ValueError(
+                    f"unsupported functools.partial argument type {type(val).__name__}"
+                )
+
+            if type(val) in (list, tuple):
+                for item in val:
+                    serialize_partial_arg(item)
+            else:
+                for key, item in val.items():
+                    serialize_partial_arg(key)
+                    serialize_partial_arg(item)
+            return repr(val)
+
+        def get_partial_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
+            if type(v) is not functools.partial:
+                return f"# {mod}.{k} omitted: unsupported partial subclass"
+            func_info = importable_ref(v.func)
+            if func_info is None:
+                return f"# {mod}.{k} omitted: partial callable cannot be re-imported"
+            func_ref, import_name = func_info
+            try:
+                parts = [func_ref]
+                parts.extend(serialize_partial_arg(arg) for arg in v.args)
+                if v.keywords:
+                    parts.append(f"**{serialize_partial_arg(v.keywords)}")
+                expression = f"functools.partial({', '.join(parts)})"
+                compile(expression, "<config>", "eval")
+            except Exception:
+                return f"# {mod}.{k} omitted: partial arguments cannot be serialized"
+            if import_name:
+                imports.add(import_name)
+            imports.add("functools")
+            return f"{mod}.{k} = {expression}"
 
         def get_config_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
             """
@@ -752,22 +796,33 @@ class ConfigModule(ModuleType):
                 import _warnings
                 torch._dynamo.config.reorderable_logging_functions = { _warnings.warn, logging.warn, print }
             """
-            ref = callable_reference(v)
-            if ref is not None:
-                return f"{mod}.{k} = {ref}"
-            elif isinstance(v, (list, set)) and v and all(callable(item) for item in v):
+            if isinstance(v, functools.partial):
+                return get_partial_line(mod, k, v)
+            elif callable(v):
+                func_info = importable_ref(v)
+                if func_info is None:
+                    return skipped_config_line(mod, k)
+                func_ref, import_name = func_info
+                if import_name:
+                    imports.add(import_name)
+                return f"{mod}.{k} = {func_ref}"
+            elif isinstance(v, (list, set)) and v and all(callable(i) for i in v):
                 v_list = callable_references(v)
                 if v_list is None:
-                    return skipped_config_line(mod, k, v)
+                    return skipped_config_line(mod, k)
                 if isinstance(v, list):
-                    return f"{mod}.{k} = {v_list}"
+                    return f"{mod}.{k} = [{', '.join(v_list)}]"
                 else:
                     return f"{mod}.{k} = {{ {', '.join(sorted(v_list))} }}"
             else:
                 value = repr(v)
-                if not is_valid_python_expr(value):
-                    return skipped_config_line(mod, k, v)
-                return f"{mod}.{k} = {value}"
+                config_line = f"{mod}.{k} = {value}"
+                try:
+                    compile(value, "<config>", "eval")
+                    compile(config_line, "<config>", "exec")
+                except (SyntaxError, ValueError):
+                    return skipped_config_line(mod, k)
+                return config_line
 
         lines = []
         mod = self.__name__
@@ -777,9 +832,8 @@ class ConfigModule(ModuleType):
             readonly_values=True,
         ).items():
             lines.append(get_config_line(mod, k, v))
-        for import_name in imports:
-            lines.insert(0, f"import {import_name}")
-        return "\n".join(lines)
+        import_lines = [f"import {import_name}" for import_name in sorted(imports)]
+        return "\n".join(import_lines + lines)
 
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""

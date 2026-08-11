@@ -87,6 +87,20 @@ class TestConfigModule(TestCase):
         ):
             config.does_not_exist = 0
 
+    def test_hide_not_added_to_instance_dict_on_write(self):
+        # A normal config write must not materialize 'hide' in the _ConfigEntry instance
+        # __dict__; it should stay on the class default. An unconditional hide=False write
+        # on every setattr would add it (pure overhead), so __setattr__ clears hide only
+        # when it is actually set.
+        entry = config._config["e_bool"]
+        entry.__dict__.pop("hide", None)  # reset to the class default
+        config.e_bool = False
+        self.assertNotIn("hide", entry.__dict__)
+        # When hide *is* set (the __delattr__ / mock.patch path), a write still clears it.
+        entry.hide = True
+        config.e_bool = True
+        self.assertFalse(entry.hide)
+
     def test_none_override_semantics(self):
         config.e_bool = None
         self.assertIsNone(config.e_bool)
@@ -261,8 +275,9 @@ torch.testing._internal.fake_config_module.e_env_force = True""",
         code = config3.codegen_config()
         self.assertIn("import _warnings", code)
         self.assertIn("import logging", code)
+        self.assertEqual(code.splitlines()[:2], ["import _warnings", "import logging"])
         self.assertIn(
-            """torch.testing._internal.fake_config_module3.e_list = ['print', '_warnings.warn', 'logging.warn']
+            """torch.testing._internal.fake_config_module3.e_list = [print, _warnings.warn, logging.warn]
 torch.testing._internal.fake_config_module3.e_set = { print }
 torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             code,
@@ -280,6 +295,64 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertIn("e_func omitted", code)
         self.assertIn("e_set omitted", code)
         self.assertNotIn("<lambda>", code)
+        compile(code, "<config>", "exec")
+
+    def test_codegen_config_validates_complete_assignment(self):
+        class CommentRepr:
+            def __repr__(self):
+                return "# comment\n1"
+
+        class StatementRepr:
+            def __repr__(self):
+                return "1; injected = True"
+
+        class NonImportableCallable:
+            def __call__(self):
+                pass
+
+        NonImportableCallable.__module__ = "bad\ninjected = True"
+        with config3.patch(
+            {
+                "e_func": CommentRepr(),
+                "e_list": StatementRepr(),
+                "e_set": NonImportableCallable(),
+            }
+        ):
+            code = config3.codegen_config()
+
+        self.assertIn("e_func omitted", code)
+        self.assertIn("e_list omitted", code)
+        self.assertIn("e_set omitted", code)
+        self.assertNotIn("injected", code)
+        compile(code, "<config>", "exec")
+
+    def test_codegen_config_does_not_import_callable_modules(self):
+        class SpoofedCallable:
+            def __call__(self):
+                pass
+
+        spoofed = SpoofedCallable()
+        spoofed.__module__ = "fractions"
+        spoofed.__qualname__ = "Fraction"
+        with patch(
+            "torch.utils._config_module.importlib.import_module"
+        ) as import_module:
+            with config3.patch("e_func", spoofed):
+                code = config3.codegen_config()
+
+        import_module.assert_not_called()
+        self.assertIn("e_func omitted", code)
+        compile(code, "<config>", "exec")
+
+    def test_codegen_config_skips_null_in_repr(self):
+        class NullRepr:
+            def __repr__(self):
+                return "'value\x00suffix'"
+
+        with config3.patch("e_func", NullRepr()):
+            code = config3.codegen_config()
+
+        self.assertIn("e_func omitted", code)
         compile(code, "<config>", "exec")
 
     def test_get_hash(self):
@@ -468,7 +541,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 break
 
         self.assertFalse(
-            error_messages, f"concurrent patch usage failed: {error_messages}"
+            error_messages,
+            lambda msg: f"{msg}\nconcurrent patch usage failed: {error_messages}",
         )
         self.assertTrue(config.e_bool)
 
@@ -635,7 +709,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertEqual(
                 len(deprecation_warnings),
                 0,
-                f"Unexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
+                lambda msg: f"{msg}\nUnexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
             )
 
     def test_patch_then_global(self):
