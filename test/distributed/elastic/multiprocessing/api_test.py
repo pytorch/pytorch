@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -430,9 +431,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @skip_but_pass_in_sandcastle_if(
-            TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan"
-        )
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -557,10 +555,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 )
 
     class StartProcessesAsBinaryTest(_StartProcessesTest):
-        hw_classification = HardwareClassification.GENERIC
         ########################################
         # start_processes as binary tests
         ########################################
+        hw_classification = HardwareClassification.GENERIC
 
         def test_subprocess_context_close(self):
             pc = start_processes(
@@ -690,10 +688,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             )
 
     class StartProcessesListAsBinaryTest(_StartProcessesTest):
-        hw_classification = HardwareClassification.GENERIC
         ########################################
         # start_processes as binary tests
         ########################################
+        hw_classification = HardwareClassification.GENERIC
+
         def test_binary(self):
             for redirs in redirects_oss_test():
                 with self.subTest(redirs=redirs):
@@ -732,10 +731,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             )
 
         @unittest.skipIf(
-            IS_LINUX,
+            IS_LINUX or TEST_WITH_ROCM,
             "https://github.com/pytorch/pytorch/issues/163230",
         )
-        @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163230")
         def test_binary_redirect_and_tee(self):
             pc = start_processes(
                 name="trainer",
@@ -1049,11 +1047,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
 
 class BoundedCloseTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
     """Verify that _close in MultiprocessContext / SubprocessContext returns
     within a bounded time when child processes refuse to die (simulating a
     Linux D-state worker, which SIGKILL cannot reap).
     """
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_multiprocess_context(self) -> MultiprocessContext:
         log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
