@@ -793,6 +793,31 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
         torch.ops.symm_mem._barrier(sm)
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    def test_cuda_multimem_barrier_kernel(self) -> None:
+        self._init_process()
+
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        group_name = dist.group.WORLD.group_name
+        with _enable_multicast_for_test(self, self.device.index):
+            t = symm_mem.empty(64, device=self.device)
+            symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA],
+            ) as prof:
+                symm_mem_hdl.barrier()
+                torch.cuda.synchronize()
+            self.assertTrue(
+                any("multimem_barrier_kernel" in event.key for event in prof.events()),
+                "expected multimem_barrier_kernel in profiler events",
+            )
+
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
