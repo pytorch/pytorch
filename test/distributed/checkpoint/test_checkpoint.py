@@ -418,11 +418,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, fail_read_data_async=[0])
 
 
-instantiate_device_type_tests(
-    TestDistributedCheckpointing, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestDistributedFailure, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestDistributedCheckpointing, globals(), except_for="cpu")
+instantiate_device_type_tests(TestDistributedFailure, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
