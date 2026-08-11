@@ -263,6 +263,13 @@ class profile:
                 FutureWarning,
                 stacklevel=2,
             )
+        if experimental_config.adjust_profiler_step:
+            warn(
+                "adjust_profiler_step is deprecated and ignored. It will be "
+                "removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
