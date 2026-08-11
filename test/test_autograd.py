@@ -6347,11 +6347,19 @@ Done""",
         with self.assertRaisesRegex(
             RuntimeError,
             "Function 'MyFuncBackward' returned nan values in its 0th output.",
-        ):
+        ) as context:
             with warnings.catch_warnings(record=True) as w:
                 with detect_anomaly():
                     out.backward()
             self.assertIn("No forward pass information", str(w[0].message))
+        error = str(context.exception)
+        self.assertIn(
+            "grad_outputs: [Tensor(shape=[1], dtype=float, device=cpu)]", error
+        )
+        self.assertIn(
+            "grad_inputs: [Tensor(shape=[10], dtype=float, device=cpu), undefined]",
+            error,
+        )
 
         inp = torch.rand(size, requires_grad=True)
         with self.assertRaisesRegex(
