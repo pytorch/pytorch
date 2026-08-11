@@ -17,7 +17,7 @@ from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, ir as inductor_ir
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -1244,6 +1244,50 @@ class TestHasTriton(TestCase):
         # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
         iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
         self.assertFalse(self._run([("fake", iface)]))
+
+
+class TestCloneDefaultGeneratorState(TestCase):
+    def test_registered_out_of_tree_device_is_admitted(self):
+        # An out-of-tree backend that registered graph-safe RNG is admitted and
+        # its generator is resolved by the GeneratorState's own device.
+        fake_generator = mock.Mock()
+        fake_generator.clone_state.return_value = "cloned-state"
+        device = torch.device("privateuseone", 0)
+        with (
+            mock.patch(
+                "torch._functorch._aot_autograd.utils._GRAPHSAFE_RNG_DEVICE_TYPES",
+                {"cuda", "privateuseone"},
+            ),
+            mock.patch(
+                "torch._functorch._aot_autograd.utils.get_default_generator",
+                return_value=fake_generator,
+            ) as get_default_generator,
+        ):
+            result = inductor_ir._clone_default_generator_state(device)
+        self.assertEqual(result, "cloned-state")
+        get_default_generator.assert_called_once_with(device)
+
+    def test_unregistered_device_type_is_rejected(self):
+        # A device type outside the graph-safe RNG registry must fail loudly.
+        with mock.patch(
+            "torch._functorch._aot_autograd.utils._GRAPHSAFE_RNG_DEVICE_TYPES",
+            {"cuda"},
+        ):
+            with self.assertRaisesRegex(
+                AssertionError, "not registered for graph-safe RNG"
+            ):
+                inductor_ir._clone_default_generator_state(
+                    torch.device("privateuseone", 0)
+                )
+
+    def test_missing_device_index_is_rejected(self):
+        # "cuda" is registered by default, but an index-less device must fail.
+        with mock.patch(
+            "torch._functorch._aot_autograd.utils._GRAPHSAFE_RNG_DEVICE_TYPES",
+            {"cuda"},
+        ):
+            with self.assertRaisesRegex(AssertionError, "device index"):
+                inductor_ir._clone_default_generator_state(torch.device("cuda"))
 
 
 if __name__ == "__main__":
