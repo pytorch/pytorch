@@ -1614,6 +1614,15 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
 
+        # compile-on-one-rank changes wrapper and kernel codegen (runtime device
+        # resolution, DeviceProperties(index=None)) even for graphs that contain no
+        # coor::current_device node, so an entry compiled with it off must not be served
+        # to a compile with it on -- that would hand back the device-baked artifact CooR
+        # exists to avoid.
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        self.compile_on_one_rank = _coor_enabled()
+
         # Include cudagraph annotation in cache key only when it changes
         # behavior. When both fwd and bwd are overridden to the same value,
         # normalize to a simple boolean (equivalent to flipping the config).
@@ -1982,7 +1991,6 @@ class InductorCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
-        FxGraphCache._emit_triton_bundle(self.content)
 
     @override
     @staticmethod
@@ -2245,7 +2253,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
             check = bool(evaluate_guards(graph.guards_expr, symints))
-            assert check is True  # noqa: S101
+            if check is not True:
+                raise AssertionError(f"expected check to be True, got {check}")
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
@@ -2263,15 +2272,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content, make_dirs=True)
-
-    @staticmethod
-    def _emit_triton_bundle(content: bytes) -> None:
-        if not TritonBundler.is_enabled():
-            return
-
-        graph = pickle.loads(content)
-        if bundle := graph._triton_bundle:
-            TritonBundler.read_and_emit(bundle)
 
     @staticmethod
     def _save_graph(
