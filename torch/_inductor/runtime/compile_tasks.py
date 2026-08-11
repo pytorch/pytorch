@@ -127,7 +127,6 @@ def _set_triton_libdevice_path_impl() -> None:
 _WORKER_CACHE_ENV_VARS = (
     "TORCHINDUCTOR_CACHE_DIR",
     "TRITON_CACHE_DIR",
-    "FLYDSL_RUNTIME_CACHE_DIR",
 )
 _last_applied_cache_env: dict[str, str | None] | None = None
 
