@@ -71,7 +71,6 @@ from torch.testing._internal.common_utils import (
     skipIfMPS,
     skipIfTorchDynamo,
     skipIfTorchInductor,
-    skipIfXpu,
     suppress_warnings,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
@@ -758,7 +757,7 @@ class TestCommon(TestCase):
 
     @onlyAccelerator
     @skipIfMPS
-    @skipIfXpu
+    @skipXPU
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
