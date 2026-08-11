@@ -14841,6 +14841,61 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.autograd.grad(b, a)
 
+    _reduction_dtype_arg_ops = {
+        "sum": lambda t, d: t.sum(dtype=d),
+        "sum_dim": lambda t, d: t.sum(dim=0, dtype=d),
+        "nansum": lambda t, d: t.nansum(dim=0, dtype=d),
+        "mean": lambda t, d: t.mean(dtype=d),
+        "mean_dim": lambda t, d: t.mean(dim=0, dtype=d),
+        "prod": lambda t, d: t.prod(dtype=d),
+        "prod_dim": lambda t, d: t.prod(dim=0, dtype=d),
+        "cumsum": lambda t, d: t.cumsum(0, dtype=d),
+        "cumprod": lambda t, d: t.cumprod(0, dtype=d),
+    }
+
+    @parametrize("op_name", list(_reduction_dtype_arg_ops))
+    def test_reduction_complex_dtype_arg_backward(self, device, op_name):
+        # Regression test for #192719: a complex dtype= on a real input must
+        # produce a real grad instead of tripping autograd's dtype check.
+        if op_name == "nansum" and torch.device(device).type == "cpu":
+            self.skipTest("nansum CPU kernel does not support complex")
+        op = self._reduction_dtype_arg_ops[op_name]
+        # + 0.5 keeps prod/cumprod values away from zero and their backward
+        # away from the zero-input special case
+        x = torch.rand(3, 4, device=device, dtype=torch.float64) + 0.5
+        x.requires_grad_()
+        out = op(x, torch.complex128)
+        self.assertEqual(out.dtype, torch.complex128)
+        # warn_always so the TORCH_WARN_ONCE "discards the imaginary part"
+        # copy warning cannot be consumed by an earlier test in the process
+        with set_warn_always_context(True), warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            out.real.sum().backward()
+        self.assertFalse(any("imaginary part" in str(w.message) for w in ws))
+        self.assertEqual(x.grad.dtype, torch.float64)
+        ref = x.detach().clone().requires_grad_()
+        op(ref.to(torch.complex128), None).real.sum().backward()
+        self.assertEqual(x.grad, ref.grad)
+        gradcheck(
+            lambda t: torch.view_as_real(op(t, torch.complex128)),
+            (x.detach().clone().requires_grad_(),),
+        )
+
+    @parametrize("op_name", list(_reduction_dtype_arg_ops))
+    def test_reduction_widening_dtype_arg_backward(self, device, op_name):
+        # A real widening dtype= (float32 input, float64 out) must keep
+        # producing a float32 grad after the #192719 fix.
+        op = self._reduction_dtype_arg_ops[op_name]
+        x = torch.rand(3, 4, device=device, dtype=torch.float32) + 0.5
+        x.requires_grad_()
+        out = op(x, torch.float64)
+        self.assertEqual(out.dtype, torch.float64)
+        out.sum().backward()
+        self.assertEqual(x.grad.dtype, torch.float32)
+        ref = x.detach().clone().requires_grad_()
+        op(ref.to(torch.float64), None).sum().backward()
+        self.assertEqual(x.grad, ref.grad)
+
     def test_grad_unused_input_error_message(self, device):
         for unused_idx in [0, 1]:
             x = torch.randn(10, requires_grad=True, device=device)
