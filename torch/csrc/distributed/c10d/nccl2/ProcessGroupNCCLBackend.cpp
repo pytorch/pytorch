@@ -16,6 +16,7 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -305,6 +306,53 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
         });
   }();
   return allocator;
+}
+
+bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  return ::c10d::cuda::deviceSupportsMulticast(deviceIdx);
+}
+
+at::Tensor ProcessGroupNCCL::allocateTensor(
+    long size,
+    at::TensorOptions options) {
+  TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
+  auto device = options.device();
+  TORCH_CHECK_VALUE(
+      device.is_cuda(),
+      "NCCL tensor allocator expects a CUDA device but got ",
+      device);
+  if (!device.has_index()) {
+    device = getBoundDeviceId().value_or(
+        at::Device(at::kCUDA, at::cuda::current_device()));
+    options = options.device(device);
+  }
+  TORCH_CHECK(
+      supportsTensorAlloc(device.index()),
+      "NCCL tensor allocation is not supported on ",
+      device);
+
+  ensureInitialized(device);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  if (!memPool_) {
+    auto allocator = std::static_pointer_cast<
+        c10::cuda::CUDACachingAllocator::CUDAAllocator>(getMemAllocator());
+    auto pool = std::make_unique<at::cuda::MemPool>(std::move(allocator));
+    registerMemPool(pool.get(), /*symm=*/false);
+    memPool_ = std::move(pool);
+  }
+
+  auto threadId = std::this_thread::get_id();
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      memPool_->device(), memPool_->id(), [threadId](cudaStream_t) {
+        return std::this_thread::get_id() == threadId;
+      });
+  auto tensor = at::empty({size}, options);
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(
+      memPool_->device(), memPool_->id());
+  c10::cuda::CUDACachingAllocator::releasePool(
+      memPool_->device(), memPool_->id());
+  return tensor;
 }
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
