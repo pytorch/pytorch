@@ -3831,10 +3831,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 for loss in (F.mse_loss, F.smooth_l1_loss):
                     xb = x.clone().requires_grad_()
                     out = loss(xb, target, reduction=reduction)
+                    grad = torch.autograd.grad(out.sum(), xb)[0]
                     if reduction == 'none':
-                        expected = torch.autograd.grad(out.sum(), xb)[0]
+                        expected = grad * v
                     else:
-                        expected = torch.autograd.grad(out, xb)[0]
+                        expected = (grad * v).sum()
                     with fwAD.dual_level():
                         dual = fwAD.make_dual(x, v)
                         tangent = fwAD.unpack_dual(loss(dual, target, reduction=reduction)).tangent
