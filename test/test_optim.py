@@ -1034,12 +1034,18 @@ class TestOptimRenewed(TestCase):
     )
     def test_foreach_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        # 2**32 is the uint32 wrap point: a numel narrowed to 32 bits becomes 0 and the
-        # kernel silently does nothing. Adafactor can't use it because it reduces over
-        # the whole param and update in the param dtype (p.norm(2), update.norm(2)),
-        # and at 2**32 unit-magnitude elements both norms are 65536, past the fp16 max
-        # of 65504, so they go inf and every param lands on nan. The backoff still
-        # clears INT32_MAX, so it keeps signed-overflow coverage but loses wrap-to-zero.
+        # Why 2**32? 2 reasons.
+        # 1. if numel gets narrowed to 32 bits for uint32, it becomes 0, and the
+        # kernel silently does nothing
+        # 2. if it gets narrowed to int32 (much smaller max), it will be negative
+        # and the kernel may also silently do nothing
+        # This test makes sure that we do not hit either of these by accident.
+        #
+        # However, we use a smaller number for Adafactor as it reduces over the whole
+        # param and update in the param dtype (p.norm(2), update.norm(2)), and at 2**32
+        # unit-magnitude elements both norms are 65536, past the fp16 max of 65504, so
+        # they become inf and every param ends up nan. The smaller value will prevent
+        # situation 2 only, but that's better than skipping the test.
         numel = 2**32 - 2**23 if optim_cls.__name__ == "Adafactor" else 2**32
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
@@ -1271,8 +1277,8 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
-            # Every element saw the same param and grad, so they must all agree; a
-            # size-1 param pins what that shared value should be.
+            # Every element saw the same param and grad, so they must all agree.
+            # Compare with a size 1 param for reference.
             self.assertEqual(params[0].min(), params[0].max())
             ref = torch.ones(1, device=device, dtype=dtype)
             ref.grad = torch.ones_like(ref)
