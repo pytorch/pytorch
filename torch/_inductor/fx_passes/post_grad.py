@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -25,7 +26,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher
+from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -141,64 +142,6 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
-def _has_accelerator_cse_candidates(gm: torch.fx.GraphModule) -> bool:
-    candidate_counts = Counter(
-        (
-            node.target,
-            value.device,
-            value.dtype,
-            value.ndim,
-        )
-        for node in gm.graph.nodes
-        if node.op == "call_function"
-        and isinstance((value := node.meta.get("val")), torch.Tensor)
-        and is_gpu(value.device.type)
-        and value.device.type != "mps"
-    )
-    return any(count > 1 for count in candidate_counts.values())
-
-
-def _annotate_data_independent_cse_tokens(gm: torch.fx.GraphModule) -> None:
-    """Mark CSE-equivalent graph fragments without deduplicating them.
-
-    See Note [Data-independent CSE signatures].
-    """
-    from torch._functorch.compile_utils import fx_graph_cse_replacements
-
-    mutation_inputs = OrderedSet(
-        input_node
-        for node in gm.graph.nodes
-        if pattern_matcher.is_mutation_op(node)
-        for input_node in node.all_input_nodes
-    )
-    tensor_data_dependent: OrderedSet[torch.fx.Node] = OrderedSet()
-    for node in gm.graph.nodes:
-        if node in mutation_inputs or (
-            node.op in ("placeholder", "get_attr")
-            and isinstance(node.meta.get("val"), torch.Tensor)
-        ):
-            tensor_data_dependent.add(node)
-        elif node.op == "call_function" and node.target in META_ONLY_OPS:
-            continue
-        elif any(arg in tensor_data_dependent for arg in node.all_input_nodes):
-            tensor_data_dependent.add(node)
-
-    for node in gm.graph.nodes:
-        if node not in tensor_data_dependent:
-            node.meta[ir.DATA_INDEPENDENT_CSE_TOKEN] = node.name
-
-    replacements = fx_graph_cse_replacements(
-        gm.graph,
-        node_filter=lambda node: node not in tensor_data_dependent,
-    )
-    if replacements:
-        gm.meta[ir.HAS_DATA_INDEPENDENT_CSE] = True
-    for node, canonical in replacements.items():
-        node.meta[ir.DATA_INDEPENDENT_CSE_TOKEN] = canonical.meta[
-            ir.DATA_INDEPENDENT_CSE_TOKEN
-        ]
-
-
 def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
     """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
 
@@ -218,6 +161,77 @@ def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
             "coor::current_device node that inductor cannot lower). Use a non-inductor "
             "backend (e.g. aot_eager) or disable compile_on_one_rank."
         )
+
+
+def _cse_repeated_gpu_wheres(gm: torch.fx.GraphModule) -> None:
+    """CSE the data-independent producer slices of repeated GPU wheres."""
+    where = aten.where.self
+    candidates = [
+        node
+        for node in gm.graph.find_nodes(op="call_function", target=where)
+        if isinstance((value := node.meta.get("val")), torch.Tensor)
+        and is_gpu(value.device.type)
+    ]
+    if len(candidates) < 2:
+        return
+
+    functional_mutations = (
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+        torch.ops.higher_order.triton_kernel_wrapper_functional,
+    )
+    mutation_aliases = OrderedSet[torch.fx.Node]()
+    for mutation in (
+        node
+        for node in gm.graph.nodes
+        if pattern_matcher.is_mutation_op(node) or node.target in functional_mutations
+    ):
+        stack = list(mutation.all_input_nodes)
+        while stack:
+            node = stack.pop()
+            if node in mutation_aliases:
+                continue
+            mutation_aliases.add(node)
+            storage = get_node_storage(node)
+            if storage is not None:
+                stack.extend(
+                    input_node
+                    for input_node in node.all_input_nodes
+                    if get_node_storage(input_node) == storage
+                )
+
+    tensor_data_dependent = OrderedSet[torch.fx.Node]()
+    for node in gm.graph.nodes:
+        if node in mutation_aliases or (
+            node.op in ("placeholder", "get_attr")
+            and isinstance(node.meta.get("val"), torch.Tensor)
+        ):
+            tensor_data_dependent.add(node)
+        elif node.op == "call_function" and node.target in META_ONLY_OPS:
+            continue
+        elif any(arg in tensor_data_dependent for arg in node.all_input_nodes):
+            tensor_data_dependent.add(node)
+
+    cse_nodes = OrderedSet[torch.fx.Node]()
+    for candidate in candidates:
+        if candidate in tensor_data_dependent:
+            continue
+        stack = [candidate]
+        while stack:
+            node = stack.pop()
+            if node in cse_nodes or node in tensor_data_dependent:
+                continue
+            cse_nodes.add(node)
+            stack.extend(node.all_input_nodes)
+    if sum(candidate in cse_nodes for candidate in candidates) < 2:
+        return
+
+    from torch._functorch.compile_utils import fx_graph_cse
+
+    gm.graph = fx_graph_cse(
+        gm.graph,
+        extra_node_key=lambda node: None if node in cse_nodes else node,
+    )
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -504,6 +518,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             gm, "replace_collectives_with_low_contention"
         ).apply_graph_pass(replace_collectives_with_low_contention)
 
+    if config.combo_kernels:
+        GraphTransformObserver(gm, "cse_repeated_gpu_wheres").apply_gm_pass(
+            _cse_repeated_gpu_wheres
+        )
+
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
@@ -527,9 +546,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
-
-    if config.combo_kernels and _has_accelerator_cse_candidates(gm):
-        _annotate_data_independent_cse_tokens(gm)
 
     gm.recompile()
     gm.graph.lint()
@@ -800,6 +816,17 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 additional_inputs,
             ) = pytree.tree_unflatten(args, tree_spec)
             scan_length = xs[0].size(0)
+            if scan_length == 0:
+                empty_ys = [
+                    torch.empty(
+                        [0] + list(ys_out.shape[1:]),
+                        dtype=ys_out.dtype,
+                        device=ys_out.device,
+                    )
+                    for ys_out in ys_outputs
+                ]
+                return list(init) + empty_ys
+
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
             # NOTE [Pre-allocate scan's output buffer]
@@ -1891,6 +1918,8 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
     mat1, mat2 = match.args
     inp_val = inp.meta["val"]
     mat1_val = mat1.meta["val"]
@@ -1914,6 +1943,8 @@ def should_prefer_unfused_addmm(match):
 def should_prefer_unfused_baddbmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
+        return False
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
         return False
 
     output = match.output_node()
@@ -2014,6 +2045,12 @@ def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, be
 
 
 def is_valid_addmm_fusion(match):
+    if any(
+        node.target is aten.mm.default and node.meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP)
+        for node in match.nodes
+    ):
+        return False
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
@@ -2062,6 +2099,62 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def _is_addcdiv_fma_eligible(match: Match) -> bool:
+    """Guards for the addcdiv FMA re-fusion pass."""
+    # aten.addcdiv requires floating-point self; check inp, not output, because
+    # aten.div promotes integers to float so the output is float even for int inp.
+    inp_val = match.kwargs["inp"].meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and inp_val.dtype.is_floating_point):
+        return False
+    # tl.fma / div_rn are Triton GPU-only
+    out_val = match.output_node().meta.get("val")
+    if not (
+        isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")
+    ):
+        return False
+    # aten.addcdiv requires all tensor args to be floating-point; integer
+    # constants and SymInts can appear as t1/t2 in decomposed graphs.
+    for key in ("t1", "t2"):
+        node = match.kwargs.get(key)
+        val = node.meta.get("val") if isinstance(node, torch.fx.Node) else node
+        if not (isinstance(val, torch.Tensor) and val.dtype.is_floating_point):
+            return False
+    # aten.addcdiv requires a scalar value, not a tensor
+    return not isinstance(match.kwargs.get("value"), torch.fx.Node)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add.Tensor,
+        KeywordArg("inp"),
+        CallFunction(
+            aten.mul.Tensor,
+            CallFunction(aten.div.Tensor, KeywordArg("t1"), KeywordArg("t2")),
+            KeywordArg("value"),
+        ),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=_is_addcdiv_fma_eligible,
+)
+def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
+    """Re-fuse ``inp + (t1/t2)*value`` back into ``aten.addcdiv``.
+
+    torch.addcdiv is CompositeImplicitAutograd: it decomposes into
+    aten.div + aten.mul + aten.add before Inductor sees the graph, making the
+    FMA-aware lowering in lowering.py unreachable.  Re-inserting a single
+    aten.addcdiv node lets that lowering fire (tl.fma + triton.language.div_rn).
+    """
+
+    def repl(
+        inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value
+    ) -> torch.Tensor:
+        return torch.ops.aten.addcdiv(inp, t1, t2, value=value)
+
+    counters["inductor"]["addcdiv_fma_fused"] += 1
+    match.replace_by_example(repl, [inp, t1, t2, value])
 
 
 def register_partial_reduction_pattern():
