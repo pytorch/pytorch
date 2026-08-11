@@ -788,6 +788,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
+        feats.indexing_node_schedule = [node]
         return feats
 
     def check(self, indices):
@@ -837,6 +838,7 @@ class TestIndexExprUpperBounds(InductorTestCase):
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
+        feats.indexing_node_schedule = [node]
         return feats
 
     def dep(self, index, var_names, sizes):
@@ -872,6 +874,17 @@ class TestIndexExprUpperBounds(InductorTestCase):
         d0 = sympy.Symbol("d0", integer=True)
         dep = self.dep(1_000_000_000_000 * d0, [d0], [s0])
         self.assertFalse(self.check([dep]))
+
+    def test_uses_indexing_schedule(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        regular = self.make_feats([self.dep(x0, [x0], [2])])
+        overflow = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(
+                reads=[self.dep(2**31 + x0, [x0], [2])], writes=[]
+            )
+        )
+        regular.indexing_node_schedule = [overflow]
+        self.assertTrue(regular.any_index_expr_overflows_int32())
 
 
 class TestEvaluateMinMax(InductorTestCase):
