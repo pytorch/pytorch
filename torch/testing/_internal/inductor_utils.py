@@ -119,8 +119,10 @@ RUN_GPU = HAS_GPU and any(
 )
 
 RUN_CPU = LazyVal(
-    lambda: HAS_CPU
-    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+    lambda: (
+        HAS_CPU
+        and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+    )
 )
 
 HAS_TPU = LazyVal(has_tpu_pallas)
@@ -129,11 +131,13 @@ HAS_TPU = LazyVal(has_tpu_pallas)
 # directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
 # unset, run if the hardware is available; when set, only run if "tpu" is listed.
 RUN_TPU = LazyVal(
-    lambda: HAS_TPU
-    and (
-        "tpu" in os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "").split(",")
-        if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
-        else True
+    lambda: (
+        HAS_TPU
+        and (
+            "tpu" in os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "").split(",")
+            if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
+            else True
+        )
     )
 )
 
@@ -212,14 +216,12 @@ requires_block_ptr = unittest.skipUnless(
 def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
         total_memory = sys.maxsize
-        if torch.xpu.is_available():
-            total_memory = torch.xpu.get_device_properties().total_memory
-        elif torch.cuda.is_available():
-            total_memory = torch.cuda.get_device_properties().total_memory
-        if (
-            not (torch.cuda.is_available() or torch.xpu.is_available())
-            or total_memory < min_mem_required
-        ):
+        if torch.accelerator.is_available():
+            try:
+                _, total_memory = torch.accelerator.get_memory_info()
+            except Exception:
+                total_memory = sys.maxsize
+        if total_memory < min_mem_required:
             return unittest.skip(
                 f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
             )(fn)
@@ -505,7 +507,10 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
-def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
+
+def patch_custom_fallback_pass(
+    predicate: Callable[[torch.fx.Node], bool],
+) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
     we could provide a predicate which returns True for all aten.add.default nodes.
@@ -521,6 +526,5 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
 
         def uuid(self):
             return None
-
 
     return config.patch(post_grad_custom_pre_pass=Pass())
