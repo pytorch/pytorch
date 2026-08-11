@@ -375,7 +375,7 @@ class PyBackend : public Backend {
 
   bool supportsTimeEstimation() const override {
     return getPropertyOverride(
-        "supports_time_estimate", Backend::supportsTimeEstimation());
+        "_supports_time_estimate", Backend::supportsTimeEstimation());
   }
 
   bool supportsShrinking() const override {

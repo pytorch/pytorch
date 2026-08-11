@@ -152,11 +152,9 @@ c10::intrusive_ptr<::c10d::Backend::Options> ProcessGroupNCCL::
 
 void ProcessGroupNCCL::startTimeEstimate() {
 #ifdef NCCL_SIM_INFO_INITIALIZER
-  if (init_state_ != InitializationState::INITIALIZED) {
-    auto device = getBoundDeviceId().value_or(
-        at::Device(at::kCUDA, at::cuda::current_device()));
-    ensureInitialized(device);
-  }
+  TORCH_CHECK(
+      init_state_ == InitializationState::INITIALIZED,
+      "NCCL time estimation requires an initialized communicator");
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 #else
