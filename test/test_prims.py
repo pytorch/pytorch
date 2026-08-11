@@ -338,6 +338,9 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')
 
+    def test_inferred_tags(self):
+        self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
+
 
 instantiate_device_type_tests(TestPrims, globals())
 
@@ -404,9 +407,6 @@ class TestRefs(TestCase):
             x = torch.ones(4, device=device)
             x.to(device="meta")
 
-    def test_inferred_tags(self, device):
-        self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
-
 
 
 instantiate_device_type_tests(TestRefs, globals())
@@ -463,10 +463,8 @@ instantiate_device_type_tests(TestDecomp, globals())
 class TestPrimsPhiloxOnCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_philox_rand(self):
-        device = "cuda"
-        dtype = torch.float32
+    @dtypes(torch.float32)
+    def test_philox_rand(self, device, dtype):
         sizes = (1000, 1000000)  # offsets of 4 and 8
         repeats = 2  # Checks multiple rand calls results with multiple philox_rand calls
         for size in sizes:
@@ -491,6 +489,9 @@ class TestPrimsPhiloxOnCUDA(TestCase):
 
             for a, b in zip(references, results):
                 self.assertEqual(a, b)
+
+
+instantiate_device_type_tests(TestPrimsPhiloxOnCUDA, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
