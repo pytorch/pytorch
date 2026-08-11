@@ -390,12 +390,13 @@ Making coverage sidecar-aware is the fix if that ever bites; it would cost a
 per-process artifact scan.
 
 ```python
-# torch/_native/_spec_grid.py
+# torchgen/native_aot_spec_grid.py
 """Spec-grid expansion shared by the AOT export tool and runtime coverage.
 
-Torch-free on purpose: tools/native_aot/export.py loads this module by
-file path in an environment with only the DSL wheel installed, while
-torch._native.aot_manifest imports it normally.
+Lives in torchgen because both consumers need it when torch may not be
+importable, and torchgen is pure Python, ships in the wheel, and is
+already a torch import-time dependency. tools/native_aot/export.py and
+torch._native.aot_manifest both import it normally.
 """
 
 import itertools
@@ -426,7 +427,7 @@ The DSL-specific parts are confined to one class per DSL:
   3. ``gen_launcher(sidecar)`` emits C++ with the toolchain-independent
      signature every manifest ``body`` programs against:
 
-         void launch_<prefix>(const at::Tensor&..., <scalars>..., cudaStream_t)
+         void launch_<prefix>(const at::Tensor&..., <scalars>..., c10::Stream)
 
      Everything above the launcher (guard chain, cond, DispatchStub
      registration) is toolchain-blind.
@@ -442,10 +443,14 @@ takes path 1 (or 3), Triton path 2, cuTile path 3, and Helion emits another DSL,
 so it inherits whichever path its backend takes.
 
 Registered kinds: `cutedsl` (`cute.compile` + `export_to_c` -> `.o` plus an ABI
-header, module load explicit and eager across devices), `triton`
-(`triton.tools.compile` -> a self-contained `.c` with cubin embedded and grid
-baked in, current-context only), and `triton_cubin` (a raw-cubin launcher spike
-with per-device module load and `TORCH_CHECK` errors). Which kind a point uses
+header, module load explicit and eager across devices) and `triton` (compiled to
+a raw cubin, embedded as bytes in the generated `.cpp`, with a launcher this
+toolchain writes: per-device module load and `TORCH_CHECK` errors).
+`triton.tools.compile`'s C template is deliberately **not** used -- it calls
+`cuModuleLoadData`/`cuLaunchKernel` directly, and being triton-generated it
+cannot be routed through `c10::cuda::DriverAPI`, so linking it would force a
+`libcuda` dependency on `torch_cuda` and break CUDA builds on driverless
+machines. Which kind a point uses
 is chosen by the **builder's returned dict** (`kind`, defaulting to
 `"cutedsl"`), not by the declaration. Adding a DSL is one class plus a
 registry entry; `export.py`, `gen_aot_lib.py` and the CMake project are
@@ -508,21 +513,26 @@ namespace {
 topk_radix_bf16_n2048_k128_det_Kernel_Module_t topk_radix_bf16_n2048_k128_det_module;
 c10::once_flag topk_radix_bf16_n2048_k128_det_loaded;
 
-void launch_topk_radix_bf16_n2048_k128_det(const at::Tensor& mX, const at::Tensor& mValues, const at::Tensor& mIndices, cudaStream_t stream) {
+void launch_topk_radix_bf16_n2048_k128_det(const at::Tensor& mX, const at::Tensor& mValues, const at::Tensor& mIndices, c10::Stream stream) {
   c10::call_once(topk_radix_bf16_n2048_k128_det_loaded, [] { topk_radix_bf16_n2048_k128_det_Kernel_Module_Load(&topk_radix_bf16_n2048_k128_det_module); });
   topk_radix_bf16_n2048_k128_det_Tensor_mX_t mX_s;
   mX_s.data = const_cast<void*>(mX.const_data_ptr());
   mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));
   mX_s.dynamic_strides[0] = mX.stride(0);
-  // ... mValues_s, mIndices_s ...
-  int32_t rc = cute_dsl_topk_radix_bf16_n2048_k128_det_wrapper(&topk_radix_bf16_n2048_k128_det_module, &mX_s, &mValues_s, &mIndices_s, stream);
+  mValues_s.data = mValues.mutable_data_ptr();   // writable outputs
+  // ... remaining mValues_s / mIndices_s slots ...
+  int32_t rc = cute_dsl_topk_radix_bf16_n2048_k128_det_wrapper(&topk_radix_bf16_n2048_k128_det_module, &mX_s, &mValues_s, &mIndices_s,
+                                         c10::cuda::CUDAStream(stream).stream());
   TORCH_CHECK(rc == 0, "topk_radix_bf16_n2048_k128_det launch failed with code ", rc);
 }
 
 // the stub kernel: signature == the structured impl signature
 bool topk_cuda_aot_kernel(const at::Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted, const at::Tensor & values, const at::Tensor & indices) {
-  // Device gate: declaration ARCHS x shipped artifacts = sm_100 sm_100a sm_103 sm_103a sm_90 sm_90a
-  if (!(at::cuda::getCurrentDeviceProperties()->major == 9 || at::cuda::getCurrentDeviceProperties()->major == 10)) return false;
+  // Device gate: declaration ARCHS x shipped artifacts = sm_100a
+  if (!(at::cuda::getCurrentDeviceProperties()->major == 10)) return false;
+  // Size gate: the DSL's exported ABI carries int32_t shape slots
+  // (see _int32_size_gate); a bigger dim would truncate silently.
+  if (C10_UNLIKELY(self.sizes().end() != std::find_if(self.sizes().begin(), self.sizes().end(), _naot_dim_too_big))) return false;
 
         if (self.scalar_type() != at::kFloat && self.scalar_type() != at::kBFloat16) return false;
         // ... the rest of cpp_dispatch_prelude(), verbatim ...
@@ -1281,8 +1291,8 @@ CuTeDSL's, so `cpp_launch` looks the same shape:
 // build/native_aot/bmm/aot_bmm_cuda.cpp (generated)
 extern "C" CUresult bmm_outer_bf16_bm32_bn128_d2f48e06_0d1d2d34567891011121314(CUstream stream, CUdeviceptr a, CUdeviceptr b, CUdeviceptr out, int32_t B_dim, /* ... */ int32_t stride_om);
 
-void launch_bmm_outer_bf16_bm32_bn128(const at::Tensor& a, const at::Tensor& b, const at::Tensor& out, int32_t B_dim, /* ... */ int32_t stride_om, cudaStream_t stream) {
-  CUresult rc = bmm_outer_bf16_bm32_bn128_d2f48e06_0d1d2d34567891011121314(stream, reinterpret_cast<CUdeviceptr>(a.const_data_ptr()), /* ... */ stride_om);
+void launch_bmm_outer_bf16_bm32_bn128(const at::Tensor& a, const at::Tensor& b, const at::Tensor& out, int32_t B_dim, /* ... */ int32_t stride_om, c10::Stream stream) {
+  CUresult rc = bmm_outer_bf16_bm32_bn128_d2f48e06_0d1d2d34567891011121314(c10::cuda::CUDAStream(stream).stream(), reinterpret_cast<CUdeviceptr>(a.const_data_ptr()), /* ... */ stride_om);
   TORCH_CHECK(rc == CUDA_SUCCESS, "bmm_outer_bf16_bm32_bn128 launch failed with CUresult ", static_cast<int>(rc));
 }
 ```
@@ -1452,12 +1462,13 @@ Every item here is a real trap recorded in the code or the design doc.
   or `*args, **kwargs` (pointwise).
 * **Re-export after editing a kernel.** Sidecars record a source-closure hash;
   `gen_aot_lib` refuses stale pairings. The closure over-approximates badly: it
-  is every **loaded** `torch._native` module, and `ops/__init__.py` eagerly
-  imports every op package, so the closure spans all of them (a topk sidecar
-  records 48 sources, including `registry.py`, `aot_manifest.py` and
-  `ops/foreach_mm/impl.py`). Editing `decl.py`, `export.py`, `toolchains.py` or
-  the router therefore invalidates **every** artifact and means a full
-  re-export. Expect your first `gen_aot_lib.py` run to fail on an unrelated op
+  is every **loaded** `torch._native` and `torchgen.native_aot` module, and
+  `ops/__init__.py` eagerly imports every op package, so the closure spans all
+  of them (a topk sidecar records ~50 sources, including `registry.py`,
+  `aot_manifest.py` and `ops/foreach_mm/impl.py`). Editing `export.py`,
+  `toolchains.py`, `torchgen/native_aot_decl.py`,
+  `torchgen/native_aot_spec_grid.py` or the router therefore invalidates
+  **every** artifact and means a full re-export. Expect your first `gen_aot_lib.py` run to fail on an unrelated op
   (`RuntimeError: acos: 2 artifact(s) were exported from different kernel
   sources than the current tree`); run `export.py` with no `--ops` first.
 * **Re-run generation after renaming or removing a declaration.** Otherwise the
@@ -1574,17 +1585,22 @@ It skips (printing why, leaving a normal artifacts-free build) when:
 
 ```python
 # tools/native_aot/build_stage2.py
-  * NATIVE_AOT=0 in the environment (explicit opt-out)
+  * TORCH_NATIVE_AOT=0 in the environment (explicit opt-out)
   * no CUDA build (USE_CUDA off / no nvcc toolchain in the build)
-  * DSL runtime not importable (nvidia_cutlass_dsl or tvm_ffi, the
-    same pair torch/_native/cutedsl_utils.py gates the JIT layer on)
+  * no toolchain targets this build's backend (Toolchain.BACKENDS); a
+    ROCm build skips here today, and gains AOT support by adding a
+    toolchain class rather than by editing this gate
   * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
     for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
     arch list is unset and a supported GPU is present
 ```
 
-Past those checks, a failure fails the build by design: "silently shipping a
-wheel without the kernels it was asked to embed is worse than failing loudly."
+Past those checks the DSL runtimes are **required, not optional**: a toolchain
+that targets this backend was asked for declared kernels, so a missing runtime
+fails the build rather than shipping a wheel that silently underperforms. Same
+for any later failure -- "silently shipping a wheel without the kernels it was
+asked to embed is worse than failing loudly." `TORCH_NATIVE_AOT=0` is the
+supported way to build without the DSL wheels.
 
 ### The steps by hand
 
@@ -1686,7 +1702,7 @@ The dedicated workflow is `.github/workflows/b200-native-aot.yml`: builds with
 | `TORCH_DISABLE_NATIVE_AOT=1` | at `torch._native` import, flips that switch off -- but only on an embedded build (there is nothing to mask otherwise). |
 | `TORCH_DISABLE_NATIVE_JIT=1` | masks the Python JIT override layer (pre-existing switch). Useful to prove a kernel came from the AOT hook. |
 | `torch.backends.python_native.<dsl>.disabled()` | context manager masking **both** layers, and restoring the previous AOT state in a `finally`. This is the correct way to compute a stock-aten reference. |
-| `NATIVE_AOT=0` | build-time: skip stage 2 entirely. |
+| `TORCH_NATIVE_AOT=0` | build-time: skip stage 2 entirely (documented in CONTRIBUTING.md with the other build switches). |
 | `NATIVE_AOT_ARTIFACTS_DIR` | CMake cache path for the artifact tree (default `${CMAKE_BINARY_DIR}/native_aot`). |
 
 Two distinct "off" states behave differently, on purpose:
@@ -1738,7 +1754,7 @@ plus the need for stock-aten references in tests.
 * **`ATEN_OP` must resolve to exactly one structured group.** Ambiguous base
   names are a hard codegen error, not a silent pick.
 * **Blackwell-only export in the standard build.** `EXPORTABLE_ARCHES` is
-  `("sm_100", "sm_100a", "sm_103", "sm_103a")`. Other arches in
+  `("sm_100", "sm_100a")`. Other arches in
   `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
   artifacts. On-device export is unrestricted, so a local sm_90 build can export
   for itself; the default `ARCHS` already covers sm_90.
@@ -1818,7 +1834,6 @@ Runtime:
 | file | role |
 | ---- | ---- |
 | `torch/_native/aot_manifest.py` | coverage objects, `covers()`, the `cpp_covers` fast path, `get_coverage` symbol resolution. |
-| `torch/_native/_spec_grid.py` | `expand_specs`, shared torch-free by export and runtime. |
 | `torch/_native/registry.py` | the router's once-per-call coverage check. |
 | `torch/_native/__init__.py` | `_native_aot_embedded()`, `aot_enabled()` / `set_aot_enabled()`, `TORCH_DISABLE_NATIVE_AOT`. |
 | `aten/src/ATen/Context.{h,cpp}` | `allowNativeAot()` / `setAllowNativeAot()`. |
