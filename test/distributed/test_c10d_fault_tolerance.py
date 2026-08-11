@@ -3,8 +3,6 @@
 import os
 import sys
 import time
-import unittest
-from dataclasses import dataclass
 from datetime import timedelta
 
 import torch
@@ -17,27 +15,19 @@ if not dist.is_available():
 
 import torch.distributed.distributed_c10d as c10d
 from torch._C._distributed_c10d import WorkResult
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    HardwareClassification,
     run_tests,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
 )
-
-
-@dataclass(frozen=True)
-class FaultToleranceBackend:
-    name: str
-    device_type: str
-    supports_work_result: bool = False
-
-
-FAULT_TOLERANCE_BACKENDS = [
-    FaultToleranceBackend("gloo", "cpu"),
-    FaultToleranceBackend("nccl2", "cuda", supports_work_result=True),
-]
 
 
 class AbstractFaultToleranceTest:
@@ -47,13 +37,31 @@ class AbstractFaultToleranceTest:
 
     @property
     def device(self):
+        if self.device_type == "cpu":
+            return "cpu"
+        return f"{self.device_type}:{self.rank}"
+
+    @property
+    def backend_name(self):
         if self.device_type == "cuda":
-            return f"cuda:{self.rank}"
-        return self.device_type
+            return "nccl2"
+        return dist.get_default_backend_for_device(self.device_type)
 
     def setUp(self):
         super().setUp()
+        if self.device_type == "cuda" and TEST_WITH_ROCM:
+            self.skipTest("nccl2 reconfigure is not supported with RCCL")
+        if self.device_type != "cpu" and torch.accelerator.device_count() < 3:
+            self.skipTest("fault tolerance tests require at least 3 accelerators")
         self._spawn_processes()
+
+    def run_test(self, test_name, parent_pipe):
+        # Workers run the test method directly via run_test, skipping setUpClass.
+        # Re-invoke it so class-level setup applies in the worker like in the main
+        # process (e.g. PrivateUse1TestBase resolving device_type from the
+        # "privateuse1" placeholder to the real backend name).
+        type(self).setUpClass()
+        super().run_test(test_name, parent_pipe)
 
     def tearDown(self):
         if dist.is_initialized():
@@ -69,8 +77,8 @@ class AbstractFaultToleranceTest:
 
     def _init_reconfigurable_pg(self):
         self.store = self._create_store()
-        if self.device_type == "cuda":
-            torch.cuda.set_device(self.rank)
+        if self.device_type != "cpu":
+            torch.accelerator.set_device_index(self.rank)
         dist.init_process_group(
             self.backend_name,
             world_size=self.world_size,
@@ -119,13 +127,16 @@ class AbstractFaultToleranceTest:
         expected = torch.full((4,), expected_value, dtype=tensor.dtype)
         self.assertEqual(tensor.cpu(), expected)
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_basic(self):
         self._create_reconfigured_pg("ft_basic", 100)
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_then_all_reduce(self):
         self._create_reconfigured_pg("ft_all_reduce", 200)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_then_send_recv(self):
         self._create_reconfigured_pg("ft_send_recv", 300)
 
@@ -146,9 +157,10 @@ class AbstractFaultToleranceTest:
         recv_work.wait()
         self.assertEqual(recv_tensor.cpu(), torch.full((4,), recv_rank + 1.0))
 
+    @requires_capabilities(
+        Capability.collective.reconfigure, Capability.collective.work_result
+    )
     def test_work_explicit_timeout_includes_prelaunch_stall(self):
-        if not self.supports_work_result:
-            self.skipTest(f"{self.backend_name} does not report work results")
         self._create_reconfigured_pg("ft_work_timeout", 1300)
         dist.all_reduce(torch.ones(1, device=self.device))
         torch.cuda.synchronize()
@@ -165,9 +177,10 @@ class AbstractFaultToleranceTest:
         )
         torch.cuda.synchronize()
 
+    @requires_capabilities(
+        Capability.collective.reconfigure, Capability.collective.work_result
+    )
     def test_work_reports_communicator_error(self):
-        if not self.supports_work_result:
-            self.skipTest(f"{self.backend_name} does not report work results")
         self._create_reconfigured_pg("ft_work_error", 1301)
         dist.all_reduce(torch.ones(1, device=self.device))
         torch.cuda.synchronize()
@@ -188,6 +201,7 @@ class AbstractFaultToleranceTest:
         else:
             time.sleep(1)
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)
         excluded_rank = self.world_size - 1
@@ -207,6 +221,7 @@ class AbstractFaultToleranceTest:
         self.assertEqual(tensor.cpu(), torch.full((4,), 42.0))
         self._store_barrier("ft_shrink_last_done")
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_shrink_exclude_middle_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_middle", 500)
         excluded_rank = self.world_size // 2
@@ -225,6 +240,7 @@ class AbstractFaultToleranceTest:
         self._assert_all_reduce_sum(sum(range(1, self.world_size)))
         self._store_barrier("ft_shrink_middle_done")
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_scale_down_up(self):
         self._init_reconfigurable_pg()
         # Each rank shrinks to its own disjoint group, so each needs a unique uuid.
@@ -242,6 +258,7 @@ class AbstractFaultToleranceTest:
         self.assertEqual(dist.get_rank(), 0)
         self._store_barrier("ft_scale_down_up_done")
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_single_to_all(self):
         self._init_reconfigurable_pg()
         # Each rank shrinks to its own disjoint group, so each needs a unique uuid.
@@ -251,12 +268,14 @@ class AbstractFaultToleranceTest:
         self._reconfigure(703, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_identity(self):
         self._create_reconfigured_pg("ft_identity", 800)
         handles = self._collect_handles("ft_identity_again")
         self._reconfigure(801, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_late_join(self):
         self._init_reconfigurable_pg()
         handles = self._collect_handles("ft_late_join_initial")
@@ -268,6 +287,7 @@ class AbstractFaultToleranceTest:
         self._reconfigure(901, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_merge_split(self):
         self._init_reconfigurable_pg()
         handles = self._collect_handles("ft_merge_split_initial")
@@ -281,6 +301,7 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1002, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_after_abort(self):
         # Port of torchcomms' ReconfigureTest.test_reconfigure_after_abort:
         # abort() (a revoke in reconfigurable mode) must be recoverable by a
@@ -298,6 +319,7 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1201, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_after_timeout(self):
         from torch._C._distributed_c10d import ErrorType
 
@@ -331,6 +353,7 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1301, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @requires_capabilities(Capability.collective.reconfigure)
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
         if self.backend_name != "nccl2":
@@ -374,38 +397,16 @@ class AbstractFaultToleranceTest:
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
 
-def _make_fault_tolerance_test_class(backend):
-    class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
-        pass
-
-    FaultToleranceTest.backend_name = backend.name
-    FaultToleranceTest.device_type = backend.device_type
-    FaultToleranceTest.supports_work_result = backend.supports_work_result
-    FaultToleranceTest.__name__ = f"{backend.name.capitalize()}FaultToleranceTest"
-    FaultToleranceTest.__qualname__ = FaultToleranceTest.__name__
-    cls = unittest.skipIf(
-        not dist.is_backend_available(backend.name),
-        f"{backend.name} backend is not available",
-    )(FaultToleranceTest)
-    if backend.device_type == "cuda":
-        cls = unittest.skipIf(
-            not TEST_CUDA or torch.cuda.device_count() < 3,
-            "fault tolerance CUDA tests require at least 3 GPUs",
-        )(cls)
-    if backend.name == "nccl2":
-        cls = unittest.skipIf(
-            TEST_WITH_ROCM,
-            "nccl2 reconfigure is not supported with RCCL",
-        )(cls)
-    return cls
+class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
 
-for backend in FAULT_TOLERANCE_BACKENDS:
-    class_name = f"{backend.name.capitalize()}FaultToleranceTest"
-    globals()[class_name] = _make_fault_tolerance_test_class(backend)
+instantiate_device_type_tests(FaultToleranceTest, globals(), except_for=["hpu", "xpu"])
 
 
 class ReconfigureContractTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_reconfigure_rejects_multiple_backends(self) -> None:
         pg = dist.ProcessGroup(0, 1)
         pg._register_backend(torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO)
@@ -423,6 +424,8 @@ class ReconfigureContractTest(TestCase):
 class BackendCapabilityContractTest(TestCase):
     """Ensures base-Backend bindings are safe to call on any backend (e.g. Gloo)
     without throwing, so hasattr-based capability detection stays valid."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_get_error_returns_success_on_base_backend(self) -> None:
         from torch._C._distributed_c10d import Backend as C10DBackend, ErrorType
