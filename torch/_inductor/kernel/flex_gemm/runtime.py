@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import math
 import os
 from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
+    FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR,
+    flex_gemm_output_config_supported,
     FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
@@ -22,12 +25,16 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
     output_contraction_capture_supported,
-    output_contraction_config_supported,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_no_c_alpha_beta,
     validate_local_reduce_out_shape,
     validate_local_reduce_runtime_dense_mm,
     validate_local_reduce_selected_dim_divisible,
+)
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    blocked_128x4_carrier_shape,
+    blocked_128x4_numel,
+    FlexGemmOutputStorageLayout,
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
@@ -216,12 +223,15 @@ class FlexGemmRuntimeLocalReducePlan:
     geometry: FlexGemmLocalReduceGeometry
     out: torch.Tensor | None = None
     callbacks: FlexGemmLocalReduceCallbacks | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
     feeds_main: bool = False
 
     def __post_init__(self) -> None:
         """Reject plans without the output/callback state required by their consumer."""
         if self.out is None and not self.feeds_main:
             raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.output_layout is not None and self.out is None:
+            raise RuntimeError("FlexGEMM output layouts require an output buffer")
         if self.feeds_main:
             if self.callbacks is None:
                 raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
@@ -244,26 +254,38 @@ def swap_local_reduce_plan(
     """Transpose a physical local-reduction plan with the swapped GEMM output."""
     if plan is None:
         return None
+    out = plan.out
+    if out is not None and plan.output_layout is None:
+        out = out.mT
     return dataclasses.replace(
         plan,
         geometry=FlexGemmLocalReduceGeometry(plan.group, 1 - plan.axis),
-        out=None if plan.out is None else plan.out.mT,
+        out=out,
     )
 
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeOutputPlan:
-    """Bundle all user-visible output consumers into one generated ABI value."""
+    """Bundle allocated returns and their structural output plans.
+
+    Attributes:
+        aux_outs: Full-shape auxiliary buffers in QuACK store order. The local
+            reduction buffer is represented separately by ``local_reduce``.
+        local_reduce: Optional compressed-reduction runtime plan and output.
+        output_contraction: Optional contraction applied to the main return.
+    """
 
     aux_outs: tuple[torch.Tensor, ...] = ()
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None
     output_contraction: FlexGemmOutputContraction | None = None
 
     def __post_init__(self) -> None:
-        if self.output_contraction is not None and (
-            self.aux_outs or self.local_reduce is not None
-        ):
+        if self.output_contraction is None:
+            return
+        if self.aux_outs:
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
+        if self.output_contraction.chunked and self.local_reduce is not None:
+            raise NotImplementedError(FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR)
 
     def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
         """Return the logical shape after applying the output contraction."""
@@ -298,6 +320,20 @@ def validate_runtime_local_reduce(
     local_reduce_out = plan.out
     if local_reduce_out is None:
         return
+    if plan.output_layout is FlexGemmOutputStorageLayout.BLOCKED_128X4:
+        if local_reduce_out.ndim != 1 or local_reduce_out.stride(0) != 1:
+            raise NotImplementedError(
+                "FlexGEMM blocked local-reduce output must be contiguous and 1-D"
+            )
+        expected_numel = blocked_128x4_numel(
+            local_reduce_compressed_shape(expected_shape, plan.group, plan.axis)
+        )
+        if local_reduce_out.numel() != expected_numel:
+            raise RuntimeError(
+                "blocked local_reduce_out size must be "
+                f"{expected_numel}, got {local_reduce_out.numel()}"
+            )
+        return
     check_matrix("local_reduce_out", local_reduce_out)
     if swap_ab:
         check_matrix_row_major_layout("local_reduce_out.mT", local_reduce_out.mT)
@@ -307,6 +343,20 @@ def validate_runtime_local_reduce(
         expected_shape, plan.group, plan.axis
     )
     validate_local_reduce_out_shape(local_reduce_out.shape, expected_local_reduce_shape)
+
+
+def initialize_runtime_local_reduce_output(
+    plan: FlexGemmRuntimeLocalReducePlan | None,
+    physical_output_shape: tuple[int, ...],
+) -> None:
+    """Zero padded local-reduction storage before the fused kernel writes it."""
+    if plan is None or plan.out is None or plan.output_layout is None:
+        return
+    logical_shape = local_reduce_compressed_shape(
+        physical_output_shape, plan.group, plan.axis
+    )
+    if plan.out.numel() != math.prod(logical_shape):
+        plan.out.zero_()
 
 
 def local_reduce_callback_key(callback: Any, fallback_key: str) -> str:
@@ -343,6 +393,37 @@ def register_runtime_local_reduce_callbacks(
         callbacks.finalize_fn,
     )
     return local_reduce_combine_key, local_reduce_finalize_key
+
+
+def register_runtime_output_layout(
+    layout: FlexGemmOutputStorageLayout | None, *, transposed: bool
+) -> str | None:
+    """Register a PyTorch-owned CuTe layout callback for one orientation."""
+    if layout is None:
+        return None
+    if layout is not FlexGemmOutputStorageLayout.BLOCKED_128X4:
+        raise NotImplementedError(f"unsupported FlexGEMM output layout: {layout}")
+
+    from torch._inductor.kernel.flex_gemm.output_layout_cutedsl import (
+        blocked_128x4_output_layout_key,
+        blocked_128x4_output_shape,
+        blocked_128x4_output_tensor,
+        blocked_128x4_transposed_output_tensor,
+    )
+    from torch._vendor.quack.gemm_act import register_output_layout
+
+    layout_key = blocked_128x4_output_layout_key(transposed)
+    register_output_layout(
+        layout_key,
+        (
+            blocked_128x4_transposed_output_tensor
+            if transposed
+            else blocked_128x4_output_tensor
+        ),
+        blocked_128x4_output_shape,
+        4,
+    )
+    return layout_key
 
 
 def local_reduce_gemm_act_kwargs(
@@ -400,6 +481,18 @@ def dispatch_gemm_act(
     output_contraction = output_plan.output_contraction
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
+    local_reduce_layout = None if local_reduce is None else local_reduce.output_layout
+    blocked_local_reduce_shape = (
+        local_reduce_compressed_shape(
+            (a.shape[-2], b.shape[-1]), local_reduce.group, local_reduce.axis
+        )
+        if local_reduce is not None
+        and local_reduce_layout is FlexGemmOutputStorageLayout.BLOCKED_128X4
+        else None
+    )
+    local_reduce_output_layout = register_runtime_output_layout(
+        local_reduce_layout, transposed=config.swap_ab
+    )
     quack_out, quack_aux_outs, quack_c = out, aux_outs, C
     if config.swap_ab:
         if output_contraction is not None:
@@ -428,8 +521,14 @@ def dispatch_gemm_act(
         aux_out.unsqueeze(0) if aux_out.ndim == 2 else aux_out
         for aux_out in quack_aux_outs
     )
-    if quack_local_reduce_out is not None and quack_local_reduce_out.ndim == 2:
-        quack_local_reduce_out = quack_local_reduce_out.unsqueeze(0)
+    if local_reduce is not None and quack_local_reduce_out is not None:
+        if blocked_local_reduce_shape is not None:
+            # QuACK builds the swizzled cute.Layout over this padded carrier.
+            quack_local_reduce_out = quack_local_reduce_out.view(
+                blocked_128x4_carrier_shape(blocked_local_reduce_shape)
+            )
+        elif quack_local_reduce_out.ndim == 2:
+            quack_local_reduce_out = quack_local_reduce_out.unsqueeze(0)
     if quack_c is not None and quack_c.ndim == 2:
         quack_c = quack_c.unsqueeze(0)
 
@@ -470,6 +569,7 @@ def dispatch_gemm_act(
         concat_layout=(
             () if output_contraction is None else output_contraction.concat_layout
         ),
+        local_reduce_output_layout=local_reduce_output_layout,
         alpha=alpha,
         beta=beta,
         use_tma_gather=config.use_tma_gather,
@@ -510,12 +610,12 @@ def gemm_epilogue(
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
         out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
-        output_plan: Structural plan for auxiliary and contracted outputs.
+        output_plan: Structural plan for auxiliary and transformed outputs.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
         config_is_lowering_validated: Whether generated lowering already checked the
-            config against the output-contraction contract.
+            config against the complete output plan.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
         stream: Optional raw CUDA stream pointer supplied by the generated wrapper.
@@ -545,12 +645,6 @@ def gemm_epilogue(
         gemm_config_from_key,
     )
 
-    config = (
-        gemm_config_from_key(config_key)
-        if config_key is not None
-        else candidate_gemm_configs_for_device(a.device)[0]
-    )
-    logical_output_shape = output_plan.output_shape(physical_output_shape)
     if output_contraction is not None:
         device_capacity = (
             torch.cuda.get_device_capability(a.device)
@@ -562,6 +656,58 @@ def gemm_epilogue(
             raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
         if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0:
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
+
+    config = gemm_config_from_key(config_key) if config_key is not None else None
+    if config is None or not config_is_lowering_validated:
+        candidates = candidate_gemm_configs_for_device(
+            a.device, device_capacity_override
+        )
+        local_reduce_geometries = (
+            () if local_reduce is None else (local_reduce.geometry,)
+        )
+        local_reduce_output_layout = (
+            None if local_reduce is None else local_reduce.output_layout
+        )
+        if config is not None and config not in candidates:
+            raise NotImplementedError(
+                "FlexGEMM explicit QUACK config is not supported on this device"
+            )
+        if config is None:
+            config = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if flex_gemm_output_config_supported(
+                        candidate,
+                        physical_output_shape[-1],
+                        local_reduce_geometries,
+                        output_contraction,
+                        local_reduce_output_layout,
+                        None if local_reduce is None else local_reduce.geometry,
+                    )
+                ),
+                None,
+            )
+        elif not flex_gemm_output_config_supported(
+            config,
+            physical_output_shape[-1],
+            local_reduce_geometries,
+            output_contraction,
+            local_reduce_output_layout,
+            None if local_reduce is None else local_reduce.geometry,
+            allow_local_reduce_swap_ab=config.swap_ab,
+        ):
+            config = None
+        if config is None:
+            contract = (
+                "output contraction"
+                if output_contraction is not None
+                else "output plan"
+            )
+            raise NotImplementedError(
+                f"FlexGEMM QUACK config is incompatible with {contract}"
+            )
+    logical_output_shape = output_plan.output_shape(physical_output_shape)
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype
@@ -647,41 +793,13 @@ def gemm_epilogue(
     )
     from torch._vendor.quack.cache import cache_dir_override
 
-    config = gemm_config_from_key(config_key) if config_key is not None else None
-    if config is None or (
-        output_contraction is not None and not config_is_lowering_validated
-    ):
-        candidates = candidate_gemm_configs_for_device(a.device)
-        if config is not None and config not in candidates:
-            raise NotImplementedError(
-                "FlexGEMM explicit QUACK config is not supported on this device"
-            )
-        if output_contraction is None:
-            config = candidates[0]
-        elif config is None:
-            config = next(
-                (
-                    candidate
-                    for candidate in candidates
-                    if output_contraction_config_supported(
-                        candidate, physical_output_shape[-1]
-                    )
-                ),
-                None,
-            )
-        elif not output_contraction_config_supported(config, physical_output_shape[-1]):
-            config = None
-        if config is None:
-            raise NotImplementedError(
-                "FlexGEMM QUACK config is incompatible with output contraction"
-            )
-
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
         else contextlib.nullcontext()
     )
     with cache_dir_override(quack_cache_dir), stream_context:
+        initialize_runtime_local_reduce_output(local_reduce, physical_output_shape)
         dispatch_gemm_act(
             a,
             b,
