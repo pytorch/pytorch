@@ -941,6 +941,7 @@ class TestLinalg(TestCase):
             self.assertEqual(A.grad.shape, A.shape)
             self.assertEqual(A.grad, torch.zeros_like(A))
 
+    @skipIfTorchDynamo("dynamo cannot trace the functorch transforms and autograd.functional used here")
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
