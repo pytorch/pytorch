@@ -68,6 +68,7 @@ from torch._functorch.partitioners import (
     _extract_graph_with_inputs_outputs,
 )
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._higher_order_ops.utils import _temporarily_unwrap_functional_tensor_buffers
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
@@ -10853,6 +10854,56 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_ref = mod(x)
         out_test = compiled_f(x)
         self.assertEqual(out_ref[0].detach(), out_test[0].detach())
+
+    def test_cond_branch_tensor_constant_buffers(self):
+        def branch(x):
+            torch.tensor(0)
+            return x.clone()
+
+        def fn(x):
+            return (torch.cond(x.any(), branch, branch, (x,)),)
+
+        x = torch.ones(())
+        gm = make_fx(fn, tracing_mode="real")(x)
+        self.assertEqual(
+            set(dict(gm.named_buffers()).keys()),
+            {"true_graph_0._tensor_constant0", "false_graph_0._tensor_constant0"},
+        )
+
+        compiled_f = aot_module_simplified(gm, (x,), nop)
+        self.assertEqual(compiled_f(x)[0], fn(x)[0])
+        y = torch.zeros(())
+        self.assertEqual(compiled_f(y)[0], fn(y)[0])
+
+    def test_cond_branch_tensor_buffer_unwrap_restores_on_error(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(x)
+        gm = torch.fx.GraphModule({}, graph)
+
+        first = torch.ones(())
+        second = torch.zeros(())
+        gm.register_buffer("first", first)
+        gm.register_buffer("second", second)
+        unwrapped_first = torch.full((), 2.0)
+
+        def unwrap(tensor):
+            if tensor is first:
+                return unwrapped_first
+            raise RuntimeError("failed to unwrap second buffer")
+
+        with (
+            patch(
+                "torch._higher_order_ops.utils._unwrap_functional_tensor",
+                side_effect=unwrap,
+            ),
+            self.assertRaisesRegex(RuntimeError, "failed to unwrap second buffer"),
+        ):
+            with _temporarily_unwrap_functional_tensor_buffers(gm):
+                self.fail("context body should not run")
+
+        self.assertIs(gm._buffers["first"], first)
+        self.assertIs(gm._buffers["second"], second)
 
     def test_inference_python_dispatcher(self):
         # Extracted from unet
