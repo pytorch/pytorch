@@ -63,6 +63,8 @@ class TensorSSAReduction:
     cute_op: str
     init_val: str
     combine_expr: str
+    combine: Callable
+    materialize_init: Callable[[], object]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,28 +76,6 @@ class MaterializedTensorSSAReduction:
     combine: Callable
     source: Callable
     finalize: Callable
-
-
-TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
-    "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
-    "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
-    "max": TensorSSAReduction(
-        "cute.ReductionOp.MAX", 'float("-inf")', "cutlass.max(lhs, rhs)"
-    ),
-    "min": TensorSSAReduction(
-        "cute.ReductionOp.MIN", 'float("inf")', "cutlass.min(lhs, rhs)"
-    ),
-}
-
-
-def tensorssa_reduction(reduction_type: ReductionType) -> TensorSSAReduction:
-    """Return the TensorSSA descriptor for reductions representable by CuTe."""
-    reduction = TENSORSSA_REDUCTIONS.get(reduction_type)
-    if reduction is None:
-        raise NotImplementedError(
-            f"{reduction_type} does not map to a CuTe TensorSSA reduction"
-        )
-    return reduction
 
 
 def _sum_combine(lhs, rhs):
@@ -116,6 +96,60 @@ def _min_combine(lhs, rhs):
     import cutlass
 
     return cutlass.min(lhs, rhs)
+
+
+def _zero_init():
+    return 0.0
+
+
+def _one_init():
+    return 1.0
+
+
+def _negative_inf_init():
+    import cutlass
+
+    return -cutlass.Float32.inf
+
+
+def _positive_inf_init():
+    import cutlass
+
+    return cutlass.Float32.inf
+
+
+TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
+    "sum": TensorSSAReduction(
+        "cute.ReductionOp.ADD", "0.0", "lhs + rhs", _sum_combine, _zero_init
+    ),
+    "prod": TensorSSAReduction(
+        "cute.ReductionOp.MUL", "1.0", "lhs * rhs", _prod_combine, _one_init
+    ),
+    "max": TensorSSAReduction(
+        "cute.ReductionOp.MAX",
+        'float("-inf")',
+        "cutlass.max(lhs, rhs)",
+        _max_combine,
+        _negative_inf_init,
+    ),
+    "min": TensorSSAReduction(
+        "cute.ReductionOp.MIN",
+        'float("inf")',
+        "cutlass.min(lhs, rhs)",
+        _min_combine,
+        _positive_inf_init,
+    ),
+}
+
+
+def tensorssa_reduction(reduction_type: ReductionType) -> TensorSSAReduction:
+    """Return the TensorSSA descriptor for reductions representable by CuTe."""
+    reduction = TENSORSSA_REDUCTIONS.get(reduction_type)
+    if reduction is None:
+        raise NotImplementedError(
+            f"{reduction_type} does not map to a CuTe TensorSSA reduction"
+        )
+    return reduction
 
 
 def _identity_source(value):
@@ -166,29 +200,11 @@ def materialize_tensorssa_reduction(
     plan_type: str | None = None,
 ) -> MaterializedTensorSSAReduction:
     """Materialize a TensorSSA descriptor as CuTeDSL compile-time operands."""
-    import cutlass
     import cutlass.cute as cute
 
-    tensorssa_reduction(reduction_type)
-    reduce_op = {
-        "sum": cute.ReductionOp.ADD,
-        "prod": cute.ReductionOp.MUL,
-        "max": cute.ReductionOp.MAX,
-        "min": cute.ReductionOp.MIN,
-    }[reduction_type]
-    init_val = {
-        "sum": 0.0,
-        "prod": 1.0,
-        "max": -cutlass.Float32.inf,
-        "min": cutlass.Float32.inf,
-    }[reduction_type]
-
-    combine = {
-        "sum": _sum_combine,
-        "prod": _prod_combine,
-        "max": _max_combine,
-        "min": _min_combine,
-    }[reduction_type]
+    reduction = tensorssa_reduction(reduction_type)
+    reduce_op = getattr(cute.ReductionOp, reduction.cute_op.rpartition(".")[2])
+    init_val = reduction.materialize_init()
     source = {
         "identity": _identity_source,
         "square": _square_source,
@@ -201,7 +217,7 @@ def materialize_tensorssa_reduction(
         else _identity_finalize
     )
     return MaterializedTensorSSAReduction(
-        reduce_op, init_val, combine, source, finalize
+        reduce_op, init_val, reduction.combine, source, finalize
     )
 
 
@@ -230,8 +246,10 @@ class CuteDSLOpOverrides(OpOverrides):
         torch.int32: "cutlass.Int32",
         torch.int64: "cutlass.Int64",
         torch.uint8: "cutlass.Uint8",
+        torch.uint16: "cutlass.Uint16",
         torch.bool: "cutlass.Boolean",
         torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
+        torch.float8_e8m0fnu: "cutlass.Float8E8M0FNU",
         torch.float8_e5m2: "cutlass.Float8E5M2",
     }
 
@@ -846,6 +864,93 @@ class CuteDSLOpOverrides(OpOverrides):
             )
         return CuteDSLOpOverrides._apply_unary_op(
             x, "(-{x})", index_expr_fn=lambda expr: -expr
+        )
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def inline_asm_elementwise(
+        *inputs: CuteDSLArg,
+        asm: str,
+        constraints: str | None = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
+        scalar_sources: tuple[bool, ...] | None = None,
+    ) -> CuteDSLArg:
+        """Emit an inline PTX block elementwise over a fragment.
+
+        The requested dtype controls the logical result and eventual storage.
+        E8M0 results may stay decoded as Float32 while fused consumers use them.
+        """
+        if constraints is None:
+            raise NotImplementedError(
+                "CuteDSL inline asm requires an explicit constraint list"
+            )
+        result_type = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(dtype)
+        if result_type is None:
+            raise NotImplementedError(
+                f"CuteDSL inline asm result dtype not supported: {dtype}"
+            )
+
+        constraint_parts = [part.strip() for part in constraints.split(",")]
+        input_constraints = [
+            part.lstrip("=&") for part in constraint_parts if not part.startswith("=")
+        ]
+
+        cast_inputs = list(inputs)
+        if input_dtypes is not None:
+            for source_index, (value, input_dtype) in enumerate(
+                zip(inputs, input_dtypes)
+            ):
+                source_constraints = input_constraints[
+                    source_index * pack : (source_index + 1) * pack
+                ]
+                cse_var = CuteDSLOpOverrides._get_cse_var(value)
+                if (
+                    source_constraints
+                    and all(constraint == "h" for constraint in source_constraints)
+                    and input_dtype in (torch.float16, torch.bfloat16)
+                    and (cse_var is None or cse_var.dtype != input_dtype)
+                ):
+                    if cse_var is None:
+                        cast_inputs[source_index] = CuteDSLOpOverrides._cast_expr(
+                            CuteDSLOpOverrides._as_expr(value), input_dtype
+                        )
+                    else:
+                        cast_inputs[source_index] = CuteDSLOpOverrides.to_dtype(
+                            value, input_dtype, use_compute_types=False
+                        )
+
+        operands = ", ".join(
+            str(CuteDSLOpOverrides._as_expr(value)) for value in cast_inputs
+        )
+        if scalar_sources is None:
+            scalar_sources = (False,) * len(inputs)
+        elif len(scalar_sources) != len(inputs):
+            raise ValueError(
+                f"CuteDSL inline asm received {len(scalar_sources)} scalar-source "
+                f"flags for {len(inputs)} inputs"
+            )
+        scalar_sources = tuple(
+            source_is_scalar or CuteDSLOpOverrides._is_scalar_expr(value)
+            for source_is_scalar, value in zip(scalar_sources, cast_inputs)
+        )
+        expr = (
+            f"inline_asm_elementwise_intrinsic({operands}, asm={asm!r}, "
+            f"constraints={constraints!r}, result_type={result_type}, "
+            f"is_pure={is_pure!r}, pack={pack!r}, "
+            f"scalar_sources={scalar_sources!r})"
+        )
+        compute_dtype = torch.float32 if dtype == torch.float8_e8m0fnu else dtype
+        if not any(
+            CuteDSLOpOverrides._get_cse_var(value) is not None for value in inputs
+        ):
+            return expr
+        return V.kernel.cse.generate(
+            V.kernel.body,
+            expr,
+            dtype=compute_dtype,
         )
 
     @staticmethod
