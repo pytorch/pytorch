@@ -43,6 +43,13 @@ class DeviceInterface:
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
 
+    # Device-specific tensor types (e.g. torch.cuda.FloatTensor). Dynamo traces
+    # calls to these as in-graph tensor constructors rather than treating them
+    # as opaque user-defined classes; see
+    # UserDefinedClassVariable._in_graph_classes(). Backends that expose such
+    # types should override this with a frozenset containing them.
+    tensor_types: frozenset[type] = frozenset()
+
     class device:
         def __new__(cls, device: torch.types.Device) -> Any:
             raise NotImplementedError
@@ -642,6 +649,11 @@ def register_interface_for_device(
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    # _in_graph_classes() snapshots this registry, so a late registration
+    # (the common case for out-of-tree backends) must invalidate it.
+    from .variables.user_defined import UserDefinedClassVariable
+
+    UserDefinedClassVariable._in_graph_classes.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
