@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCPU,
 )
 from torch.testing._internal.common_dtype import (
     all_passthru_types,
@@ -248,23 +247,6 @@ class TestShapeOps(TestCase):
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
-
-    @onlyCPU
-    @dtypes(torch.float)
-    def test_diagonal_multidim(self, device, dtype):
-        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
-        xn = x.cpu().numpy()
-        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
-            result = torch.diagonal(x, *args)
-            expected = xn.diagonal(*args)
-            self.assertEqual(expected.shape, result.shape)
-            self.assertEqual(expected, result)
-        # test non-contiguous
-        xp = x.permute(1, 2, 3, 0)
-        result = torch.diagonal(xp, 0, -2, -1)
-        expected = xp.cpu().numpy().diagonal(0, -2, -1)
-        self.assertEqual(expected.shape, result.shape)
-        self.assertEqual(expected, result)
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
@@ -587,19 +569,6 @@ class TestShapeOps(TestCase):
         self.compare_with_numpy(torch_fn, np_fn, t_in)
         del t_in
 
-    @onlyCPU
-    @unittest.expectedFailure
-    @dtypes(torch.quint4x2, torch.quint2x4)
-    def test_flip_unsupported_dtype(self, device, dtype):
-        scale, zero_point = 0.1, 5
-        qt = torch.quantize_per_tensor(
-            torch.randn(16, 16, device=device),
-            scale=scale,
-            zero_point=zero_point,
-            dtype=dtype,
-        )
-        torch.flip(qt, dims=(0,))
-
     def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
             shape = self._rand_shape(dim, 5, 10)
@@ -860,7 +829,38 @@ class TestShapeOps(TestCase):
             torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
+class TestShapeOpsOnCPU(TestCase):
+    @dtypes(torch.float)
+    def test_diagonal_multidim(self, device, dtype):
+        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
+        xn = x.cpu().numpy()
+        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
+            result = torch.diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertEqual(expected, result)
+        # test non-contiguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.cpu().numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertEqual(expected, result)
+
+    @unittest.expectedFailure
+    @dtypes(torch.quint4x2, torch.quint2x4)
+    def test_flip_unsupported_dtype(self, device, dtype):
+        scale, zero_point = 0.1, 5
+        qt = torch.quantize_per_tensor(
+            torch.randn(16, 16, device=device),
+            scale=scale,
+            zero_point=zero_point,
+            dtype=dtype,
+        )
+        torch.flip(qt, dims=(0,))
+
+
 instantiate_device_type_tests(TestShapeOps, globals())
+instantiate_device_type_tests(TestShapeOpsOnCPU, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
