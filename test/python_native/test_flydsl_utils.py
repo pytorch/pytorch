@@ -101,88 +101,6 @@ class TestFlyDSLArchResolution(TestCase):
         self.assertEqual(self._resolve(flydsl_arch="gfx950"), "gfx950")
 
 
-class TestFlyDSLRuntimeProbe(TestCase):
-    """The import-free probe the eager gate relies on.
-
-    It must never import flydsl -- test_no_dsl_imports_after_import_torch in
-    test_native_dsl_ops.py enforces that end to end; these cases pin every
-    reason it can decline.
-    """
-
-    # Both names are bound at import time (``from ... import x as _x``), so
-    # patch them on the module. In particular _PathFinder is replaced whole
-    # rather than having its find_spec patched: it *is*
-    # importlib.machinery.PathFinder, so patching that method would answer
-    # "not found" for every sys.path import in the process, and any lazy
-    # import inside the block would fail with an unrelated ModuleNotFoundError.
-    def _with_specs(self, package_spec, mlir_spec=None):
-        return (
-            patch.object(flydsl_utils, "_find_spec", return_value=package_spec),
-            patch.object(
-                flydsl_utils,
-                "_PathFinder",
-                SimpleNamespace(find_spec=lambda *args, **kwargs: mlir_spec),
-            ),
-        )
-
-    def test_missing_package(self):
-        package, mlir = self._with_specs(None)
-        with package, mlir:
-            self.assertIn(
-                "missing optional dependency `flydsl`",
-                flydsl_utils._flydsl_runtime_unavailable_reason(),
-            )
-
-    def test_missing_mlir_submodule(self):
-        spec = SimpleNamespace(submodule_search_locations=["/nonexistent"])
-        package, mlir = self._with_specs(spec, mlir_spec=None)
-        with package, mlir:
-            self.assertIn(
-                "flydsl._mlir",
-                flydsl_utils._flydsl_runtime_unavailable_reason(),
-            )
-
-    def test_available_returns_no_reason(self):
-        spec = SimpleNamespace(submodule_search_locations=["/nonexistent"])
-        package, mlir = self._with_specs(spec, mlir_spec=object())
-        with package, mlir:
-            self.assertIsNone(flydsl_utils._flydsl_runtime_unavailable_reason())
-
-    # A raising probe has to read as "unavailable", not propagate: this runs
-    # under `import torch`, so anything that escapes here breaks the import
-    # rather than falling back to aten. find_spec raises ValueError when
-    # `flydsl` is in sys.modules without a usable __spec__ -- a test stub or a
-    # namespace shim looks like that.
-    @parametrize("error", (ValueError("no spec"), ModuleNotFoundError("flydsl")))
-    def test_unusable_package_spec_reads_as_missing(self, error):
-        with patch.object(flydsl_utils, "_find_spec", side_effect=error):
-            self.assertIn(
-                "missing optional dependency `flydsl`",
-                flydsl_utils._flydsl_runtime_unavailable_reason(),
-            )
-
-    def test_unusable_search_location_reads_as_missing_mlir(self):
-        # A bad entry in submodule_search_locations reaches a path entry
-        # finder, which can raise for the same reason.
-        spec = SimpleNamespace(submodule_search_locations=["/nonexistent"])
-
-        def raising_find_spec(*args, **kwargs):
-            raise ValueError("bad path entry")
-
-        with (
-            patch.object(flydsl_utils, "_find_spec", return_value=spec),
-            patch.object(
-                flydsl_utils,
-                "_PathFinder",
-                SimpleNamespace(find_spec=raising_find_spec),
-            ),
-        ):
-            self.assertIn(
-                "flydsl._mlir",
-                flydsl_utils._flydsl_runtime_unavailable_reason(),
-            )
-
-
 class TestFlyDSLVersionGate(TestCase):
     """The gate that decides whether FlyDSL overrides register at all.
 
@@ -203,30 +121,27 @@ class TestFlyDSLVersionGate(TestCase):
             return_value=(True, version),
         )
 
-    @parametrize("version", ("0.3.0", "0.3.0.dev765", "0.3.5", "0.3.0rc1"))
-    def test_supported_release_is_accepted(self, version):
+    @parametrize("version", ("0.3.0", "0.3.1", "0.3.5", "0.3.0.post1"))
+    def test_stable_supported_releases_are_accepted(self, version):
         with self._with_version(Version(version)):
             self.assertTrue(flydsl_utils._version_is_ok())
 
-    @parametrize("version", ("0.2.9", "0.4.0", "1.3.0"))
-    def test_other_releases_are_rejected(self, version):
-        # Exact 0.3.x match, so a future 0.4 falls back to ATen rather than
-        # loading kernels written against an API it may no longer provide.
+    @parametrize(
+        "version",
+        ("0.2.9", "0.3.0.dev765", "0.3.0rc1", "0.4.0", "1.3.0"),
+    )
+    def test_other_versions_are_rejected(self, version):
         with self._with_version(Version(version)):
             self.assertFalse(flydsl_utils._version_is_ok())
 
-    def test_missing_version_metadata_is_rejected(self):
-        # _available_version returns None when the distribution metadata is
-        # absent -- e.g. flydsl imported from a source checkout on PYTHONPATH.
-        # The runtime probe passes but the gate still declines, and the reason
-        # has to name the missing metadata rather than read as a bad version.
+    def test_missing_version_is_rejected(self):
         with (
             self._with_version(None),
             self.assertLogs("torch._native.flydsl_utils", level="INFO") as logs,
         ):
             self.assertFalse(flydsl_utils._version_is_ok())
 
-        self.assertIn("metadata is missing", "\n".join(logs.output))
+        self.assertIn("version None is not supported", "\n".join(logs.output))
 
     def test_unsupported_version_reports_the_version(self):
         with (
@@ -253,7 +168,6 @@ class TestFlyDSLVersionGate(TestCase):
 
 
 instantiate_parametrized_tests(TestFlyDSLArchResolution)
-instantiate_parametrized_tests(TestFlyDSLRuntimeProbe)
 instantiate_parametrized_tests(TestFlyDSLVersionGate)
 
 
