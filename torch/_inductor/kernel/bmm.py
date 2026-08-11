@@ -212,9 +212,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     aten_handler: ExternKernelChoice = aten_bmm
     aten_extra_kwargs = {}
     if out_dtype:
-        assert mat1.get_device().type in ("cuda", "xpu"), (
-            "out_dtype is only supported for CUDA or XPU"
-        )
+        if mat1.get_device().type not in ("cuda", "xpu"):
+            raise AssertionError("out_dtype is only supported for CUDA or XPU")
         aten_handler = aten_bmm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 

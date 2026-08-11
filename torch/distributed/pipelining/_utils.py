@@ -93,7 +93,8 @@ class _TensorMeta:
             An empty strided tensor on ``device``.
         """
         t = _make_tensor_from_meta(self, device)
-        t.requires_grad_(self.requires_grad)
+        if t.is_floating_point():
+            t.requires_grad_(self.requires_grad)
         return t
 
     def get_diff(self, other: _TensorMeta) -> list[str]:
@@ -195,17 +196,17 @@ class _DTensorMeta(_TensorMeta):
         local_tensor = _make_tensor_from_meta(self, device)
         # Set requires_grad after from_local() so that the from_local
         # operation itself is not recorded in the autograd graph.
-        return cast(
-            DTensor,
-            DTensor.from_local(
-                local_tensor,
-                device_mesh=mesh,
-                placements=self.placements,
-                shape=self.global_shape,
-                stride=self.global_stride,
-                run_check=False,
-            ).requires_grad_(self.requires_grad),
+        dt = DTensor.from_local(
+            local_tensor,
+            device_mesh=mesh,
+            placements=self.placements,
+            shape=self.global_shape,
+            stride=self.global_stride,
+            run_check=False,
         )
+        if self.requires_grad and dt.is_floating_point():
+            dt = dt.requires_grad_(True)
+        return cast(DTensor, dt)
 
     def get_diff(self, other: _TensorMeta) -> list[str]:
         """Return field-by-field differences, including DTensor-specific fields.
@@ -533,7 +534,7 @@ def generate_stage_to_rank_mapping(
         rank_index = 0
         for stage_index in range(num_stages):
             mapping[stage_index] = rank_index
-            # dont change rank if we are on the border (to keep v shape)
+            # don't change rank if we are on the border (to keep v shape)
             if (stage_index + 1) % pp_size == 0:
                 continue
             if (stage_index // pp_size) % 2 == 0:
