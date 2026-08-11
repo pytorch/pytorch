@@ -350,6 +350,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.epi_tile_n = cute.size(self.epi_tile[1])
 
         # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
+        # Cross-warp reductions need up to three Float32 partial/feed values per N column.
+        local_reduce_smem_bytes = (
+            self.cta_tile_shape_mnk[1] * 3 * 4
+            if self.has_cross_warp_local_reduce
+            else 0
+        )
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -362,6 +368,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.sf_vec_size,
             self.smem_capacity,
             self.occupancy,
+            local_reduce_smem_bytes,
         )
 
         # Prefetch depth = AB pipeline depth.
@@ -472,8 +479,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         if cutlass.const_expr(local_reduce_config is None):
             local_reduce_group = 0
             local_reduce_axis = 1
-            local_reduce_type = "sum"
-            local_reduce_source = "identity"
             local_reduce_feeds_main = False
             local_reduce_op = cute.ReductionOp.ADD
             local_reduce_init = 0.0
@@ -485,8 +490,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             (
                 local_reduce_group,
                 local_reduce_axis,
-                local_reduce_type,
-                local_reduce_source,
                 local_reduce_feeds_main,
                 local_reduce_op,
                 local_reduce_init,
@@ -515,15 +518,20 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             local_reduce_tensor is not None or local_reduce_feeds_main
         )
         if cutlass.const_expr(has_local_reduce):
-            assert local_reduce_group > 1
-            assert local_reduce_axis in (0, 1)
+            if cutlass.const_expr(local_reduce_group <= 1):
+                raise AssertionError("expected local-reduction group greater than one")
+            if cutlass.const_expr(local_reduce_axis not in (0, 1)):
+                raise AssertionError("expected local-reduction axis 0 or 1")
+            if cutlass.const_expr(
+                local_reduce_feeds_main and local_reduce_consumer is None
+            ):
+                raise AssertionError("expected feed-main local-reduction consumer")
         if cutlass.const_expr(local_reduce_feed_tensor is not None):
-            assert local_reduce_feeds_main
+            if cutlass.const_expr(not local_reduce_feeds_main):
+                raise AssertionError("expected feed-main local reduction")
 
         self.local_reduce_group = local_reduce_group
         self.local_reduce_axis = local_reduce_axis
-        self.local_reduce_type = local_reduce_type
-        self.local_reduce_source = local_reduce_source
         self.local_reduce_feeds_main = local_reduce_feeds_main
         self.local_reduce_op = local_reduce_op
         self.local_reduce_init = local_reduce_init
@@ -726,64 +734,24 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             max_active_clusters,
         )
 
-        self.buffer_align_bytes = 1024
-
-        # Define shared storage for kernel
-        @cute.struct
-        class SharedStorage:
-            ab_full_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_ab_stage]
-            ab_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_ab_stage]
-            acc_full_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_acc_stage]
-            acc_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_acc_stage]
-            tmem_dealloc_mbar_ptr: cutlass.Int64
-            tmem_holding_buf: cutlass.Int32
-            # (EPI_TILE_M, EPI_TILE_N, STAGE)
-            sC: cute.struct.Align[
-                cute.struct.MemRange[
-                    self.c_dtype,
-                    cute.cosize(self.c_smem_layout_staged.outer),
-                ],
-                self.buffer_align_bytes,
-            ]
-            # (MMA, MMA_M, MMA_K, STAGE)
-            sA: cute.struct.Align[
-                cute.struct.MemRange[
-                    self.a_dtype, cute.cosize(self.a_smem_layout_staged.outer)
-                ],
-                self.buffer_align_bytes,
-            ]
-            # (MMA, MMA_N, MMA_K, STAGE)
-            sB: cute.struct.Align[
-                cute.struct.MemRange[
-                    self.b_dtype, cute.cosize(self.b_smem_layout_staged.outer)
-                ],
-                self.buffer_align_bytes,
-            ]
-            # (MMA, MMA_M, MMA_K, STAGE)
-            sSFA: cute.struct.Align[
-                cute.struct.MemRange[
-                    self.sf_dtype, cute.cosize(self.sfa_smem_layout_staged)
-                ],
-                self.buffer_align_bytes,
-            ]
-            # (MMA, MMA_N, MMA_K, STAGE)
-            sSFB: cute.struct.Align[
-                cute.struct.MemRange[
-                    self.sf_dtype, cute.cosize(self.sfb_smem_layout_staged)
-                ],
-                self.buffer_align_bytes,
-            ]
-            sLocalReduce: cute.struct.Align[
-                cute.struct.MemRange[
-                    cutlass.Float32,
-                    self.cta_tile_shape_mnk[1] * 3
-                    if self.has_cross_warp_local_reduce
-                    else 1,
-                ],
-                16,
-            ]
-
-        self.shared_storage = SharedStorage
+        self.shared_storage = self._make_shared_storage(
+            num_acc_stage=self.num_acc_stage,
+            num_ab_stage=self.num_ab_stage,
+            c_dtype=self.c_dtype,
+            c_elements=cute.cosize(self.c_smem_layout_staged.outer),
+            a_dtype=self.a_dtype,
+            a_elements=cute.cosize(self.a_smem_layout_staged.outer),
+            b_dtype=self.b_dtype,
+            b_elements=cute.cosize(self.b_smem_layout_staged.outer),
+            sf_dtype=self.sf_dtype,
+            sfa_elements=cute.cosize(self.sfa_smem_layout_staged),
+            sfb_elements=cute.cosize(self.sfb_smem_layout_staged),
+            local_reduce_elements=(
+                self.cta_tile_shape_mnk[1] * 3
+                if self.has_cross_warp_local_reduce
+                else 1
+            ),
+        )
 
         # Launch the kernel synchronously
         self.kernel(
@@ -1749,14 +1717,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     if cutlass.const_expr(self.local_reduce_feeds_main):
                         group = cutlass.const_expr(self.local_reduce_group)
                         if cutlass.const_expr(self.local_reduce_axis == 1):
-                            assert (
-                                self.local_reduce_consumer is not None
-                                or self.local_reduce_type == "online_softmax"
-                            )
                             fragment_n = cutlass.const_expr(
                                 cute.size(local_reduce_vec.shape, mode=[0])
                             )
-                            assert fragment_n % group == 0
                             repeats = cutlass.const_expr(fragment_n // group)
                             grouped = local_reduce_vec.reshape(
                                 ((1, group, repeats), 1, 1)
@@ -1764,61 +1727,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             numerator = acc_vec.to(epilogue_input_dtype).reshape(
                                 grouped.shape
                             )
-                            if cutlass.const_expr(
-                                self.local_reduce_type == "online_softmax"
-                            ):
-                                max_value = grouped.reduce(
-                                    cute.ReductionOp.MAX,
-                                    init_val=-cutlass.Float32.inf,
-                                    reduction_profile=((None, 1, None), 1, 1),
-                                ).reshape(((1, 1, repeats), 1, 1))
-                                max_value = max_value.broadcast_to(grouped.shape)
-                                numerator = cute.math.exp(grouped - max_value)
-                            denominator_input = (
-                                grouped
-                                if cutlass.const_expr(
-                                    self.local_reduce_consumer is not None
-                                )
-                                else numerator
-                            )
-                            denominator_op = (
-                                self.local_reduce_op
-                                if cutlass.const_expr(
-                                    self.local_reduce_consumer is not None
-                                )
-                                else cute.ReductionOp.ADD
-                            )
-                            denominator_init = (
-                                self.local_reduce_init
-                                if cutlass.const_expr(
-                                    self.local_reduce_consumer is not None
-                                )
-                                else 0.0
-                            )
-                            denominator = denominator_input.reduce(
-                                denominator_op,
-                                init_val=denominator_init,
+                            denominator = grouped.reduce(
+                                self.local_reduce_op,
+                                init_val=self.local_reduce_init,
                                 reduction_profile=((None, 1, None), 1, 1),
                             ).reshape(((1, 1, repeats), 1, 1))
                             denominator = denominator.broadcast_to(grouped.shape)
-                            if cutlass.const_expr(
-                                self.local_reduce_consumer is not None
-                            ):
-                                consumer_result = self.local_reduce_consumer(
-                                    numerator, denominator, 0.0
-                                )
-                                epilogue_result = cute.TensorSSA(
-                                    consumer_result.ir_value(),
-                                    local_reduce_vec.shape,
-                                    consumer_result.dtype,
-                                )
-                            else:
-                                epilogue_result = (numerator / denominator).reshape(
-                                    local_reduce_vec.shape
-                                )
+                            consumer_result = self.local_reduce_consumer(
+                                numerator, denominator, 0.0
+                            )
+                            epilogue_result = cute.TensorSSA(
+                                consumer_result.ir_value(),
+                                local_reduce_vec.shape,
+                                consumer_result.dtype,
+                            )
                         else:
-                            assert self.local_reduce_axis == 0
-                            assert self.local_reduce_consumer is not None
                             epilogue_result = acc_vec.to(epilogue_input_dtype)
                     else:
                         epilogue_result = epilogue_op(
@@ -2016,12 +1939,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         reduced_flt[i], other
                                     )
                                     rows = rows // 2
-                                if cutlass.const_expr(
-                                    self.local_reduce_consumer is None
-                                ):
-                                    reduced_flt[i] = self.local_reduce_finalize(
-                                        reduced_flt[i], group
-                                    )
                             groups_per_cta = cutlass.const_expr(
                                 self.cta_tile_shape_mnk[0] // group
                             )
@@ -2106,12 +2023,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         and n_idx < limit_n
                                         and global_group_idx < limit_groups
                                     ):
-                                        output_value = (
-                                            self.local_reduce_finalize(
-                                                group_value, group
-                                            )
-                                            if self.local_reduce_consumer is not None
-                                            else group_value
+                                        output_value = self.local_reduce_finalize(
+                                            group_value, group
                                         )
                                         gReduce[group_idx, n_idx] = output_value
                             if cutlass.const_expr(group > lanes_in_m):
@@ -2131,7 +2044,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             n_idx, row_idx // group
                                         ]
                                     self.epilog_sync_barrier.arrive_and_wait()
-                                assert self.local_reduce_consumer is not None
                                 consumer_result = self.local_reduce_consumer(
                                     acc_vec.to(self.acc_dtype),
                                     tDrReduce.load(),
@@ -2424,7 +2336,59 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         return tma_atom_c, bSG_sC, bSG_gC
 
     @staticmethod
+    def _make_shared_storage(
+        *,
+        num_acc_stage: int,
+        num_ab_stage: int,
+        c_dtype: Type[cutlass.Numeric],
+        c_elements: int,
+        a_dtype: Type[cutlass.Numeric],
+        a_elements: int,
+        b_dtype: Type[cutlass.Numeric],
+        b_elements: int,
+        sf_dtype: Type[cutlass.Numeric],
+        sfa_elements: int,
+        sfb_elements: int,
+        local_reduce_elements: int,
+    ):
+        @cute.struct
+        class SharedStorage:
+            ab_full_mbar_ptr: cute.struct.MemRange[cutlass.Int64, num_ab_stage]
+            ab_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, num_ab_stage]
+            acc_full_mbar_ptr: cute.struct.MemRange[cutlass.Int64, num_acc_stage]
+            acc_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, num_acc_stage]
+            tmem_dealloc_mbar_ptr: cutlass.Int64
+            tmem_holding_buf: cutlass.Int32
+            sC: cute.struct.Align[
+                cute.struct.MemRange[c_dtype, c_elements],
+                1024,
+            ]
+            sA: cute.struct.Align[
+                cute.struct.MemRange[a_dtype, a_elements],
+                1024,
+            ]
+            sB: cute.struct.Align[
+                cute.struct.MemRange[b_dtype, b_elements],
+                1024,
+            ]
+            sSFA: cute.struct.Align[
+                cute.struct.MemRange[sf_dtype, sfa_elements],
+                1024,
+            ]
+            sSFB: cute.struct.Align[
+                cute.struct.MemRange[sf_dtype, sfb_elements],
+                1024,
+            ]
+            sLocalReduce: cute.struct.Align[
+                cute.struct.MemRange[cutlass.Float32, local_reduce_elements],
+                16,
+            ]
+
+        return SharedStorage
+
+    @classmethod
     def _compute_stages(
+        cls,
         tiled_mma: cute.TiledMma,
         mma_tiler_mnk: Tuple[int, int, int],
         a_dtype: Type[cutlass.Numeric],
@@ -2436,6 +2400,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         sf_vec_size: int,
         smem_capacity: int,
         occupancy: int,
+        local_reduce_smem_bytes: int,
     ) -> Tuple[int, int, int]:
         """Computes the number of stages for A/B/C operands based on heuristics.
 
@@ -2461,6 +2426,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :type smem_capacity: int
         :param occupancy: Target number of CTAs per SM (occupancy).
         :type occupancy: int
+        :param local_reduce_smem_bytes: Cross-warp reduction scratch size in bytes.
+        :type local_reduce_smem_bytes: int
 
         :return: A tuple containing the computed number of stages for:
                  (ACC stages, A/B operand stages, C stages)
@@ -2511,26 +2478,40 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             + cute.size_in_bytes(sf_dtype, sfa_smem_layout_staged_one)
             + cute.size_in_bytes(sf_dtype, sfb_smem_layout_staged_one)
         )
-        mbar_helpers_bytes = 2048
         c_bytes_per_stage = cute.size_in_bytes(c_dtype, c_smem_layout_staged_one)
-        c_bytes = c_bytes_per_stage * num_c_stage
+        a_elements = cute.cosize(a_smem_layout_stage_one.outer)
+        b_elements = cute.cosize(b_smem_layout_staged_one.outer)
+        sfa_elements = cute.cosize(sfa_smem_layout_staged_one)
+        sfb_elements = cute.cosize(sfb_smem_layout_staged_one)
+        c_elements = cute.cosize(c_smem_layout_staged_one.outer)
+        local_reduce_elements = max(1, local_reduce_smem_bytes // 4)
+        smem_per_cta = smem_capacity // occupancy
 
-        # Calculate A/B/SFA/SFB stages:
-        # Start with total smem per CTA (capacity / occupancy)
-        # Subtract reserved bytes and initial C stages bytes
-        # Divide remaining by bytes needed per A/B/SFA/SFB stage
-        num_ab_stage = (
-            smem_capacity // occupancy - (mbar_helpers_bytes + c_bytes)
-        ) // ab_bytes_per_stage
+        def storage_bytes(ab_stages, c_stages):
+            return cls._make_shared_storage(
+                num_acc_stage=num_acc_stage,
+                num_ab_stage=ab_stages,
+                c_dtype=c_dtype,
+                c_elements=c_elements * c_stages,
+                a_dtype=a_dtype,
+                a_elements=a_elements * ab_stages,
+                b_dtype=b_dtype,
+                b_elements=b_elements * ab_stages,
+                sf_dtype=sf_dtype,
+                sfa_elements=sfa_elements * ab_stages,
+                sfb_elements=sfb_elements * ab_stages,
+                local_reduce_elements=local_reduce_elements,
+            ).size_in_bytes()
 
-        # Refine epilogue stages:
-        # Calculate remaining smem after allocating for A/B/SFA/SFB stages and reserved bytes
-        # Add remaining unused smem to epilogue
-        num_c_stage += (
-            smem_capacity
-            - occupancy * ab_bytes_per_stage * num_ab_stage
-            - occupancy * (mbar_helpers_bytes + c_bytes)
-        ) // (occupancy * c_bytes_per_stage)
+        num_ab_stage = smem_per_cta // ab_bytes_per_stage
+        while (
+            num_ab_stage > 0 and storage_bytes(num_ab_stage, num_c_stage) > smem_per_cta
+        ):
+            num_ab_stage -= 1
+        if num_ab_stage == 0:
+            raise ValueError("insufficient shared memory for one GEMM pipeline stage")
+        while storage_bytes(num_ab_stage, num_c_stage + 1) <= smem_per_cta:
+            num_c_stage += 1
 
         return num_acc_stage, num_ab_stage, num_c_stage
 

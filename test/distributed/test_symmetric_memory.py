@@ -1,9 +1,11 @@
 # Owner(s): ["module: c10d"]
 
 import itertools
+import json
 import os
 import random
 import re
+import tempfile
 from contextlib import contextmanager, nullcontext
 from unittest import skip, skipIf, skipUnless
 
@@ -64,9 +66,6 @@ from torch.testing._internal.common_utils import (
 
 
 test_contexts = [nullcontext, _test_mode]
-
-# Set environment variable to disable multicast for all tests in this module
-os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
 
 
 @contextmanager
@@ -228,6 +227,67 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_alloc_rendezvous_on_current_stream(self) -> None:
+        # Regression test for https://github.com/pytorch/pytorch/issues/181086:
+        # the memset issued by empty() and the memcpys issued by the first
+        # rendezvous() must follow the caller's current stream instead of
+        # implicitly using the default stream.
+        self._init_process()
+
+        # Only the CUDA backend is fixed; NCCL/NVSHMEM still issue these ops
+        # synchronously on the default stream.
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        stream = torch.cuda.Stream()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA]
+        ) as prof:
+            with torch.cuda.stream(stream):
+                t = symm_mem.empty(1024, device="cuda")
+                symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+                symm_mem_hdl.barrier()
+            torch.cuda.synchronize()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_path = os.path.join(tmpdir, "trace.json")
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                events = json.load(f)["traceEvents"]
+
+        # Only GPU-track events carry args.stream. The barrier kernel launched
+        # on the current stream even before the fix, so its trace stream id
+        # identifies the user stream.
+        barrier_events = [
+            ev
+            for ev in events
+            if "barrier" in ev.get("name", "") and "stream" in ev.get("args", {})
+        ]
+        self.assertGreater(len(barrier_events), 0)
+        user_stream = barrier_events[0]["args"]["stream"]
+        # Restrict to the alloc/rendezvous window (everything before the
+        # barrier) so unrelated copies elsewhere in the profile cannot affect
+        # the result.
+        barrier_ts = min(ev["ts"] for ev in barrier_events)
+        mem_events = [
+            ev
+            for ev in events
+            if ev.get("name", "").startswith(("Memset", "Memcpy"))
+            and "stream" in ev.get("args", {})
+            and ev["ts"] < barrier_ts
+        ]
+        # ROCm records no memset/memcpy activities for these ops, most likely
+        # because HIP lowers a small fill and the pointer-array uploads to blit
+        # kernels, so there is nothing to check the stream of there.
+        if not TEST_WITH_ROCM:
+            self.assertGreater(len(mem_events), 0)
+        for ev in mem_events:
+            self.assertEqual(ev["args"]["stream"], user_stream, ev["name"])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_get_signal_pad(self) -> None:
         self._init_process()
@@ -318,16 +378,23 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             ag_entries = [
                 e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
             ]
-            # On NVLink-fabric hardware both the RendezvousRequest and handle
-            # exchange go through pg_all_gather → 2 allgathers. On hardware
-            # without NVLink fabric only the RendezvousRequest uses
-            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
-            self.assertIn(
-                len(ag_entries),
-                [1, 2],
-                lambda msg: f"{msg}\nexpected 1 or 2 NCCL _all_gather_base from rendezvous, "
-                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            bc_entries = [e for e in entries if e["profiling_name"] == "nccl:broadcast"]
+            has_mc = symm_mem_hdl.multicast_ptr != 0
+            # Exchanges routed through the PG: the RendezvousRequest allgather
+            # (always), the handle exchange allgather (NVLink-fabric hardware
+            # only; elsewhere handles go through ipc_channel), and, when
+            # multicast is set up, a success-flag allgather plus a multicast
+            # handle broadcast (fabric only).
+            lo, hi = (2, 3) if has_mc else (1, 2)
+            self.assertTrue(
+                lo <= len(ag_entries) <= hi,
+                f"expected {lo} to {hi} NCCL _all_gather_base from rendezvous "
+                f"(multicast={has_mc}), got {len(ag_entries)}: "
+                f"{[e['profiling_name'] for e in entries]}",
             )
+            self.assertLessEqual(len(bc_entries), 1)
+            if bc_entries:
+                self.assertTrue(has_mc)
 
             symm_mem_hdl.barrier()
             for peer in range(self.world_size):
@@ -1013,6 +1080,43 @@ class AsyncTPTest(MultiProcContinuousTest):
                 f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
             )
 
+    @skip_if_lt_x_gpu(2)
+    def test_fused_matmul_reduce_scatter_bfloat16_custom_reduce(self) -> None:
+        self._init_process()
+
+        M = 64
+        N = 32
+        K = 1024
+        group = dist.group.WORLD
+        rank = self.rank
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.rand(K, N, device="cuda", dtype=torch.bfloat16)
+
+        output_0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+        output_1 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+
+        torch.testing.assert_close(output_0, output_1, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_1.stride())
+
+        # The fused reducer is only selected under graph capture, so the eager
+        # call above does not cover it. output_1 already sized the symmetric
+        # memory workspace, which cannot grow during capture.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            output_2 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "avg", scatter_dim=0, group_name=group.group_name
+            )
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_2.stride())
+
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
@@ -1346,6 +1450,50 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         if max_channel > 1:
             symm_mem_hdl.barrier(channel=max_channel - 1)
         torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = symm_mem_hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+        peer = (self.rank + 1) % self.world_size
+
+        # An over-capacity channel would write past the signal pad, into the
+        # peer's tensor data (see #191618). Both ops must reject it host-side.
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.put_signal(dst_rank=peer, channel=max_channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.wait_signal(src_rank=peer, channel=max_channel)
+
+        # The boundary channel is accepted: ring-exchange a signal on it.
+        src = (self.rank - 1) % self.world_size
+        symm_mem_hdl.put_signal(dst_rank=peer, channel=max_channel - 1)
+        symm_mem_hdl.wait_signal(src_rank=src, channel=max_channel - 1)
+        torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal_rank_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        # An out-of-range rank indexes a wild signal pad pointer (put_signal)
+        # or a slot past the signal pad, in the tensor data (wait_signal).
+        # get_signal_pad wraps the wild pointer in a tensor handed to the user.
+        for bad_rank in (-1, self.world_size):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.put_signal(dst_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.wait_signal(src_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.get_signal_pad(bad_rank)
 
 
 @instantiate_parametrized_tests
