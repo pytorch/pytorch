@@ -527,8 +527,13 @@ class YieldValueOp(Exception):
 
 def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     nargs = len(inspect.signature(fn).parameters)
+    fn_name = fn.__name__
     fn_var = BuiltinVariable(fn)
 
+    @break_graph_if_unsupported(
+        push=fn_name[0] != "i",
+        msg_prefix=f"Encountered graph break when attempting to trace {fn_name}: a binary operator, e.g. x + y, x - y, etc.",
+    )
     @functools.wraps(fn)
     def impl(self: InstructionTranslator, inst: Instruction) -> None:
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
@@ -3193,7 +3198,7 @@ class InstructionTranslatorBase(
 
     @break_graph_if_unsupported(
         push=True,
-        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
+        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operator, e.g. x == y",
     )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
@@ -4657,11 +4662,7 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-
-    BINARY_SUBSCR = break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
-    )(stack_op(operator.getitem))
+    BINARY_SUBSCR = stack_op(operator.getitem)
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
