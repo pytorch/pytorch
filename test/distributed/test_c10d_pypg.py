@@ -2,7 +2,6 @@
 
 import os
 import time
-import unittest
 import weakref
 from datetime import timedelta
 
@@ -21,7 +20,7 @@ from torch.distributed.distributed_c10d import (
 )
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -485,12 +484,11 @@ class TestPyProcessGroupGeneric(TestCase):
         self.assertIs(pg.new_window_tensor, t)
 
 
-@unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
 class TestPyProcessGroupCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_block_current_stream(self) -> None:
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         stream = torch.cuda.Stream()
         with stream:
@@ -519,7 +517,7 @@ class TestPyProcessGroupCUDA(TestCase):
         """
         This tests that the CPU control tensor is not freed before the CUDA kernel executes.
         """
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         stream = torch.cuda.Stream()
         with stream:
             a = BlockWork()
@@ -629,6 +627,9 @@ class TestBatchSendRecv(MultiProcessTestCase):
 
         dist.barrier()
         dist.destroy_process_group()
+
+
+instantiate_device_type_tests(TestPyProcessGroupCUDA, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
