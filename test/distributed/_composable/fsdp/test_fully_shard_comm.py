@@ -51,6 +51,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -68,6 +69,7 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -153,6 +155,8 @@ class TestFSDPCommContext(TestCase):
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 128
@@ -405,6 +409,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -810,6 +816,8 @@ class TestFullyShardCommunication(FSDPTestContinuous):
 
 
 class TestFullyShardPrefetch(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -1713,6 +1721,8 @@ class TestFullyShardPrefetch(FSDPTest):
 
 
 class TestFullyShardUnshardMultiProcess(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
@@ -1797,6 +1807,8 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
 
 
 class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1824,6 +1836,8 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
 
 
 class TestFullyShardAllocFromPG(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
     MEMORY_REGISTER_RE = (
@@ -1908,6 +1922,8 @@ class TestFullyShardAllocFromPG(FSDPTest):
 )
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls) -> str | None:
         return "nccl"
@@ -1959,6 +1975,8 @@ instantiate_parametrized_tests(TestFullyShardSymmMem)
 
 
 class TestFullyShardForceSumReduction(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
 
@@ -2113,6 +2131,8 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
 @instantiate_parametrized_tests
 class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 1
@@ -2182,6 +2202,34 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
 
+
+instantiate_device_type_tests(
+    TestFullyShardCollectiveOps,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardCommunication,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardPrefetch,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardUnshardMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
