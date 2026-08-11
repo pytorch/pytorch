@@ -1403,6 +1403,17 @@ class TestDisabledTorchFunction(TestCase):
         self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
         self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
 
+    def test_l1_loss_weight_dispatch(self):
+        class MyTensor:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return "called"
+
+        input = torch.rand(2, 2)
+        target = torch.rand(2, 2)
+        weight = MyTensor()
+        self.assertEqual(torch.nn.functional.l1_loss(input, target, weight=weight), "called")
+
 class TestResolveName(TestCase):
     def test_resolve_name(self):
         for cs in get_overridable_functions().values():

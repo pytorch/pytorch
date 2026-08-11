@@ -4194,7 +4194,7 @@ def l1_loss(
     Returns:
         Tensor: L1 loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target):
+    if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             l1_loss,
             (input, target, weight),
@@ -4203,6 +4203,7 @@ def l1_loss(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            weight=weight,
         )
     if target.size() != input.size():
         warnings.warn(
