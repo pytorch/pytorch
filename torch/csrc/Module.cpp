@@ -32,6 +32,7 @@
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <libshm.h>
@@ -2674,6 +2675,13 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
 
+#if defined(USE_CUFILE)
+  PyObject* has_gds = Py_True;
+#else
+  PyObject* has_gds = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_gds", has_gds));
+
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
 #else
@@ -2699,6 +2707,19 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+
+  // Serialized access to the process environment. Prefer these over Python's
+  // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so
+  // reads and writes are consistent with C++ code that also goes through
+  // c10::utils::{get,set}_env.
+  py_module.def("_getenv", &c10::utils::get_env);
+  py_module.def(
+      "_setenv",
+      &c10::utils::set_env,
+      py::arg("name"),
+      py::arg("value"),
+      py::arg("overwrite") = true);
+  py_module.def("_unsetenv", &c10::utils::unset_env);
 
   {
     using at::impl::FakeDispatchCategory;
