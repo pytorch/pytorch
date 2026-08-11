@@ -33,6 +33,7 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     TEST_CUDA,
+    TEST_CUDA_GRAPH_TOOLS_ID,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
@@ -2464,6 +2465,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(sync, monitor._enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
     def test_event_node_recorder_arm_before_capture(self):
         # End-to-end usage, and the ordering contract it depends on: the recorder learns a
         # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
@@ -2528,6 +2533,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
     def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
         # The serial-chain case above is the one where every candidate ordering agrees. This
         # is the case that separates them: two event nodes on CONCURRENT branches of differing
@@ -3126,6 +3135,196 @@ class TestCuptiMonitorCUDA(TestCase):
 
         self.assertGreater(counts.get(int(ActivityKind.CONCURRENT_KERNEL), 0), 0)
         self.assertGreater(stats["buffers_completed"], 0)
+
+
+# CUPTI callback domain/cbid used by the registry tests. Graph-node creation is the
+# motivating consumer, and RESOURCE callbacks need no CUDA work beyond building a graph.
+_RESOURCE_DOMAIN = 3  # CUpti_CallbackDomain.CUPTI_CB_DOMAIN_RESOURCE
+_CBID_GRAPHNODE_CREATED = 13  # CUPTI_CBID_RESOURCE_GRAPHNODE_CREATED
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA required")
+# setUp imports the monitor, which hard-imports the build-generated _cupti_stubs, so the
+# whole class has to be gated -- a method-level gate would still let setUp error out where
+# the stubs were not generated (see TEST_CUPTI in common_cuda).
+@unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+class TestCuptiCallbackRegistry(TestCase):
+    """The monitor's shared *subscriber-callback* registry -- a separate axis from activity
+    records: handlers fire synchronously on the application thread inside the CUDA call."""
+
+    def setUp(self):
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
+    def _monitor(self):
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        return CuptiMonitor()
+
+    def test_capability_flag_advertised(self):
+        # Consumers (e.g. an out-of-tree CUPTI subscriber) branch on this to stop taking a
+        # subscription of their own. Needs no CUDA/CUPTI.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        self.assertTrue(_cupti_monitor.get_config()["supports_callback_handlers"])
+
+    def test_register_unregister_handler(self):
+        monitor = self._monitor()
+        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        first = monitor.register_callback_handler(*key, lambda *a: None)
+        second = monitor.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(monitor.unregister_callback_handler, second)
+        self.assertEqual(len(monitor._callback_handlers[key]), 2)
+
+        monitor.unregister_callback_handler(first)
+        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+        # Idempotent: removing an already-removed handler leaves the survivor alone.
+        monitor.unregister_callback_handler(first)
+        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+
+    def test_arm_refcount_disables_only_at_zero(self):
+        # Two consumers scoping the same callback to different windows must not disable
+        # each other, so cuptiEnableCallback is driven only on the 0->1 and 1->0 edges.
+        monitor = self._monitor()
+        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        handler = monitor.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(monitor.unregister_callback_handler, handler)
+
+        calls = []
+        real = monitor._cupti.enable_callback
+
+        def recording(sub, domain, cbid, enable):
+            calls.append(enable)
+            return real(sub, domain, cbid, enable)
+
+        with patch.object(monitor._cupti, "enable_callback", recording):
+            monitor.arm_callback(*key)
+            monitor.arm_callback(*key)
+            self.assertEqual(calls, [True])
+            self.assertEqual(monitor._callback_armed[key], 2)
+
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True])
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True, False])
+            self.assertNotIn(key, monitor._callback_armed)
+            # Disarming when not armed is a no-op, not an error.
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True, False])
+
+    def test_handler_exception_is_isolated(self):
+        # A raise must not reach CUPTI's C dispatch, and one bad handler must not silence
+        # the others (order-independent, so check both orderings).
+        monitor = self._monitor()
+        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        seen = []
+
+        def boom(*_args):
+            raise RuntimeError("handler blew up")
+
+        bad = monitor.register_callback_handler(*key, boom)
+        good = monitor.register_callback_handler(*key, lambda *a: seen.append("good"))
+        self.addCleanup(monitor.unregister_callback_handler, good)
+        self.addCleanup(monitor.unregister_callback_handler, bad)
+
+        monitor._dispatch_callback(0, *key, 0)
+        self.assertEqual(seen, ["good"])
+
+    def test_handler_alone_holds_subscription(self):
+        # A callback-only consumer must be able to bring CUPTI up and hold it with no
+        # activity observers -- the motivating case captures graphs before any profiling.
+        monitor = self._monitor()
+        self.assertIsNone(monitor._subscriber)
+
+        handler = monitor.register_callback_handler(
+            _RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED, lambda *a: None
+        )
+        self.assertIsNotNone(monitor._subscriber)
+        # No user-defined records and no decode worker: the activity path stayed off.
+        self.assertFalse(monitor._started)
+        self.assertFalse(monitor._callbacks_registered)
+
+        monitor.unregister_callback_handler(handler)
+        self.assertIsNone(monitor._subscriber)
+
+    def test_subscription_survives_activity_session_either_way(self):
+        # The subscription is shared, so it must outlive whichever consumer leaves first.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.records import Kernel
+
+        monitor = self._monitor()
+        handler = monitor.register_callback_handler(
+            _RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED, lambda *a: None
+        )
+        obs = monitor.register(
+            {ActivityKind.CONCURRENT_KERNEL: {Kernel.END}}, lambda c: None
+        )
+        self.assertTrue(monitor._started)
+        subscriber = monitor._subscriber
+
+        # Observer leaves first: stop() disarms user-defined records but must not
+        # unsubscribe from under the live handler.
+        monitor.unregister(obs)
+        self.assertFalse(monitor._started)
+        self.assertEqual(monitor._subscriber, subscriber)
+
+        # Handler leaves last -> released.
+        monitor.unregister_callback_handler(handler)
+        self.assertIsNone(monitor._subscriber)
+
+    def test_noop_cb_swap_does_not_clobber_dispatch(self):
+        # An out-of-tree consumer that swaps cupti_python._NOOP_CB (to route its own
+        # subscription to its own callback) must not steal the monitor's dispatch, so the
+        # monitor passes its switchboard to subscribe() explicitly.
+        from torch.profiler._cupti import cupti_python
+
+        other = cupti_python._CB_FUNC(lambda *a: None)
+        with patch.object(cupti_python, "_NOOP_CB", other):
+            monitor = self._monitor()
+            handler = monitor.register_callback_handler(
+                _RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED, lambda *a: None
+            )
+            self.addCleanup(monitor.unregister_callback_handler, handler)
+            self.assertIsNotNone(monitor._callback_trampoline)
+            self.assertIsNot(monitor._callback_trampoline, other)
+
+    def test_graph_node_callback_fires_during_capture_only(self):
+        # End-to-end proof of the mechanism: GRAPHNODE_CREATED fires once per node while
+        # armed during a capture, and not at all once disarmed (so replay pays nothing).
+        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        n_kernels = 4
+        monitor = self._monitor()
+        fired = []
+        handler = monitor.register_callback_handler(*key, lambda *a: fired.append(a))
+        self.addCleanup(monitor.unregister_callback_handler, handler)
+
+        x = torch.randn(64, 64, device="cuda")
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                x = x + 1
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        monitor.arm_callback(*key)
+        try:
+            with torch.cuda.graph(g):
+                for _ in range(n_kernels):
+                    x = x + 1
+        finally:
+            monitor.disarm_callback(*key)
+        self.assertGreaterEqual(len(fired), n_kernels)
+
+        # Disarmed: replay must not enter the dispatcher at all.
+        before = len(fired)
+        for _ in range(5):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(len(fired), before)
 
 
 class TestWindowFinalizer(TestCase):
