@@ -143,6 +143,13 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
 
+  // A workspace allocated before capture belongs to the ordinary caching
+  // allocator pool, so a captured cuBLAS kernel must not retain its address.
+  // Clear the capture stream's workspace on this thread before pool routing is
+  // enabled. Threads that join the capture lazily replace stale workspaces in
+  // setCublasWorkspace/getCUDABlasLtWorkspace after observing the capture id.
+  clearCublasWorkspacesForStream(capture_stream_.stream());
+
 #if defined(USE_ROCM)
   // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
   // Ensure the handle for the intended capture stream exists before
@@ -185,6 +192,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
+  notifyCublasCaptureBegin();
   c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
