@@ -22,7 +22,6 @@ batch_size = 256
 
 
 class StageBackwardTests(TestCase):
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -53,11 +52,19 @@ class StageBackwardTests(TestCase):
 
         torch.testing.assert_close(grad_inputs[0], ref_x.grad)
 
+        # https://github.com/intel/torch-xpu-ops/issues/1682 - reason for different tolerance for xpu
+        rtol, atol = None, None
+        if self.device_type == "xpu":
+            rtol, atol = (
+                torch.testing._comparison.default_tolerances(torch.float32)[0],
+                1e-4,
+            )
+
         # Every rank checks gradients
         for name, p in mod.named_parameters():
             ref_p = ref_mod.get_parameter(name)
             try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=rtol, atol=atol)
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
@@ -97,6 +104,7 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
+    # https://github.com/intel/torch-xpu-ops/issues/1682 - reason for different tolerance for xpu
     def test_stage_backward_input_ignores_non_tensor_inputs(self, device):
         mod = MLPModule(d_hid).to(device)
         x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
@@ -150,16 +158,22 @@ class StageBackwardTests(TestCase):
         ref_loss = loss_fn(ref_out, ref_target)
         ref_loss.backward()
 
+        rtol, atol = None, None
+        if self.device_type == "xpu":
+            rtol, atol = (
+                torch.testing._comparison.default_tolerances(torch.float32)[0],
+                1e-4,
+            )
+
         # Every rank checks gradients
         for name, p in mod.named_parameters():
             ref_p = ref_mod.get_parameter(name)
             try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=rtol, atol=atol)
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight_multiple_iters(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -201,11 +215,18 @@ class StageBackwardTests(TestCase):
             ref_loss = loss_fn(ref_out, ref_target)
             ref_loss.backward()
 
+        rtol, atol = None, None
+        if self.device_type == "xpu":
+            rtol, atol = (
+                torch.testing._comparison.default_tolerances(torch.float32)[0],
+                1e-4,
+            )
+
         # Every rank checks gradients
         for name, p in mod.named_parameters():
             ref_p = ref_mod.get_parameter(name)
             try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=rtol, atol=atol)
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
