@@ -387,7 +387,10 @@ class TestPrepareTensor(TestCase):
 
 
 class TestPrepareStateDict(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # Every case builds its target device as torch.device("cpu") rather than
+    # deriving it from whatever accelerator is present, so this is tied to CPU
+    # by construction. GENERIC is for logic that references no device at all.
+    hw_classification = HardwareClassification.CPU
 
     def test_prepare_state_dict_basic(self):
         """Test basic state dict preparation."""
@@ -445,7 +448,10 @@ class TestPrepareStateDict(TestCase):
 
 
 class TestPGTransportMocked(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # `setUp` pins the transport to torch.device("cpu"); the process group is
+    # mocked, so nothing here adapts to the accelerator that happens to be
+    # present. That is CPU, not GENERIC.
+    hw_classification = HardwareClassification.CPU
 
     def setUp(self):
         super().setUp()
