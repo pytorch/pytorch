@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from types import FunctionType
 from typing import Any
 
 from cutlass.operators.arch import TargetSm  # noqa: TC002
@@ -29,7 +28,6 @@ from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
 )
 from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.gemm_epilogue_codegen import (
-    gemm_epilogue_op_scope,
     GemmReductionCompileConfig,
     materialize_epilogue_function,
 )
@@ -37,7 +35,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
 
 
-class _EFCOpScope:
+class _EfcCuteNamespace:
     """Provide the module-shaped namespaces expected by generated epilogues.
 
     Generated source calls both ``cute.math`` and ``mlir_math`` operations. EFC
@@ -57,10 +55,8 @@ class _EFCOpScope:
 def _direct_cutedsl_epilogue(metadata):
     """Adapt generated CuTeDSL source to EFC's accumulator and parameter API."""
 
-    import cutlass.cute as cute
-
-    direct_fn = materialize_epilogue_function(metadata.epilogue.epilogue_fn, cute)
-    inputs, outputs = trace_in_out(metadata.epilogue.epilogue_fn)
+    epilogue_source = metadata.epilogue.epilogue_fn
+    inputs, outputs = trace_in_out(epilogue_source)
     inputs = ["accum", *inputs] if "accum" not in inputs else inputs
     parameter_names = metadata.epilogue.parameter_names
     tensors = metadata.epilogue.tensors
@@ -113,20 +109,10 @@ def _direct_cutedsl_epilogue(metadata):
             efc_config.accum() if name == "accum" else load(name, by_name[name])
             for name in inputs
         ]
-        op_scope = _EFCOpScope(efc_config)
-        call_scope = direct_fn.__globals__.copy()
-        call_scope.update(gemm_epilogue_op_scope(op_scope))
-        call_scope["mlir_math"] = op_scope
-        # Rebind globals because the generated function targets module-level
-        # CuTeDSL operations while EFC exposes them through this trace's config.
-        call_fn = FunctionType(
-            direct_fn.__code__,
-            call_scope,
-            direct_fn.__name__,
-            direct_fn.__defaults__,
-            direct_fn.__closure__,
+        op_scope = _EfcCuteNamespace(efc_config)
+        call_fn = materialize_epilogue_function(
+            epilogue_source, op_scope, mlir_math=op_scope
         )
-        call_fn.__kwdefaults__ = direct_fn.__kwdefaults__
         results = call_fn(*values)
         if len(outputs) == 1:
             result_values = (results,)
@@ -183,8 +169,10 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         self, args: GemmArguments, target_sm: TargetSm | None = None
     ) -> Status:
         epilogue = args.epilogue
+        # ``supports`` has already checked the operator metadata. Direct source
+        # has no EVT DAG, so bypass only the parent's EVT-specific validation.
         status = (
-            Status.success()
+            CuteDslOperator._supports(self, args, target_sm)
             if epilogue is not None and getattr(epilogue, "_is_direct_cutedsl", False)
             else super()._supports(args, target_sm)
         )
