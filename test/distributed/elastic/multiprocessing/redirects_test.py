@@ -19,7 +19,6 @@ from torch.distributed.elastic.multiprocessing.redirects import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    run_tests,
     TestCase,
 )
 
@@ -148,4 +147,7 @@ class RedirectsTest(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )
