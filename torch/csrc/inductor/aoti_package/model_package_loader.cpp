@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/error.h>
 #include <c10/util/string_view.h>
@@ -14,9 +15,10 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <utility>
 
 #ifdef _WIN32
-#include <Windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #endif
 
 namespace fs = c10::filesystem;
@@ -451,6 +453,27 @@ std::unordered_set<std::string> find_model_names(
   return model_names;
 }
 
+void validate_package_device(
+    const std::unordered_map<std::string, std::string>& metadata) {
+  const auto device_key_iter = metadata.find("AOTI_DEVICE_KEY");
+  TORCH_CHECK(
+      device_key_iter != metadata.end() && !device_key_iter->second.empty(),
+      "No device information found.");
+
+  if (device_key_iter->second == "cuda") {
+#if defined(USE_ROCM)
+    const char* backend_name = "ROCm";
+#else
+    const char* backend_name = "CUDA";
+#endif
+    TORCH_CHECK(
+        at::detail::getCUDAHooks().getNumGPUs() > 0,
+        "Cannot load AOTInductor package for device 'cuda' because ",
+        backend_name,
+        " is not available in this process. Check that this host or container has GPU access, or compile/package the model for CPU.");
+  }
+}
+
 } // namespace
 
 void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
@@ -698,12 +721,14 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
   return metadata;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
     const bool run_single_threaded,
     const size_t num_runners,
-    const c10::DeviceIndex device_index) {
+    const c10::DeviceIndex device_index)
+    : runner_(nullptr), metadata_{} {
   if (run_single_threaded) {
     TORCH_CHECK(
         num_runners == 1,
@@ -891,17 +916,18 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         found_filenames_str);
   }
 
+  // Load metadata which can be queried by user and validated before compiling
+  // source-only packages or constructing the device-specific runner.
+  load_metadata(!cpp_filename.empty() ? cpp_filename : so_filename);
+  validate_package_device(metadata_);
+
   // Compile the .so
   std::string so_path = !so_filename.empty()
       ? so_filename
       : compile_so(cpp_filename, obj_filenames);
 
-  // Load metadata which can be queried by user
-  load_metadata(!cpp_filename.empty() ? cpp_filename : so_path);
-
   // Construct the runner depending on the device information
   std::string device_key = metadata_["AOTI_DEVICE_KEY"];
-  TORCH_CHECK(!device_key.empty(), "No device information found.");
 
   std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
       registered_aoti_runner = getAOTIModelRunnerRegistry();
@@ -946,6 +972,7 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::vector<at::Tensor>&& inputs,
     void* stream_handle) {
   return runner_->boxed_run(std::move(inputs), stream_handle);
