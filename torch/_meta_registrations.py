@@ -4615,6 +4615,9 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
+    # reduces over all dimensions if dims=() is passed
+    if dims == () or dims == []:
+        dims = None
     dims = utils.reduction_dims(input.shape, dims)
     output_shape = _compute_reduction_shape(input, dims, keepdim)
     return input.new_empty(output_shape, dtype=output_dtype)
@@ -5808,6 +5811,17 @@ class GridSamplerInterpolation(Enum):
     BICUBIC = 2
 
 
+def check_grid_sampler_2d(input: Tensor, grid: Tensor):
+    torch._check(
+        input.ndim == 4 and input.ndim == grid.ndim,
+        lambda: (
+            f"grid_sampler(): expected 4D input and grid with same number of "
+            f"dimensions, but got input with sizes {input.shape}"
+            f" and grid with sizes {grid.shape}"
+        ),
+    )
+
+
 def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
     torch._check(
         input.ndim == 5 and input.ndim == grid.ndim,
@@ -5824,6 +5838,47 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
         ),
         lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
     )
+
+
+# torch._grid_sampler_2d_cpu_fallback is CompositeExplicitAutograd, so without a
+# meta kernel the real CPU kernel runs under FakeTensorMode and fails on
+# unallocated data ("the tensor has a non-zero number of elements, but its data is
+# not allocated yet"), making the op uncapturable. These mirror both the checks the
+# C++ impls run (they call check_grid_sampler_common/_2d themselves, since they can
+# be called instead of grid_sampler) and the shapes they allocate --
+# aten/src/ATen/native/GridSampler.cpp.
+@register_meta(aten._grid_sampler_2d_cpu_fallback)
+@out_wrapper()
+def _grid_sampler_2d_cpu_fallback_meta(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_H = grid.shape[1]
+    out_W = grid.shape[2]
+    return input.new_empty((N, C, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_2d_cpu_fallback_backward)
+def _grid_sampler_2d_cpu_fallback_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
 
 
 @register_meta(aten.grid_sampler_2d_backward.default)
@@ -6664,7 +6719,9 @@ def meta__scaled_dot_product_efficient_backward(
     scale: float | None = None,
 ):
     batch_size = query.size(0)
-    num_heads = query.size(1)
+    num_heads_q = query.size(1)
+    num_heads_k = key.size(1)
+    num_heads_v = value.size(1)
     max_q = query.size(2)
     head_dim = query.size(3)
     head_dim_v = value.size(3)
@@ -6672,19 +6729,19 @@ def meta__scaled_dot_product_efficient_backward(
     max_k = key.size(2)
 
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
+        (batch_size, num_heads_q, max_q, head_dim),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads_k, max_k, head_dim),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim_v),
+        (batch_size, num_heads_v, max_k, head_dim_v),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
@@ -7025,6 +7082,10 @@ def meta__efficient_attention_backward(
         torch._check(
             query.shape[3] == key.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
+        )
+        torch._check(
+            query.shape[2] == key.shape[2],
+            lambda: "num heads must match for `shared_storage_dqdkdv",
         )
         chunk = torch.empty(
             (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
@@ -8689,6 +8750,29 @@ def meta_scaled_grouped_mm(
         out_dtype=out_dtype,
         use_fast_accum=use_fast_accum,
     )
+
+
+@register_meta([aten._scaled_grouped_mm_v2.default])
+def meta_scaled_grouped_mm_v2(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    offs: torch.Tensor | None = None,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    """Shape inference only, since the structured C++ meta doesn't support
+    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    """
+    _out_dtype = out_dtype or torch.bfloat16
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
 @register_meta(aten._foreach_norm.Scalar)

@@ -113,6 +113,30 @@ namespace c10::xpu {
   _(native_vector_width_double)                                                \
   _(native_vector_width_half)
 
+#if SYCL_COMPILER_VERSION >= 20260100
+#define AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(_)                           \
+                                                                            \
+  /* the number of stacks (chiplets/tiles) */                               \
+  _(xe_stack_count, xe_stack_count, 1)                                      \
+                                                                            \
+  /* the number of regions sharing local L2/L3 (XE_CU) per stack */         \
+  _(xe_regions_per_stack, xe_regions_per_stack, 1)                          \
+                                                                            \
+  /* the number of clusters (slices) per region */                          \
+  _(xe_clusters_per_region, xe_clusters_per_region, 1)                      \
+                                                                            \
+  /* the number of XE cores (subslices) per cluster */                      \
+  _(xe_cores_per_cluster, xe_cores_per_cluster, 64)                         \
+                                                                            \
+  /* the number of execution engines (EUs) per XE Core */                   \
+  _(eus_per_xe_core, eus_per_xe_core, 8)                                    \
+                                                                            \
+  /* the maximal number of lanes (virtual SIMD size) per hardware thread */ \
+  _(max_lanes_per_hw_thread, max_lanes_per_hw_thread, 32)
+#else
+#define AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(_)
+#endif
+
 #define AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(_)                                \
   /* the number of EUs associated with the Intel GPU. */                      \
   _(gpu_eu_count, gpu_eu_count, 512)                                          \
@@ -136,7 +160,9 @@ namespace c10::xpu {
   _(memory_clock_rate, memory_clock_rate, 0)                                  \
                                                                               \
   /* the maximum bus width between device and memory in bits. */              \
-  _(memory_bus_width, memory_bus_width, 0)
+  _(memory_bus_width, memory_bus_width, 0)                                    \
+                                                                              \
+  AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(_)
 
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
   /* sycl::half is supported on device. */              \
@@ -197,10 +223,8 @@ struct C10_XPU_API DeviceProp{
     // ext properties.
     AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
-#if SYCL_COMPILER_VERSION >= 20260000
     // device aspects.
     DEFINE_DEVICE_ASPECT(is_integrated_gpu)
-#endif
 
     // device has aspects.
     AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_HAS_ASPECT)
