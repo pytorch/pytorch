@@ -360,7 +360,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
 
 
 instantiate_device_type_tests(
-    TestHSDPWithDeviceMeshAndDTensor, globals(), except_for="cpu"
+    TestHSDPWithDeviceMeshAndDTensor, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
