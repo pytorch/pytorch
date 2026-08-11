@@ -282,8 +282,12 @@ def cudagraph_post_compile(
         }
 
         device_index = next(iter(compiled_graph.device_idxs))
+        device_type = next(
+            t for t in compiled_graph.device_types if t not in ("cpu", "meta")
+        )
         cudagraphify_kwargs = dict(
             device_index=device_index,
+            device_type=device_type,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
@@ -414,6 +418,9 @@ def cudagraph_partition_post_compile(
             cudagraphify,
             static_input_idxs=tuple(partition_metadata.static_input_idxs),
             device_index=device_index,
+            device_type=next(
+                t for t in compiled_graph.device_types if t not in ("cpu", "meta")
+            ),
             stack_traces=partition_metadata.stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,

@@ -15,15 +15,20 @@ The abstraction layer enables device-agnostic code in TorchDynamo while allowing
 specialized implementations for each hardware backend's unique features.
 """
 
+import contextlib
 import inspect
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 from torch.utils._pallas import has_torch_tpu
+
+
+if TYPE_CHECKING:
+    from torch.cuda import _POOL_HANDLE
 
 
 get_cuda_stream: Callable[[int], int] | None
@@ -178,6 +183,92 @@ class DeviceInterface:
                 "This device is not capable of supporting Triton"
             )
 
+    class GraphOps:
+        """
+        Runtime extension point for CUDA-graph-style capture: memory-pool
+        routing and caching-allocator checkpointing, as consumed by Inductor's
+        cudagraph_trees. Backends that support graph capture override the
+        NotImplementedError members; the remaining defaults are safe no-ops.
+        """
+
+        @staticmethod
+        def graph_pool_handle() -> "_POOL_HANDLE":
+            raise NotImplementedError
+
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device: int, pool: tuple[int, int]
+        ) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def end_allocate_to_pool(device: int, pool: tuple[int, int]) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def release_pool(device: int, pool: tuple[int, int]) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def get_checkpoint_state(device: int, pool: tuple[int, int]) -> Any:
+            raise NotImplementedError
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device: int,
+            state: Any,
+            stale_storages: Any,
+            storages_to_add_deleters_to: Any,
+        ) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device: int, pool: tuple[int, int], expected_live_allocations: Any
+        ) -> bool:
+            raise NotImplementedError
+
+        @staticmethod
+        def raw_delete(ptr: int) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def caching_allocator_enabled() -> bool:
+            # True by default: the precheck consuming this probe only matters
+            # for backends that opted into graph capture, and opting in means
+            # overriding GraphOps (pool routing at minimum) — which is the
+            # point to override this probe too. Backends that have not opted
+            # in never pass the eligibility gate, so the permissive default
+            # is not a safety hole.
+            return True
+
+        @staticmethod
+        def memory_snapshot() -> Any:
+            return None
+
+        @staticmethod
+        def make_graph(pool: "_POOL_HANDLE | None" = None) -> Any:
+            # Default: a backend-agnostic graph object resolved from the C++
+            # GraphImplInterface registry via torch.accelerator.Graph.
+            return torch.accelerator.Graph(pool=pool, capture_error_mode="thread_local")
+
+        @staticmethod
+        @contextlib.contextmanager
+        def capture_context(
+            graph: Any,
+            stream: torch.Stream,
+            pool: "_POOL_HANDLE | None",
+            capture_error_mode: str = "thread_local",
+        ) -> Any:
+            # accelerator.Graph is itself a capture context manager on the
+            # current stream; pool and capture_error_mode were already given
+            # to make_graph. Unlike torch.cuda.graph, the stream context is
+            # entered before the graph's device-wide sync/empty_cache prep;
+            # those operations are not stream-scoped, so the order does not
+            # change behavior.
+            with stream, graph:
+                yield
+
 
 class DeviceGuard:
     """
@@ -304,6 +395,78 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+
+    class GraphOps(DeviceInterface.GraphOps):
+        graph_pool_handle = staticmethod(torch.cuda.graph_pool_handle)
+        memory_snapshot = staticmethod(torch.cuda.memory_snapshot)
+
+        @staticmethod
+        def make_graph(pool: "_POOL_HANDLE | None" = None) -> Any:
+            # CUDA keeps its legacy graph object; pool and capture_error_mode
+            # are supplied at capture time by torch.cuda.graph instead.
+            return torch.cuda.CUDAGraph()
+
+        @staticmethod
+        def capture_context(
+            graph: Any,
+            stream: torch.Stream,
+            pool: "_POOL_HANDLE | None",
+            capture_error_mode: str = "thread_local",
+        ) -> Any:
+            return torch.cuda.graph(
+                graph,
+                stream=stream,
+                pool=pool,
+                capture_error_mode=capture_error_mode,
+            )
+
+        # The torch._C._cuda_* symbols below only exist in CUDA builds, so
+        # they are bound at call time rather than at class-definition time to
+        # keep CPU-only builds importable.
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device: int, pool: tuple[int, int]
+        ) -> None:
+            torch._C._cuda_beginAllocateCurrentThreadToPool(device, pool)
+
+        @staticmethod
+        def end_allocate_to_pool(device: int, pool: tuple[int, int]) -> None:
+            torch._C._cuda_endAllocateToPool(device, pool)
+
+        @staticmethod
+        def release_pool(device: int, pool: tuple[int, int]) -> None:
+            torch._C._cuda_releasePool(device, pool)
+
+        @staticmethod
+        def get_checkpoint_state(device: int, pool: tuple[int, int]) -> Any:
+            return torch._C._cuda_getCheckpointState(device, pool)
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device: int,
+            state: Any,
+            stale_storages: Any,
+            storages_to_add_deleters_to: Any,
+        ) -> None:
+            torch._C._cuda_setCheckpointPoolState(
+                device, state, stale_storages, storages_to_add_deleters_to
+            )
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device: int, pool: tuple[int, int], expected_live_allocations: Any
+        ) -> bool:
+            return torch._C._cuda_checkPoolLiveAllocations(
+                device, pool, expected_live_allocations
+            )
+
+        @staticmethod
+        def raw_delete(ptr: int) -> None:
+            torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
+
+        @staticmethod
+        def caching_allocator_enabled() -> bool:
+            return torch._C._cuda_cudaCachingAllocator_is_enabled()
 
 
 get_mtia_stream: Callable[[int], int] | None
