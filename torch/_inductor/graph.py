@@ -829,7 +829,11 @@ class GraphLowering(torch.fx.Interpreter):
         # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
-        if len(list(gm.graph.nodes)) >= 300 * nconv:
+        # The threshold was calibrated on forward graphs; backward graphs have
+        # 2-3x the nodes for the same conv count (recomputation, grad chains), so
+        # applying it there would silently disable layout opt for conv-sparse
+        # backward graphs that the forward graph enables.
+        if is_inference and len(list(gm.graph.nodes)) >= 300 * nconv:
             log.debug("Skipped layout opt because only a few conv")
             return False
 
