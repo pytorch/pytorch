@@ -230,6 +230,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsCoalescing() const override {
     return true;
   }
+  bool supportsTimeEstimation() const override {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+    return true;
+#else
+    return false;
+#endif
+  }
   bool supportsSplitting() const override {
     return true;
   }
@@ -242,6 +249,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
 
   // Create a child backend over `ranks` (a subset of this group's ranks) via
   // ncclCommSplit. Collective over the parent communicator: every parent rank
@@ -259,6 +268,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
           nullptr) override;
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
+  at::Tensor allocateTensor(long size, at::TensorOptions options) override;
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
   void setTimeout(std::chrono::milliseconds timeout) override;
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   void eagerConnectSingleDevice(at::Device device) override;
@@ -613,6 +624,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
+  std::unique_ptr<at::cuda::MemPool> memPool_;
 
   std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
   std::mutex event_pool_mutex_;
