@@ -1200,6 +1200,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """2""")
 
+    def test_metaclass_descriptor(self):
+        class Meta(type):
+            def __neg__(cls):
+                return 999
+
+        class Base(metaclass=Meta):
+            # Alias int's unary __neg__ slot wrapper into this class's dict under a
+            # different name. __objclass__ == int, __name__ == '__neg__', but looked
+            # up on Base, whose metaclass separately defines __neg__.
+            sneaky = int.__neg__
+
+        def fn(x):
+            if Base.sneaky.__objclass__ is not int:
+                raise AssertionError("Base.sneaky.__objclass__ is not int")
+
+            n = x.size(0)  # symint under dynamic shapes -> NOT a compile-time constant
+            # CPython: Base.sneaky is the unbound int.__neg__ wrapper_descriptor,
+            # so this is int.__neg__(n) == -n.
+            r = Base.sneaky(n)
+            return x + r
+
+        x = torch.zeros(7)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x)[0].item(), -7)
+
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
         model = ReformerEncoder()
@@ -5100,6 +5125,65 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f_compiled(a)
         # See https://github.com/pytorch/pytorch/issues/161010
 
+    # https://github.com/pytorch/pytorch/issues/185888
+    @parametrize("backend", ["eager", "inductor"])
+    def test_as_strided_inplace_internal_tensor_metadata(self, backend):
+        def fn():
+            x = torch.arange(4.0)
+            y = x.as_strided_((2, 2), (2, 1))
+            observer = torch.max(y)
+            return (
+                y,
+                x.size(),
+                x.shape,
+                x.dim(),
+                y.size(),
+                x.stride(),
+                y.stride(),
+                observer,
+            )
+
+        eager = fn()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+        actual = compiled()
+
+        self.assertEqual(actual[0], eager[0])
+        self.assertEqual(tuple(actual[1]), tuple(eager[1]))
+        self.assertEqual(tuple(actual[2]), tuple(eager[2]))
+        self.assertEqual(actual[3], eager[3])
+        self.assertEqual(tuple(actual[4]), tuple(eager[4]))
+        self.assertEqual(tuple(actual[5]), tuple(eager[5]))
+        self.assertEqual(tuple(actual[6]), tuple(eager[6]))
+        self.assertEqual(actual[7], eager[7])
+
+    # https://github.com/pytorch/pytorch/issues/185888
+    @parametrize("backend", ["eager", "inductor"])
+    def test_as_strided_inplace_internal_tensor_symbolic_metadata(self, backend):
+        def fn(inp):
+            x = torch.arange(16.0)
+            n = inp.size(0)
+            y = x.as_strided_((n,), (2,))
+            return (
+                x.size(),
+                y.size(),
+                x.stride(),
+                y.stride(),
+                x.is_contiguous(),
+                y.is_contiguous(),
+            )
+
+        inp = torch.empty(5)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+        actual = compiled(inp)
+
+        self.assertEqual(tuple(actual[0]), tuple(eager[0]))
+        self.assertEqual(tuple(actual[1]), tuple(eager[1]))
+        self.assertEqual(tuple(actual[2]), tuple(eager[2]))
+        self.assertEqual(tuple(actual[3]), tuple(eager[3]))
+        self.assertEqual(actual[4], eager[4])
+        self.assertEqual(actual[5], eager[5])
+
     # Extension of https://github.com/pytorch/pytorch/issues/161010
     # in the non memory dense case
     def test_clone_not_memory_dense(self):
@@ -7205,6 +7289,23 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         f(x, out_ref)
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
         self.assertEqual(out_ref, out_res)
+
+    def test_gather_out_dynamic_shapes(self):
+        def f(x, index, out):
+            torch.gather(x, 1, index, sparse_grad=False, out=out)
+            return out
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3):
+            x = torch.randn(1, width)
+            index = torch.randint(width, (1, 1))
+            out_ref = torch.empty(1, 1)
+            out_res = torch.empty(1, 1)
+
+            f(x, index, out_ref)
+            res = opt_f(x, index, out_res)
+            self.assertEqual(out_ref, out_res)
+            self.assertEqual(out_ref, res)
 
     @skipIfNotPy312
     def test_sys_monitoring(self):
