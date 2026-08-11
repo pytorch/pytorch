@@ -1025,15 +1025,6 @@ class TestOptimRenewed(TestCase):
             finally:
                 torch.set_default_dtype(old_default_dtype)
 
-    def _assert_large_tensor_matches_ref(self, optim_cls, param, optim_input, impl):
-        # A size-1 param stepped with the same config gives the expected value for
-        # every element, so a 32-bit index overflow shows up as the tail diverging.
-        ref = torch.ones(1, device=param.device, dtype=param.dtype)
-        ref.grad = torch.ones_like(ref)
-        optim_cls([ref], **{impl: True}, **optim_input.kwargs).step()
-        self.assertEqual(param[0], ref[0])
-        self.assertEqual(param[-1], ref[0])
-
     @onlyCUDA
     @largeTensorTest("72GB", "cuda")
     @serialTest()
@@ -1043,21 +1034,29 @@ class TestOptimRenewed(TestCase):
     )
     def test_foreach_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        if optim_cls.__name__ == "Adafactor":
-            # Adafactor scales by p.norm(2) / sqrt(p.numel()) computed in the param
-            # dtype. At 2**32 elements sqrt(numel) is 65536, just past the fp16 max
-            # of 65504, so the norm is inf and every param goes nan. Pre-existing:
-            # this test passed only because it asserted nothing.
-            self.skipTest("Adafactor overflows the fp16 norm at 2**32 elements")
+        # 2**32 is the uint32 wrap point: a numel narrowed to 32 bits becomes 0 and the
+        # kernel silently does nothing. Adafactor can't use it because it reduces over
+        # the whole param and update in the param dtype (p.norm(2), update.norm(2)),
+        # and at 2**32 unit-magnitude elements both norms are 65536, past the fp16 max
+        # of 65504, so they go inf and every param lands on nan. The backoff still
+        # clears INT32_MAX, so it keeps signed-overflow coverage but loses wrap-to-zero.
+        numel = 2**32 - 2**23 if optim_cls.__name__ == "Adafactor" else 2**32
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
-            params = [torch.ones(2**32, device=device, dtype=dtype)]
-            params[0].grad = torch.ones_like(params[0])
+            params = [torch.ones(numel, device=device, dtype=dtype)]
+            params[0].grad = torch.rand_like(params[0])
+            grads = (params[0].grad[0].item(), params[0].grad[-1].item())
             optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
             optimizer.step()
-            self._assert_large_tensor_matches_ref(
-                optim_cls, params[0], optim_input, "foreach"
-            )
+
+            # A size-1 param stepped with the same config and grad gives the expected
+            # value for one element. Distinct grads mean a 32-bit index overflow shows
+            # up whether it drops the tail or reads the wrong grad for it.
+            for idx, grad in zip((0, -1), grads):
+                ref = torch.ones(1, device=device, dtype=dtype)
+                ref.grad = torch.full_like(ref, grad)
+                optim_cls([ref], foreach=True, **optim_input.kwargs).step()
+                self.assertEqual(params[0][idx], ref[0])
 
     @onlyCUDA
     @optims(
@@ -1270,12 +1269,19 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2**32, device=device, dtype=dtype)]
-            params[0].grad = torch.ones_like(params[0])
+            params[0].grad = torch.rand_like(params[0])
+            grads = (params[0].grad[0].item(), params[0].grad[-1].item())
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
-            self._assert_large_tensor_matches_ref(
-                optim_cls, params[0], optim_input, "fused"
-            )
+
+            # A size-1 param stepped with the same config and grad gives the expected
+            # value for one element. Distinct grads mean a 32-bit index overflow shows
+            # up whether it drops the tail or reads the wrong grad for it.
+            for idx, grad in zip((0, -1), grads):
+                ref = torch.ones(1, device=device, dtype=dtype)
+                ref.grad = torch.full_like(ref, grad)
+                optim_cls([ref], fused=True, **optim_input.kwargs).step()
+                self.assertEqual(params[0][idx], ref[0])
 
     @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
