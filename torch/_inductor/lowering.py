@@ -7347,7 +7347,7 @@ def make_reduction(
     reduction_type: ReductionType,
     override_return_dtype=None,
     *,
-    strict_sum: bool = False,
+    strict_reduction: bool = False,
 ) -> Callable[..., TensorBox]:
     def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
@@ -7368,7 +7368,7 @@ def make_reduction(
         result = Reduction.create(
             reduction_type=reduction_type,
             input_node=x,
-            strict_sum=strict_sum,
+            strict_reduction=strict_reduction,
             **kwargs,
         )
         if isinstance(
@@ -7895,7 +7895,7 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-def _strict_sum_layout_eligible(axis, dtype) -> bool:
+def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     current_node = V.graph.current_node
     if (
         current_node is None
@@ -7962,13 +7962,15 @@ def _strict_sum_layout_eligible(axis, dtype) -> bool:
 
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
-    strict_sum = _strict_sum_layout_eligible(axis, dtype)
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("sum", override_return_dtype=dtype, strict_sum=strict_sum)
+    fn = make_reduction(
+        "sum", override_return_dtype=dtype, strict_reduction=strict_reduction
+    )
     return fn(x, axis, keepdims, dtype=dtype)
 
 
