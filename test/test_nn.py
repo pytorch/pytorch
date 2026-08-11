@@ -10287,6 +10287,55 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
+    @onlyCPU
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test(
+        "input_shape, output_size, memory_format",
+        [
+            ((1, 1, 2, 3, 4), (3, 5, 7), torch.contiguous_format),
+            ((2, 5, 4, 3, 2), (3, 1, 5), torch.channels_last_3d),
+        ],
+    )
+    def test_upsamplingTrilinear3d_uint8(
+        self, device, align_corners, input_shape, output_size, memory_format
+    ):
+        input_uint8 = torch.arange(
+            math.prod(input_shape), dtype=torch.uint8, device=device
+        ).reshape(input_shape)
+        input_uint8 = input_uint8.contiguous(memory_format=memory_format)
+
+        expected = F.interpolate(
+            input_uint8.float(),
+            size=output_size,
+            mode="trilinear",
+            align_corners=align_corners,
+        ).add(0.5).clamp(0, 255).to(torch.uint8)
+        actual = F.interpolate(
+            input_uint8,
+            size=output_size,
+            mode="trilinear",
+            align_corners=align_corners,
+        )
+
+        self.assertTrue(actual.is_contiguous(memory_format=memory_format))
+        self.assertEqual(actual, expected, rtol=0, atol=1)
+
+    @onlyCPU
+    def test_upsamplingTrilinear3d_uint8_rounds_half_up(self, device):
+        input_uint8 = torch.tensor([0, 1], dtype=torch.uint8, device=device).reshape(
+            1, 1, 1, 1, 2
+        )
+        actual = F.interpolate(
+            input_uint8,
+            size=(1, 1, 3),
+            mode="trilinear",
+            align_corners=True,
+        )
+        expected = torch.tensor([0, 1, 1], dtype=torch.uint8, device=device).reshape(
+            1, 1, 1, 1, 3
+        )
+        self.assertEqual(actual, expected)
+
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
