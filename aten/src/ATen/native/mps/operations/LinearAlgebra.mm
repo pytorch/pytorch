@@ -329,9 +329,9 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
-                                       static_cast<uint32_t>(self_.size(1)),
-                                       static_cast<uint32_t>(output.size(1))};
+      c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self_.size(0)),
+                                          static_cast<uint32_t>(self_.size(1)),
+                                          static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
           self_.stride(0), self_.stride(1), other_.stride(0), other_.stride(1), output.stride(0), output.stride(1)};
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
@@ -412,9 +412,9 @@ Tensor& do_metal_addmm(const Tensor& self,
       getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
-                                       static_cast<uint32_t>(self_.size(1)),
-                                       static_cast<uint32_t>(output.size(1))};
+      c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self_.size(0)),
+                                          static_cast<uint32_t>(self_.size(1)),
+                                          static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 8> strides = {self_.stride(0),
                                         self_.stride(1),
                                         other_.stride(0),
@@ -538,7 +538,6 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
@@ -567,10 +566,23 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
     }
   }
 
-  return !is_macos_14_4_or_newer &&
-      (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
-       self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
-       other.size(0) > max_stride_size || other.size(1) > max_stride_size);
+  const bool has_large_size_or_stride = self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
+      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
+      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
+  static const bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
+  if (!is_macos_14_4_or_newer) {
+    return has_large_size_or_stride;
+  }
+
+  // On Apple7/8, MPSGraph intermittently corrupts matmuls with a reduction
+  // dimension over 2^15 when both output dimensions use the matrix kernels;
+  // whether a given call misbehaves depends on allocator/session state, and
+  // fully contiguous operands are affected too. Apple9+ handles this
+  // correctly.
+  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
+  constexpr int64_t min_matrix_dim = 16;
+  return is_affected_gpu && self.size(1) > max_stride_size && self.size(0) >= min_matrix_dim &&
+      other.size(1) >= min_matrix_dim;
 }
 
 } // anonymous namespace

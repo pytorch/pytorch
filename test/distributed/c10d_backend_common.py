@@ -52,6 +52,7 @@ class BackendConfig:
     supports_uneven_all_gather: bool = False
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
+    premul_sum_dtypes: tuple[torch.dtype, ...] = ()
     complex_dtypes: tuple[torch.dtype, ...] = COMPLEX_DTYPES
 
 
@@ -73,6 +74,7 @@ C10D_BACKENDS = (
         supports_gather_single=True,
         supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
+        premul_sum_dtypes=(torch.float16, torch.float32, torch.float64),
     ),
     BackendConfig(
         "nccl2",
@@ -86,6 +88,12 @@ C10D_BACKENDS = (
         supports_gather_single=True,
         supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
+        premul_sum_dtypes=(
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        ),
     ),
     # nccl-lazy wraps a primary ProcessGroupNCCL (all collectives delegate to
     # it) plus lazily-built per-peer P2P comms. Timing and sequence APIs are not
@@ -101,6 +109,12 @@ C10D_BACKENDS = (
         supports_gather_single=True,
         supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
+        premul_sum_dtypes=(
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        ),
     ),
 )
 
@@ -169,6 +183,7 @@ def instantiate_backend_tests(namespace, suite_name, base_class, backends):
                 "supports_uneven_all_gather": backend.supports_uneven_all_gather,
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
+                "premul_sum_dtypes": backend.premul_sum_dtypes,
                 "complex_dtypes": backend.complex_dtypes,
             },
         )
