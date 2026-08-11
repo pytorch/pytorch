@@ -730,9 +730,8 @@ class NestedReduction:
             OrderedSet(reduction_reads),
         ):
             return None
-        parent_nodes = tuple(node for node in nodes if node not in epilogue_node_set)
         return StagedReductionPlan(
-            parent_nodes=parent_nodes,
+            parent_nodes=tuple(node for node in nodes if node not in epilogue_node_set),
             parent_numel=numel,
             parent_rnumel=parent_rnumel,
             nested_stage=None,
@@ -1435,19 +1434,29 @@ class NestedReduction:
 
         source_layouts = tuple((dep.name, layout) for dep, layout in source_deps)
         broadcast_source_names = OrderedSet(
-            name
+            renames.get(name, name)
             for node, domain in pointwise_domains
             if domain is cls.PointwiseDomain.REDUCED
             for name in node.get_buffer_names()
         )
-        broadcast_source_names.update(grouped_reduction.get_buffer_names())
+        broadcast_source_names.update(
+            renames.get(name, name) for name in grouped_reduction.get_buffer_names()
+        )
         for node in outer_node.get_nodes():
             if node.is_reduction():
-                broadcast_source_names.update(node.get_buffer_names())
+                broadcast_source_names.update(
+                    renames.get(name, name) for name in node.get_buffer_names()
+                )
+        sub_parent_read_names = OrderedSet(
+            renames.get(dep.name, dep.name)
+            for node in sub_parent_nodes
+            for dep in node.read_writes.reads
+        )
+        broadcast_source_names &= sub_parent_read_names
 
         allowed_internal_names = (
             OrderedSet(name for name, _layout in source_layouts)
-            | OrderedSet(renames.get(name, name) for name in broadcast_source_names)
+            | broadcast_source_names
             | OrderedSet(
                 renames.get(name, name)
                 for node in sub_parent_nodes
@@ -1467,7 +1476,7 @@ class NestedReduction:
             factor=cls.NESTED_SUB_PARENT_FACTOR,
             source_layouts=source_layouts,
             epilogue_nodes=sub_parent_nodes,
-            must_materialize_names=tuple(broadcast_source_names),
+            broadcast_source_names=tuple(broadcast_source_names),
         )
 
     @classmethod
@@ -1852,7 +1861,7 @@ class SubParentEpilogueStage:
     source_layouts: tuple[tuple[str, NestedReduction.SubParentSourceLayout], ...]
     epilogue_nodes: tuple[SchedulerNode, ...]
     # Reduced/group-constant values broadcast into the sub-parent domain.
-    must_materialize_names: tuple[str, ...] = ()
+    broadcast_source_names: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3925,17 +3934,16 @@ class FusedNestedReductions(FusedStagedReduction):
             for _, domain in pointwise_domains
         ):
             return False
-        sub_parent_nodes = [
-            sn
-            for sn, domain in pointwise_domains
-            if domain is NestedReduction.PointwiseDomain.SUB_PARENT
-        ]
+        has_sub_parent = any(
+            domain is NestedReduction.PointwiseDomain.SUB_PARENT
+            for _, domain in pointwise_domains
+        )
         if not self.scheduler._can_fuse_nested_reduction_append(
             self.node2,
             other,
             pointwise_domains,
             can_reorder=can_reorder,
-            producer_node=self if sub_parent_nodes else None,
+            producer_node=self if has_sub_parent else None,
         ):
             return False
 
@@ -8732,9 +8740,8 @@ class Scheduler:
             index_equivalent_dep_names.update(
                 dep_name for dep_name in reads if dep_name in grouped_buf_names
             )
-        # Parent-full consumers may read grouped-stage outputs through
-        # broadcasted parent-tile views. Relax matching only for those named
-        # producer outputs; all other deps use normal vertical legality.
+        # Derived-domain consumers may view grouped outputs at a different
+        # resolution. Relax matching only for those named producer outputs.
         return self._can_fuse(
             producer_node if producer_node is not None else grouped_node,
             other,
