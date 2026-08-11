@@ -3951,6 +3951,66 @@ exit(2)
     )
     @serialTest()
     @blas_library_context("cublas")
+    def test_graph_capture_cublas_workspace_cross_thread(self):
+        if torch.cuda.get_device_capability()[0] != 9:
+            self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
+
+        torch.cuda._clear_cublas_workspaces()
+        x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
+        weight = torch.randn(2048, 10944, device="cuda", dtype=torch.bfloat16)
+        expected = torch.nn.functional.linear(x, weight)
+        torch.cuda.synchronize()
+
+        stream = torch.cuda.Stream()
+        ready = threading.Event()
+        launch = threading.Event()
+        state = {}
+
+        def worker():
+            try:
+                with torch.cuda.stream(stream):
+                    # Allocate this thread's workspace before capture, in the
+                    # ordinary pool. The operation below must replace it after
+                    # this stream begins capture on the main thread.
+                    torch.cuda.current_blas_handle()
+                ready.set()
+                if not launch.wait(timeout=30):
+                    raise RuntimeError("capture thread did not release worker")
+                with torch.cuda.stream(stream):
+                    state["output"] = torch.nn.functional.linear(x, weight)
+            except BaseException as error:
+                state["error"] = error
+                ready.set()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        self.assertTrue(ready.wait(timeout=30))
+        if "error" in state:
+            raise state["error"]
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            launch.set()
+            thread.join(timeout=30)
+            self.assertFalse(thread.is_alive())
+            if "error" in state:
+                raise state["error"]
+
+        # Force an ordinary-pool stale pointer to become an illegal address.
+        # A correctly replaced graph-pool workspace remains mapped.
+        torch.cuda.empty_cache()
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(
+            state["output"], expected, rtol=1e-2, atol=2e-1
+        )
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    @blas_library_context("cublas")
     def test_repeat_graph_capture_cublas_workspace_memory(self):
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device="cuda")

@@ -90,12 +90,27 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
+TORCH_CUDA_CPP_API void notifyCublasCaptureBegin();
 
 // Thread-local workspace map keyed by (device, stream).
 // No mutex is needed because cuBLAS handles are unique per thread
 // (guaranteed by DeviceThreadHandlePool), so each thread's workspace
 // map is only ever accessed by that thread.
-using WorkspaceMap = std::unordered_map<std::pair<int, void*>, std::pair<at::DataPtr, size_t>, c10::hash<std::pair<int, void*>>>;
+struct Workspace {
+  at::DataPtr data;
+  size_t size;
+  // Zero means the workspace was allocated outside capture. Otherwise this is
+  // the capture id whose private pool owns the allocation.
+  uint64_t capture_id;
+  // Global capture epoch at which capture_id was last checked. This avoids a
+  // cudaStreamGetCaptureInfo call on every cuBLAS invocation.
+  uint64_t capture_epoch;
+};
+
+using WorkspaceMap = std::unordered_map<
+    std::pair<int, void*>,
+    Workspace,
+    c10::hash<std::pair<int, void*>>>;
 
 TORCH_CUDA_CPP_API WorkspaceMap& cublas_stream_to_workspace();
 TORCH_CUDA_CPP_API WorkspaceMap& cublaslt_stream_to_workspace();
