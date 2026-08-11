@@ -6524,6 +6524,43 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_combo_kernel_numel(self):
+        # Combo kernels (multiple independent pointwise ops fused together)
+        # are NOT wrapped in {} profiling scope blocks, unlike regular kernels.
+        # Their numel variables are declared at function scope. With profiling
+        # enabled, the codegen must not re-emit int64_t declarations for the
+        # same numel variable at function scope, which would cause a
+        # "redefinition" C++ compilation error.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("combo kernels require GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                # Two independent pointwise ops on same-shaped tensors
+                # triggers combo kernel fusion
+                return a.sin(), b.cos()
+
+        example_inputs = (
+            torch.randn(4, 8, device=self.device),
+            torch.randn(4, 8, device=self.device),
+        )
+        dim0 = Dim("dim0", min=1, max=32)
+        dynamic_shapes = {"a": {0: dim0}, "b": {0: dim0}}
+
+        with config.patch({"cpp.enable_kernel_profile": True, "combo_kernels": True}):
+            # This compilation would fail with "redefinition of
+            # '..._xnumel'" if numel declarations at function scope
+            # were not properly deduplicated.
+            self.check_model(
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
