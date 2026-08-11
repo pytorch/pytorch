@@ -147,7 +147,7 @@ jobs:
 
       - name: Upload usage metrics
         if: steps.gate.outputs.proceed == 'true'
-        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@release/2.14
 
       - name: Upload execution output to S3
         if: always() && steps.gate.outputs.proceed == 'true'

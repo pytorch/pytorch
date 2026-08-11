@@ -94,7 +94,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.14
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 

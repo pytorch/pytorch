@@ -142,7 +142,7 @@ jobs:
           zip -1 -r artifacts.zip dist/
 
       - name: Store the build artifacts
-        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@release/2.14
         with:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts

@@ -65,7 +65,7 @@ jobs:
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@release/2.14
         with:
           docker-image-name: ${{ matrix.name }}
           custom-tag-prefix: ${{ matrix.tag }}

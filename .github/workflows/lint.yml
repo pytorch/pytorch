@@ -22,7 +22,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.14
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -148,7 +148,7 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks') && github.repository_owner == 'pytorch' }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.14
         with:
           submodules: false
           fetch-depth: -1
@@ -169,7 +169,7 @@ jobs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
         # Regenerate workflows
-        .github/scripts/generate_ci_workflows.py
+        RELEASE_VERSION_TAG=2.14 .github/scripts/generate_ci_workflows.py
 
         RC=0
         # Assert that regenerating the workflows didn't change them
@@ -254,7 +254,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.14
         with:
           submodules: false
           fetch-depth: 1
@@ -314,7 +314,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.repository_owner == 'pytorch'
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.14
         with:
           submodules: false
           fetch-depth: 0

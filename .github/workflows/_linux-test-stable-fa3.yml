@@ -81,7 +81,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.14
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -106,7 +106,7 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@release/2.14
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}

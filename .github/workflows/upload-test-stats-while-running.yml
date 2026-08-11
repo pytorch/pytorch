@@ -23,13 +23,13 @@ jobs:
       image: ghcr.io/actions/actions-runner:latest
     steps:
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.14
         with:
           use-arc: true
           submodules: false
 
       - name: Setup uv
-        uses: pytorch/test-infra/.github/actions/setup-uv@main
+        uses: pytorch/test-infra/.github/actions/setup-uv@release/2.14
         with:
           python-version: "3.12"
           activate-environment: true

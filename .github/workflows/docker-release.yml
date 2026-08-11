@@ -48,7 +48,7 @@ jobs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.14
         with:
           fetch-depth: 1
           submodules: 'false'
@@ -97,11 +97,11 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.14
         with:
           submodules: 'false'
       - name: Setup UV
-        uses: pytorch/test-infra/.github/actions/setup-uv@main
+        uses: pytorch/test-infra/.github/actions/setup-uv@release/2.14
       - name: Install make
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends make
       - name: Login to GitHub Container Registry
@@ -178,7 +178,7 @@ jobs:
   validate:
     needs: build
     if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
-    uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@main
+    uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@release/2.14
     with:
       channel: nightly
       ref: main
