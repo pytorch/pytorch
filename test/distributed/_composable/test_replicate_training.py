@@ -32,6 +32,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import Capability, requires_capabilities
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     get_cycles_per_ms,
     run_tests,
     wrapSwapTensorsTest,
@@ -70,11 +72,14 @@ def _should_skip_for_accelerator():
 
 
 class TestReplicateForwardInputs(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(1)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_root_move_forward_input_to_device(self):
         device = torch.device(device_type.type, 0)
 
@@ -102,11 +107,14 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
 
 
 class TestReplicateRegisteredParams(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
 
     @skip_if_lt_x_gpu(1)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device(device_type.type, 0)
@@ -156,6 +164,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
         self._assert_same_params(model.parameters(), ref_model.parameters())
 
     @skip_if_lt_x_gpu(1)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)
@@ -203,12 +212,15 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
 
 
 class TestReplicateCastAfterInit(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(1)
     @wrapSwapTensorsTest(True)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
         if device_type.type == "npu":
@@ -261,11 +273,14 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
 
 
 class TestReplicate1DTrainingCore(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return min(8, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_single_group(self):
         """
         Tests train parity with DDP for a single FSDP group when sharding
@@ -311,10 +326,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
-    )
+    @unittest.skipIf(_should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_multi_groups(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -335,9 +349,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
-    )
+    @unittest.skipIf(_should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU")
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity when using multiple parameter groups for
@@ -465,9 +478,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
-    )
+    @unittest.skipIf(_should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU")
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -514,6 +526,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_multi_forward_module(self):
         """
         Tests parity when running a module that participates multiple
@@ -563,6 +576,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_explicit_prefetching(self):
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=8, dropout_p=0.0)
@@ -611,9 +625,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
-    )
+    @unittest.skipIf(_should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU")
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
@@ -664,6 +677,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
 
 class TestReplicateTrainingCompose(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         # Since these tests run with a larger transformer model, they may see
@@ -672,6 +687,7 @@ class TestReplicateTrainingCompose(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_with_activation_checkpointing(self):
         """
         Tests train parity against DDP when composing with activation
@@ -796,11 +812,14 @@ class TestReplicateTrainingCompose(FSDPTest):
 
 
 class TestReplicateSharedParams(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_with_shared_params(self):
         self.run_subtests(
             {
@@ -850,11 +869,14 @@ class TestReplicateSharedParams(FSDPTest):
 
 
 class TestReplicateGradientAccumulation(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
@@ -1013,6 +1035,7 @@ class TestReplicateGradientAccumulation(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_1f1b_microbatching(self):
         self.run_subtests(
             {
@@ -1082,11 +1105,14 @@ class TestReplicateGradientAccumulation(FSDPTest):
 
 
 class TestReplicateCustomForwardMethod(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(Capability.distributed.fsdp)
     def test_register_fsdp_forward_method(self):
         class VisionTransformer(nn.Module):
             def __init__(self) -> None:
@@ -1130,6 +1156,8 @@ class TestReplicateCustomForwardMethod(FSDPTest):
 
 
 class TestReplicateTPTraining(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -1142,6 +1170,7 @@ class TestReplicateTPTraining(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(8)
+    @requires_capabilities(Capability.distributed.fsdp, Capability.distributed.dtensor)
     def test_replicate_tp(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
