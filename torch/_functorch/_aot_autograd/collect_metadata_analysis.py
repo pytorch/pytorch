@@ -13,7 +13,7 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,10 +21,16 @@ from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    is_concrete_bool,
+    is_concrete_int,
+    statically_known_true,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -42,14 +48,28 @@ from .descriptors import (
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
+    data_mutation_requires_full_storage,
     from_fun,
+    get_data_mutation_ranges,
+    get_mutation_storage_nbytes,
+    had_data_mutation_carrier,
+    had_metadata_mutation_under_no_grad_or_inference_mode,
+    has_aliased_data_mutation,
+    has_aliased_metadata_mutation,
     has_data_mutation,
+    has_data_mutation_carrier,
+    has_data_mutation_full_overwrite,
     has_metadata_mutation,
+    has_metadata_mutation_marker,
+    has_size_mutation,
     MetadataKey,
-    to_fun,
+    to_fun_for_aot_metadata,
     ViewMetaSequence,
     was_inductor_storage_resized,
     was_shallow_copy_data,
+    was_storage_changed,
+    was_storage_changed_after_mutation,
+    was_storage_offset_mutated,
 )
 from .schemas import (
     InputAliasInfo,
@@ -70,6 +90,43 @@ zip = strict_zip
 
 log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
+
+
+def _prove_bool(value: bool | torch.SymBool, *, allow_runtime_guards: bool) -> bool:
+    if is_concrete_bool(value):
+        return statically_known_true(value)
+    return allow_runtime_guards and guard_or_false(value)
+
+
+def _is_statically_non_overlapping_and_dense(
+    t: Tensor, *, allow_runtime_guards: bool
+) -> bool:
+    """Conservatively prove that t covers its storage span without holes."""
+    sizes = list(t.shape)
+    strides = list(t.stride())
+    # Singleton dimensions do not constrain density. Remove them once instead
+    # of permuting them recursively: a rank-N tensor with N-1 singleton dims
+    # must remain O(N^2), not O(N!). Among the remaining dimensions every size
+    # is greater than one, so a valid dense stride chain grows strictly and a
+    # greedy match is sufficient.
+    remaining_dims = [
+        dim
+        for dim in range(t.dim())
+        if not _prove_bool(sizes[dim] == 1, allow_runtime_guards=allow_runtime_guards)
+    ]
+    expected_stride: int | torch.SymInt = 1
+    while remaining_dims:
+        for pos, dim in enumerate(remaining_dims):
+            if _prove_bool(
+                strides[dim] == expected_stride,
+                allow_runtime_guards=allow_runtime_guards,
+            ):
+                expected_stride *= sizes[dim]
+                remaining_dims.pop(pos)
+                break
+        else:
+            return False
+    return True
 
 
 # Note [Tangents memory format]
@@ -172,6 +229,7 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
+    allow_aliased_metadata_mutations: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
 
@@ -181,7 +239,7 @@ def run_functionalized_fw_and_collect_metadata(
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = to_fun(t)
+            r = to_fun_for_aot_metadata(t)
             memo[t] = r
             return r
         else:
@@ -212,6 +270,7 @@ def run_functionalized_fw_and_collect_metadata(
         mode = FunctionalTensorMode(
             _allow_token_discovery=True,
             _keep_input_mutations=keep_input_mutations,
+            _force_normal_input_version_wrappers=True,
         )
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
@@ -220,6 +279,20 @@ def run_functionalized_fw_and_collect_metadata(
         with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
+            # Functional graph-input wrappers always have logical version
+            # counters, including when the trace input is a genuine inference
+            # tensor. Snapshot them so a cached artifact can be reused with
+            # either inference or normal runtime inputs.
+            flat_f_arg_versions: list[int | None] = []
+            for f_arg in flat_f_args:
+                if isinstance(f_arg, Tensor):
+                    if f_arg.is_inference():
+                        raise AssertionError(
+                            "AOT metadata input wrapper must have a version counter"
+                        )
+                    flat_f_arg_versions.append(f_arg._version)
+                else:
+                    flat_f_arg_versions.append(None)
             flat_f_args_descs = flat_args_descs
             flat_f_outs = f(*flat_f_args)
 
@@ -252,13 +325,87 @@ def run_functionalized_fw_and_collect_metadata(
                 "If you encounter this error while using torch.compile, please file a bug."
             )
 
+        # Dynamo evaluates ShapeEnv guards before reusing an artifact. Bare
+        # dynamic aot_function does not, so it may only accept predicates that
+        # simplify to literal booleans without trace-time range assumptions.
+        allow_runtime_guards = torch._guards.TracingContext.try_get() is not None
+
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
-        for arg, f_arg in zip(flat_args, flat_f_args):
+        for arg, f_arg, version_before in zip(
+            flat_args, flat_f_args, flat_f_arg_versions
+        ):
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
+            has_final_metadata_mutation = mutates_metadata
+            mutates_size = has_size_mutation(f_arg)
+            if was_storage_changed_after_mutation(f_arg):
+                raise RuntimeError(
+                    "AOTAutograd does not support changing storage after a "
+                    "prior data or metadata mutation"
+                )
+            if not allow_aliased_metadata_mutations and has_aliased_metadata_mutation(
+                f_arg
+            ):
+                raise RuntimeError(
+                    "AOTAutograd does not support an input metadata mutation "
+                    "through an alias created inside the graph"
+                )
+            has_internal_alias_data_mutation = has_aliased_data_mutation(f_arg)
+            has_full_data_mutation_carrier = has_data_mutation_carrier(f_arg)
+            has_full_data_mutation_overwrite = has_data_mutation_full_overwrite(f_arg)
+            had_full_data_mutation_carrier = had_data_mutation_carrier(f_arg)
+            requires_full_storage_for_data_mutation = (
+                data_mutation_requires_full_storage(f_arg)
+            )
+            recorded_data_mutation_ranges: list[
+                tuple[int | torch.SymInt, int | torch.SymInt]
+            ] = (
+                []
+                if is_traceable_wrapper_subclass(f_arg)
+                else get_data_mutation_ranges(f_arg)
+            )
+            has_indirect_data_mutation = (
+                has_internal_alias_data_mutation or had_full_data_mutation_carrier
+            )
+            all_recorded_ranges_are_empty = bool(recorded_data_mutation_ranges) and all(
+                _prove_bool(
+                    mutation_begin == mutation_end,
+                    allow_runtime_guards=allow_runtime_guards,
+                )
+                for mutation_begin, mutation_end in recorded_data_mutation_ranges
+            )
+            raw_preserved_offset_storage_nbytes = get_mutation_storage_nbytes(
+                f_arg, preserves_storage_offset=True
+            )
+            raw_explicit_offset_storage_nbytes = get_mutation_storage_nbytes(
+                f_arg, preserves_storage_offset=False
+            )
+            if (
+                mutates_size
+                and is_traceable_wrapper_subclass(arg)
+                and not (
+                    _prove_bool(
+                        raw_preserved_offset_storage_nbytes == 0,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                    and _prove_bool(
+                        raw_explicit_offset_storage_nbytes == 0,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                )
+            ):
+                raise RuntimeError(
+                    "AOTAutograd does not support storage-resizing input "
+                    "mutations on traceable tensor subclasses"
+                )
+            # Final metadata comparisons can cancel a sequence such as t_();
+            # t_(). It is still observable through the version counter, so
+            # replay final metadata whenever an inplace metadata op occurred.
+            if has_metadata_mutation_marker(f_arg) or was_storage_changed(f_arg):
+                mutates_metadata = True
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
@@ -266,21 +413,366 @@ def run_functionalized_fw_and_collect_metadata(
                 f_arg
             )
             mutations_under_no_grad_or_inference_mode = (
-                mutates_data
-                and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
-            )
+                mutates_data or (mutates_metadata and not mutates_storage_metadata)
+            ) and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             mutation_inductor_storage_resize = was_inductor_storage_resized(f_arg)
 
             if mutates_storage_metadata:
+                # A data mutation after set_() is already carried by the tensor
+                # whose storage we install. The unsupported inverse ordering is
+                # rejected above by was_storage_changed_after_mutation().
                 mutates_data = False
 
+            if (
+                mutates_data
+                and mutates_metadata
+                and isinstance(arg, Tensor)
+                and not (
+                    _prove_bool(
+                        arg.numel() == 0,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                    or (
+                        arg.layout is torch.strided
+                        and _is_statically_non_overlapping_and_dense(
+                            arg,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                    )
+                )
+            ):
+                raise RuntimeError(
+                    "AOTAutograd cannot replay combined data and metadata "
+                    "mutations unless the original input is empty or "
+                    "non-overlapping and dense"
+                )
+
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
+            if (
+                has_final_metadata_mutation
+                and not mutates_storage_metadata
+                and had_metadata_mutation_under_no_grad_or_inference_mode(f_arg)
+                and requires_grad
+                and isinstance(arg, Tensor)
+                and not safe_is_leaf(arg)
+            ):
+                raise RuntimeError(
+                    "AOTAutograd does not support input metadata mutations "
+                    "under no_grad on non-leaf tensors that require gradients"
+                )
+            mutation_version_delta = (
+                f_arg._version - version_before
+                if isinstance(f_arg, Tensor) and version_before is not None
+                else 0
+            )
+            mutation_replay_preserves_storage_offset = False
+            mutation_replay_resizes_storage = False
+            mutation_replay_requires_full_storage = (
+                requires_full_storage_for_data_mutation
+                and not all_recorded_ranges_are_empty
+            )
+            mutation_replay_overwrites_storage = False
+            if (
+                has_indirect_data_mutation
+                and not mutates_metadata
+                and isinstance(arg, Tensor)
+                and isinstance(f_arg, Tensor)
+            ):
+                mutation_ranges: list[tuple[int | torch.SymInt, int | torch.SymInt]]
+                is_subclass = is_traceable_wrapper_subclass(arg) or (
+                    is_traceable_wrapper_subclass(f_arg)
+                )
+                mutation_ranges = [] if is_subclass else recorded_data_mutation_ranges
+                has_full_carrier = (
+                    False if is_subclass else has_full_data_mutation_carrier
+                )
+                itemsize = arg.element_size()
+                carrier_begin = arg.storage_offset() * itemsize
+                carrier_end = (
+                    compute_required_storage_length(
+                        arg.shape,
+                        arg.stride(),
+                        cast(int, arg.storage_offset()),
+                    )
+                    * itemsize
+                )
+                # A complete auto-functionalized base may stand in for a
+                # missing per-view interval only when the graph input covers
+                # its entire physical storage. Otherwise hidden bytes before
+                # or after a partial input could have been the actual target.
+                full_carrier_is_safe = (
+                    has_full_carrier
+                    and _prove_bool(
+                        carrier_begin == 0,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                    and _prove_bool(
+                        arg.untyped_storage().nbytes() <= carrier_end,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                )
+                all_ranges_are_empty = all_recorded_ranges_are_empty
+                all_mutations_carried = all_ranges_are_empty or (
+                    arg.layout is torch.strided
+                    and _is_statically_non_overlapping_and_dense(
+                        arg, allow_runtime_guards=allow_runtime_guards
+                    )
+                    and (bool(mutation_ranges) or full_carrier_is_safe)
+                    and all(
+                        _prove_bool(
+                            mutation_begin == mutation_end,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or (
+                            _prove_bool(
+                                carrier_begin <= mutation_begin,
+                                allow_runtime_guards=allow_runtime_guards,
+                            )
+                            and _prove_bool(
+                                mutation_end <= carrier_end,
+                                allow_runtime_guards=allow_runtime_guards,
+                            )
+                        )
+                        for mutation_begin, mutation_end in mutation_ranges
+                    )
+                )
+                if not all_mutations_carried:
+                    raise RuntimeError(
+                        "AOTAutograd cannot replay a data mutation through an "
+                        "internal alias unless its graph input densely carries "
+                        "every mutated byte range"
+                    )
+            if (
+                mutates_metadata
+                and not mutates_storage_metadata
+                and isinstance(arg, Tensor)
+                and isinstance(f_arg, Tensor)
+            ):
+                arg_after = from_fun(f_arg)
+                if not isinstance(arg_after, Tensor):
+                    raise AssertionError(
+                        f"expected Tensor after functionalization, got {type(arg_after)}"
+                    )
+                logical_offset = f_arg.storage_offset()
+                carrier_offset = arg_after.storage_offset()
+                original_offset = arg.storage_offset()
+                explicitly_mutates_offset = was_storage_offset_mutated(f_arg)
+                if explicitly_mutates_offset:
+                    if not _prove_bool(
+                        logical_offset == carrier_offset,
+                        allow_runtime_guards=allow_runtime_guards,
+                    ):
+                        raise RuntimeError(
+                            "AOTAutograd cannot replay a compound metadata "
+                            "mutation that explicitly changes and then loses its "
+                            "logical storage offset"
+                        )
+                elif _prove_bool(
+                    logical_offset == original_offset,
+                    allow_runtime_guards=allow_runtime_guards,
+                ):
+                    # Auto-functionalized out= operators carry their result in a
+                    # fresh tensor, but eager resize_ preserves the output's
+                    # existing storage offset. Use a runtime-derived offset so a
+                    # compiled artifact also works for inputs at other offsets.
+                    mutation_replay_preserves_storage_offset = True
+                elif not _prove_bool(
+                    logical_offset == carrier_offset,
+                    allow_runtime_guards=allow_runtime_guards,
+                ):
+                    raise RuntimeError(
+                        "AOTAutograd cannot replay a metadata mutation whose "
+                        "logical storage offset differs from both the original "
+                        "input and the updated-data tensor"
+                    )
+
+                final_storage_offset = (
+                    0 if mutation_replay_preserves_storage_offset else carrier_offset
+                )
+                final_storage_nbytes = (
+                    compute_required_storage_length(
+                        arg_after.shape,
+                        arg_after.stride(),
+                        cast(int, final_storage_offset),
+                    )
+                    * arg_after.element_size()
+                )
+                if has_indirect_data_mutation:
+                    original_storage_nbytes = arg.untyped_storage().nbytes()
+                    if (
+                        not mutation_replay_preserves_storage_offset
+                        or not _prove_bool(
+                            original_offset == 0,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or not _prove_bool(
+                            original_storage_nbytes <= final_storage_nbytes,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or not _is_statically_non_overlapping_and_dense(
+                            arg_after,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                    ):
+                        raise RuntimeError(
+                            "AOTAutograd cannot replay an input metadata mutation "
+                            "combined with a data mutation through an internal alias "
+                            "unless the final tensor densely covers the original storage"
+                        )
+
+                mutation_storage_nbytes = (
+                    raw_preserved_offset_storage_nbytes
+                    if mutation_replay_preserves_storage_offset
+                    else raw_explicit_offset_storage_nbytes
+                )
+                inactive_mutation_storage_nbytes = (
+                    raw_explicit_offset_storage_nbytes
+                    if mutation_replay_preserves_storage_offset
+                    else raw_preserved_offset_storage_nbytes
+                )
+                if not _prove_bool(
+                    inactive_mutation_storage_nbytes == 0,
+                    allow_runtime_guards=allow_runtime_guards,
+                ):
+                    raise RuntimeError(
+                        "AOTAutograd does not support input mutation storage "
+                        "growth across a storage-offset change"
+                    )
+                if not _prove_bool(
+                    mutation_storage_nbytes == 0,
+                    allow_runtime_guards=allow_runtime_guards,
+                ):
+                    itemsize = arg.element_size()
+                    original_is_empty = _prove_bool(
+                        arg.numel() == 0,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                    original_carrier_begin = original_offset * itemsize
+                    original_carrier_end = (
+                        original_carrier_begin
+                        if original_is_empty
+                        else compute_required_storage_length(
+                            arg.shape,
+                            arg.stride(),
+                            cast(int, original_offset),
+                        )
+                        * itemsize
+                    )
+                    runtime_final_offset = (
+                        original_offset
+                        if mutation_replay_preserves_storage_offset
+                        else carrier_offset
+                    )
+                    final_is_empty = _prove_bool(
+                        arg_after.numel() == 0,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                    final_carrier_begin = (
+                        runtime_final_offset * arg_after.element_size()
+                    )
+                    final_carrier_end = (
+                        final_carrier_begin
+                        if final_is_empty
+                        else compute_required_storage_length(
+                            arg_after.shape,
+                            arg_after.stride(),
+                            cast(int, runtime_final_offset),
+                        )
+                        * arg_after.element_size()
+                    )
+                    physical_storage_nbytes = arg.untyped_storage().nbytes()
+                    original_is_dense = original_is_empty or (
+                        arg.layout is torch.strided
+                        and _is_statically_non_overlapping_and_dense(
+                            arg,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                    )
+                    final_has_no_preexisting_bytes = _prove_bool(
+                        physical_storage_nbytes <= final_carrier_begin,
+                        allow_runtime_guards=allow_runtime_guards,
+                    )
+                    final_preexisting_bytes_are_carried = _prove_bool(
+                        original_carrier_begin <= final_carrier_begin,
+                        allow_runtime_guards=allow_runtime_guards,
+                    ) and (
+                        _prove_bool(
+                            physical_storage_nbytes <= original_carrier_end,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or _prove_bool(
+                            final_carrier_end <= original_carrier_end,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                    )
+                    if not original_is_dense or (
+                        not has_full_data_mutation_overwrite
+                        and not (
+                            final_has_no_preexisting_bytes
+                            or final_preexisting_bytes_are_carried
+                        )
+                    ):
+                        raise RuntimeError(
+                            "AOTAutograd does not support input mutation storage "
+                            "growth that exposes pre-existing storage bytes outside "
+                            "the original dense input"
+                        )
+
+                    original_storage_nbytes = (
+                        compute_required_storage_length(
+                            arg.shape,
+                            arg.stride(),
+                            0,
+                        )
+                        * arg.element_size()
+                    )
+                    final_covers_original_data = (
+                        has_full_data_mutation_overwrite
+                        or not mutates_data
+                        or _prove_bool(
+                            original_storage_nbytes == 0,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or (
+                            mutation_replay_preserves_storage_offset
+                            and _prove_bool(
+                                original_storage_nbytes <= final_storage_nbytes,
+                                allow_runtime_guards=allow_runtime_guards,
+                            )
+                        )
+                    )
+                    if (
+                        not _prove_bool(
+                            mutation_storage_nbytes == final_storage_nbytes,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or not _is_statically_non_overlapping_and_dense(
+                            arg_after,
+                            allow_runtime_guards=allow_runtime_guards,
+                        )
+                        or not final_covers_original_data
+                    ):
+                        raise RuntimeError(
+                            "AOTAutograd does not support input mutation storage "
+                            "growth unless the final updated tensor densely covers "
+                            "the maximum mutated storage span"
+                        )
+                    mutation_replay_resizes_storage = True
+                    mutation_replay_overwrites_storage = (
+                        has_full_data_mutation_overwrite
+                    )
 
             input_info.append(
                 InputAliasInfo(
                     is_leaf=isinstance(arg, Tensor) and safe_is_leaf(arg),
                     mutates_data=mutates_data,
                     mutates_metadata=mutates_metadata,
+                    mutates_size=mutates_size,
+                    mutation_replay_preserves_storage_offset=mutation_replay_preserves_storage_offset,
+                    mutation_replay_resizes_storage=mutation_replay_resizes_storage,
+                    mutation_replay_requires_full_storage=mutation_replay_requires_full_storage,
+                    mutation_replay_overwrites_storage=mutation_replay_overwrites_storage,
+                    mutation_version_delta=mutation_version_delta,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),

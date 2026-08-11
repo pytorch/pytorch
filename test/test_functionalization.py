@@ -205,6 +205,43 @@ class TestFunctionalization(TestCase):
         r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
         self.assertEqual(str(r.device), "cpu")
 
+    def test_set_after_mutation(self):
+        def data_then_set(a):
+            a.add_(1)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        def metadata_then_set(a):
+            a.resize_(10)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        for fn, inp in (
+            (data_then_set, torch.arange(5.0)),
+            (metadata_then_set, torch.empty(0)),
+        ):
+            with self.subTest(fn=fn.__name__):
+                expected = fn(inp.clone())
+                actual = torch.func.functionalize(fn)(inp.clone())
+                self.assertEqual(actual, expected)
+
+    def test_quantized_alias_mutation(self):
+        def f(x):
+            x.detach().relu_()
+            return x
+
+        q = torch.quantize_per_tensor(
+            torch.tensor([-2.0, 1.0, 3.0]), scale=0.25, zero_point=3, dtype=torch.qint8
+        )
+        expected = f(q.clone())
+        actual = torch.func.functionalize(f)(q.clone())
+        self.assertEqual(actual, expected)
+
+        actual_reapply_views = _functionalize(f, reapply_views=True, crossref=False)(
+            q.clone()
+        )
+        self.assertEqual(actual_reapply_views, expected)
+
     def test_advanced_indexing(self):
         def f():
             x = torch.zeros(3, 3)
@@ -2095,6 +2132,85 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return getitem
     """,
         )
+
+    def test_data_mutation_ranges_preserve_logical_layout(self):
+        def mutation_ranges(base, fn, *, reapply_views=True):
+            functional = torch._to_functional_tensor(base)
+            torch._enable_functionalization(reapply_views=reapply_views)
+            try:
+                fn(functional)
+                return torch._functionalize_get_data_mutation_ranges(functional)
+            finally:
+                torch._disable_functionalization()
+
+        def repeated_alias_write(functional):
+            alias = functional.detach()
+            alias.add_(1)
+            alias.add_(1)
+
+        self.assertEqual(
+            mutation_ranges(torch.arange(10.0)[5:], repeated_alias_write),
+            [(20, 40), (20, 40)],
+        )
+        self.assertEqual(
+            mutation_ranges(torch.arange(10.0)[::2], repeated_alias_write),
+            [(0, 36), (0, 36)],
+        )
+
+        def direct_then_alias_write(functional):
+            functional.add_(1)
+            functional.detach().add_(1)
+
+        # The direct write does not need an alias interval; the later alias
+        # write must still retain the input's original nonzero offset.
+        self.assertEqual(
+            mutation_ranges(torch.arange(10.0)[5:], direct_then_alias_write),
+            [(20, 40)],
+        )
+        self.assertEqual(
+            mutation_ranges(
+                torch.arange(10.0)[5:],
+                lambda functional: functional[1:3].add_(1),
+                reapply_views=False,
+            ),
+            [],
+        )
+
+    def test_batch_norm_out_with_mutable_inputs(self):
+        def f(x, weight, bias, running_mean, running_var, out, mean, invstd):
+            return torch.ops.aten._native_batch_norm_legit.out(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                True,
+                0.1,
+                1e-5,
+                out=out,
+                save_mean=mean,
+                save_invstd=invstd,
+            )
+
+        args = (
+            torch.randn(2, 3, 4, 4),
+            torch.randn(3),
+            torch.randn(3),
+            torch.zeros(3),
+            torch.ones(3),
+            torch.empty(2, 3, 4, 4),
+            torch.empty(3),
+            torch.empty(3),
+        )
+        ref_args = tuple(x.clone() for x in args)
+        test_args = tuple(x.clone() for x in args)
+
+        ref_out = f(*ref_args)
+        test_out = torch.func.functionalize(f)(*test_args)
+
+        self.assertEqual(test_out, ref_out)
+        for test_arg, ref_arg in zip(test_args, ref_args):
+            self.assertEqual(test_arg, ref_arg)
 
     # This tests our python shims around C++ Functionalization: FunctionalTensor and FunctionalTensorMode
     def test_python_functionalization(self):

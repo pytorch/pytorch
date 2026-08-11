@@ -169,6 +169,35 @@ def create_synthetic_base_metadata(
             if len(outer_indices) > 1
             else m.input_info[outer_indices[0]].mutates_metadata
         )
+        mutates_size = (
+            False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutates_size
+        )
+        mutation_replay_preserves_storage_offset = (
+            False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutation_replay_preserves_storage_offset
+        )
+        mutation_replay_resizes_storage = (
+            False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutation_replay_resizes_storage
+        )
+        mutation_replay_requires_full_storage = (
+            # Synthetic aliases are regenerated with as_strided fallback view
+            # replay. Metadata recomputation therefore records the same
+            # full-storage requirement on their combined base input.
+            len(outer_indices) > 1
+            or any(
+                m.input_info[x].mutation_replay_requires_full_storage
+                for x in outer_indices
+            )
+        )
+        mutation_replay_overwrites_storage = (
+            len(outer_indices) == 1
+            and m.input_info[outer_indices[0]].mutation_replay_overwrites_storage
+        )
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
         mutations_under_no_grad_or_inference_mode = all(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
@@ -178,6 +207,15 @@ def create_synthetic_base_metadata(
         mutation_inductor_storage_resize = all(
             m.input_info[x].mutation_inductor_storage_resize for x in outer_indices
         )
+        # AOTSyntheticBaseWrapper owns exact version replay for every original
+        # input represented by a synthetic base. The inner base may consolidate
+        # several mutations into one physical graph update, so it must not also
+        # contribute a logical version delta.
+        mutation_version_delta = (
+            0
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutation_version_delta
+        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -186,6 +224,12 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
+            mutates_size=mutates_size,
+            mutation_replay_preserves_storage_offset=mutation_replay_preserves_storage_offset,
+            mutation_replay_resizes_storage=mutation_replay_resizes_storage,
+            mutation_replay_requires_full_storage=mutation_replay_requires_full_storage,
+            mutation_replay_overwrites_storage=mutation_replay_overwrites_storage,
+            mutation_version_delta=mutation_version_delta,
             mutations_hidden_from_autograd=all(
                 m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
             ),

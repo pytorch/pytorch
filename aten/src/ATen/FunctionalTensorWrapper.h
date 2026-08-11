@@ -74,10 +74,66 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool has_metadata_mutation() const {
     return has_metadata_mutation_;
   }
+  bool has_aliased_metadata_mutation() const {
+    return had_aliased_metadata_mutation_before_storage_change_ ||
+        functional_storage_impl()->metadata_mutation_counter() >
+        metadata_mutation_counter_;
+  }
+  bool had_metadata_mutation_under_no_grad_or_inference_mode() const {
+    return functional_storage_impl()
+        ->had_metadata_mutation_under_no_grad_or_inference_mode();
+  }
+  bool has_size_mutation() const {
+    return has_size_mutation_;
+  }
+  bool was_storage_offset_mutated() const {
+    return was_storage_offset_mutated_;
+  }
+  void mark_storage_offset_mutated() {
+    was_storage_offset_mutated_ = true;
+  }
+  void record_mutation_storage_nbytes();
+  c10::SymInt max_mutation_storage_nbytes(bool preserves_storage_offset) const {
+    return preserves_storage_offset
+        ? max_mutation_storage_nbytes_preserving_offset_
+        : max_mutation_storage_nbytes_with_explicit_offset_;
+  }
   uint64_t mutation_counter() const {
     return functional_storage_impl()->mutation_counter();
   }
+  bool has_aliased_data_mutation() const {
+    return mutation_counter() > data_mutation_counter_;
+  }
+  const std::vector<
+      functionalization::FunctionalStorageImpl::DataMutationRange>&
+  data_mutation_ranges() const {
+    return functional_storage_impl()->data_mutation_ranges();
+  }
+  void record_data_mutation_range();
+  void mark_data_mutation_requires_full_storage_if_needed();
+  void mark_data_mutation_carrier() {
+    functional_storage_impl()->mark_data_mutation_carrier();
+  }
+  bool has_data_mutation_carrier() const {
+    return functional_storage_impl()->has_data_mutation_carrier();
+  }
+  bool had_data_mutation_carrier() const {
+    return functional_storage_impl()->had_data_mutation_carrier();
+  }
+  void mark_data_mutation_requires_full_storage() {
+    functional_storage_impl()->mark_data_mutation_requires_full_storage();
+  }
+  bool data_mutation_requires_full_storage() const {
+    return functional_storage_impl()->data_mutation_requires_full_storage();
+  }
+  void mark_data_mutation_full_overwrite() {
+    functional_storage_impl()->mark_data_mutation_full_overwrite();
+  }
+  bool has_data_mutation_full_overwrite() const {
+    return functional_storage_impl()->has_data_mutation_full_overwrite();
+  }
   void mark_mutation() {
+    data_mutation_counter_++;
     functional_storage_impl()->mark_mutation();
   }
   // Denotes a mutation that's hidden from autograd,
@@ -164,6 +220,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return was_storage_changed_;
   }
 
+  bool was_storage_changed_after_mutation() const {
+    return was_storage_changed_after_mutation_;
+  }
+
   void mark_storage_changed() {
     was_storage_changed_ = true;
     storage_changed_counter_++;
@@ -219,7 +279,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   }
 
   // See Note[resize_() in functionalization pass]
-  void maybe_replace_storage(const Tensor& other);
+  void maybe_replace_storage(
+      const Tensor& other,
+      size_t mutation_storage_nbytes);
 
   // Replaces the storage with a new functional storage,
   // and clears the view_metas_ stack.
@@ -258,6 +320,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   const char* tensorimpl_type_name() const override;
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
+  void mark_metadata_mutation();
+  void mark_storage_size_mutation();
+  void record_mutation_storage_nbytes(
+      c10::SymIntArrayRef sizes,
+      c10::SymIntArrayRef strides,
+      const c10::SymInt& storage_offset,
+      bool has_explicit_storage_offset);
 
   // This is used to re-implement shallow_copy_and_detach for
   // FunctionalTensorWrapper. The implementation is identical, but we just need
@@ -286,9 +355,35 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // we convert the input mutation to a copy_() we know it will be safe to hide
   // the copy_() from autograd as well.
   bool has_metadata_mutation_ = false;
+  // Number of metadata mutations performed directly through this wrapper. A
+  // larger shared counter means an internal alias changed metadata and bumped
+  // the input's shared version counter.
+  uint64_t metadata_mutation_counter_ = 0;
+  bool had_aliased_metadata_mutation_before_storage_change_ = false;
+  // Unlike a stride-only metadata mutation, changing sizes can make replaying a
+  // mutation into an aliased synthetic base impossible.
+  bool has_size_mutation_ = false;
+  // Did an inplace as_strided_() explicitly set the storage offset? This
+  // distinguishes absolute offset changes from metadata mutations that preserve
+  // the input's runtime offset.
+  bool was_storage_offset_mutated_ = false;
+  // Eager storage growth is monotonic even if a later resize shrinks the
+  // tensor. Track the maximum byte span of direct mutations before and after an
+  // explicit storage-offset change so runtime replay can preserve that
+  // capacity. The preserving-offset value excludes the input offset, which is
+  // runtime-derived.
+  c10::SymInt max_mutation_storage_nbytes_preserving_offset_ = 0;
+  c10::SymInt max_mutation_storage_nbytes_with_explicit_offset_ = 0;
+  // Number of data mutations performed directly through this wrapper. A
+  // larger shared mutation counter means an internal alias performed a write.
+  uint64_t data_mutation_counter_ = 0;
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  // set_() can discard mutation history by moving this wrapper to another
+  // functional storage. AOTAutograd uses this observation to reject only its
+  // unsupported replay case without changing eager functionalization behavior.
+  bool was_storage_changed_after_mutation_ = false;
   // Did the tensor experience a shallow_copy_data_() call.
   bool was_shallow_copy_data_ = false;
   uint64_t storage_changed_counter_ = 0;
@@ -357,6 +452,11 @@ TORCH_API void replace_(
 
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
+
+TORCH_API void mark_data_mutation_full_overwrite(
+    const Tensor& functional_tensor);
+TORCH_API void mark_data_mutation_full_overwrite(
+    ITensorListRef functional_tensor);
 
 TORCH_API void unsafe_reset_storage(const Tensor& functional_tensor);
 

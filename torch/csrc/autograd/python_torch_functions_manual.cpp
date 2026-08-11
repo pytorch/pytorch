@@ -748,6 +748,120 @@ void initTorchFunctions(PyObject* module) {
             at::functionalization::impl::unsafeGetFunctionalWrapper(t);
         return t_impl->has_metadata_mutation();
       });
+  py_module.def("_functionalize_has_size_mutation", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return t_impl->has_size_mutation();
+  });
+  py_module.def(
+      "_functionalize_had_metadata_mutation_under_no_grad_or_inference_mode",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->had_metadata_mutation_under_no_grad_or_inference_mode();
+      });
+  py_module.def(
+      "_functionalize_has_aliased_metadata_mutation", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->has_aliased_metadata_mutation();
+      });
+  py_module.def(
+      "_functionalize_has_aliased_data_mutation", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->has_aliased_data_mutation();
+      });
+  py_module.def(
+      "_functionalize_get_data_mutation_ranges", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->data_mutation_ranges();
+      });
+  py_module.def(
+      "_functionalize_record_data_mutation_range", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        t_impl->record_data_mutation_range();
+      });
+  py_module.def(
+      "_functionalize_mark_data_mutation_requires_full_storage",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        t_impl->mark_data_mutation_requires_full_storage_if_needed();
+      });
+  py_module.def(
+      "_functionalize_mark_data_mutation_carrier", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        t_impl->mark_data_mutation_carrier();
+      });
+  py_module.def(
+      "_functionalize_has_data_mutation_carrier", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->has_data_mutation_carrier();
+      });
+  py_module.def(
+      "_functionalize_had_data_mutation_carrier", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->had_data_mutation_carrier();
+      });
+  py_module.def(
+      "_functionalize_data_mutation_requires_full_storage",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->data_mutation_requires_full_storage();
+      });
+  py_module.def(
+      "_functionalize_has_data_mutation_full_overwrite",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->has_data_mutation_full_overwrite();
+      });
+  py_module.def(
+      "_functionalize_was_storage_offset_mutated", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->was_storage_offset_mutated();
+      });
+  py_module.def(
+      "_functionalize_get_mutation_storage_nbytes",
+      [](const at::Tensor& t, bool preserves_storage_offset) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->max_mutation_storage_nbytes(preserves_storage_offset);
+      });
   py_module.def("_functionalize_has_data_mutation", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
@@ -777,6 +891,15 @@ void initTorchFunctions(PyObject* module) {
     auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
     return wrapper->was_storage_changed();
   });
+  py_module.def(
+      "_functionalize_was_storage_changed_after_mutation",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto wrapper =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return wrapper->was_storage_changed_after_mutation();
+      });
   py_module.def(
       "_functionalize_storage_changed_counter", [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
@@ -810,11 +933,73 @@ void initTorchFunctions(PyObject* module) {
               /*check_offset_in_bounds=*/false);
         } else {
           TORCH_CHECK(
-              dst.sym_sizes() == src.sym_sizes() &&
-                  dst.sym_strides() == src.sym_strides() &&
-                  dst.dtype() == src.dtype(),
+              dst.dtype() == src.dtype() &&
+                  dst.sym_sizes() == src.sym_sizes() &&
+                  dst.sym_strides() == src.sym_strides(),
               "cross-device .data requires matching dtype, sizes, "
               "and strides");
+          dst.unsafeGetTensorImpl()->_change_backend_component_keys(
+              src.device());
+          dst.unsafeGetTensorImpl()->set_storage_keep_dtype(src.storage());
+        }
+      });
+  py_module.def(
+      "_functionalize_unsafe_set_storage_for_functional_tensor",
+      [](py::object dst_obj, py::object src_obj) {
+        // Import here instead of at module initialization to avoid the
+        // functional_tensor -> torch._C initialization cycle.
+        auto functional_tensor_class =
+            py::module::import("torch._subclasses.functional_tensor")
+                .attr("FunctionalTensor");
+        TORCH_CHECK(
+            py::isinstance(dst_obj, functional_tensor_class) &&
+                py::isinstance(src_obj, functional_tensor_class),
+            "FunctionalTensor storage installation expects FunctionalTensor "
+            "inputs and outputs");
+
+        at::Tensor dst = THPVariable_Unpack(dst_obj.ptr());
+        const at::Tensor& src = THPVariable_Unpack(src_obj.ptr());
+        auto dst_elem_obj = dst_obj.attr("elem");
+        auto src_elem_obj = src_obj.attr("elem");
+        TORCH_CHECK(
+            THPVariable_Check(dst_elem_obj.ptr()) &&
+                THPVariable_Check(src_elem_obj.ptr()),
+            "FunctionalTensor storage installation expects tensor elements");
+        const at::Tensor& dst_elem = THPVariable_Unpack(dst_elem_obj.ptr());
+        const at::Tensor& src_elem = THPVariable_Unpack(src_elem_obj.ptr());
+        TORCH_CHECK(
+            at::functionalization::impl::isFunctionalTensor(dst_elem) &&
+                at::functionalization::impl::isFunctionalTensor(src_elem),
+            "FunctionalTensor storage installation expects functional tensor "
+            "elements");
+        TORCH_CHECK(
+            dst_elem.is_alias_of(src_elem),
+            "FunctionalTensor storage installation expects aliased inner "
+            "functional tensors");
+
+        // FunctionalTensor outer TensorImpl storages are bookkeeping only:
+        // after a resize or dtype view they can intentionally have different
+        // devices and metadata. Keep this capability separate from the checked
+        // generic _functionalize_unsafe_set API above, and enforce its wrapper
+        // and inner-alias invariants here because this binding is callable
+        // directly from Python.
+        TORCH_INTERNAL_ASSERT(
+            dst.key_set().has(c10::DispatchKey::Python) &&
+            src.key_set().has(c10::DispatchKey::Python));
+        if (dst.device() == src.device()) {
+          at::native::checkSetStorage(
+              dst,
+              src.storage(),
+              dst.sym_storage_offset(),
+              dst.sym_sizes(),
+              dst.sym_strides(),
+              /*check_offset_in_bounds=*/false);
+        } else {
+          TORCH_CHECK(
+              dst.storage().device().type() == c10::DeviceType::Meta &&
+                  src.storage().device().type() == c10::DeviceType::Meta,
+              "cross-device FunctionalTensor storage installation requires "
+              "meta bookkeeping storages");
           dst.unsafeGetTensorImpl()->_change_backend_component_keys(
               src.device());
           dst.unsafeGetTensorImpl()->set_storage_keep_dtype(src.storage());

@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import unittest
+import warnings
 
 import torch
 import torch._functorch.config as functorch_config
@@ -120,6 +121,50 @@ class _BufferMutate(torch.nn.Module):
     def forward(self, x):
         self.b.add_(x.sum())
         return x + self.b
+
+
+class _BufferMetadataMutate(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("b", torch.arange(6, dtype=torch.float32).reshape(2, 3))
+
+    def forward(self, x):
+        self.b.transpose_(0, 1)
+        return x + self.b.sum()
+
+
+class _BufferDataAndMetadataMutate(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("b", torch.arange(6, dtype=torch.float32).reshape(2, 3))
+
+    def forward(self, x):
+        self.b.transpose_(0, 1)
+        self.b.add_(x.sum())
+        return x + self.b.sum()
+
+
+class _BufferSetTwice(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("b", torch.empty(0))
+
+    def forward(self, x):
+        self.b.set_(torch.arange(2.0))
+        self.b.set_(torch.arange(3.0))
+        return x + self.b.sum()
+
+
+class _BufferPeakStorageMutate(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        base = torch.arange(12, dtype=torch.float32)
+        self.register_buffer("b", base[3:9])
+
+    def forward(self, x):
+        torch.add(x, x, out=self.b)
+        torch.add(x[:10], x[:10], out=self.b)
+        return self.b * 2
 
 
 class _MatMul(torch.nn.Module):
@@ -277,6 +322,128 @@ class TestAOTCompileToPython(TestCase):
             composed_out = _exec(src)([buf, x])[0]
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(buf, eager.b)
+
+    def test_input_metadata_mutation_copy_back_runs_like_eager(self):
+        m = _BufferMetadataMutate().eval()
+        x = torch.randn(4)
+        gm = _capture(m, x)
+
+        # _capture runs the metadata mutation, so compile and execute with a fresh
+        # buffer in the original layout expected by the graph input.
+        buf = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+        src, _cache = compile_to_python(gm, [buf, x])
+        _assert_composed(self, src)
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import "
+            "_resize_storage_if_needed",
+            src,
+        )
+        self.assertNotIn("runtime_wrappers._resize_storage_if_needed", src)
+
+        eager = _BufferMetadataMutate().eval()
+        eager_version = eager.b._version
+        eager_out = eager(x)
+        buf_version = buf._version
+        with torch.no_grad():
+            composed_out = _exec(src)([buf, x])[0]
+
+        self.assertEqual(composed_out, eager_out)
+        self.assertEqual(buf, eager.b)
+        self.assertEqual(buf.shape, torch.Size([3, 2]))
+        self.assertEqual(buf.stride(), (1, 3))
+        self.assertEqual(
+            buf._version - buf_version,
+            eager.b._version - eager_version,
+        )
+
+    def test_input_data_and_metadata_mutation_version_runs_like_eager(self):
+        m = _BufferDataAndMetadataMutate().eval()
+        x = torch.randn(4)
+        gm = _capture(m, x)
+
+        # _capture runs both mutations, so execute the artifact with a fresh
+        # buffer in the original layout expected by the graph input.
+        buf_base = torch.full((12,), -1.0)
+        buf_base[3:9].copy_(torch.arange(6, dtype=torch.float32))
+        buf = buf_base[3:9].view(2, 3)
+        buf.add_(0)
+        src, _cache = compile_to_python(gm, [buf, x])
+        _assert_composed(self, src)
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import "
+            "_replay_input_mutation_version_counter",
+            src,
+        )
+        self.assertNotIn("runtime_wrappers._replay_input_mutation_version_counter", src)
+
+        eager = _BufferDataAndMetadataMutate().eval()
+        eager_base = torch.full((12,), -1.0)
+        eager_base[3:9].copy_(torch.arange(6, dtype=torch.float32))
+        eager.b = eager_base[3:9].view(2, 3)
+        eager.b.add_(0)
+        eager_version = eager.b._version
+        eager_out = eager(x)
+        buf_version = buf._version
+        with torch.no_grad():
+            composed_out = _exec(src)([buf, x])[0]
+
+        self.assertEqual(composed_out, eager_out)
+        self.assertEqual(buf, eager.b)
+        self.assertEqual(buf_base, eager_base)
+        self.assertEqual(buf.shape, eager.b.shape)
+        self.assertEqual(buf.stride(), eager.b.stride())
+        self.assertEqual(buf.storage_offset(), eager.b.storage_offset())
+        self.assertEqual(buf.storage_offset(), 3)
+        self.assertEqual(eager.b._version - eager_version, 2)
+        self.assertEqual(buf._version - buf_version, 2)
+
+    def test_input_set_version_runs_like_eager(self):
+        m = _BufferSetTwice().eval()
+        x = torch.randn(4)
+        gm = _capture(m, x)
+
+        buf = torch.empty(0)
+        src, _cache = compile_to_python(gm, [buf, x])
+        _assert_composed(self, src)
+        helper = "_replay_graph_handled_input_mutation_version_counters"
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import " + helper,
+            src,
+        )
+        self.assertNotIn(f"runtime_wrappers.{helper}", src)
+
+        eager = _BufferSetTwice().eval()
+        eager_version = eager.b._version
+        eager_out = eager(x)
+        buf_version = buf._version
+        with torch.no_grad():
+            composed_out = _exec(src)([buf, x])[0]
+
+        self.assertEqual(composed_out, eager_out)
+        self.assertEqual(buf, eager.b)
+        self.assertEqual(eager.b._version - eager_version, 2)
+        self.assertEqual(buf._version - buf_version, 2)
+
+    def test_input_mutation_intermediate_storage_growth_errors(self):
+        m = _BufferPeakStorageMutate().eval()
+        x = torch.arange(100, dtype=torch.float32)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            gm = _capture(m, x)
+
+        buf_base = torch.arange(12, dtype=torch.float32)
+        buf = buf_base[3:9]
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "final updated tensor densely covers the maximum mutated storage span",
+            ):
+                compile_to_python(gm, [buf, x])
 
     def test_output_alias_regen_runs_like_eager(self):
         # An output that aliases an input exercises AOTAutograd's output-alias regeneration

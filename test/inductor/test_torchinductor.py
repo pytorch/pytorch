@@ -14216,6 +14216,149 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             [torch.randn((4, 2)), torch.randn(4)],
         )
 
+    def test_histogram_out_resized_tensors(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("torch.histogram out= repro is CPU-only")
+
+        def fn(x, w, hist, bin_edges):
+            return torch.histogram(
+                x,
+                6,
+                weight=w,
+                range=(0.0, 7.0),
+                density=False,
+                out=(hist, bin_edges),
+            )
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        x = torch.rand([1, 2, 3, 4, 1], device=self.device)
+        w = torch.rand([1, 2, 3, 4, 1], device=self.device)
+        for initial_size in (0, 1):
+            with self.subTest(initial_size=initial_size), warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                eager_hist = torch.empty(initial_size, device=self.device)
+                eager_bin_edges = torch.empty(initial_size, device=self.device)
+                eager_hist_version = eager_hist._version
+                eager_bin_edges_version = eager_bin_edges._version
+                eager_out = fn(x, w, eager_hist, eager_bin_edges)
+
+                hist = torch.empty(initial_size, device=self.device)
+                bin_edges = torch.empty(initial_size, device=self.device)
+                hist_storage = hist.untyped_storage()._cdata
+                bin_edges_storage = bin_edges.untyped_storage()._cdata
+                hist_version = hist._version
+                bin_edges_version = bin_edges._version
+                actual_out = compiled_fn(x, w, hist, bin_edges)
+
+            self.assertEqual(actual_out[0], eager_out[0])
+            self.assertEqual(actual_out[1], eager_out[1])
+            self.assertEqual(hist, eager_hist)
+            self.assertEqual(bin_edges, eager_bin_edges)
+            self.assertEqual(hist.shape, torch.Size([6]))
+            self.assertEqual(bin_edges.shape, torch.Size([7]))
+            self.assertEqual(hist.untyped_storage()._cdata, hist_storage)
+            self.assertEqual(bin_edges.untyped_storage()._cdata, bin_edges_storage)
+            self.assertEqual(eager_hist._version - eager_hist_version, 1)
+            self.assertEqual(eager_bin_edges._version - eager_bin_edges_version, 1)
+            self.assertEqual(
+                hist._version - hist_version,
+                eager_hist._version - eager_hist_version,
+            )
+            self.assertEqual(
+                bin_edges._version - bin_edges_version,
+                eager_bin_edges._version - eager_bin_edges_version,
+            )
+
+        # Resizing an out= view preserves its storage offset. Cover both a
+        # backing storage with spare capacity and one that must grow.
+        for has_spare_storage in (False, True):
+            with (
+                self.subTest(has_spare_storage=has_spare_storage),
+                warnings.catch_warnings(),
+            ):
+                warnings.simplefilter("ignore", UserWarning)
+                hist_base_size = 12 if has_spare_storage else 3
+                bin_edges_base_size = 16 if has_spare_storage else 5
+
+                eager_hist_base = torch.full(
+                    (hist_base_size,), -1.0, device=self.device
+                )
+                eager_bin_edges_base = torch.full(
+                    (bin_edges_base_size,), -2.0, device=self.device
+                )
+                eager_hist = eager_hist_base[3:3]
+                eager_bin_edges = eager_bin_edges_base[5:5]
+                eager_hist_version = eager_hist._version
+                eager_bin_edges_version = eager_bin_edges._version
+                eager_hist_storage = eager_hist.untyped_storage()._cdata
+                eager_bin_edges_storage = eager_bin_edges.untyped_storage()._cdata
+                eager_out = fn(x, w, eager_hist, eager_bin_edges)
+
+                hist_base = torch.full((hist_base_size,), -1.0, device=self.device)
+                bin_edges_base = torch.full(
+                    (bin_edges_base_size,), -2.0, device=self.device
+                )
+                hist = hist_base[3:3]
+                bin_edges = bin_edges_base[5:5]
+                hist_version = hist._version
+                bin_edges_version = bin_edges._version
+                hist_storage = hist.untyped_storage()._cdata
+                bin_edges_storage = bin_edges.untyped_storage()._cdata
+                actual_out = compiled_fn(x, w, hist, bin_edges)
+
+            self.assertEqual(actual_out, eager_out)
+            self.assertEqual(hist, eager_hist)
+            self.assertEqual(bin_edges, eager_bin_edges)
+            self.assertEqual(hist_base, eager_hist_base)
+            self.assertEqual(bin_edges_base, eager_bin_edges_base)
+            self.assertEqual(hist.storage_offset(), 3)
+            self.assertEqual(bin_edges.storage_offset(), 5)
+            self.assertEqual(hist.stride(), (1,))
+            self.assertEqual(bin_edges.stride(), (1,))
+            self.assertEqual(hist.untyped_storage()._cdata, hist_storage)
+            self.assertEqual(bin_edges.untyped_storage()._cdata, bin_edges_storage)
+            self.assertEqual(
+                hist.untyped_storage().nbytes(),
+                eager_hist.untyped_storage().nbytes(),
+            )
+            self.assertEqual(
+                bin_edges.untyped_storage().nbytes(),
+                eager_bin_edges.untyped_storage().nbytes(),
+            )
+            self.assertEqual(eager_hist.untyped_storage()._cdata, eager_hist_storage)
+            self.assertEqual(
+                eager_bin_edges.untyped_storage()._cdata,
+                eager_bin_edges_storage,
+            )
+            self.assertEqual(
+                hist._version - hist_version,
+                eager_hist._version - eager_hist_version,
+            )
+            self.assertEqual(
+                bin_edges._version - bin_edges_version,
+                eager_bin_edges._version - eager_bin_edges_version,
+            )
+
+        # Correctly-sized noncontiguous outputs are not resized and keep their
+        # existing strides and backing-storage layout.
+        eager_hist_base = torch.full((12,), -1.0, device=self.device)
+        eager_bin_edges_base = torch.full((14,), -2.0, device=self.device)
+        eager_hist = eager_hist_base[::2]
+        eager_bin_edges = eager_bin_edges_base[::2]
+        eager_out = fn(x, w, eager_hist, eager_bin_edges)
+
+        hist_base = torch.full((12,), -1.0, device=self.device)
+        bin_edges_base = torch.full((14,), -2.0, device=self.device)
+        hist = hist_base[::2]
+        bin_edges = bin_edges_base[::2]
+        actual_out = compiled_fn(x, w, hist, bin_edges)
+
+        self.assertEqual(actual_out, eager_out)
+        self.assertEqual(hist_base, eager_hist_base)
+        self.assertEqual(bin_edges_base, eager_bin_edges_base)
+        self.assertEqual(hist.stride(), (2,))
+        self.assertEqual(bin_edges.stride(), (2,))
+
     # Shape padding causes the inputs to all get specialized, so the codegen
     # test fails
     @expectedFailureCodegenDynamic

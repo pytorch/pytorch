@@ -138,6 +138,27 @@ class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
     mutates_metadata: bool
+    mutates_size: bool
+    # Some functionalized out= operators carry updated data in a fresh tensor,
+    # while eager resize semantics preserve the input's storage offset. In that
+    # case runtime metadata replay must take the offset from the original input
+    # rather than from the updated-data carrier.
+    mutation_replay_preserves_storage_offset: bool
+    # True when eager may grow the input's storage. Analysis only permits this
+    # when the final updated tensor densely covers the maximum mutated span, so
+    # runtime can derive both the required capacity and initialized bytes from
+    # that tensor without baking in symbolic sizes.
+    mutation_replay_resizes_storage: bool
+    # Nonempty writes through aliases created inside the graph are only
+    # cache-safe when the runtime input carries its entire physical storage.
+    mutation_replay_requires_full_storage: bool
+    # A write-only out= operator produced the complete final carrier. Runtime
+    # replay may overwrite storage that was capacity-only in the original input.
+    mutation_replay_overwrites_storage: bool
+    # The version delta observed on the functional input wrapper. Metadata replay
+    # can use several physical inplace ops, so its version behavior cannot be
+    # reconstructed from the mutation flags alone.
+    mutation_version_delta: int
     mutations_hidden_from_autograd: bool
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
@@ -147,6 +168,28 @@ class InputAliasInfo:
     keep_input_mutations: bool
 
     def __post_init__(self) -> None:
+        if self.mutation_replay_preserves_storage_offset and not self.mutates_metadata:
+            raise AssertionError(
+                "preserving the storage offset requires a metadata mutation"
+            )
+        if self.mutation_replay_resizes_storage and not self.mutates_metadata:
+            raise AssertionError("resizing storage requires a metadata mutation")
+        if self.mutation_replay_requires_full_storage and not self.mutates_data:
+            raise AssertionError(
+                "full-storage replay validation requires a data mutation"
+            )
+        if self.mutation_replay_overwrites_storage and not (
+            self.mutates_data
+            and self.mutates_metadata
+            and self.mutation_replay_resizes_storage
+        ):
+            raise AssertionError(
+                "overwriting storage requires a data-and-metadata storage resize"
+            )
+        if self.mutation_version_delta < 0:
+            raise AssertionError(
+                "mutation_version_delta must be greater than or equal to zero"
+            )
         if self.mutates_storage_metadata:
             # For convenience, we guarantee that this is always true.
             # In practice, If we call .set_(), then at runtime there is no need

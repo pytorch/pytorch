@@ -46,6 +46,40 @@ def to_fun(t: object) -> Any:
         return t
 
 
+def to_fun_for_aot_metadata(
+    t: object, *, _ambient_inference_mode: bool | None = None
+) -> Any:
+    """Functionalize an AOT input while preserving its own inference status."""
+    ambient_inference_mode = (
+        torch.is_inference_mode_enabled()
+        if _ambient_inference_mode is None
+        else _ambient_inference_mode
+    )
+    if not ambient_inference_mode:
+        return to_fun(t)
+    if isinstance(t, Tensor):
+        if is_traceable_wrapper_subclass(t):
+            # Metadata graph-input wrappers need logical version counters even
+            # when the trace input is a genuine inference subclass: the cached
+            # artifact may later run on a normal subclass. Recursive inner
+            # FunctionalTensors retain the ambient-mode value for
+            # auto-functionalization's inference-base bookkeeping.
+            with torch.inference_mode(False):
+                out = transform_subclass(
+                    t,
+                    lambda _, inner_t: to_fun_for_aot_metadata(
+                        inner_t,
+                        _ambient_inference_mode=ambient_inference_mode,
+                    ),
+                )
+                torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
+                return out
+        return FunctionalTensor.to_functional_for_aot_metadata(
+            t, ambient_inference_mode=ambient_inference_mode
+        )
+    return t
+
+
 def sync_functional_tensor(t: torch.Tensor) -> None:
     if is_traceable_wrapper_subclass(t):
         attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
@@ -224,6 +258,315 @@ def was_shallow_copy_data(t: object) -> bool:
     return torch._functionalize_was_shallow_copy_data(t.elem)  # type: ignore[attr-defined]
 
 
+def was_storage_changed(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if was_storage_changed(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_was_storage_changed(t.elem)  # type: ignore[attr-defined]
+
+
+def was_storage_changed_after_mutation(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if was_storage_changed_after_mutation(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_was_storage_changed_after_mutation(t.elem)  # type: ignore[attr-defined]
+
+
+def has_size_mutation(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if has_size_mutation(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_has_size_mutation(t.elem)  # type: ignore[attr-defined]
+
+
+def has_metadata_mutation_marker(t: object) -> bool:
+    """Return whether an inplace metadata op ran, even if its effects cancelled."""
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if has_metadata_mutation_marker(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_has_metadata_mutation(t.elem)  # type: ignore[attr-defined]
+
+
+def had_metadata_mutation_under_no_grad_or_inference_mode(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if had_metadata_mutation_under_no_grad_or_inference_mode(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_had_metadata_mutation_under_no_grad_or_inference_mode(  # type: ignore[attr-defined]
+        t.elem
+    )
+
+
+def has_aliased_metadata_mutation(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if has_aliased_metadata_mutation(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_has_aliased_metadata_mutation(t.elem)  # type: ignore[attr-defined]
+
+
+def has_aliased_data_mutation(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if has_aliased_data_mutation(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_has_aliased_data_mutation(t.elem)  # type: ignore[attr-defined]
+
+
+def get_data_mutation_ranges(
+    t: object,
+) -> list[tuple[int | torch.SymInt, int | torch.SymInt]]:
+    if not isinstance(t, torch.Tensor):
+        return []
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_get_data_mutation_ranges(t.elem)  # type: ignore[attr-defined]
+
+
+def has_data_mutation_carrier(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if has_data_mutation_carrier(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_has_data_mutation_carrier(t.elem)  # type: ignore[attr-defined]
+
+
+def had_data_mutation_carrier(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if had_data_mutation_carrier(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_had_data_mutation_carrier(t.elem)  # type: ignore[attr-defined]
+
+
+def data_mutation_requires_full_storage(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if data_mutation_requires_full_storage(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_data_mutation_requires_full_storage(t.elem)  # type: ignore[attr-defined]
+
+
+def has_data_mutation_full_overwrite(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if has_data_mutation_full_overwrite(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_has_data_mutation_full_overwrite(t.elem)  # type: ignore[attr-defined]
+
+
+def get_mutation_storage_nbytes(
+    t: object, *, preserves_storage_offset: bool
+) -> int | torch.SymInt:
+    if is_traceable_wrapper_subclass(t):
+        result: int | torch.SymInt = 0
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    result = torch.sym_max(
+                        result,
+                        get_mutation_storage_nbytes(
+                            elem,
+                            preserves_storage_offset=preserves_storage_offset,
+                        ),
+                    )
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return result
+    if not isinstance(t, torch.Tensor):
+        return 0
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_get_mutation_storage_nbytes(  # type: ignore[attr-defined]
+        t.elem, preserves_storage_offset
+    )
+
+
+def was_storage_offset_mutated(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            match getattr(t, attr):
+                case Tensor() as elem:
+                    if was_storage_offset_mutated(elem):
+                        return True
+                case CustomClassBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                    )
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_was_storage_offset_mutated(t.elem)  # type: ignore[attr-defined]
+
+
 # f_arg here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
@@ -271,14 +614,10 @@ def has_metadata_mutation(
             raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
-        # This is true if the current tensor experienced at least one set_() call
+        # This is true if the current tensor experienced at least one set_() call.
         maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)  # type: ignore[attr-defined]
-        # However, multiple set_() calls can cancel out. So we also check whether the
-        # storage of the tensor has changed.
-        # Note: if an input experienced two set_() calls that cancel out, **and**
-        # it experiences a data mutation, we pessimistically think that the set_()
-        # call is necessary here. We could in theory fix this, but this will
-        # hopefully never happen in user code, and is not needed for fsdp.
+        # Multiple set_() calls can end on the original storage, so compare both
+        # storage identity and final tensor metadata below.
         if is_sparse_any(arg):
             # TODO:add sparse tensors support to functionalization
             same_storages = False
@@ -290,14 +629,14 @@ def has_metadata_mutation(
         if check_only_storage_mutation:
             return has_storage_metadata_mutation
 
-        # storage metadata mutation is a type of metadata mutation, so return true if we saw one
+        # A final storage change is also a metadata mutation.
         if has_storage_metadata_mutation:
             return True
 
-        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)  # type: ignore[attr-defined]
         # This is true if the current tensor experienced at least one metadata mutation.
         # So if false, we know there was no metadata mutation
-        if not maybe_metadata_mutated:
+        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)  # type: ignore[attr-defined]
+        if not maybe_metadata_mutated and not maybe_storage_changed:
             return False
 
         # However, multi metadata mutations can cancel out.
@@ -305,11 +644,7 @@ def has_metadata_mutation(
         same_sizes = arg.shape == arg_after.shape
         same_strides = arg.stride() == arg_after.stride()
         same_offsets = arg.storage_offset() == arg_after.storage_offset()
-        has_metadata_mutation_ = maybe_metadata_mutated and not (
-            same_sizes and same_strides and same_offsets
-        )
-        # We consider a tensor to have been metadata mutated if its storage was mutated through a set_() call.
-        return has_metadata_mutation_
+        return not (same_sizes and same_strides and same_offsets)
 
 
 def gen_alias_from_base(
@@ -670,9 +1005,20 @@ def _check_if_mutation_can_be_in_graph(
     mutation_inductor_storage_resize: bool,
     requires_grad: bool,
 ) -> bool:
+    # An ordinary data+metadata mutation needs both as_strided_() and copy_()
+    # during replay. Keeping those in the graph would make copy_ target the
+    # as_strided_ result instead of a graph-input placeholder, violating the
+    # functional graph invariant. Replay it in the runtime epilogue instead.
+    # set_()/shallow-copy and raw storage resizing remain special graph-only paths.
+    logical_metadata_mutation = mutates_metadata and not mutates_storage_metadata
     if keep_input_mutations:
         in_graph = (
-            mutates_data or mutates_storage_metadata or mutation_inductor_storage_resize
+            not logical_metadata_mutation
+            and (
+                mutates_data
+                or mutates_storage_metadata
+                or mutation_inductor_storage_resize
+            )
         ) and (
             (not mutates_metadata and not requires_grad)
             or mutations_hidden_from_autograd

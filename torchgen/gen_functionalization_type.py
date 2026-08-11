@@ -425,6 +425,13 @@ def emit_view_functionalization_body(
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
+            storage_offset_mutation = ""
+            if str(f.func.name) == "as_strided_":
+                storage_offset_mutation = f"""
+      if (storage_offset.has_value()) {{
+        auto functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper({view_tensor_name});
+        functional_impl->mark_storage_offset_mutated();
+      }}"""
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
@@ -455,6 +462,7 @@ def emit_view_functionalization_body(
       // Because of this, we need to make sure to run the reference shape function above,
       // BEFORE doing this (otherwise we'll end up running the reference function using the wrong sizes/strides)
       at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
+      {storage_offset_mutation}
       // See  Note [Propagating strides in the functionalization pass]
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
@@ -553,7 +561,24 @@ def return_from_mutable_noop_redispatch(
 def wrap_propagate_mutations_and_return(
     f: NativeFunction, functional_op: NativeFunction, inner_return_var: str
 ) -> str:
-    mutable_arg_names = f.func.arguments.mutable_arg_names()
+    # Functional schemas return the original outputs first, followed by mutable
+    # inputs that were not already returned. Match that order when associating
+    # functional results with the mutable arguments of an out/mutable operator.
+    # Schema order instead puts positional mutable arguments before out arguments,
+    # which swaps results for operators that have both (for example batch norm).
+    args = f.func.arguments
+    mutable_args_in_return_order = (
+        ([args.self_arg.argument] if args.self_arg is not None else [])
+        + list(args.out)
+        + list(args.post_self_positional)
+    )
+    mutable_arg_names = [a.name for a in mutable_args_in_return_order if a.is_write]
+    write_only_out_arg_names = {a.name for a in args.out if a.is_write}
+    if set(mutable_arg_names) != set(args.mutable_arg_names()):
+        raise AssertionError(
+            "Unable to order mutable arguments like functional returns: "
+            f"{mutable_arg_names} vs {args.mutable_arg_names()}"
+        )
     (
         aliased_outer_rets,
         non_aliased_outer_rets,
@@ -588,12 +613,17 @@ def wrap_propagate_mutations_and_return(
     for outer_arg, inner_ret in zip(
         mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets) :]
     ):
+        full_overwrite = (
+            f"\n  at::functionalization::impl::mark_data_mutation_full_overwrite({outer_arg});"
+            if outer_arg in write_only_out_arg_names
+            else ""
+        )
         updates.append(
             f"""\
   auto {outer_arg}_inner = at::functionalization::impl::from_functional_tensor({outer_arg});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
-  at::functionalization::impl::sync({outer_arg});
+  at::functionalization::impl::sync({outer_arg});{full_overwrite}
   auto {outer_arg}_inner_updated = at::functionalization::impl::from_functional_tensor({outer_arg});
   at::functionalization::impl::propagate_xla_data_direct({outer_arg}_inner, {outer_arg}_inner_updated);"""
         )

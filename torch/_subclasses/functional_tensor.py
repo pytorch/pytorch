@@ -27,8 +27,8 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
+    _return_and_correct_aliasing_for_functional_tensor,
     autograd_would_have_decomposed,
-    return_and_correct_aliasing,
     TorchDispatchMode,
 )
 
@@ -171,7 +171,14 @@ class FunctionalTensor(torch.Tensor):
     # Used by auto_functionalize to determine base of tensors during inference mode.
     _inference_mode_base: FunctionalTensor | None = None
 
-    def __new__(cls, elem: torch.Tensor, mode: FunctionalTensorMode) -> Self:
+    def __new__(
+        cls,
+        elem: torch.Tensor,
+        mode: FunctionalTensorMode,
+        *,
+        inference_mode: bool | None = None,
+        storage_device: torch.device | None = None,
+    ) -> Self:
         if not torch._is_functional_tensor(elem):
             raise AssertionError("elem must be a functional tensor")
 
@@ -195,47 +202,66 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(
-            # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
-            # Calling the overload that has kwargs causes us to go down the first overload path,
-            # which will **always** specialize sizes.
-            # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
-            cls,
-            elem.shape,  # sizes
-            elem.stride() if not is_sparse_any(elem) else None,  # strides
-            (
-                elem.storage_offset() if not is_sparse_any(elem) else None
-            ),  # storage_offset
-            None,  # memory_format
-            elem.dtype,  # dtype
-            elem.layout,  # layout
-            elem.device,  # device
-            False,  # pin_memory
-            elem.requires_grad,  # requires_grad
-            None,  # dispatch_sizes_strides_policy
-            False,  # dispatch_device
-            False,  # dispatch_layout
-            extra_dispatch_keys,  # _extra_dispatch_keys
+        ambient_inference_mode = torch.is_inference_mode_enabled()
+        # Alias outputs must be able to share their functional base's version
+        # counter. Inference status therefore follows the inner functional
+        # tensor rather than the ambient context used for metadata analysis.
+        wrapper_is_inference = (
+            elem.is_inference() if inference_mode is None else inference_mode
         )
+        with torch.inference_mode(wrapper_is_inference):
+            out = torch.Tensor._make_wrapper_subclass(
+                # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+                # Calling the overload that has kwargs causes us to go down the first overload path,
+                # which will **always** specialize sizes.
+                # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+                cls,
+                elem.shape,  # sizes
+                elem.stride() if not is_sparse_any(elem) else None,  # strides
+                (
+                    elem.storage_offset() if not is_sparse_any(elem) else None
+                ),  # storage_offset
+                None,  # memory_format
+                elem.dtype,  # dtype
+                elem.layout,  # layout
+                elem.device if storage_device is None else storage_device,  # device
+                False,  # pin_memory
+                elem.requires_grad,  # requires_grad
+                None,  # dispatch_sizes_strides_policy
+                False,  # dispatch_device
+                False,  # dispatch_layout
+                extra_dispatch_keys,  # _extra_dispatch_keys
+            )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
 
+        out._maybe_register_inference_mode_base(
+            mode,
+            inference_mode_enabled=ambient_inference_mode,
+        )
+        return out
+
+    def _maybe_register_inference_mode_base(
+        self,
+        mode: FunctionalTensorMode,
+        *,
+        inference_mode_enabled: bool,
+    ) -> None:
         if (
             torch._export.config.enable_auto_functionalized_v2_for_export
-            and torch.is_inference_mode_enabled()
+            and inference_mode_enabled
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
-            storage = out.elem.untyped_storage()
-            if out.is_base_tensor():
-                out._inference_mode_base = None
+            storage = self.elem.untyped_storage()
+            if self.is_base_tensor():
+                self._inference_mode_base = None
                 # This assumes that the FunctionalTensor.elem does not change its storage after this point.
                 # Otherwise this would be invalid.
-                mode._storage_to_base[storage] = out
+                mode._storage_to_base[storage] = self
             else:
-                out._inference_mode_base = mode._storage_to_base.get(storage)
-                if out._inference_mode_base is None:
-                    mode._storage_to_base[storage] = out
-        return out
+                self._inference_mode_base = mode._storage_to_base.get(storage)
+                if self._inference_mode_base is None:
+                    mode._storage_to_base[storage] = self
 
     def __torch_dispatch__(  # type: ignore[override]
         self,
@@ -292,6 +318,27 @@ class FunctionalTensor(torch.Tensor):
 
     @staticmethod
     def to_functional(x: torch.Tensor) -> FunctionalTensor:
+        return FunctionalTensor._to_functional(x)
+
+    @staticmethod
+    def to_functional_for_aot_metadata(
+        x: torch.Tensor, *, ambient_inference_mode: bool
+    ) -> FunctionalTensor:
+        # Initially match the input rather than the ambient AOT metadata mode.
+        # The caller can then replace graph-input wrappers with normal wrappers
+        # when it needs a trace-input-independent logical version counter.
+        with torch.inference_mode(x.is_inference()):
+            return FunctionalTensor._to_functional(
+                x,
+                inference_mode_for_base_tracking=ambient_inference_mode,
+            )
+
+    @staticmethod
+    def _to_functional(
+        x: torch.Tensor,
+        *,
+        inference_mode_for_base_tracking: bool | None = None,
+    ) -> FunctionalTensor:
         # We will do the wrapping for the user.
 
         if torch._is_functional_tensor(x):
@@ -313,7 +360,30 @@ class FunctionalTensor(torch.Tensor):
 
         with functional_mode:
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
-            out = FunctionalTensor(x_functional, functional_mode)
+            if functional_mode._force_normal_input_version_wrappers:
+                # AOT metadata analysis may trace with a genuine inference
+                # input and reuse the artifact with a normal tensor later.
+                # Give every graph-input wrapper a logical version counter so
+                # its mutation delta is independent of trace input status.
+                out = FunctionalTensor.__new__(
+                    FunctionalTensor,
+                    x_functional,
+                    functional_mode,
+                    inference_mode=False,
+                )
+            else:
+                out = FunctionalTensor(x_functional, functional_mode)
+            if (
+                inference_mode_for_base_tracking
+                and not torch.is_inference_mode_enabled()
+            ):
+                # The AOT metadata converter can deliberately construct a normal,
+                # versioned wrapper while ambient inference mode is enabled. Preserve
+                # the inference-mode base registration that __new__ would otherwise
+                # have performed in that ambient context.
+                out._maybe_register_inference_mode_base(
+                    functional_mode, inference_mode_enabled=True
+                )
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
@@ -335,6 +405,15 @@ class FunctionalTensor(torch.Tensor):
 
     def mark_mutation_hidden_from_autograd(self) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
+
+    def mark_data_mutation_carrier(self) -> None:
+        torch._functionalize_mark_data_mutation_carrier(self.elem)
+
+    def record_data_mutation_range(self) -> None:
+        torch._functionalize_record_data_mutation_range(self.elem)
+
+    def mark_data_mutation_requires_full_storage(self) -> None:
+        torch._functionalize_mark_data_mutation_requires_full_storage(self.elem)
 
     def tolist(self) -> Any:
         if self.elem.dim() == 0:
@@ -423,6 +502,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         export: bool = False,
         _allow_token_discovery: bool = False,
         _keep_input_mutations: bool = True,
+        _force_normal_input_version_wrappers: bool = False,
     ) -> None:
         super().__init__()
         self.export = export
@@ -451,6 +531,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._allow_token_discovery = _allow_token_discovery
         # Controls whether invoke_subgraph keeps input mutations in its graph.
         self._keep_input_mutations = _keep_input_mutations
+        self._force_normal_input_version_wrappers = _force_normal_input_version_wrappers
 
         self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, FunctionalTensor | None
@@ -510,6 +591,12 @@ class FunctionalTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
+        functional_inputs = [
+            input_tensor
+            for input_tensor in pytree.tree_leaves((args, kwargs))
+            if isinstance(input_tensor, FunctionalTensor)
+        ]
+
         def wrap(x: object) -> object:
             # Only wrap our outputs in subclasses if the inner functionalization call
             # also wrapped outputs into FunctionalTensorWrappers.
@@ -517,7 +604,45 @@ class FunctionalTensorMode(TorchDispatchMode):
             if isinstance(x, FunctionalTensor):
                 raise AssertionError("x must not be a FunctionalTensor in wrap()")
             if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
-                return FunctionalTensor(x, self)
+                # Functionalization may implement an inplace op with an
+                # out-of-place result created under ambient inference mode.
+                # Any output that aliases an existing functional storage must
+                # retain that storage's wrapper inference status so alias
+                # correction can share its version counter.
+                if not functional_inputs:
+                    return FunctionalTensor(x, self)
+                aliased_inputs = [
+                    input_tensor
+                    for input_tensor in functional_inputs
+                    if torch._C._is_alias_of(x, input_tensor.elem)  # type: ignore[attr-defined]
+                ]
+                if not aliased_inputs:
+                    return FunctionalTensor(x, self)
+                inference_mode = all(
+                    input_tensor.is_inference() for input_tensor in aliased_inputs
+                )
+                # resize_/set_ can leave a wrapper's bookkeeping storage on a
+                # different device from its logical inner tensor. Prefer such a
+                # device so alias correction takes its explicit cross-device
+                # path; that path then installs the schema-selected input's
+                # storage and backend keys. Other alias candidates may
+                # legitimately have different bookkeeping storage devices.
+                storage_device = next(
+                    (
+                        input_tensor.untyped_storage().device
+                        for input_tensor in aliased_inputs
+                        if input_tensor.untyped_storage().device
+                        != input_tensor.elem.device
+                    ),
+                    aliased_inputs[0].untyped_storage().device,
+                )
+                return FunctionalTensor.__new__(
+                    FunctionalTensor,
+                    x,
+                    self,
+                    inference_mode=inference_mode,
+                    storage_device=storage_device,
+                )
             return x
 
         def unwrap(x: FunctionalTensor) -> torch.Tensor:
@@ -706,7 +831,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
-        return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+        return _return_and_correct_aliasing_for_functional_tensor(
+            func,
+            args,
+            kwargs,
+            outs_wrapped,
+        )
 
     def _sync_view_replay_annotations(
         self,
@@ -873,6 +1003,12 @@ class BaseFunctionalizeAPI(ABC):
     def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
+    def mark_data_mutation_carrier(self, tensor: torch.Tensor) -> None:
+        torch._functionalize_mark_data_mutation_carrier(tensor)
+
+    def record_data_mutation_range(self, tensor: torch.Tensor) -> None:
+        torch._functionalize_record_data_mutation_range(tensor)
+
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def __init__(
@@ -931,6 +1067,27 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         self._check_cast_functional(
             tensor, "tensor"
         ).mark_mutation_hidden_from_autograd()
+
+    def mark_data_mutation_carrier(self, tensor: torch.Tensor) -> None:
+        self._check_cast_functional(tensor, "tensor").mark_data_mutation_carrier()
+
+    def record_data_mutation_range(self, tensor: torch.Tensor) -> None:
+        functional_tensor = self._check_cast_functional(tensor, "tensor")
+        functional_tensor.mark_data_mutation_requires_full_storage()
+        # Auto-functionalization also runs during the real graph trace. Range
+        # bookkeeping is metadata-analysis-only so symbolic byte arithmetic
+        # cannot leak into the traced graph.
+        proxy_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+        if self.mode._allow_token_discovery and proxy_mode is None:
+            # Mutable custom ops are intercepted before the normal redispatch
+            # block temporarily enables view reapplication. Their view metas
+            # were created in that mode, so restore it while replaying the
+            # logical target solely for interval bookkeeping.
+            old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
+            try:
+                functional_tensor.record_data_mutation_range()
+            finally:
+                torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):

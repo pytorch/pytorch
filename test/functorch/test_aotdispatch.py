@@ -72,6 +72,7 @@ from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
@@ -670,6 +671,29 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 4)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_mutation_free_sparse_input(self):
+        indices = torch.tensor([[0, 1], [1, 0]])
+        values = torch.tensor([2.0, 3.0])
+        inp = torch.sparse_coo_tensor(indices, values, (2, 2)).coalesce()
+        compiled = aot_function(lambda x: x, fw_compiler=nop, bw_compiler=nop)
+        self.assertEqual(compiled(inp), inp)
+
+        def mutate_dense_metadata(dense, sparse):
+            dense.t_()
+            return dense.clone(), sparse
+
+        compiled = aot_function(
+            mutate_dense_metadata,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        dense = torch.arange(6.0).view(2, 3)
+        out_dense, out_sparse = compiled(dense, inp)
+        self.assertEqual(dense, torch.arange(6.0).view(2, 3).t())
+        self.assertEqual(out_dense, dense)
+        self.assertEqual(out_sparse, inp)
+
     def test_complex_linear(self):
         # https://github.com/pytorch/pytorch/issues/93424
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
@@ -933,20 +957,90 @@ def forward(self, primals_1, primals_2):
         )
         inp = [torch.ones(3, 3, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
-        # Things to note:
-        # - There are no set_() calls in the graph (we functionalize a.set_(b) into "b")
-        # - There is only **1** graph output. We properly realized that the two set_() calls
-        #   undo each other, and so effectively no inputs are mutated.
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
 def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [3, 3]);  primals_1 = None
     arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    alias = torch.ops.aten.alias.default(primals_1);  primals_1 = None
-    view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
-    add = torch.ops.aten.add.Tensor(alias, view);  alias = view = None
-    return (add,)""",
+    alias = torch.ops.aten.alias.default(view);  view = None
+    view_1 = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
+    add = torch.ops.aten.add.Tensor(alias, view_1);  view_1 = None
+    return (alias, add)""",
         )
+
+    @skipIfDynamoInput("directly exercises AOTAutograd version replay")
+    def test_input_mutation_set__version_replay(self):
+        def check(fn, make_args):
+            compiled = aot_function(
+                fn,
+                fw_compiler=nop,
+                bw_compiler=nop,
+                keep_inference_input_mutations=True,
+            )
+            ref_args = make_args()
+            test_args = make_args()
+            ref_versions = [arg._version for arg in ref_args]
+            test_versions = [arg._version for arg in test_args]
+            ref_out = fn(*ref_args)
+            test_out = compiled(*test_args)
+            self.assertEqual(test_out, ref_out)
+            for ref_arg, test_arg, ref_version, test_version in zip(
+                ref_args, test_args, ref_versions, test_versions
+            ):
+                self.assertTensorMetadataEqual(test_arg, ref_arg)
+                self.assertEqual(
+                    test_arg._version - test_version,
+                    ref_arg._version - ref_version,
+                )
+
+        def set_twice(a):
+            a.set_(torch.arange(2.0))
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        def set_then_restore(a):
+            old = torch.ops.aten.alias.default(a)
+            a.set_(torch.arange(3.0))
+            a.set_(old)
+            return a.clone()
+
+        def set_same_storage_new_metadata(a):
+            a.set_(a.t())
+            return a.clone()
+
+        def set_with_preserved_version(a):
+            with torch.autograd._unsafe_preserve_version_counter(a):
+                a.set_(torch.arange(3.0))
+            return a.clone()
+
+        def set_two_aliases(a, b):
+            a.set_(torch.arange(2.0))
+            b.set_(torch.arange(3.0))
+            return a.clone(), b.clone()
+
+        def mutate_metadata_on_two_aliases(a, b):
+            a.t_()
+            b.t_()
+            return a.clone(), b.clone()
+
+        cases = (
+            (set_twice, lambda: (torch.empty(0),)),
+            (set_then_restore, lambda: (torch.empty(0),)),
+            (set_same_storage_new_metadata, lambda: (torch.arange(6.0).view(2, 3),)),
+            (set_with_preserved_version, lambda: (torch.empty(0),)),
+            (
+                set_two_aliases,
+                lambda: tuple(torch.arange(6.0).split(3)),
+            ),
+            (
+                mutate_metadata_on_two_aliases,
+                lambda: tuple(torch.arange(8.0).view(4, 2).split(2)),
+            ),
+        )
+        for fn, make_args in cases:
+            with self.subTest(fn=fn.__name__):
+                check(fn, make_args)
 
     def test_input_mutation_simple_with_none_and_nontensor(self):
         # Tensor, None, int
@@ -1519,6 +1613,26 @@ def forward(self, primals_1):
     resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0);  resize_storage_bytes_ = None
     return (sin, primals_1)""",
         )
+
+    def test_input_raw_storage_resize_then_logical_resize_errors(self):
+        def f(a):
+            with torch.no_grad():
+                torch.ops.inductor.resize_storage_bytes_(a, 32)
+                a.resize_(4)
+            return a
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            decompositions={},
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "storage growth|metadata mutation after resize_storage_bytes_",
+        ):
+            compiled_f(torch.empty(0))
 
     #     def test_input_mutation_storage_resize_up_down(self):
     #         def f(a):
@@ -2591,6 +2705,1465 @@ def forward(self, primals_1):
     return (t_4, view_1)""",
         )
 
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_and_metadata_mutation_version(self):
+        cases = (
+            ("grad_mode", False, False),
+            ("no_grad", True, False),
+            ("inference_mode", False, True),
+        )
+        for name, mutate_under_no_grad, ambient_inference in cases:
+            with self.subTest(name=name):
+
+                def f(a):
+                    mutation_context = (
+                        torch.no_grad() if mutate_under_no_grad else nullcontext()
+                    )
+                    with mutation_context:
+                        a.t_()
+                        a.add_(1)
+                    # Force a fresh alias wrapper after the mutation. Under
+                    # ambient inference mode it must retain the normal input
+                    # base's version-counter status.
+                    return a.view(a.shape) * 2
+
+                compiled_f = aot_function(
+                    f,
+                    fw_compiler=nop,
+                    bw_compiler=nop,
+                    keep_inference_input_mutations=True,
+                )
+                ref_base = torch.full((12,), -1.0)
+                ref_base[3:9].copy_(torch.arange(6.0))
+                test_base = ref_base.clone()
+                ref_inp = ref_base[3:9].view(2, 3)
+                test_inp = test_base[3:9].view(2, 3)
+                # Exercise replay on a nonzero starting counter.
+                ref_inp.add_(0)
+                test_inp.add_(0)
+                ref_version = ref_inp._version
+                test_version = test_inp._version
+                runtime_context = (
+                    torch.inference_mode() if ambient_inference else nullcontext()
+                )
+                with runtime_context:
+                    ref_out = f(ref_inp)
+                runtime_context = (
+                    torch.inference_mode() if ambient_inference else nullcontext()
+                )
+                with runtime_context:
+                    test_out = compiled_f(test_inp)
+
+                self.assertEqual(test_out, ref_out)
+                self.assertEqual(test_inp, ref_inp)
+                self.assertEqual(test_base, ref_base)
+                self.assertTensorMetadataEqual(test_inp, ref_inp)
+                self.assertEqual(test_inp.storage_offset(), 3)
+                self.assertEqual(ref_inp._version - ref_version, 2)
+                self.assertEqual(test_inp._version - test_version, 2)
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_and_metadata_mutation_inference_tensor(self):
+        def f(a):
+            a.t_()
+            a.add_(1)
+            return a * 2
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with torch.inference_mode():
+            ref_inp = torch.arange(6.0).reshape(2, 3)
+            test_inp = ref_inp.clone()
+            ref_out = f(ref_inp)
+            test_out = compiled_f(test_inp)
+
+        self.assertTrue(test_inp.is_inference())
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_inp, ref_inp)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+
+        # aot_function caches one metadata result without guarding inference
+        # status. Reusing an inference-first trace with a normal tensor must
+        # still replay the two eager version bumps.
+        ref_inp = torch.arange(6.0).reshape(2, 3)
+        test_inp = ref_inp.clone()
+        ref_version = ref_inp._version
+        test_version = test_inp._version
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_inp, ref_inp)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertEqual(ref_inp._version - ref_version, 2)
+        self.assertEqual(test_inp._version - test_version, 2)
+
+    @skipIfDynamoInput("directly exercises reusable AOT inference metadata")
+    def test_input_metadata_mutation_inference_subclass(self):
+        def f(a):
+            a.transpose_(1, 0)
+            return a * 2
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with torch.inference_mode(), TwoTensorMode():
+            ref_inp = torch.arange(6.0).view(2, 3)
+            test_inp = ref_inp.clone()
+            ref_out = f(ref_inp)
+            test_out = compiled_f(test_inp)
+        self.assertTrue(test_inp.is_inference())
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+
+        # Reuse the inference-first artifact with normal subclasses. The outer
+        # subclass input wrapper must carry the logical metadata version bump.
+        with TwoTensorMode():
+            ref_inp = torch.arange(6.0).view(2, 3)
+            test_inp = ref_inp.clone()
+        ref_version = ref_inp._version
+        test_version = test_inp._version
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertEqual(ref_inp._version - ref_version, 1)
+        self.assertEqual(test_inp._version - test_version, 1)
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_and_metadata_mutation_new_storage_offset(self):
+        def f(a):
+            a.as_strided_((2, 2), (2, 1), 0)
+            a.add_(1)
+            return a * 2
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        # Compile while the explicit target offset is indistinguishable from
+        # the input offset, then reuse the artifact with a different input
+        # offset. The explicit as_strided_ offset must win in both calls.
+        for original_offset in (0, 3):
+            with self.subTest(original_offset=original_offset):
+                ref_base = torch.arange(20.0)
+                test_base = ref_base.clone()
+                ref_inp = ref_base[original_offset : original_offset + 6]
+                test_inp = test_base[original_offset : original_offset + 6]
+                ref_version = ref_inp._version
+                test_version = test_inp._version
+
+                ref_out = f(ref_inp)
+                test_out = compiled_f(test_inp)
+
+                self.assertEqual(test_out, ref_out)
+                self.assertEqual(test_base, ref_base)
+                self.assertTensorMetadataEqual(test_inp, ref_inp)
+                self.assertEqual(test_inp.storage_offset(), 0)
+                self.assertEqual(ref_inp._version - ref_version, 2)
+                self.assertEqual(test_inp._version - test_version, 2)
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_and_metadata_mutation_intermediate_growth_errors(self):
+        def f(a, x):
+            torch.add(x, x, out=a)
+            torch.add(x[:10], x[:10], out=a)
+            return a * 2
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        test_base = torch.arange(12.0)
+        test_inp = test_base[3:9]
+        x = torch.arange(100.0)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "final updated tensor densely covers the maximum mutated storage span",
+            ):
+                compiled_f(test_inp, x)
+
+    @skipIfDynamoInput("directly exercises a reusable dynamic AOT artifact")
+    def test_input_data_and_metadata_mutation_dynamic_storage(self):
+        def f(a, x):
+            torch.add(x, x, out=a)
+            return a * 2
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            dynamic=True,
+        )
+        for n in (10, 20, 5):
+            with self.subTest(n=n):
+                ref_base = torch.arange(3.0)
+                test_base = ref_base.clone()
+                ref_inp = ref_base[3:3]
+                test_inp = test_base[3:3]
+                x = torch.arange(float(n))
+                ref_version = ref_inp._version
+                test_version = test_inp._version
+
+                ref_out = f(ref_inp, x)
+                test_out = compiled_f(test_inp, x)
+
+                self.assertEqual(test_out, ref_out)
+                self.assertEqual(test_inp, ref_inp)
+                self.assertEqual(test_base, ref_base)
+                self.assertTensorMetadataEqual(test_inp, ref_inp)
+                self.assertEqual(test_inp.storage_offset(), 3)
+                self.assertEqual(
+                    test_inp.untyped_storage().nbytes(), (3 + n) * x.element_size()
+                )
+                self.assertEqual(ref_inp._version - ref_version, 1)
+                self.assertEqual(test_inp._version - test_version, 1)
+
+    @skipIfDynamoInput("directly exercises a reusable dynamic AOT artifact")
+    def test_input_mutation_dynamic_intermediate_peak_errors(self):
+        def f(a, x):
+            torch.add(x, x, out=a)
+            torch.add(x[:2], x[:2], out=a)
+            return a * 2
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            dynamic=True,
+        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "final updated tensor densely covers the maximum mutated storage span",
+            ):
+                compiled_f(torch.empty(0), torch.arange(10.0))
+
+        # At the tracing hint (5), max(4 * n, 40) equals the final 40-byte
+        # carrier. That equality is not symbolically true for a reusable
+        # artifact, so it must not be accepted by guarding on the hint.
+        def hinted_equal_at_trace(a, x):
+            torch.add(x, x, out=a)
+            y = torch.ones(10)
+            torch.add(y, y, out=a)
+            return a * 2
+
+        compiled_hinted = aot_function(
+            hinted_equal_at_trace,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            dynamic=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "final updated tensor densely covers the maximum mutated storage span",
+        ):
+            compiled_hinted(torch.empty(0), torch.arange(5.0))
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_metadata_mutation_intermediate_growth_errors(self):
+        def f(a):
+            a.resize_(100)
+            a.resize_(0)
+            return a.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "final updated tensor densely covers the maximum mutated storage span",
+        ):
+            compiled_f(torch.arange(6.0))
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_metadata_mutation_cancelled_size_version(self):
+        def f(a):
+            a.unsqueeze_(0)
+            a.squeeze_(0)
+            return a.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_inp = torch.arange(6.0)
+        test_inp = ref_inp.clone()
+        ref_version = ref_inp._version
+        test_version = test_inp._version
+
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_inp, ref_inp)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertEqual(ref_inp._version - ref_version, 2)
+        self.assertEqual(test_inp._version - test_version, 2)
+
+        def transpose_twice(a):
+            a.t_()
+            a.t_()
+            return a.clone()
+
+        compiled_transpose = aot_function(
+            transpose_twice,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_inp = torch.arange(4.0).view(2, 2)
+        test_inp = ref_inp.clone()
+        ref_version = ref_inp._version
+        test_version = test_inp._version
+
+        ref_out = transpose_twice(ref_inp)
+        test_out = compiled_transpose(test_inp)
+
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertEqual(ref_inp._version - ref_version, 2)
+        self.assertEqual(test_inp._version - test_version, 2)
+
+        def mutate_aliased_metadata(a, b):
+            a.t_()
+            a.t_()
+            b.t_()
+            return a.clone(), b.clone()
+
+        compiled_aliases = aot_function(
+            mutate_aliased_metadata,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_base = torch.arange(4.0)
+        ref_a = ref_base.view(2, 2)
+        ref_b = ref_base.view(2, 2)
+        test_base = ref_base.clone()
+        test_a = test_base.view(2, 2)
+        test_b = test_base.view(2, 2)
+        ref_version = ref_a._version
+        test_version = test_a._version
+
+        ref_out = mutate_aliased_metadata(ref_a, ref_b)
+        test_out = compiled_aliases(test_a, test_b)
+
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_a, ref_a)
+        self.assertTensorMetadataEqual(test_b, ref_b)
+        self.assertEqual(ref_a._version - ref_version, 3)
+        self.assertEqual(test_a._version - test_version, 3)
+
+        def nonleaf_no_grad_f(a):
+            with torch.no_grad():
+                a.t_()
+            return (a * 2).sum()
+
+        compiled_nonleaf = aot_function(
+            nonleaf_no_grad_f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        leaf = torch.arange(6.0, requires_grad=True)
+        nonleaf = (leaf * 1).view(2, 3)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "metadata mutations under no_grad on non-leaf tensors",
+        ):
+            compiled_nonleaf(nonleaf)
+
+        def mixed_context_nonleaf_f(a):
+            with torch.no_grad():
+                a.t_()
+            a.add_(1)
+            return (a * 2).sum()
+
+        compiled_mixed_context = aot_function(
+            mixed_context_nonleaf_f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        leaf = torch.arange(6.0, requires_grad=True)
+        nonleaf = (leaf * 1).view(2, 3)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "metadata mutations under no_grad on non-leaf tensors",
+        ):
+            compiled_mixed_context(nonleaf)
+
+        def nonleaf_grad_f(a):
+            a.t_()
+            return (a * 2).sum()
+
+        compiled_nonleaf_grad = aot_function(
+            nonleaf_grad_f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        ref_leaf = torch.arange(6.0, requires_grad=True)
+        test_leaf = ref_leaf.detach().clone().requires_grad_()
+        ref_inp = (ref_leaf * 1).view(2, 3)
+        test_inp = (test_leaf * 1).view(2, 3)
+
+        ref_out = nonleaf_grad_f(ref_inp)
+        test_out = compiled_nonleaf_grad(test_inp)
+        ref_out.backward()
+        test_out.backward()
+
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_leaf.grad, ref_leaf.grad)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+
+        def no_grad_leaf_f(a):
+            with torch.no_grad():
+                a.unsqueeze_(0)
+                a.squeeze_(0)
+            return a.clone()
+
+        compiled_leaf_f = aot_function(
+            no_grad_leaf_f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_leaf = torch.arange(6.0, requires_grad=True)
+        test_leaf = ref_leaf.detach().clone().requires_grad_()
+        ref_version = ref_leaf._version
+        test_version = test_leaf._version
+
+        ref_out = no_grad_leaf_f(ref_leaf)
+        test_out = compiled_leaf_f(test_leaf)
+
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_leaf, ref_leaf)
+        self.assertEqual(ref_leaf._version - ref_version, 2)
+        self.assertEqual(test_leaf._version - test_version, 2)
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_before_resize_is_preserved(self):
+        def f(a):
+            a.add_(1)
+            a.resize_(10)
+            return a.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_inp = torch.arange(6.0)
+        test_inp = ref_inp.clone()
+        ref_version = ref_inp._version
+        test_version = test_inp._version
+
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_out[:6], ref_out[:6])
+        self.assertEqual(test_inp[:6], ref_inp[:6])
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertEqual(ref_inp._version - ref_version, 2)
+        self.assertEqual(test_inp._version - test_version, 2)
+
+        def shrink_after_write(a):
+            a.add_(1)
+            a.resize_(5)
+            return a.clone()
+
+        compiled_shrink = aot_function(
+            shrink_after_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "final updated tensor densely covers the maximum mutated storage span",
+        ):
+            compiled_shrink(torch.arange(10.0))
+
+        def shrink_after_view_write(a):
+            a[5:].add_(1)
+            a.resize_(5)
+            return a.clone()
+
+        compiled_view_shrink = aot_function(
+            shrink_after_view_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "data mutation through an internal alias",
+        ):
+            compiled_view_shrink(torch.arange(10.0))
+
+        def as_strided_after_write(a):
+            a.add_(1)
+            a.as_strided_((4,), (1,), 0)
+            return a.clone()
+
+        compiled_as_strided = aot_function(
+            as_strided_after_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation storage growth",
+        ):
+            compiled_as_strided(torch.arange(6.0))
+
+        def offset_shift_after_write(a):
+            a.add_(1)
+            a.as_strided_((5,), (1,), 0)
+            return a.clone()
+
+        compiled_offset_shift = aot_function(
+            offset_shift_after_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        base = torch.arange(20.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation storage growth across a storage-offset change",
+        ):
+            compiled_offset_shift(base[5:10])
+
+    @skipIfDynamoInput("directly exercises FunctionalTensor alias correction")
+    def test_input_resize_then_view_aliases(self):
+        def f(a):
+            a.resize_(10)
+            view = a[:5]
+            return view, view.view(torch.int32)
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        ref_inp = torch.arange(5.0)
+        test_inp = ref_inp.clone()
+        ref_version = ref_inp._version
+        test_version = test_inp._version
+
+        storage_installs: list[bool] = []
+        checked_api_rejections: list[str] = []
+        unsafe_set_storage = (
+            torch._functionalize_unsafe_set_storage_for_functional_tensor
+        )
+
+        def record_storage_install(dst, src):
+            self.assertIsInstance(dst, FunctionalTensor)
+            self.assertIsInstance(src, FunctionalTensor)
+            self.assertTrue(torch._C._is_alias_of(dst.elem, src.elem))
+            storage_installs.append(
+                dst.elem.dtype != src.elem.dtype
+                or dst.elem.shape != src.elem.shape
+                or dst.elem.stride() != src.elem.stride()
+            )
+            try:
+                torch._functionalize_unsafe_set(dst, src)
+            except RuntimeError as exc:
+                if "cross-device .data requires matching" not in str(exc):
+                    raise
+                checked_api_rejections.append(str(exc))
+            unsafe_set_storage(dst, src)
+
+        ref_out = f(ref_inp)
+        with patch.object(
+            torch,
+            "_functionalize_unsafe_set_storage_for_functional_tensor",
+            record_storage_install,
+        ):
+            test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+        self.assertEqual(test_inp._version - test_version, 1)
+        self.assertEqual(ref_inp._version - ref_version, 1)
+        self.assertTrue(any(storage_installs))
+        self.assertTrue(checked_api_rejections)
+        for out in test_out:
+            self.assertEqual(out.device, torch.device("cpu"))
+            self.assertEqual(
+                out.untyped_storage().data_ptr(),
+                test_inp.untyped_storage().data_ptr(),
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "cross-device .data requires matching dtype, sizes, and strides",
+        ):
+            torch._functionalize_unsafe_set(
+                torch.empty(0), torch.empty(1, device="meta")
+            )
+
+    @skipIfDynamoInput("directly exercises FunctionalTensor alias correction")
+    def test_functional_tensor_storage_aliasing_rejects_unrelated_wrappers(self):
+        with FunctionalTensorMode():
+            dst = torch.arange(4.0)
+            src = torch.arange(4.0)
+            self.assertFalse(torch._C._is_alias_of(dst.elem, src.elem))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "expects aliased inner functional tensors",
+            ):
+                torch._functionalize_unsafe_set_storage_for_functional_tensor(dst, src)
+            self.assertFalse(torch._C._is_alias_of(dst, src))
+
+        with FakeTensorMode():
+            fake_dst = torch.empty(2)
+            fake_src = torch.empty(3, device="cuda", dtype=torch.float64)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "expects FunctionalTensor inputs and outputs",
+            ):
+                torch._functionalize_unsafe_set_storage_for_functional_tensor(
+                    fake_dst, fake_src
+                )
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_before_resize_holey_input_errors(self):
+        def f(a):
+            a.add_(100)
+            a.resize_(10)
+            return a.clone()
+
+        ref_base = torch.arange(10.0, dtype=torch.float64)
+        ref_out = f(ref_base[::2])
+        self.assertEqual(
+            ref_out,
+            torch.tensor(
+                [100, 1, 102, 3, 104, 5, 106, 7, 108, 9],
+                dtype=torch.float64,
+            ),
+        )
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        test_base = torch.arange(10.0, dtype=torch.float64)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "original input is empty or non-overlapping and dense",
+        ):
+            compiled_f(test_base[::2])
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_data_before_resize_partial_storage_errors(self):
+        def f(a):
+            a.add_(100)
+            a.resize_(10)
+            return a.clone()
+
+        ref_base = torch.arange(10.0, dtype=torch.float64)
+        ref_out = f(ref_base[:5])
+        self.assertEqual(
+            ref_out,
+            torch.tensor(
+                [100, 101, 102, 103, 104, 5, 6, 7, 8, 9],
+                dtype=torch.float64,
+            ),
+        )
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        test_base = torch.arange(10.0, dtype=torch.float64)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "exposes pre-existing storage bytes outside the original dense input",
+        ):
+            compiled_f(test_base[:5])
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_metadata_then_data_holey_input_errors(self):
+        def f(a):
+            a.t_()
+            a.add_(100)
+            return a.clone()
+
+        ref_base = torch.arange(12.0, dtype=torch.float64)
+        ref_inp = ref_base.view(3, 4)[:, ::2]
+        ref_out = f(ref_inp)
+        self.assertEqual(
+            ref_base,
+            torch.tensor(
+                [100, 1, 102, 3, 104, 5, 106, 7, 108, 9, 110, 11],
+                dtype=torch.float64,
+            ),
+        )
+        self.assertEqual(ref_inp.stride(), (2, 4))
+        self.assertEqual(
+            ref_out,
+            torch.tensor(
+                [[100, 104, 108], [102, 106, 110]],
+                dtype=torch.float64,
+            ),
+        )
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        test_base = torch.arange(12.0, dtype=torch.float64)
+        test_inp = test_base.view(3, 4)[:, ::2]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "original input is empty or non-overlapping and dense",
+        ):
+            compiled_f(test_inp)
+
+        # Logical shape alone is not a cache-safe density certificate. Trace a
+        # dense input first, then reuse the artifact with a holey input that has
+        # the same shape but different physical strides.
+        compiled_reuse = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        compiled_reuse(torch.arange(6.0, dtype=torch.float64).view(3, 2))
+        runtime_base = torch.arange(12.0, dtype=torch.float64)
+        runtime_inp = runtime_base.view(3, 4)[:, ::2]
+        with self.assertRaisesRegex(RuntimeError, "not non-overlapping and dense"):
+            compiled_reuse(runtime_inp)
+        self.assertEqual(runtime_base, torch.arange(12.0, dtype=torch.float64))
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_metadata_resize_spare_capacity_errors(self):
+        def f(a):
+            a.resize_(10)
+            return a.clone()
+
+        unsafe_inputs = (
+            lambda: torch.arange(10.0, dtype=torch.float64)[:5],
+            lambda: torch.arange(15.0, dtype=torch.float64)[5:10],
+            lambda: torch.arange(10.0, dtype=torch.float64)[::2],
+        )
+        for make_input in unsafe_inputs:
+            with self.subTest(input=make_input):
+                compiled_f = aot_function(
+                    f,
+                    fw_compiler=nop,
+                    bw_compiler=nop,
+                    keep_inference_input_mutations=True,
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "exposes pre-existing storage bytes outside the original dense input",
+                ):
+                    compiled_f(make_input())
+
+        # A suffix has no pre-existing bytes after its logical carrier. Growing
+        # it preserves all defined values; only the newly allocated tail is
+        # intentionally uninitialized.
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_base = torch.arange(15.0, dtype=torch.float64)
+        test_base = ref_base.clone()
+        ref_inp = ref_base[10:15]
+        test_inp = test_base[10:15]
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+        self.assertEqual(test_out[:5], ref_out[:5])
+        self.assertEqual(test_base, ref_base)
+        self.assertTensorMetadataEqual(test_inp, ref_inp)
+
+        # Storage capacity is not part of the aot_function cache key. Reusing
+        # the suffix trace with the same logical metadata but a hidden runtime
+        # tail must fail before the compiled graph runs.
+        hidden_tail_base = torch.arange(20.0, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, "hidden trailing storage capacity"):
+            compiled_f(hidden_tail_base[10:15])
+
+    @skipIfDynamoInput("directly exercises a reusable AOT artifact")
+    def test_input_mutation_runtime_storage_capacity_errors(self):
+        def metadata_only(a):
+            a.resize_(10)
+            return a.clone()
+
+        compiled_metadata = aot_function(
+            metadata_only,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        compiled_metadata(torch.arange(5.0, dtype=torch.float64))
+        hidden_tail_base = torch.arange(10.0, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, "hidden trailing storage capacity"):
+            compiled_metadata(hidden_tail_base[:5])
+
+        def data_before_resize(a):
+            a.add_(100)
+            a.resize_(10)
+            return a.clone()
+
+        compiled_data = aot_function(
+            data_before_resize,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        compiled_data(torch.arange(5.0, dtype=torch.float64))
+        hidden_tail_base = torch.arange(10.0, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, "hidden trailing storage capacity"):
+            compiled_data(hidden_tail_base[:5])
+        self.assertEqual(
+            hidden_tail_base,
+            torch.arange(10.0, dtype=torch.float64),
+        )
+
+    @skipIfDynamoInput("directly exercises a reusable AOT artifact")
+    def test_input_write_only_out_runtime_storage_capacity(self):
+        def f(a, x):
+            torch.add(x, x, out=a)
+            return a.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        x = torch.arange(8.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            compiled_f(torch.full((5,), -1.0), x)
+
+        # The cached artifact may see a logically identical output tensor with
+        # extra physical capacity. A write-only out= operator initializes the
+        # complete resized carrier, while bytes outside it must stay untouched.
+        for base_size, input_slice in (
+            (10, slice(None, 5)),
+            (15, slice(5, 10)),
+        ):
+            with self.subTest(base_size=base_size):
+                ref_base = torch.full((base_size,), -1.0)
+                test_base = ref_base.clone()
+                ref_inp = ref_base[input_slice]
+                test_inp = test_base[input_slice]
+                test_storage = test_inp.untyped_storage()._cdata
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    ref_out = f(ref_inp, x)
+                    test_out = compiled_f(test_inp, x)
+                self.assertEqual(test_out, ref_out)
+                self.assertEqual(test_base, ref_base)
+                self.assertTensorMetadataEqual(test_inp, ref_inp)
+                self.assertEqual(test_inp.untyped_storage()._cdata, test_storage)
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_metadata_then_data_high_rank_holey_input_errors(self):
+        def f(a):
+            a.squeeze_(0)
+            a.add_(1)
+            return a.clone()
+
+        # Singleton dimensions must not cause factorial density-proof time.
+        rank = 32
+        base = torch.arange(3.0)
+        inp = base.as_strided((1,) * (rank - 1) + (2,), (3,) * (rank - 1) + (2,))
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "original input is empty or non-overlapping and dense",
+        ):
+            compiled_f(inp)
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_mutation_holey_final_carrier_errors(self):
+        def f(a):
+            a.resize_(100)
+            a.fill_(1)
+            a.as_strided_((34,), (3,))
+            return a.clone()
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "final updated tensor densely covers the maximum mutated storage span",
+        ):
+            compiled_f(torch.empty(0))
+
+    @skipIfDynamoInput("directly exercises the AOTAutograd runtime epilogue")
+    def test_input_metadata_mutation_does_not_grow_storage(self):
+        def f(a):
+            a.as_strided_((100,), (1,), 0)
+            return a.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
+            compiled_f(torch.arange(6.0))
+
+    @skipIfDynamoInput("directly exercises AOTAutograd synthetic bases")
+    def test_input_size_mutation_with_aliases_errors(self):
+        def f(a, b, x):
+            torch.add(x, x, out=a)
+            return b + 1
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        base = torch.arange(12.0)
+        a = base[3:9]
+        b = base[3:9]
+        x = torch.arange(100.0)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "AOTAutograd does not support input size mutations on aliased inputs",
+            ):
+                compiled_f(a, b, x)
+
+    @skipIfDynamoInput("directly exercises AOTAutograd alias handling")
+    def test_input_size_mutation_with_disjoint_aliases_errors(self):
+        def f(a, b, x):
+            torch.add(x, x, out=a)
+            return b.clone(), a.clone()
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        base = torch.arange(20.0)
+        a = base[:2]
+        b = base[10:12]
+        x = torch.arange(12.0)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "AOTAutograd does not support input size mutations on aliased inputs",
+            ):
+                compiled_f(a, b, x)
+
+    @skipIfDynamoInput("directly exercises AOTAutograd alias handling")
+    def test_input_storage_offset_mutation_with_disjoint_aliases_errors(self):
+        def f(a, b):
+            a.as_strided_((2,), (1,), 0)
+            a.add_(10)
+            return b.clone(), a.clone()
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        base = torch.arange(20.0)
+        a = base[10:12]
+        b = base[:2]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input metadata mutations on aliased inputs",
+        ):
+            compiled_f(a, b)
+
+        def stride_change(a, b):
+            a.as_strided_((2, 2), (1, 2))
+            a.add_(10)
+            return b.clone(), a.clone()
+
+        compiled_stride_change = aot_function(
+            stride_change,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        base = torch.arange(20.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input metadata mutations on aliased inputs",
+        ):
+            compiled_stride_change(base[:4].view(2, 2), base[10:14].view(2, 2))
+
+        def overlap_after_metadata_change(a, b):
+            a.as_strided_((2,), (1,))
+            a.add_(10)
+            return b.clone(), a.clone()
+
+        compiled_overlap = aot_function(
+            overlap_after_metadata_change,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        base = torch.arange(3.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input metadata mutations on aliased inputs|"
+            "original input is empty or non-overlapping and dense",
+        ):
+            compiled_overlap(base[0:3:2], base[1:2])
+
+    @skipIfDynamoInput("directly exercises AOTAutograd metadata analysis")
+    def test_input_size_mutation_through_internal_alias_errors(self):
+        def f(a, x):
+            alias = a.detach()
+            torch.add(x, x, out=alias)
+            return a.clone()
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "resizing a tensor with outstanding aliases",
+        ):
+            compiled_f(torch.empty(0), torch.arange(10.0))
+
+        def direct_resize_with_alias(a, x):
+            alias = a.detach()
+            torch.add(x, x, out=a)
+            return alias.clone()
+
+        compiled_direct_resize = aot_function(
+            direct_resize_with_alias,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "resizing a tensor with outstanding aliases",
+        ):
+            compiled_direct_resize(torch.arange(6.0), torch.arange(10.0))
+
+        def metadata_then_alias_write(a):
+            alias = a[5:]
+            a.as_strided_((5,), (1,), 0)
+            alias.add_(1)
+            return a.clone()
+
+        compiled_metadata_then_write = aot_function(
+            metadata_then_alias_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "data mutation through an internal alias",
+        ):
+            compiled_metadata_then_write(torch.arange(10.0))
+
+        def write_before_input(a):
+            alias = a.as_strided((5,), (1,), 0)
+            alias.add_(100)
+            return a.clone()
+
+        compiled_write_before = aot_function(
+            write_before_input,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        base = torch.arange(10.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "internal alias unless its graph input densely carries every mutated byte range",
+        ):
+            compiled_write_before(base[5:])
+
+        def write_into_other_input(a, b):
+            a.as_strided((5,), (1,), 0).add_(100)
+            return a.clone(), b.clone()
+
+        compiled_write_into_other_input = aot_function(
+            write_into_other_input,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        base = torch.arange(10.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "internal alias unless its graph input densely carries every mutated byte range",
+        ):
+            compiled_write_into_other_input(base[5:], base[:5])
+
+        # Auto-functionalization returns a reconstructed base tensor, so its
+        # replacement can look like a direct input mutation even when the
+        # custom op actually targeted an internal view. Preserve that view's
+        # exact byte range and reject writes into hidden backing-storage bytes.
+        with torch.library._scoped_library("aot_alias_range", "FRAGMENT") as lib:
+            torch.library.define(
+                "aot_alias_range::mutate",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("aot_alias_range::mutate", "cpu", lib=lib)
+            def mutate_cpu(x):
+                x.add_(100)
+
+            @torch.library.impl("aot_alias_range::mutate", "Meta", lib=lib)
+            def mutate_meta(x):
+                pass
+
+            def auto_functionalized_write_before_input(a):
+                alias = a.as_strided((5,), (1,), 0)
+                torch.ops.aot_alias_range.mutate(alias)
+                return a.clone()
+
+            def auto_functionalized_write_then_direct(a):
+                alias = a.as_strided((5,), (1,), 0)
+                torch.ops.aot_alias_range.mutate(alias)
+                # A later direct mutation makes the base wrapper's local and
+                # shared counters equal again. The recorded alias interval
+                # must still force the containment proof.
+                a.add_(1)
+                return a.clone()
+
+            for fn in (
+                auto_functionalized_write_before_input,
+                auto_functionalized_write_then_direct,
+            ):
+                for enable_v2 in (False, True):
+                    with torch._inductor.config.patch(
+                        enable_auto_functionalized_v2=enable_v2
+                    ):
+                        compiled_auto_write_before = aot_function(
+                            fn,
+                            fw_compiler=nop,
+                            bw_compiler=nop,
+                        )
+                        base = torch.arange(10.0)
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            "internal alias unless its graph input densely carries every mutated byte range",
+                        ):
+                            compiled_auto_write_before(base[5:])
+
+        def write_within_input_through_alias(a):
+            alias = a.detach()
+            alias.add_(100)
+            alias.add_(100)
+            return a.clone()
+
+        compiled_write_within_input = aot_function(
+            write_within_input_through_alias,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        ref_inp = torch.arange(5.0)
+        test_inp = ref_inp.clone()
+        ref_out = write_within_input_through_alias(ref_inp)
+        test_out = compiled_write_within_input(test_inp)
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_inp, ref_inp)
+
+        for input_slice in (slice(None, 5), slice(5, None)):
+            ref_base = torch.arange(10.0)
+            test_base = ref_base.clone()
+            ref_out = write_within_input_through_alias(ref_base[input_slice])
+            test_out = compiled_write_within_input(test_base[input_slice])
+            self.assertEqual(test_out, ref_out)
+            self.assertEqual(test_base, ref_base)
+
+        def direct_write_with_live_alias(a):
+            alias = a.detach()
+            a.add_(100)
+            return alias.clone()
+
+        compiled_direct_with_alias = aot_function(
+            direct_write_with_live_alias,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        ref_base = torch.arange(10.0)
+        test_base = ref_base.clone()
+        ref_out = direct_write_with_live_alias(ref_base[::2])
+        test_out = compiled_direct_with_alias(test_base[::2])
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_base, ref_base)
+
+        def direct_then_alias_write(a):
+            a.add_(100)
+            a.detach().add_(100)
+            return a.clone()
+
+        compiled_direct_then_alias = aot_function(
+            direct_then_alias_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        ref_base = torch.arange(10.0)
+        test_base = ref_base.clone()
+        ref_out = direct_then_alias_write(ref_base[5:])
+        test_out = compiled_direct_then_alias(test_base[5:])
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_base, ref_base)
+
+        def absolute_alias_write(a):
+            a.as_strided((1,), (1,), 0).add_(100)
+            return a.clone()
+
+        for keep_input_mutations in (False, True):
+            compiled_absolute_alias = aot_function(
+                absolute_alias_write,
+                fw_compiler=nop,
+                bw_compiler=nop,
+                keep_inference_input_mutations=keep_input_mutations,
+            )
+            compiled_absolute_alias(torch.arange(5.0))
+            runtime_base = torch.arange(10.0)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime input carries its entire storage",
+            ):
+                compiled_absolute_alias(runtime_base[5:])
+            self.assertEqual(runtime_base, torch.arange(10.0))
+
+        def fixed_span_alias_write(a):
+            a.as_strided((5,), (1,), 0).add_(100)
+            return a.clone()
+
+        compiled_dynamic_alias = aot_function(
+            fixed_span_alias_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            dynamic=True,
+        )
+        # Bare dynamic aot_function does not evaluate ShapeEnv guards when an
+        # artifact is reused. A trace-time n=5 hint therefore cannot authorize
+        # replay through a carrier that could later have n=2.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "internal alias unless its graph input densely carries every mutated byte range",
+        ):
+            compiled_dynamic_alias(torch.arange(10.0)[:5])
+
+        def empty_alias_write(a):
+            a[:0].add_(1)
+            return a.clone()
+
+        compiled_empty_alias_write = aot_function(
+            empty_alias_write,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        for input_slice in (slice(None, 5), slice(3, 8), slice(None, None, 2)):
+            ref_base = torch.arange(10.0)
+            test_base = ref_base.clone()
+            ref_inp = ref_base[input_slice]
+            test_inp = test_base[input_slice]
+            ref_version = ref_inp._version
+            test_version = test_inp._version
+            ref_out = empty_alias_write(ref_inp)
+            test_out = compiled_empty_alias_write(test_inp)
+            self.assertEqual(test_out, ref_out)
+            self.assertEqual(test_base, ref_base)
+            self.assertEqual(ref_inp._version - ref_version, 1)
+            self.assertEqual(test_inp._version - test_version, 1)
+
+        def alias_write_then_set(a):
+            alias = a.as_strided((5,), (1,), 0)
+            alias.add_(100)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        compiled_write_then_set = aot_function(
+            alias_write_then_set,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        base = torch.arange(10.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "changing storage after a prior data or metadata mutation",
+        ):
+            compiled_write_then_set(base[5:])
+
+        def data_then_set(a):
+            a.add_(100)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        compiled_data_then_set = aot_function(
+            data_then_set,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "changing storage after a prior data or metadata mutation",
+        ):
+            compiled_data_then_set(torch.arange(5.0))
+
+        def metadata_then_set(a):
+            a.resize_(10)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        compiled_metadata_then_set = aot_function(
+            metadata_then_set,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "changing storage after a prior data or metadata mutation",
+        ):
+            compiled_metadata_then_set(torch.empty(0))
+
+        def set_twice(a):
+            a.set_(torch.arange(2.0))
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        compiled_set_twice = aot_function(
+            set_twice,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_a = torch.empty(0)
+        test_a = torch.empty(0)
+        ref_out = set_twice(ref_a)
+        test_out = compiled_set_twice(test_a)
+        self.assertEqual(test_out, ref_out)
+        self.assertTensorMetadataEqual(test_a, ref_a)
+
+        def set_then_data(a, b):
+            with torch.no_grad():
+                a.set_(b)
+                a.add_(1)
+            return a.clone(), b.clone()
+
+        compiled_set_then_data = aot_function(
+            set_then_data,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        ref_a = torch.empty(0)
+        test_a = torch.empty(0)
+        ref_b = torch.arange(3.0)
+        test_b = ref_b.clone()
+        ref_versions = (ref_a._version, ref_b._version)
+        test_versions = (test_a._version, test_b._version)
+        ref_out = set_then_data(ref_a, ref_b)
+        test_out = compiled_set_then_data(test_a, test_b)
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_a, ref_a)
+        self.assertEqual(test_b, ref_b)
+        self.assertEqual(
+            tuple(x._version - v for x, v in zip((test_a, test_b), test_versions)),
+            tuple(x._version - v for x, v in zip((ref_a, ref_b), ref_versions)),
+        )
+
+        def metadata_mutation_through_alias(a):
+            alias = a.detach()
+            alias.resize_(5)
+            return a.clone()
+
+        compiled_alias_metadata = aot_function(
+            metadata_mutation_through_alias,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "metadata mutation through an alias created inside the graph",
+        ):
+            compiled_alias_metadata(torch.arange(10.0))
+
+        def set_through_alias(a):
+            alias = a.detach()
+            alias.set_(torch.arange(3.0))
+            return a.clone()
+
+        compiled_alias_set = aot_function(
+            set_through_alias,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "metadata mutation through an alias created inside the graph",
+        ):
+            compiled_alias_set(torch.arange(10.0))
+
+        def alias_metadata_then_data(a):
+            alias = a.detach()
+            alias.resize_(5)
+            a.add_(1)
+            return a.clone()
+
+        compiled_alias_metadata_then_data = aot_function(
+            alias_metadata_then_data,
+            fw_compiler=nop,
+            bw_compiler=nop,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "metadata mutation through an alias created inside the graph",
+        ):
+            compiled_alias_metadata_then_data(torch.arange(10.0))
+
+    @skipIfDynamoInput("directly exercises AOTAutograd metadata analysis")
+    def test_input_size_mutation_tensor_subclass_errors(self):
+        def f(a, x):
+            torch.add(x, x, out=a)
+            return a.sin()
+
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        a = TwoTensor(torch.empty(6), torch.empty(6))
+        x = TwoTensor(torch.arange(10.0), torch.arange(10.0) + 10)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="An output with one or more elements was resized"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "storage-resizing input mutations on traceable tensor subclasses",
+            ):
+                compiled_f(a, x)
+
     def test_view_and_inplace_view(self):
         def f(a, b):
             a.t_()
@@ -2646,12 +4219,9 @@ def forward(self, primals_1, primals_2):
     return (mul, mul_1)""",
         )
 
-    # This is a torture test:
-    # a and b get turned into a synthetic base in the compiled graph
-    # One gets a data mutation, the other gets a metadata mutation.
-    # We need to make sure that the metadata mutation gets propagated
-    # back to the original input.
-    @skipIfDynamoInput("Dynamo removes runtime error")
+    # A synthetic base consolidates the data update, while its outer wrapper
+    # replays the metadata update and exact version deltas on the user inputs.
+    @skipIfDynamoInput("directly exercises AOTAutograd synthetic bases")
     def test_input_data_and_metadata_mutation_aliases_other_input(self):
         # a and b are aliased
         def f(a, b):
@@ -2667,32 +4237,40 @@ def forward(self, primals_1, primals_2):
             inp2 = x[0]
             return [base], [inp1, inp2]
 
-        self.verify_aot_autograd(
-            f, partial(inp_callable, req_grad=False), test_mutation=True
-        )
-        self.verify_aot_autograd(
-            f, partial(inp_callable, req_grad=True), test_mutation=True
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Encountered aliased inputs that are mutated in the graph, but",
-        ):
+        for req_grad in (False, True):
             self.verify_aot_autograd(
                 f,
-                partial(inp_callable, req_grad=False),
+                partial(inp_callable, req_grad=req_grad),
                 test_mutation=True,
-                make_inputs_subclasses=True,
             )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Encountered aliased inputs that are mutated in the graph, but",
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable, req_grad=True),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Encountered aliased inputs that are mutated in the graph, but",
+            ):
+                self.verify_aot_autograd(
+                    f,
+                    partial(inp_callable, req_grad=req_grad),
+                    test_mutation=True,
+                    make_inputs_subclasses=True,
+                )
+
+        compiled_f = aot_function(f, nop)
+        ref_base = torch.ones(2, 2).add(1)
+        test_base = ref_base.clone()
+        ref_args = (ref_base[0], ref_base[0])
+        test_args = (test_base[0], test_base[0])
+        ref_versions = tuple(x._version for x in (ref_base, *ref_args))
+        test_versions = tuple(x._version for x in (test_base, *test_args))
+        ref_out = f(*ref_args)
+        test_out = compiled_f(*test_args)
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(test_base, ref_base)
+        self.assertEqual(
+            tuple(
+                x._version - v for x, v in zip((test_base, *test_args), test_versions)
+            ),
+            tuple(x._version - v for x, v in zip((ref_base, *ref_args), ref_versions)),
+        )
 
     # https://github.com/pytorch/pytorch/issues/106456
     def test_input_mutation_noncontiguous(self):
@@ -3654,9 +5232,10 @@ def forward(self, primals_1, primals_2):
             fw_graph.code.strip(),
             """\
 def forward(self, primals_1, primals_2):
-    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
-    add = torch.ops.aten.add.Tensor(t, primals_2);  t = primals_2 = None
-    return (add,)""",
+    view = torch.ops.aten.view.default(primals_1, [4]);  primals_1 = None
+    t = torch.ops.aten.t.default(view);  view = None
+    add = torch.ops.aten.add.Tensor(t, primals_2);  primals_2 = None
+    return (t, add)""",
         )
 
     def test_input_mutation_aliases_and_none_require_gradients(self):
@@ -9415,18 +10994,29 @@ def forward(self, primals_1, tangents_1):
             b.t_()
             return a + 1
 
-        base = torch.randn(4, 4)
+        ref_base = torch.randn(4, 4)
+        base = ref_base.clone()
+        ref_a = ref_base[:3, :]
+        ref_b = ref_base[1:, :]
         a = base[:3, :]
         b = base[1:, :]
-
-        a_ref = a.clone()
-        b_shape_before = b.shape
+        ref_versions = tuple(x._version for x in (ref_base, ref_a, ref_b))
+        test_versions = tuple(x._version for x in (base, a, b))
 
         compiled_f = aot_function(f, nop)
-        compiled_f(a, b)
+        ref_out = f(ref_a, ref_b)
+        test_out = compiled_f(a, b)
 
-        self.assertEqual(a, a_ref * 2)
-        self.assertEqual(b.shape, (b_shape_before[1], b_shape_before[0]))
+        self.assertEqual(test_out, ref_out)
+        self.assertEqual(base, ref_base)
+        self.assertTensorMetadataEqual(a, ref_a)
+        self.assertTensorMetadataEqual(b, ref_b)
+        self.assertEqual(
+            tuple(x._version - v for x, v in zip((base, a, b), test_versions)),
+            tuple(
+                x._version - v for x, v in zip((ref_base, ref_a, ref_b), ref_versions)
+            ),
+        )
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_multiple_groups_correctness(self):

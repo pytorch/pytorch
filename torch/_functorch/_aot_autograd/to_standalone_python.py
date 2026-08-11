@@ -202,6 +202,30 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} _unwrap_tensoralias",
             "_unwrap_tensoralias",
         ),
+        id(rt._replay_input_mutation_version_counter): (
+            f"{_RT} _replay_input_mutation_version_counter",
+            "_replay_input_mutation_version_counter",
+        ),
+        id(rt._replay_graph_handled_input_mutation_version_counters): (
+            f"{_RT} _replay_graph_handled_input_mutation_version_counters",
+            "_replay_graph_handled_input_mutation_version_counters",
+        ),
+        id(rt._resize_storage_if_needed): (
+            f"{_RT} _resize_storage_if_needed",
+            "_resize_storage_if_needed",
+        ),
+        id(rt._validate_input_mutation_storage_capacity): (
+            f"{_RT} _validate_input_mutation_storage_capacity",
+            "_validate_input_mutation_storage_capacity",
+        ),
+        id(rt._validate_input_mutation_density): (
+            f"{_RT} _validate_input_mutation_density",
+            "_validate_input_mutation_density",
+        ),
+        id(rt._validate_input_mutation_full_storage): (
+            f"{_RT} _validate_input_mutation_full_storage",
+            "_validate_input_mutation_full_storage",
+        ),
         id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
             f"{_RT} CUDARngStateHelper",
             "CUDARngStateHelper.get_torch_state_as_tuple",

@@ -1,11 +1,15 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
+#include <ATen/EmptyTensor.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
+
+#include <algorithm>
+#include <array>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -15,6 +19,56 @@
 #endif
 
 namespace at {
+namespace {
+
+bool same_sizes(c10::SymIntArrayRef lhs, c10::SymIntArrayRef rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (const auto i : c10::irange(lhs.size())) {
+    if (!TORCH_STATICALLY_KNOWN_TRUE(lhs[i].sym_eq(rhs[i]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Tensor mutation_target_metadata(
+    functionalization::FunctionalStorageImpl* storage,
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& view_metas) {
+  if (storage->mutation_base_layout() != Layout::Strided ||
+      isQIntType(storage->mutation_base_dtype())) {
+    return {};
+  }
+  const auto itemsize = c10::SymInt(static_cast<int64_t>(
+      c10::elementSize(storage->mutation_base_dtype())));
+  const auto storage_numel = storage->mutation_base_storage_nbytes() / itemsize;
+  const std::array<c10::SymInt, 1> storage_sizes{storage_numel};
+  const std::array<c10::SymInt, 1> storage_strides{c10::SymInt(1)};
+  Tensor target = at::detail::empty_strided_symint_meta(
+      storage_sizes, storage_strides, storage->mutation_base_dtype());
+  target.unsafeGetTensorImpl()->set_sizes_and_strides(
+      storage->mutation_base_sizes(),
+      storage->mutation_base_strides(),
+      storage->mutation_base_storage_offset());
+
+  // View replay here is metadata bookkeeping only. Keep it out of the graph
+  // and out of any enclosing functorch transform.
+  at::AutoDispatchSkipFunctionalize functional_guard;
+  const auto excluded_keys = c10::python_ks | c10::functorch_transforms_ks |
+      c10::DispatchKeySet({
+          c10::DispatchKey::FuncTorchDynamicLayerBackMode,
+          c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
+          c10::DispatchKey::PreDispatch,
+      });
+  c10::impl::ExcludeDispatchKeyGuard guard(excluded_keys);
+  for (const auto& view_meta : view_metas) {
+    target = view_meta->forward(target);
+  }
+  return target;
+}
+
+} // namespace
 
 void FunctionalTensorWrapper::set_constructor_metadata() {
   TORCH_INTERNAL_ASSERT(value_.defined());
@@ -135,9 +189,13 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(
           view_value.dtype(),
           base->storage().data_ptr().device()),
       value_(view_value),
+      had_aliased_metadata_mutation_before_storage_change_(
+          base->had_aliased_metadata_mutation_before_storage_change_),
       is_multi_output_view_(
           base->is_multi_output_view_ || meta->is_multi_output),
       was_storage_changed_(base->was_storage_changed_),
+      was_storage_changed_after_mutation_(
+          base->was_storage_changed_after_mutation_),
       is_symbolic_(base->is_symbolic_) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -175,9 +233,18 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 
 // See Note [Functionalization Pass - Inplace View Ops]
 void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
+  TORCH_CHECK(
+      !functional_storage_impl()->was_inductor_storage_resized(),
+      "Functionalization does not support a metadata mutation after "
+      "resize_storage_bytes_");
+  const auto old_sizes = value_.sym_sizes().vec();
+  const auto old_strides = value_.sym_strides().vec();
+  const auto old_storage_offset = value_.sym_storage_offset();
+  const auto had_data_mutation = has_data_mutation();
+  const auto had_explicit_storage_offset = was_storage_offset_mutated_;
   view_metas_.push_back(meta);
   // Manually track the fact that this tensor received a metadata mutation!
-  has_metadata_mutation_ = true;
+  mark_metadata_mutation();
   // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
   maybe_mark_symbolic(meta.get());
   // Note [Functionalization Pass - Inplace View Ops]
@@ -187,6 +254,59 @@ void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functio
   at::AutoDispatchSkipFunctionalize guard;
   value_ = meta->forward(value_);
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
+  if (had_data_mutation) {
+    // A later metadata mutation can make only part of an earlier write visible
+    // through the final carrier. Keep the old span so AOTAutograd can require
+    // full, dense coverage or reject the sequence.
+    record_mutation_storage_nbytes(
+        old_sizes,
+        old_strides,
+        old_storage_offset,
+        had_explicit_storage_offset);
+  }
+  if (!same_sizes(old_sizes, value_.sym_sizes())) {
+    mark_storage_size_mutation();
+  }
+}
+
+void FunctionalTensorWrapper::record_mutation_storage_nbytes() {
+  record_mutation_storage_nbytes(
+      value_.sym_sizes(),
+      value_.sym_strides(),
+      value_.sym_storage_offset(),
+      was_storage_offset_mutated_);
+}
+
+void FunctionalTensorWrapper::record_mutation_storage_nbytes(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    const c10::SymInt& storage_offset,
+    bool has_explicit_storage_offset) {
+  const auto required_storage_nbytes = at::detail::computeStorageNbytes(
+      sizes,
+      strides,
+      c10::SymInt(static_cast<int64_t>(value_.dtype().itemsize())),
+      has_explicit_storage_offset ? storage_offset : c10::SymInt(0));
+  if (has_explicit_storage_offset) {
+    max_mutation_storage_nbytes_with_explicit_offset_ =
+        max_mutation_storage_nbytes_with_explicit_offset_.max(
+            required_storage_nbytes);
+  } else {
+    max_mutation_storage_nbytes_preserving_offset_ =
+        max_mutation_storage_nbytes_preserving_offset_.max(
+            required_storage_nbytes);
+  }
+}
+
+void FunctionalTensorWrapper::mark_metadata_mutation() {
+  has_metadata_mutation_ = true;
+  metadata_mutation_counter_++;
+  functional_storage_impl()->mark_metadata_mutation(
+      !at::GradMode::is_enabled() || InferenceMode::is_enabled());
+}
+
+void FunctionalTensorWrapper::mark_storage_size_mutation() {
+  has_size_mutation_ = true;
 }
 
 // Note [Functionalization: Mutation Removal]
@@ -217,6 +337,16 @@ void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functio
 void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regenerate) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
+  auto old_sizes = value_.sym_sizes().vec();
+  const bool sizes_match = same_sizes(old_sizes, other.sym_sizes());
+  TORCH_CHECK(
+      from_lazy_regenerate || sizes_match || storage().use_count() == 1,
+      "Functionalization does not support resizing a tensor with outstanding aliases");
+  if (!from_lazy_regenerate && !sizes_match && has_data_mutation()) {
+    // Preserve the span of any writes that preceded a shrink. The final data
+    // carrier cannot otherwise reproduce bytes outside its new logical extent.
+    record_mutation_storage_nbytes();
+  }
   value_ = other;
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
@@ -241,11 +371,74 @@ void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regen
   // Example: if a mutation happens to a view under a no_grad,
   // we won't call replace_() on the other alias until the alias is later used, which
   if (!from_lazy_regenerate) {
+    // Record the actual eager write target in bytes. A replacement carrier can
+    // have unrelated strides and offset, so reconstruct the destination from
+    // the functional storage's original metadata and this wrapper's view chain.
+    // Lazy regeneration merely synchronizes an alias and is not another write.
+    // A unique storage cannot have a write through another wrapper. Avoid
+    // constructing symbolic interval expressions unless alias analysis can
+    // need them; doing so also keeps this bookkeeping invisible to FX naming.
+    // Copy-style view replay discards physical coordinates, so outside AOT's
+    // reapply-views mode it is safer to leave the interval unrecorded.
+    mark_data_mutation_requires_full_storage_if_needed();
+    if (storage().use_count() > 1 &&
+        at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
+      record_data_mutation_range();
+    }
+    // Functionalization implements out= operators with replace_(). A resized out
+    // tensor is a real metadata mutation even though no inplace-view rule ran.
+    // Only use sizes here: a fresh functional result may legitimately have
+    // different strides from an existing, noncontiguous output buffer.
+    if (!sizes_match) {
+      mark_metadata_mutation();
+      mark_storage_size_mutation();
+      record_mutation_storage_nbytes();
+    }
     mark_mutation();
     if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
       // This mutation happened under no_grad or inference_mode
       mark_mutation_during_no_grad_or_inference_mode();
     }
+  }
+}
+
+void FunctionalTensorWrapper::record_data_mutation_range() {
+  mark_data_mutation_requires_full_storage_if_needed();
+  // Copy-style view replay does not preserve physical storage coordinates.
+  // Public callers must not record those layouts as exact mutation targets.
+  if (!at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
+    return;
+  }
+  auto mutation_target =
+      mutation_target_metadata(functional_storage_impl(), view_metas_);
+  if (!mutation_target.defined()) {
+    return;
+  }
+  const auto itemsize = c10::SymInt(
+      static_cast<int64_t>(mutation_target.dtype().itemsize()));
+  const auto begin_bytes = mutation_target.sym_storage_offset() * itemsize;
+  const auto end_bytes = TORCH_STATICALLY_KNOWN_TRUE(
+                             mutation_target.sym_numel().sym_eq(0))
+      ? begin_bytes
+      : at::detail::computeStorageNbytes(
+            mutation_target.sym_sizes(),
+            mutation_target.sym_strides(),
+            itemsize,
+            mutation_target.sym_storage_offset());
+  functional_storage_impl()->record_data_mutation_range(
+      begin_bytes, end_bytes);
+}
+
+void FunctionalTensorWrapper::
+    mark_data_mutation_requires_full_storage_if_needed() {
+  if (std::any_of(
+          view_metas_.begin(), view_metas_.end(), [](const auto& view_meta) {
+            return view_meta->is_as_strided;
+          })) {
+    // Unlike ordinary view chains, as_strided may use an absolute storage
+    // offset and reach outside the logical graph input. Trace-time byte ranges
+    // alone cannot certify a cached artifact for a new runtime storage.
+    mark_data_mutation_requires_full_storage();
   }
 }
 
@@ -255,6 +448,16 @@ bool FunctionalTensorWrapper::has_data_mutation() {
 }
 
 void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
+  was_storage_changed_after_mutation_ |= has_data_mutation() ||
+      has_metadata_mutation_ || has_aliased_metadata_mutation() ||
+      functional_storage_impl()->was_inductor_storage_resized();
+  had_aliased_metadata_mutation_before_storage_change_ |=
+      has_aliased_metadata_mutation();
+  // set_() bumps the shared eager version counter even though this wrapper
+  // leaves its old storage. Record that fact before the swap so an input that
+  // remains on the old storage can detect a set_() through an internal alias.
+  functional_storage_impl()->mark_metadata_mutation(
+      !at::GradMode::is_enabled() || InferenceMode::is_enabled());
   // self.set_(src) will cause self to have all of the tensor properties of self.
   value_ = other->value_;
   generation_ = other->generation_;
@@ -266,6 +469,9 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   // Unsafely swap out the storage with other's storage,
   // disconnecting `self` with its view chain
   storage_ = other->storage_;
+  metadata_mutation_counter_ =
+      functional_storage_impl()->metadata_mutation_counter();
+  data_mutation_counter_ = functional_storage_impl()->mutation_counter();
   /// explicitly mark the tensor as having its storage changed from set_()
   // Otherwise, we don't actually have a 100% accurate way to check this.
   // (We could check if the updated value has a new storage than the original value,
@@ -305,7 +511,9 @@ void FunctionalTensorWrapper::storage_resize_(const c10::SymInt& new_size) {
   functional_storage_impl()->mark_inductor_storage_resize(new_size);
 }
 
-void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
+void FunctionalTensorWrapper::maybe_replace_storage(
+    const Tensor& other,
+    size_t mutation_storage_nbytes) {
   // Note [resize_() in functionalization pass]
   // resize_() is a special operator in functionalization because it can reallocate its underlying storage.
   // This function is only ever called in the case that resize_() needs to reallocate its storage to a larger size.
@@ -332,12 +540,20 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   // Given all of the above, for now we're just banning the above usage.
   TORCH_CHECK(storage().use_count() == 1, "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
   TORCH_CHECK(view_metas_.empty(), "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
+  TORCH_CHECK(
+      !functional_storage_impl()->was_inductor_storage_resized(),
+      "Functionalization does not support a metadata mutation after "
+      "resize_storage_bytes_");
   // If this tensor is not a view (and has no outstanding views taken out on it),
   // Then it's safe to throw out the old storage and replace it with the new, larger one.
-  storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(other));
+  auto old_storage_impl = functional_storage_impl();
+  auto new_storage_impl =
+      c10::make_intrusive<functionalization::FunctionalStorageImpl>(other);
+  new_storage_impl->inherit_mutation_state(*old_storage_impl);
+  storage_ = c10::Storage(std::move(new_storage_impl));
   value_ = other;
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
-  generation_ = 0;
+  generation_ = functional_storage_impl()->generation();
   // And update the metadata on the wrapper to reflect the new sizes and strides
   set_sizes_and_strides(value_.sizes(), value_.strides());
   refresh_numel();
@@ -346,7 +562,11 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   refresh_contiguous();
   // Swapping out the storage of a tensor (aka from a resize_() call) will update the sizes and strides of the tensor,
   // so we need to record the fact that metadata was mutated.
-  has_metadata_mutation_ = true;
+  mark_metadata_mutation();
+  mark_storage_size_mutation();
+  max_mutation_storage_nbytes_preserving_offset_ =
+      max_mutation_storage_nbytes_preserving_offset_.max(c10::SymInt(
+          static_cast<int64_t>(mutation_storage_nbytes)));
 }
 
 void FunctionalTensorWrapper::_unsafe_reset_storage() {
@@ -354,6 +574,10 @@ void FunctionalTensorWrapper::_unsafe_reset_storage() {
   storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value_));
   // Reset the generation so that it matches the new storage
   generation_ = 0;
+  metadata_mutation_counter_ = 0;
+  had_aliased_metadata_mutation_before_storage_change_ = false;
+  data_mutation_counter_ = 0;
+  was_storage_changed_after_mutation_ = false;
   // Clear any pre-existing view metas so that base and value_ are semantically the same
   view_metas_.clear();
 }
@@ -408,8 +632,22 @@ void FunctionalTensorWrapper::copy_tensor_metadata(
     dest_impl->value_ = src_impl->value_;
     dest_impl->level_ = src_impl->level_;
     dest_impl->has_metadata_mutation_ = src_impl->has_metadata_mutation_;
+    dest_impl->has_size_mutation_ = src_impl->has_size_mutation_;
+    dest_impl->was_storage_offset_mutated_ =
+        src_impl->was_storage_offset_mutated_;
+    dest_impl->max_mutation_storage_nbytes_preserving_offset_ =
+        src_impl->max_mutation_storage_nbytes_preserving_offset_;
+    dest_impl->max_mutation_storage_nbytes_with_explicit_offset_ =
+        src_impl->max_mutation_storage_nbytes_with_explicit_offset_;
+    dest_impl->metadata_mutation_counter_ =
+        src_impl->metadata_mutation_counter_;
+    dest_impl->had_aliased_metadata_mutation_before_storage_change_ =
+        src_impl->had_aliased_metadata_mutation_before_storage_change_;
+    dest_impl->data_mutation_counter_ = src_impl->data_mutation_counter_;
     dest_impl->is_multi_output_view_ = src_impl->is_multi_output_view_;
     dest_impl->was_storage_changed_ = src_impl->was_storage_changed_;
+    dest_impl->was_storage_changed_after_mutation_ =
+        src_impl->was_storage_changed_after_mutation_;
     dest_impl->is_symbolic_ = src_impl->is_symbolic_;
     dest_impl->generation_ = src_impl->generation_;
     dest_impl->view_metas_ = src_impl->view_metas_;
@@ -677,6 +915,18 @@ void commit_update(const Tensor& functional_tensor) {
 void commit_update(ITensorListRef functional_tensor) {
   for (const auto& t : functional_tensor) {
     commit_update(t);
+  }
+}
+
+void mark_data_mutation_full_overwrite(const Tensor& functional_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)
+      ->mark_data_mutation_full_overwrite();
+}
+
+void mark_data_mutation_full_overwrite(ITensorListRef functional_tensor) {
+  for (const auto& t : functional_tensor) {
+    mark_data_mutation_full_overwrite(t);
   }
 }
 

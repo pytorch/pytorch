@@ -17,7 +17,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any
 
@@ -41,7 +41,11 @@ from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import (
+    compute_required_storage_length,
+    CUDARngStateHelper,
+    is_non_overlapping_and_dense_or_false,
+)
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
@@ -126,6 +130,127 @@ def _unwrap_tensor_subclasses_no_symints(
 zip = strict_zip
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _resize_storage_if_needed(
+    dst: Tensor,
+    src: Tensor,
+    target_storage_offset: int | torch.SymInt,
+) -> None:
+    dst_storage = dst.untyped_storage()
+    required_nbytes = (
+        compute_required_storage_length(
+            src.shape,
+            src.stride(),
+            typing.cast(int, target_storage_offset),
+        )
+        * dst.element_size()
+    )
+    if dst_storage.nbytes() < required_nbytes:
+        dst_storage.resize_(required_nbytes)
+
+
+def _validate_input_mutation_density(tensor: Tensor) -> None:
+    if tensor.layout is not torch.strided or not is_non_overlapping_and_dense_or_false(
+        tensor
+    ):
+        raise RuntimeError(
+            "AOTAutograd cannot safely replay input mutations when "
+            "the runtime input is not non-overlapping and dense"
+        )
+
+
+def _input_mutation_carrier_end(tensor: Tensor) -> int | torch.SymInt:
+    return (
+        tensor.storage_offset() * tensor.element_size()
+        if tensor.numel() == 0
+        else compute_required_storage_length(
+            tensor.shape,
+            tensor.stride(),
+            typing.cast(int, tensor.storage_offset()),
+        )
+        * tensor.element_size()
+    )
+
+
+def _validate_input_mutation_storage_capacity(tensor: Tensor) -> None:
+    """Reject runtime storage capacity that the functional carrier cannot see."""
+    _validate_input_mutation_density(tensor)
+    carrier_end = _input_mutation_carrier_end(tensor)
+    if tensor.untyped_storage().nbytes() > carrier_end:
+        raise RuntimeError(
+            "AOTAutograd cannot replay storage-resizing input mutations when "
+            "the runtime input has hidden trailing storage capacity"
+        )
+
+
+def _validate_input_mutation_full_storage(tensor: Tensor) -> None:
+    _validate_input_mutation_storage_capacity(tensor)
+    if tensor.storage_offset() != 0:
+        raise RuntimeError(
+            "AOTAutograd cannot replay a nonempty internal-alias mutation unless "
+            "the runtime input carries its entire storage"
+        )
+
+
+@contextlib.contextmanager
+def _replay_input_mutation_version_counter(
+    tensor: Tensor, mutation_version_delta: int
+) -> Generator[None, None, None]:
+    """Hide physical replay bumps, then apply the recorded version delta."""
+    if mutation_version_delta < 0:
+        raise AssertionError(
+            "mutation_version_delta must be greater than or equal to zero"
+        )
+
+    # Inference tensors do not have a version counter. In particular, entering the
+    # preservation context would try to read one and raise. Normal tensors used
+    # under inference mode still take the preservation path and retain eager's
+    # version-counter behavior.
+    if tensor.is_inference():
+        yield
+        return
+
+    with torch.autograd._unsafe_preserve_version_counter(tensor):
+        yield
+
+    if mutation_version_delta:
+        torch.autograd.graph.increment_version(
+            itertools.repeat(tensor, mutation_version_delta)
+        )
+
+
+@contextlib.contextmanager
+def _replay_graph_handled_input_mutation_version_counters(
+    mutations: tuple[tuple[Tensor, int], ...],
+) -> Generator[None, None, None]:
+    """Apply logical deltas while hiding consolidated physical graph bumps."""
+    versioned_mutations = tuple(
+        (tensor, mutation_version_delta)
+        for tensor, mutation_version_delta in mutations
+        if not tensor.is_inference()
+    )
+    for tensor, mutation_version_delta in versioned_mutations:
+        if mutation_version_delta < 0:
+            raise AssertionError(
+                "mutation_version_delta must be greater than or equal to zero"
+            )
+        if mutation_version_delta:
+            torch.autograd.graph.increment_version(
+                itertools.repeat(tensor, mutation_version_delta)
+            )
+
+    tensors = tuple(tensor for tensor, _ in versioned_mutations)
+    if not tensors:
+        yield
+        return
+
+    # Functionalization may consolidate several mutations into one graph op or
+    # may emit a copy_ for an alias whose eager version counter did not change.
+    # Preserve the already-replayed logical versions across all physical graph
+    # mutations.
+    with torch.autograd._unsafe_preserve_version_counter(tensors):
+        yield
 
 
 def _unwrap_no_symints(args: list[Any]) -> list[Any]:
@@ -530,10 +655,11 @@ class _FirstInvocationContext:
 
 # Note [RuntimeWrapper codegen specification methods]
 # The run() method on _RuntimeCompiledFnInvoker and the capture_orig_inputs(),
-# increment_mutation_versions(), and finalize() methods on _RuntimeForwardEpilogue
-# are the readable reference implementations for the codegen'd _runtime_wrapper
-# generated in _create_runtime_wrapper(). They are not called on the hot path;
-# the codegen inlines their logic with all branches resolved at compile time.
+# graph_handled_input_mutation_versions() and finalize() methods on
+# _RuntimeForwardEpilogue are the readable reference
+# implementations for the codegen'd _runtime_wrapper generated in
+# _create_runtime_wrapper(). They are not called on the hot path; the codegen
+# inlines their logic with all branches resolved at compile time.
 #
 # WARNING: Any semantic change to the runtime wrapper must be reflected in both
 # the reference methods here and the codegen in _create_runtime_wrapper().
@@ -619,6 +745,16 @@ class _RuntimeForwardEpilogue:
 
     def __post_init__(self) -> None:
         epilogue_args_idx = list(self.runtime_metadata.mutated_inp_runtime_indices)
+        for i, info in enumerate(self.runtime_metadata.input_info):
+            if (
+                info.mutation_replay_requires_full_storage
+                or info.mutation_replay_overwrites_storage
+                or info.mutation_replay_resizes_storage
+                or (info.mutates_data and info.mutates_metadata)
+            ) and i not in epilogue_args_idx:
+                # Runtime safety checks must also see graph-handled mutations;
+                # they run before the compiled graph can mutate an input.
+                epilogue_args_idx.append(i)
         for info in self.runtime_metadata.output_info:
             if (
                 info.output_type == OutputType.alias_of_input
@@ -628,7 +764,8 @@ class _RuntimeForwardEpilogue:
                     raise AssertionError(
                         f"expected info.base_idx to be int, got {type(info.base_idx)}"
                     )
-                epilogue_args_idx.append(info.base_idx)
+                if info.base_idx not in epilogue_args_idx:
+                    epilogue_args_idx.append(info.base_idx)
         self.epilogue_args_idx = tuple(epilogue_args_idx)
 
         if config.unlift_effect_tokens:
@@ -652,16 +789,30 @@ class _RuntimeForwardEpilogue:
     def capture_orig_inputs(self, args: list[Any]) -> dict[int, Tensor]:
         return {i: typing.cast(Tensor, args[i]) for i in self.epilogue_args_idx}
 
-    # WARNING: this is a reference implementation; the hot path uses codegen'd
-    # code from _create_runtime_wrapper(). Keep both in sync.
-    # See Note [RuntimeWrapper codegen specification methods]
-    def increment_mutation_versions(self, args: list[Any]) -> None:
-        if self.keep_input_mutations:
-            mutated_args = (
-                args[i]
-                for i in self.runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
+    def validate_input_mutation_storage_capacity(
+        self, orig_inputs: dict[int, Tensor]
+    ) -> None:
+        for inpt_idx, meta in enumerate(self.runtime_metadata.input_info):
+            if meta.mutation_replay_requires_full_storage:
+                _validate_input_mutation_full_storage(orig_inputs[inpt_idx])
+            elif meta.mutation_replay_overwrites_storage:
+                _validate_input_mutation_density(orig_inputs[inpt_idx])
+            elif meta.mutation_replay_resizes_storage:
+                _validate_input_mutation_storage_capacity(orig_inputs[inpt_idx])
+            elif meta.mutates_data and meta.mutates_metadata:
+                _validate_input_mutation_density(orig_inputs[inpt_idx])
+
+    def graph_handled_input_mutation_versions(
+        self, args: list[Any]
+    ) -> AbstractContextManager[None]:
+        mutations = tuple(
+            (
+                typing.cast(Tensor, args[i]),
+                self.runtime_metadata.input_info[i].mutation_version_delta,
             )
-            torch.autograd.graph.increment_version(mutated_args)
+            for i in self.runtime_metadata.mutated_graph_handled_indices
+        )
+        return _replay_graph_handled_input_mutation_version_counters(mutations)
 
     # WARNING: this is a reference implementation; the hot path uses codegen'd
     # code from _create_runtime_wrapper(). Keep both in sync.
@@ -731,11 +882,16 @@ class _RuntimeForwardEpilogue:
                             f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
                         )
                     updated_inpt = updated_inpt.alias
-                with torch.no_grad():
-                    if meta.mutation_is_shallow_copy_data:
-                        torch.ops.aten.shallow_copy_data_(original_inpt, updated_inpt)
-                    else:
-                        original_inpt.set_(updated_inpt)
+                with _replay_input_mutation_version_counter(
+                    original_inpt, meta.mutation_version_delta
+                ):
+                    with torch.no_grad():
+                        if meta.mutation_is_shallow_copy_data:
+                            torch.ops.aten.shallow_copy_data_(
+                                original_inpt, updated_inpt
+                            )
+                        else:
+                            original_inpt.set_(updated_inpt)
                 continue
             if meta.mutates_metadata and not meta.mutates_data:
                 if self.trace_joint:
@@ -744,36 +900,47 @@ class _RuntimeForwardEpilogue:
                             f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
                         )
                     updated_inpt = updated_inpt.alias
-                # We need to grab the size/stride/storage_offset from the compiled forward,
-                # and use that to mutate the metadata of the input
-                original_inpt.as_strided_(
-                    updated_inpt.size(),
-                    updated_inpt.stride(),
-                    updated_inpt.storage_offset(),
+                # We need to grab the size/stride/storage_offset from the compiled
+                # forward, and use that to mutate the metadata of the input.
+                target_storage_offset = (
+                    original_inpt.storage_offset()
+                    if meta.mutation_replay_preserves_storage_offset
+                    else updated_inpt.storage_offset()
                 )
-            else:
-                if meta.mutates_data and meta.mutates_metadata:
-                    original_inpt.as_strided_(
-                        updated_inpt.size(),
-                        updated_inpt.stride(),
-                        updated_inpt.storage_offset(),
+                with _replay_input_mutation_version_counter(
+                    original_inpt, meta.mutation_version_delta
+                ):
+                    if meta.mutation_replay_resizes_storage:
+                        _resize_storage_if_needed(
+                            original_inpt,
+                            updated_inpt,
+                            target_storage_offset,
+                        )
+                    metadata_grad_ctx = (
+                        torch.no_grad()
+                        if meta.mutations_under_no_grad_or_inference_mode
+                        or (meta.is_leaf and original_inpt.requires_grad)
+                        else nullcontext()
                     )
-                else:
-                    if not meta.mutates_data:
-                        raise AssertionError("expected meta.mutates_data to be True")
+                    with metadata_grad_ctx:
+                        original_inpt.as_strided_(
+                            updated_inpt.size(),
+                            updated_inpt.stride(),
+                            target_storage_offset,
+                        )
+                continue
+
+            def copy_updated_input() -> None:
                 if meta.is_leaf and original_inpt.requires_grad:
                     # We can hit this situation in this case:
                     #   def f(x):
                     #       x.detach().mul_(2)
                     #       return x + 1
                     # AOTAutograd will see a mutation in the above case, and try to
-                    # apply a copy_() here, in the epilogue.
-                    # But if x required gradients, and is a leaf, then autograd
-                    # will yell at us for trying to mutate it.
-                    # However, it's only possible to end up in this scenario (like the above)
-                    # if all of the mutations to the leaf input were non-autograd-tracking mutations
-                    # (aka mutations under no_grad(), or on detached views).
-                    # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
+                    # apply a copy_() here, in the epilogue. But if x required
+                    # gradients and is a leaf, autograd will reject it. Reaching this
+                    # path means all mutations were non-autograd-tracking, so
+                    # detaching the replay is correct.
                     original_inpt.detach().copy_(updated_inpt)
                 else:
                     # Check if we have stream index information for this mutated input
@@ -788,6 +955,43 @@ class _RuntimeForwardEpilogue:
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
                     original_inpt.copy_(updated_inpt)
+
+            if meta.mutates_data and meta.mutates_metadata:
+                # Replaying one logical mixed mutation requires both as_strided_()
+                # and copy_(), and multiple logical mutations can be consolidated into
+                # the same pair. Hide those physical bumps, then apply the exact delta
+                # observed on the functional input wrapper.
+                with _replay_input_mutation_version_counter(
+                    original_inpt, meta.mutation_version_delta
+                ):
+                    target_storage_offset = (
+                        original_inpt.storage_offset()
+                        if meta.mutation_replay_preserves_storage_offset
+                        else updated_inpt.storage_offset()
+                    )
+                    if meta.mutation_replay_resizes_storage:
+                        _resize_storage_if_needed(
+                            original_inpt,
+                            updated_inpt,
+                            target_storage_offset,
+                        )
+                    mutation_grad_ctx = (
+                        torch.no_grad()
+                        if meta.mutations_hidden_from_autograd
+                        or meta.mutations_under_no_grad_or_inference_mode
+                        else nullcontext()
+                    )
+                    with mutation_grad_ctx:
+                        original_inpt.as_strided_(
+                            updated_inpt.size(),
+                            updated_inpt.stride(),
+                            target_storage_offset,
+                        )
+                        copy_updated_input()
+            else:
+                if not meta.mutates_data:
+                    raise AssertionError("expected meta.mutates_data to be True")
+                copy_updated_input()
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -820,19 +1024,26 @@ def _codegen_capture_orig_inputs(
         buf.emit("orig_inputs = {}", indent=1)
 
 
-def _codegen_increment_mutation_versions(
-    buf: "PySourceBuilder",
-    keep_input_mutations: bool,
-    runtime_metadata: ViewAndMutationMeta,
+def _codegen_validate_input_mutation_storage_capacity(
+    buf: "PySourceBuilder", runtime_metadata: ViewAndMutationMeta
 ) -> None:
-    if (
-        keep_input_mutations
-        and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
-    ):
-        buf.add_global("_increment_version_", torch.autograd.graph.increment_version)
-        mut_idx = tuple(runtime_metadata.mutated_graph_handled_indices_seen_by_autograd)
-        gen_expr = ", ".join(f"args[{i}]" for i in mut_idx)
-        buf.emit(f"_increment_version_(({gen_expr},))", indent=1)
+    for i, meta in enumerate(runtime_metadata.input_info):
+        if meta.mutation_replay_requires_full_storage:
+            helper_name = "_validate_input_mutation_full_storage_"
+            helper = _validate_input_mutation_full_storage
+        elif meta.mutation_replay_overwrites_storage:
+            helper_name = "_validate_input_mutation_density_"
+            helper = _validate_input_mutation_density
+        elif meta.mutation_replay_resizes_storage:
+            helper_name = "_validate_input_mutation_storage_capacity_"
+            helper = _validate_input_mutation_storage_capacity
+        elif meta.mutates_data and meta.mutates_metadata:
+            helper_name = "_validate_input_mutation_density_"
+            helper = _validate_input_mutation_density
+        else:
+            continue
+        buf.add_global(helper_name, helper)
+        buf.emit(f"{helper_name}(orig_inputs[{i}])", indent=1)
 
 
 def _codegen_normalize_as_list(
@@ -849,58 +1060,68 @@ def _codegen_compiled_fn_invocation(
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
+    *,
+    indent_level: int = 1,
 ) -> None:
-    buf.emit("with _first_ctx_():", indent=1)
+    buf.emit("with _first_ctx_():", indent=indent_level)
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
     if trace_joint:
-        buf.emit("args_ = list(args)", indent=2)
+        buf.emit("args_ = list(args)", indent=indent_level + 1)
         for idx in indices_of_inps_to_detach:
             buf.emit(
                 f"if isinstance(args_[{idx}], torch.Tensor): "
                 f"args_[{idx}] = args_[{idx}].detach()",
-                indent=2,
+                indent=indent_level + 1,
             )
         buf.emit(
-            "prev_view_replay_enabled = torch._C._is_view_replay_enabled()", indent=2
+            "prev_view_replay_enabled = torch._C._is_view_replay_enabled()",
+            indent=indent_level + 1,
         )
-        buf.emit("try:", indent=2)
-        buf.emit("if not prev_view_replay_enabled:", indent=3)
-        buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
-        buf.emit("with torch.enable_grad():", indent=3)
-        buf.emit("_on_before_call_()", indent=4)
+        buf.emit("try:", indent=indent_level + 1)
+        buf.emit("if not prev_view_replay_enabled:", indent=indent_level + 2)
+        buf.emit("torch._C._set_view_replay_enabled(True)", indent=indent_level + 3)
+        buf.emit("with torch.enable_grad():", indent=indent_level + 2)
+        buf.emit("_on_before_call_()", indent=indent_level + 3)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=4)
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=5)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=5)
+            buf.emit("with _DisableAutocast_():", indent=indent_level + 3)
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=indent_level + 4)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 4)
         else:
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
-        buf.emit("finally:", indent=2)
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=indent_level + 3)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 3)
+        buf.emit("finally:", indent=indent_level + 1)
         buf.emit(
             "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
-            indent=3,
+            indent=indent_level + 2,
         )
         buf.emit(
-            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)", indent=4
+            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)",
+            indent=indent_level + 3,
         )
     else:
-        buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
-        buf.emit("try:", indent=2)
-        buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
-        buf.emit("_on_before_call_()", indent=3)
+        buf.emit("grad_enabled = torch.is_grad_enabled()", indent=indent_level + 1)
+        buf.emit("try:", indent=indent_level + 1)
+        buf.emit(
+            "if grad_enabled: torch._C._set_grad_enabled(False)",
+            indent=indent_level + 2,
+        )
+        buf.emit("_on_before_call_()", indent=indent_level + 2)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=3)
-            buf.emit("all_outs = _compiled_fn_(args)", indent=4)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
+            buf.emit("with _DisableAutocast_():", indent=indent_level + 2)
+            buf.emit("all_outs = _compiled_fn_(args)", indent=indent_level + 3)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 3)
         else:
-            buf.emit("all_outs = _compiled_fn_(args)", indent=3)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
-        buf.emit("finally:", indent=2)
-        buf.emit("if grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
-    buf.emit("del args", indent=1)
+            buf.emit("all_outs = _compiled_fn_(args)", indent=indent_level + 2)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 2)
+        buf.emit("finally:", indent=indent_level + 1)
+        buf.emit(
+            "if grad_enabled: torch._C._set_grad_enabled(True)",
+            indent=indent_level + 2,
+        )
+    buf.emit("del args", indent=indent_level)
 
 
 # signatures mirror the _RuntimeForwardEpilogue reference methods
@@ -1076,7 +1297,18 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _resize_storage_if_needed=_resize_storage_if_needed,
+        )
+        if any(
+            runtime_metadata.input_info[i].mutates_metadata
+            for i in runtime_metadata.mutated_inp_runtime_indices
+        ):
+            buf.bind(
+                _replay_input_mutation_version_counter=_replay_input_mutation_version_counter
+            )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1092,47 +1324,122 @@ def _create_runtime_wrapper(
                         buf.writeline(f"{u} = _unwrap_tensoralias({ui})")
                     else:
                         buf.writeline(f"{u} = {ui}")
-                    buf.writeline(f"with torch.no_grad(): {oi}.set_({u})")
+                    buf.writeline(
+                        "with _replay_input_mutation_version_counter("
+                        f"{oi}, {meta.mutation_version_delta}):"
+                    )
+                    with buf.indent():
+                        if meta.mutation_is_shallow_copy_data:
+                            buf.writeline(
+                                f"with torch.no_grad(): "
+                                f"torch.ops.aten.shallow_copy_data_({oi}, {u})"
+                            )
+                        else:
+                            buf.writeline(f"with torch.no_grad(): {oi}.set_({u})")
                 elif meta.mutates_metadata and not meta.mutates_data:
                     u = buf.fresh_name("_u")
                     if trace_joint:
                         buf.writeline(f"{u} = _unwrap_tensoralias({ui})")
                     else:
                         buf.writeline(f"{u} = {ui}")
-                    buf.writeline(
-                        f"{oi}.as_strided_({u}.size(), {u}.stride(), {u}.storage_offset())"
+                    target_offset = (
+                        f"{oi}.storage_offset()"
+                        if meta.mutation_replay_preserves_storage_offset
+                        else f"{u}.storage_offset()"
                     )
+                    buf.writeline(
+                        "with _replay_input_mutation_version_counter("
+                        f"{oi}, {meta.mutation_version_delta}):"
+                    )
+                    with buf.indent():
+                        if meta.mutation_replay_resizes_storage:
+                            buf.writeline(
+                                f"_resize_storage_if_needed({oi}, {u}, {target_offset})"
+                            )
+                        if meta.mutations_under_no_grad_or_inference_mode:
+                            buf.writeline("with torch.no_grad():")
+                            with buf.indent():
+                                buf.writeline(
+                                    f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                                )
+                        elif meta.is_leaf:
+                            buf.writeline(f"if {oi}.requires_grad:")
+                            with buf.indent():
+                                buf.writeline("with torch.no_grad():")
+                                with buf.indent():
+                                    buf.writeline(
+                                        f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                                    )
+                            buf.writeline("else:")
+                            with buf.indent():
+                                buf.writeline(
+                                    f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                                )
+                        else:
+                            buf.writeline(
+                                f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                            )
                 else:
+
+                    def emit_copy() -> None:
+                        if meta.is_leaf:
+                            buf.writeline(
+                                f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
+                            )
+                            buf.writeline(f"else: {oi}.copy_({ui})")
+                        else:
+                            has_stream = (
+                                runtime_metadata.mutated_inp_stream_indices is not None
+                                and i < len(runtime_metadata.mutated_inp_stream_indices)
+                                and runtime_metadata.mutated_inp_stream_indices[i]
+                                is not None
+                            )
+                            if has_stream:
+                                msg_name = buf.bind_value(
+                                    "_stream_err",
+                                    "Mutations on inputs with user-specified streams are not yet supported. "
+                                    "See: https://github.com/pytorch/pytorch/issues/172522",
+                                )
+                                buf.writeline(f"raise RuntimeError({msg_name})")
+                            else:
+                                buf.writeline(f"{oi}.copy_({ui})")
+
                     if meta.mutates_data and meta.mutates_metadata:
-                        buf.writeline(
-                            f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
+                        target_offset = (
+                            f"{oi}.storage_offset()"
+                            if meta.mutation_replay_preserves_storage_offset
+                            else f"{ui}.storage_offset()"
                         )
+                        buf.writeline(
+                            "with _replay_input_mutation_version_counter("
+                            f"{oi}, {meta.mutation_version_delta}):"
+                        )
+                        with buf.indent():
+                            if meta.mutation_replay_resizes_storage:
+                                buf.writeline(
+                                    f"_resize_storage_if_needed({oi}, {ui}, {target_offset})"
+                                )
+                            if (
+                                meta.mutations_hidden_from_autograd
+                                or meta.mutations_under_no_grad_or_inference_mode
+                            ):
+                                buf.writeline("with torch.no_grad():")
+                                with buf.indent():
+                                    buf.writeline(
+                                        f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {target_offset})"
+                                    )
+                                    emit_copy()
+                            else:
+                                buf.writeline(
+                                    f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {target_offset})"
+                                )
+                                emit_copy()
                     else:
                         if not meta.mutates_data:
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
-                    if meta.is_leaf:
-                        buf.writeline(
-                            f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
-                        )
-                        buf.writeline(f"else: {oi}.copy_({ui})")
-                    else:
-                        has_stream = (
-                            runtime_metadata.mutated_inp_stream_indices is not None
-                            and i < len(runtime_metadata.mutated_inp_stream_indices)
-                            and runtime_metadata.mutated_inp_stream_indices[i]
-                            is not None
-                        )
-                        if has_stream:
-                            msg_name = buf.bind_value(
-                                "_stream_err",
-                                "Mutations on inputs with user-specified streams are not yet supported. "
-                                "See: https://github.com/pytorch/pytorch/issues/172522",
-                            )
-                            buf.writeline(f"raise RuntimeError({msg_name})")
-                        else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                        emit_copy()
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -1156,9 +1463,32 @@ def _create_runtime_wrapper(
     buf.bind(torch=torch)
 
     _codegen_capture_orig_inputs(buf, epilogue_args_idx)
-    _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
+    _codegen_validate_input_mutation_storage_capacity(buf, runtime_metadata)
+    graph_handled_input_mutations = tuple(
+        (i, runtime_metadata.input_info[i].mutation_version_delta)
+        for i in runtime_metadata.mutated_graph_handled_indices
+    )
+    invocation_indent = 1
+    if graph_handled_input_mutations:
+        buf.add_global(
+            "_replay_graph_input_mutation_versions_",
+            _replay_graph_handled_input_mutation_version_counters,
+        )
+        mutation_args = ", ".join(
+            f"(args[{i}], {mutation_version_delta})"
+            for i, mutation_version_delta in graph_handled_input_mutations
+        )
+        buf.emit(
+            f"with _replay_graph_input_mutation_versions_(({mutation_args},)):",
+            indent=1,
+        )
+        invocation_indent = 2
     _codegen_compiled_fn_invocation(
-        buf, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf,
+        trace_joint,
+        indices_of_inps_to_detach,
+        disable_amp,
+        indent_level=invocation_indent,
     )
     _codegen_epilogue(
         buf,
@@ -1848,6 +2178,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
+    aliased_arg_idx_with_mutations: list[int] = field(default_factory=list)
+    aliased_arg_mutation_version_deltas: list[int] = field(default_factory=list)
     base_groups: dict[int, list[int]] = field(
         default_factory=lambda: collections.defaultdict(list)
     )
@@ -1941,6 +2273,19 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
+        self.aliased_arg_idx_with_mutations = [
+            outer_idx
+            for outer_idx, entry in enumerate(synthetic_base_info)
+            if isinstance(entry, tuple)
+            and (
+                fw_metadata.input_info[outer_idx].mutates_data
+                or fw_metadata.input_info[outer_idx].mutates_metadata
+            )
+        ]
+        self.aliased_arg_mutation_version_deltas = [
+            fw_metadata.input_info[i].mutation_version_delta
+            for i in self.aliased_arg_idx_with_mutations
+        ]
         replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
@@ -2005,7 +2350,20 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 flat_args_descs=flat_args_descs_with_synthetic_bases,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
+                allow_aliased_metadata_mutations=True,
             )(*flat_args_with_synthetic_bases)
+            # The recomputation sees every regenerated alias mutation on the
+            # synthetic base. At runtime those exact logical version deltas are
+            # instead replayed on the original user inputs by this outer
+            # wrapper, so normalize the deliberately hidden inner-base delta
+            # before comparing the rest of the metadata.
+            for base_idx in self.base_groups:
+                ref_fw_metadata.input_info[base_idx] = replace(
+                    ref_fw_metadata.input_info[base_idx],
+                    mutation_version_delta=(
+                        fw_metadata_updated.input_info[base_idx].mutation_version_delta
+                    ),
+                )
             if ref_fw_metadata != fw_metadata_updated:
                 raise AssertionError(
                     f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
@@ -2035,7 +2393,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 
         num_bases = len(base_groups)
         aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
+        aliased_mut_indices = self.aliased_arg_idx_with_mutations
+        aliased_mut_version_deltas = self.aliased_arg_mutation_version_deltas
         num_meta_mut = len(aliased_meta_mut_indices)
+        num_mut = len(aliased_mut_indices)
 
         buf = PySourceBuilder(
             "_synthetic_base_wrapper",
@@ -2043,6 +2404,12 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             artifact_name="synthetic_base_wrapper",
         )
         buf.bind(torch=torch, _compiled_fn_=compiled_fn)
+        if num_mut > 0:
+            buf.bind(
+                _replay_synthetic_input_mutation_versions_=(
+                    _replay_graph_handled_input_mutation_version_counters
+                )
+            )
 
         with buf.indent():
             buf.writeline(f"_bases = [None] * {num_bases}")
@@ -2076,26 +2443,49 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
                 buf.writeline(f"_meta_mut = [{meta_items}]")
 
-            buf.writeline("args.clear()")
-            buf.writeline("_outs = _compiled_fn_(_new_args)")
-
-            if num_meta_mut > 0:
-                # Handles metadata mutations on inputs that were merged into
-                # synthetic bases (create_synthetic_base_metadata hides these
-                # from the normal tracking by forcing mutates_metadata=False
-                # on the base).  Metadata mutations on non-aliased inputs are
-                # handled separately by _apply_input_mutations in the runtime
-                # epilogue.
-                buf.writeline(f"_mut_inps = _outs[-{num_meta_mut}:]")
-                buf.writeline(f"_user_outs = _outs[:-{num_meta_mut}]")
-                buf.writeline("for _inp, _mi in zip(_meta_mut, _mut_inps):")
-                with buf.indent():
-                    buf.writeline(
-                        "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
+            if num_mut > 0:
+                mutation_items = ", ".join(
+                    f"(args[{i}], {delta})"
+                    for i, delta in zip(
+                        aliased_mut_indices,
+                        aliased_mut_version_deltas,
                     )
-                buf.writeline("return _user_outs")
+                )
+                buf.writeline(f"_version_mutations = ({mutation_items},)")
+
+            buf.writeline("args.clear()")
+
+            def emit_call_and_metadata_replay() -> None:
+                buf.writeline("_outs = _compiled_fn_(_new_args)")
+
+                if num_meta_mut > 0:
+                    # Handles metadata mutations on inputs that were merged into
+                    # synthetic bases (create_synthetic_base_metadata hides these
+                    # from the normal tracking by forcing mutates_metadata=False
+                    # on the base). Metadata mutations on non-aliased inputs are
+                    # handled separately by _apply_input_mutations in the runtime
+                    # epilogue.
+                    buf.writeline(f"_mut_inps = _outs[-{num_meta_mut}:]")
+                    buf.writeline(f"_user_outs = _outs[:-{num_meta_mut}]")
+                    buf.writeline("for _inp, _mi in zip(_meta_mut, _mut_inps):")
+                    with buf.indent():
+                        buf.writeline(
+                            "_inp.as_strided_("
+                            "_mi.size(), _mi.stride(), _mi.storage_offset())"
+                        )
+                    buf.writeline("return _user_outs")
+                else:
+                    buf.writeline("return _outs")
+
+            if num_mut > 0:
+                buf.writeline(
+                    "with _replay_synthetic_input_mutation_versions_("
+                    "_version_mutations):"
+                )
+                with buf.indent():
+                    emit_call_and_metadata_replay()
             else:
-                buf.writeline("return _outs")
+                emit_call_and_metadata_replay()
 
         inner_fn = buf.build(wrapped_fn=compiled_fn)
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
@@ -2217,8 +2607,12 @@ def merge_view_inputs(
             f"expected len(fwd_inputs) == len(mutated_input_info), "
             f"got {len(fwd_inputs)} != {len(mutated_input_info)}"
         )
-    if not [info for info in mutated_input_info if info.mutates_data]:
-        # Return early when there are no mutations.
+
+    if not any(
+        info.mutates_data or info.mutates_metadata for info in mutated_input_info
+    ):
+        # Avoid querying storage for mutation-free inputs. Some tensor layouts,
+        # including sparse tensors, intentionally do not expose one.
         return fwd_inputs, fwd_inputs_descs, None
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
@@ -2229,12 +2623,51 @@ def merge_view_inputs(
     base_args_descs = []
     other_args_descs = []
     for i, (inpt, source) in enumerate(zip(fwd_inputs, fwd_inputs_descs)):
-        if isinstance(inpt, Tensor):
+        if (
+            isinstance(inpt, Tensor)
+            and inpt.layout is torch.strided
+            and not inpt.is_nested
+        ):
             storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
             other_args_descs.append(source)
+    # A combined data-and-metadata mutation changes how that same input
+    # addresses its storage, but synthetic-base view inversion is built from
+    # the input's original metadata. It would scatter the update into the wrong
+    # locations. A metadata-only mutation on a different alias remains
+    # supported by the synthetic-base metadata-mutation epilogue.
+    for aliased_input_indices in storage_ref_to_idx.values():
+        metadata_mutated_indices = [
+            idx
+            for idx in aliased_input_indices
+            if mutated_input_info[idx].mutates_metadata
+        ]
+        size_and_data_mutated_indices = [
+            idx
+            for idx in metadata_mutated_indices
+            if mutated_input_info[idx].mutates_size
+            and mutated_input_info[idx].mutates_data
+        ]
+        if len(aliased_input_indices) > 1 and size_and_data_mutated_indices:
+            raise RuntimeError(
+                "AOTAutograd does not support input size mutations on aliased "
+                f"inputs. Mutated input indices: {size_and_data_mutated_indices}"
+            )
+        combined_mutated_indices = [
+            idx
+            for idx in metadata_mutated_indices
+            if mutated_input_info[idx].mutates_data
+        ]
+        if len(aliased_input_indices) > 1 and combined_mutated_indices:
+            raise RuntimeError(
+                "AOTAutograd does not support input metadata mutations on "
+                f"aliased inputs. Mutated input indices: {combined_mutated_indices}"
+            )
+    if not [info for info in mutated_input_info if info.mutates_data]:
+        # Return early when there are no data mutations.
+        return fwd_inputs, fwd_inputs_descs, None
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:

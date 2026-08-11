@@ -28,7 +28,13 @@ from torch._prims_common import CUDARngStateHelper
 # ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
 from .functional_utils import gen_alias_from_base
 from .runtime_wrappers import (
+    _replay_graph_handled_input_mutation_version_counters,
+    _replay_input_mutation_version_counter,
+    _resize_storage_if_needed,
     _unwrap_tensoralias,
+    _validate_input_mutation_density,
+    _validate_input_mutation_full_storage,
+    _validate_input_mutation_storage_capacity,
     mark_dynamo_propagated_dynamic_indices,
 )
 from .utils import normalize_as_list
@@ -36,7 +42,13 @@ from .utils import normalize_as_list
 
 __all__ = [
     "gen_alias_from_base",
+    "_replay_graph_handled_input_mutation_version_counters",
+    "_replay_input_mutation_version_counter",
+    "_resize_storage_if_needed",
     "_unwrap_tensoralias",
+    "_validate_input_mutation_density",
+    "_validate_input_mutation_full_storage",
+    "_validate_input_mutation_storage_capacity",
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",
     "CUDARngStateHelper",
