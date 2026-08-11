@@ -82,6 +82,8 @@ class TestUnevenParamShard(FSDPTestContinuous):
             self.assertEqual(ref_weight_out, weight_out)
 
 
-instantiate_device_type_tests(TestUnevenParamShard, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestUnevenParamShard, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
