@@ -4,8 +4,9 @@ THE contract an op author programs against. The mechanism behind it (the
 validating loader, discovery, decl_id) lives in
 torchgen/native_aot_decl.py and is re-exported here, because installed
 torchgen must load declarations out of tree, where tools/ is not shipped.
-This file stays the documented home of the contract: every module
-docstring, generated .cpp header and README section names this path.
+This file stays the documented home of the contract: torchgen, the
+runtime coverage layer, cmake/Codegen.cmake and the README all name
+this path.
 
 An op opts into AOT by shipping ``torch/_native/ops/<op>/aot.py``, a
 module whose scope is TORCH-FREE (torch lazily inside function bodies)
@@ -50,6 +51,12 @@ Required exports (module or declaration object):
                               C++ invoking this point's kernel via
                               launch_fn(...); no allocation, no fallback
                               (the chain's return false IS the fallback)
+
+Emitted C++ (any of the cpp_* exports) sees ATen/core/Tensor.h, not
+ATen/ATen.h -- Tensor methods all work, but calling an at:: FACTORY
+(at::empty, at::zeros, at::cat, ...) or an operator like `t + t` needs
+its per-op header added to FILE_TMPL in gen_aot_lib.py. The failure is a
+loud "'empty' is not a member of 'at'" at build time, not a silent one.
 
 Optional exports:
 

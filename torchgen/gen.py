@@ -2124,7 +2124,7 @@ def gen_headers(
     native_aot_manifests = native_aot_manifests or {}
     # NB: structured_native_functions contains every NativeFunctionsGroup,
     # structured or not, and base names can repeat across groups (e.g. bmm
-    # and bmm.dtype, or gt.Scalar and gt.Tensor). The stub signature must
+    # and bmm.dtype, or sum and sum.dim_IntList). The stub signature must
     # come from the STRUCTURED group the manifest targets (validation
     # guarantees exactly one match per manifest: qualified ops match the
     # exact overload, base names require a unique structured group).
