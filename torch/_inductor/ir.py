@@ -56,7 +56,7 @@ from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
-from torch._native.ops.sum import inner_tree_plan
+from torch._native.ops.reductions import inner_tree_plan
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
