@@ -1,0 +1,47 @@
+name: Test remote BuildKit composite action
+
+# Throwaway check that pytorch/test-infra's docker-build-remote-buildkit action
+# works when called from this repo. Scoped to its own branch so it cannot run
+# anywhere else; delete the branch (and this file) once the action has landed.
+on:
+  push:
+    branches:
+      - huydhn/test-remote-buildkit-action
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: mt-l-x86iavx512-16-128
+    container:
+      image: ghcr.io/actions/actions-runner:latest
+    # The actions-runner container defaults `run:` to sh.
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 30
+    steps:
+      - name: Write a trivial build context
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/ctx"
+          cat > "${RUNNER_TEMP}/ctx/Dockerfile" <<'EOF'
+          FROM alpine:3.20
+          ARG GREETING=hello
+          RUN echo "${GREETING} from remote buildkit" > /greeting
+          EOF
+
+      # No checkout: the runner fetches the action from GitHub, and the build
+      # context is generated above.
+      - name: Build with the remote BuildKit action
+        uses: pytorch/test-infra/.github/actions/docker-build-remote-buildkit@osdc-remote-buildkit-action
+        with:
+          context: ${{ runner.temp }}/ctx
+          tags: ghcr.io/pytorch/pytorch-buildkit-action-check:${{ github.sha }}
+          build-args: |
+            GREETING=pytorch-ci
+          # Build only. Pushing would need either GHCR_PAT or an ECR repository
+          # on role/arc's allowlist; test-infra's own smoke test covers --push.
+          push: false
