@@ -1376,17 +1376,8 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_get_cft_handle(self) -> None:
         hdl = self._init_process()
-        # Without this the CUDA backend would raise below and be swallowed as
-        # "CFT unavailable", turning a wrong-backend run into a silent skip.
         self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
-        try:
-            _, self_le_offset = hdl.get_peer_cft_handle(self.rank)
-        except RuntimeError as e:
-            # Querying our own rank is the only reliable probe: it fails both
-            # on hardware without CFT and on a communicator built without
-            # host-side CFT. The answer is identical on every rank, so no rank
-            # skips while others enter the multimem collective below.
-            self.skipTest(f"host-side CFT unavailable: {e}")
+        _, self_le_offset = hdl.get_peer_cft_handle(self.rank)
 
         le_ids = set()
         for peer in range(self.world_size):
