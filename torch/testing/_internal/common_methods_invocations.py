@@ -10091,7 +10091,8 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if requires_grad:
-        # backward tests would take too long to complete, causing the job timeout.
+        # Keep the grad sample small (no mask/biases): composite-compliance
+        # forward-AD cost grows as ~4^(num tensors) and times out otherwise.
         bsz = 2
         is_batcheds = (True,)
         use_separate_proj_weights = (False,)
@@ -10100,7 +10101,7 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
         tgt_lens = (XS,)
         heads = (2,)
         dropouts = (0.5,)
-        mask_types = ("2d",)
+        mask_types = (None,)
     else:
         bsz = 2
         is_batcheds = (False, True)
@@ -10140,11 +10141,14 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
             k_proj_weight = None
             v_proj_weight = None
 
-        bias_k = make_input(emb_size)
-        bias_v = make_input(emb_size)
-        in_proj_bias = make_input(emb_size * 3)
         out_proj_weight = make_input(emb_size, emb_size)
-        out_proj_bias = make_input(emb_size)
+        if requires_grad:
+            bias_k = bias_v = in_proj_bias = out_proj_bias = None
+        else:
+            bias_k = make_input(emb_size)
+            bias_v = make_input(emb_size)
+            in_proj_bias = make_input(emb_size * 3)
+            out_proj_bias = make_input(emb_size)
         sample_args = (
             k, v, emb_size, num_heads, in_proj_weight,
             in_proj_bias, bias_k, bias_v, False,
