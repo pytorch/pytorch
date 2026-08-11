@@ -62,7 +62,7 @@ Tensor pad_tensor_to_shape(
 } // namespace
 
 
-Tensor NestedTensor_expand_as(const Tensor& self, const Tensor& other) {
+Tensor expand_as_nested(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       !self.is_nested() && self.dim() == 0,
       "expand_as(): only a scalar can be expanded to a NestedTensor");

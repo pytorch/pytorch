@@ -2612,7 +2612,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_expand_as
+    CompositeImplicitAutograd: expand_as
+    CompositeImplicitAutogradNestedTensor: expand_as_nested
 
 # decomposes to eye.m
 - func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor

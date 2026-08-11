@@ -928,6 +928,10 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         nt.sum().backward()
         self.assertEqual(nt.grad, torch.ones_like(nt))
 
+        nt.grad = None
+        nt.mean().backward()
+        self.assertEqual(nt.grad, torch.full_like(nt, 1 / nt.numel()))
+
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
