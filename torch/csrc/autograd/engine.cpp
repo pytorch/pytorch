@@ -286,10 +286,10 @@ Engine::~Engine() {
 // running Even though readyQueue should be empty, shutdown tasks have the
 // highest priority
 void Engine::stop() {
-  if (stopped_) {
+  if (stopped_.load(std::memory_order_acquire)) {
     return;
   }
-  stopped_ = true;
+  stopped_.store(true, std::memory_order_release);
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str =
@@ -1704,7 +1704,7 @@ void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
           device_index < device_queues_size_.load(std::memory_order_acquire),
       "Device index out of bounds");
 
-  if (stopped_) {
+  if (stopped_.load(std::memory_order_acquire)) {
     return;
   }
 
@@ -1730,7 +1730,7 @@ void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
       track_bad_autograd_forks();
       ensure_thread_pool_initialized();
 
-      C10_LOG_API_USAGE_ONCE(
+      c10::LogAPIUsage(
           "torch.autograd.thread_start." + std::to_string(device_index));
 
       try {
@@ -1751,10 +1751,13 @@ void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
   }
 
   while (!device_thread_ready_[device_index].load(std::memory_order_acquire)) {
+    if (stopped_.load(std::memory_order_acquire)) {
+      return;
+    }
     std::this_thread::yield();
   }
 
-  if (stopped_) {
+  if (stopped_.load(std::memory_order_acquire)) {
     device_ready_queues_[device_index]->pushShutdownTask();
   }
 }

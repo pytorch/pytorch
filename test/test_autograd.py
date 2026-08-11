@@ -18294,9 +18294,6 @@ instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
 
-instantiate_parametrized_tests(TestAutograd)
-instantiate_parametrized_tests(TestNestedCheckpoint)
-
 
 class TestLazyAutogradEngineInit(TestCase):
     """Tests verifying that autograd device threads are initialized lazily."""
@@ -18374,8 +18371,11 @@ for tid in os.listdir(task_path):
         pass
 print(json.dumps(sorted(thread_names)))
 """
-        stdout, _ = TestCase.run_process_no_exception(code)
-        thread_names = set(json.loads(stdout.decode()))
+        stdout, stderr = TestCase.run_process_no_exception(code)
+        try:
+            thread_names = set(json.loads(stdout.decode()))
+        except json.JSONDecodeError:
+            self.fail(f"Subprocess produced invalid output.\nstdout: {stdout.decode()}\nstderr: {stderr.decode()}")
         self.assertIn("pt_autograd_0", thread_names)
         self.assertIn("pt_autograd_1", thread_names)
         for i in range(2, torch.cuda.device_count()):
@@ -18420,8 +18420,11 @@ for tid in os.listdir(task_path):
         pass
 print(json.dumps(sorted(thread_names)))
 """
-        stdout, _ = TestCase.run_process_no_exception(code)
-        thread_names = set(json.loads(stdout.decode()))
+        stdout, stderr = TestCase.run_process_no_exception(code)
+        try:
+            thread_names = set(json.loads(stdout.decode()))
+        except json.JSONDecodeError:
+            self.fail(f"Subprocess produced invalid output.\nstdout: {stdout.decode()}\nstderr: {stderr.decode()}")
         self.assertIn("pt_autograd_0", thread_names)
         self.assertIn("pt_autograd_1", thread_names)
         for i in range(2, torch.cuda.device_count()):
@@ -18429,6 +18432,10 @@ print(json.dumps(sorted(thread_names)))
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @unittest.skipIf(IS_WINDOWS, "fork not supported on Windows")
+    @unittest.skipIf(
+        (torch.cuda.device_count() < 2) if TEST_CUDA else True,
+        "requires 2+ GPUs",
+    )
     def test_fork_after_backward_prevents_new_threads(self):
         """After backward + fork, child cannot start new device threads."""
         code = """import torch
@@ -18441,7 +18448,7 @@ x = torch.randn(4, 4, device="cuda:0", requires_grad=True)
 pid = os.fork()
 if pid == 0:
     try:
-        y = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda:1", requires_grad=True)
         (y @ y.T).sum().backward()
     except RuntimeError as e:
         if "fork" in str(e).lower():
@@ -18450,9 +18457,12 @@ if pid == 0:
 else:
     os.waitpid(pid, 0)
 """
-        s = TestCase.runWithPytorchAPIUsageStderr(code)
-        self.assertIn("FORK_ERROR_CAUGHT", s)
+        _, stderr = TestCase.run_process_no_exception(code)
+        self.assertIn("FORK_ERROR_CAUGHT", stderr.decode())
 
+
+instantiate_parametrized_tests(TestAutograd)
+instantiate_parametrized_tests(TestNestedCheckpoint)
 
 if __name__ == "__main__":
     run_tests()

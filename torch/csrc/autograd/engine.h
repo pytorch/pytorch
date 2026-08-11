@@ -242,7 +242,7 @@ struct TORCH_API Engine {
   void ensure_thread_pool_initialized();
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
+  std::deque<std::shared_ptr<ReadyQueue>> device_ready_queues_;
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::function<void()>> final_callbacks_;
@@ -296,7 +296,7 @@ struct TORCH_API Engine {
   // class, in order to avoid a data-race-on-vptr. Use this boolean to guard
   // whether stop() has already been called, so we can call this in every
   // destructor of the class hierarchy.
-  bool stopped_{false};
+  std::atomic<bool> stopped_{false};
 };
 
 // allow python_engine to override the default engine when it loads
