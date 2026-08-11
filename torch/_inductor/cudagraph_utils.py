@@ -360,15 +360,19 @@ def check_multiple_devices_or_any_cpu_nodes(
         return format_default_skip_message(msg)
 
     if len(device_node_mapping) == 1:
-        device = next(iter(device_node_mapping.keys()))
+        device_type = next(iter(device_node_mapping.keys())).type
         try:
-            interface = get_interface_for_device(device.type)
+            if get_interface_for_device(device_type).is_graph_capture_supported(
+                device_type
+            ):
+                return None
         except NotImplementedError:
-            # Devices without a registered DeviceInterface fall through to the
-            # skip message below, matching the previous hardcoded behavior.
-            interface = None
-        if interface is not None and interface.is_graph_capture_supported():
-            return None
+            # Devices without a registered DeviceInterface get the same skip
+            # message as registered ones without the capability.
+            pass
+        return format_default_skip_message(
+            f"device type '{device_type}' does not support graph capture"
+        )
 
     keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")

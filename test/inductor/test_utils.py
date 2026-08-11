@@ -46,6 +46,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -1249,55 +1251,84 @@ class TestHasTriton(TestCase):
         # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
         iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
         self.assertFalse(self._run([("fake", iface)]))
-class _FakeDevice:
-    """Duck-typed stand-in for torch.device: the cudagraph eligibility gate
-    only reads ``.type`` on the mapping keys, and out-of-tree device types
-    cannot be constructed via torch.device() without renaming the PrivateUse1
-    backend."""
-
-    def __init__(self, device_type: str) -> None:
-        self.type = device_type
 
 
-class _AccInterface(DeviceInterface):
+class _CapturableInterface(DeviceInterface):
     """Fake out-of-tree accelerator interface that opts into graph capture."""
 
     @classmethod
-    def is_graph_capture_supported(cls) -> bool:
+    def is_graph_capture_supported(cls, device: torch.types.Device = None) -> bool:
         return True
 
 
+@instantiate_parametrized_tests
 class TestCheckMultipleDevicesOrAnyCpuNodes(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Force lazy registry initialization before any mock.patch.dict on
+        # device_interfaces: patch.dict restores the dict but not the module
+        # flag init_device_reg sets, so initializing inside a patched dict
+        # would leave the registry permanently empty for later tests.
+        device_interface.get_interface_for_device("cpu")
+
     def test_single_cuda_device_is_eligible(self):
         # No CUDA runtime needed: the gate only consults the capability bit.
         mapping = {torch.device("cuda"): None}
         self.assertIsNone(check_multiple_devices_or_any_cpu_nodes(mapping))
 
-    def test_single_device_without_capability_is_skipped(self):
+    @parametrize("device_type", ("xpu", "mps"))
+    def test_single_device_without_capability_is_skipped(self, device_type):
         # Registered in-tree interfaces inherit the safe default (False).
-        for device_type in ("xpu", "mps"):
-            mapping = {torch.device(device_type): None}
-            msg = check_multiple_devices_or_any_cpu_nodes(mapping)
-            self.assertIsNotNone(msg)
-            self.assertIn("multiple devices", msg)
-
-    def test_out_of_tree_backend_with_capability_is_eligible(self):
-        register_interface_for_device("acc", _AccInterface)
-        try:
-            mapping = {_FakeDevice("acc"): None}
-            self.assertIsNone(check_multiple_devices_or_any_cpu_nodes(mapping))
-        finally:
-            # There is no unregister API; drop the throwaway entry directly.
-            device_interface.device_interfaces.pop("acc", None)
-
-    def test_unregistered_device_is_skipped_without_raising(self):
-        # "acc" is not registered here: get_interface_for_device raises
-        # NotImplementedError internally, which the gate must swallow and
-        # turn into the same skip message as before.
-        mapping = {_FakeDevice("acc"): None}
+        mapping = {torch.device(device_type): None}
         msg = check_multiple_devices_or_any_cpu_nodes(mapping)
         self.assertIsNotNone(msg)
-        self.assertIn("multiple devices", msg)
+        self.assertIn(f"device type '{device_type}' does not support", msg)
+
+    def test_out_of_tree_backend_with_capability_is_eligible(self):
+        with mock.patch.dict(device_interface.device_interfaces):
+            register_interface_for_device("privateuseone", _CapturableInterface)
+            mapping = {torch.device("privateuseone", 0): None}
+            self.assertIsNone(check_multiple_devices_or_any_cpu_nodes(mapping))
+
+    def test_unregistered_device_is_skipped_without_raising(self):
+        # An unregistered device type must produce a skip message, not leak
+        # the NotImplementedError from get_interface_for_device.
+        with mock.patch.dict(device_interface.device_interfaces):
+            device_interface.device_interfaces.pop("privateuseone", None)
+            mapping = {torch.device("privateuseone", 0): None}
+            msg = check_multiple_devices_or_any_cpu_nodes(mapping)
+        self.assertIsNotNone(msg)
+        self.assertIn("does not support graph capture", msg)
+
+    def test_cudagraphs_backend_skips_capable_non_cuda_device(self):
+        # A backend that declares the capability must get a graceful skip from
+        # the dynamo cudagraphs backend, not an AssertionError: its capture
+        # path is still CUDA-specific.
+        from torch._dynamo.backends import cudagraphs as cudagraphs_backend
+
+        device = torch.device("privateuseone", 0)
+        with (
+            mock.patch.dict(device_interface.device_interfaces),
+            mock.patch.object(
+                cudagraphs_backend,
+                "get_device_node_mapping",
+                return_value={device: None},
+            ),
+            mock.patch.object(
+                cudagraphs_backend,
+                "check_for_mutation_ignore_cuda_graph_managed_tensor",
+                return_value=None,
+            ),
+            mock.patch.object(
+                cudagraphs_backend,
+                "get_first_incompatible_cudagraph_node",
+                return_value=None,
+            ),
+        ):
+            register_interface_for_device("privateuseone", _CapturableInterface)
+            skip = cudagraphs_backend.check_for_skip(mock.Mock(), 0)
+            self.assertIsNotNone(skip)
+            self.assertIn("not supported by the cudagraphs backend", skip)
 
 
 if __name__ == "__main__":

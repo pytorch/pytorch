@@ -123,10 +123,18 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
         ):
             return mut_skip
 
-    if skip := check_multiple_devices_or_any_cpu_nodes(
-        get_device_node_mapping(aot_model)
-    ):
+    device_node_mapping = get_device_node_mapping(aot_model)
+    if skip := check_multiple_devices_or_any_cpu_nodes(device_node_mapping):
         return skip
+
+    device = next(iter(device_node_mapping))
+    if device.type != "cuda":
+        # The capability bit admits any backend that supports graph capture,
+        # but this backend's capture path is still CUDA-specific: skip
+        # gracefully instead of crashing in get_device_index below.
+        return format_default_skip_message(
+            f"device type '{device.type}' not supported by the cudagraphs backend"
+        )
 
     if node := get_first_incompatible_cudagraph_node(aot_model):
         return format_default_skip_message(f"incompatible op ({node.name})")
@@ -135,9 +143,15 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
 
 
 def get_device_index(gm: torch.fx.GraphModule) -> int:
-    device = next(iter(get_device_node_mapping(gm)))
-    if device.type != "cuda":
-        raise AssertionError(f"Expected CUDA device, got {device.type}")
+    # check_for_skip only lets single-cuda-device graphs through; pick the
+    # cuda entry rather than iteration order (the mapping may also contain
+    # meta devices, which the eligibility gate filters out on its own copy).
+    device = next((d for d in get_device_node_mapping(gm) if d.type == "cuda"), None)
+    if device is None:
+        raise AssertionError(
+            "get_device_index expects a graph admitted by check_for_skip "
+            "(single cuda device)"
+        )
     return device.index
 
 
