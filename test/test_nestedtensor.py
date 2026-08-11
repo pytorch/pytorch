@@ -908,6 +908,26 @@ class TestNestedTensor(NestedTensorTestCase):
 
 @markDynamoStrictTest
 class TestNestedTensorDeviceType(NestedTensorTestCase):
+    @parametrize("layout", [torch.strided, torch.jagged])
+    def test_expand_as(self, device, layout):
+        nt = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(4, 3)],
+            device=device,
+            layout=layout,
+            requires_grad=True,
+        )
+        scalar = torch.randn((), device=device, requires_grad=True)
+
+        expanded = scalar.expand_as(nt)
+        self.assertEqual(expanded, torch.full_like(nt, scalar.item()))
+        self.assertTrue(expanded._is_view())
+
+        expanded.values().sum().backward()
+        self.assertEqual(scalar.grad, nt.numel())
+
+        nt.sum().backward()
+        self.assertEqual(nt.grad, torch.ones_like(nt))
+
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
