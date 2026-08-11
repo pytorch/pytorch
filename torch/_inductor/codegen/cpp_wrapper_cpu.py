@@ -25,7 +25,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, cpp_builder, ir
+from .. import config, ir
 from ..ir import ExternKernel
 from ..utils import (
     _align,
@@ -405,12 +405,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if force_mutable or c_type.endswith("*"):
             return f"{array_expr}.data()"
 
-        # MSVC does not support implicitly converting a const iterator to a const
-        # pointer, so use data() and cast to keep const qualification.
-        if cpp_builder.is_msvc_cl():
-            return f"static_cast<const {c_type}*>({array_expr}.data())"
-
-        return f"{array_expr}.cbegin()"
+        return f"static_cast<const {c_type}*>({array_expr}.data())"
 
     def _generate_kernel_call_helper(
         self,

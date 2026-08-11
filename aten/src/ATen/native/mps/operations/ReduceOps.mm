@@ -528,49 +528,21 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
   return output_t;
 }
 
+static void argmax_argmin_out_mps(const Tensor& input_t,
+                                  std::optional<int64_t> dim,
+                                  bool keepdim,
+                                  const Tensor& output_t,
+                                  MPSReductionType reduction_type,
+                                  const std::string& func_name);
+static void value_reduction_kernel_mps(TensorIterator& iter, const std::string& op_prefix);
+
 static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  IntArrayRef input_shape = input_t.sizes();
-  int64_t num_in_elements = c10::multiply_integers(input_shape);
-
   Tensor output_t = at::empty({}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  if (output_t.numel() == 0 || num_in_elements == 0) {
+  if (output_t.numel() == 0 || input_t.numel() == 0) {
     return output_t;
   }
-
-  @autoreleasepool {
-    std::string key = func_name + getTensorsStringKey(input_t);
-    CachedGraph* cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-
-      MPSGraphTensor* castOutputTensor = nil;
-      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
-
-      NSArray<NSNumber*>* axes = getTensorAxes(input_t);
-      if (reduction_type == MPSReductionType::MAX) {
-        castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
-      } else if (reduction_type == MPSReductionType::MIN) {
-        castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
-      }
-
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, @[ @1 ]);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
+  auto iter = at::meta::make_reduction(input_t, output_t, IntArrayRef{}, /*keepdim=*/false, input_t.scalar_type());
+  value_reduction_kernel_mps(iter, reduction_type == MPSReductionType::MIN ? "min_" : "max_");
   return output_t;
 }
 
@@ -590,73 +562,11 @@ static void min_max_out_mps(const Tensor& input_t,
     return;
   }
 
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-    MPSGraphTensor* indicesTensor_ = nil;
-  };
-
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
-
-  // Calculate the output shape according to keepdim=True
-  // If there is no dim argument, the input shape is flattened
-  IntArrayRef input_shape = input_t.sizes();
-  int64_t num_input_dims = input_shape.size();
-  NSMutableArray<NSNumber*>* apparent_out_shape = nil;
-
-  apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-  for (const auto i : c10::irange(num_input_dims)) {
-    apparent_out_shape[i] = dim_ == i ? @1 : [NSNumber numberWithInt:input_shape[i]];
-  }
-
-  auto stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + std::to_string(dim_);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* outputTensor = nil;
-      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
-
-      if (reduction_type == MPSReductionType::MAX) {
-        outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-      } else if (reduction_type == MPSReductionType::MIN) {
-        outputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-      }
-
-      MPSGraphTensor* argreduceOutTensor = nil;
-      if (reduction_type == MPSReductionType::MAX)
-        argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor
-                                                                axis:(NSInteger)dim_
-                                                                name:@"argmax_out"];
-      else if (reduction_type == MPSReductionType::MIN)
-        argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor
-                                                                axis:(NSInteger)dim_
-                                                                name:@"argmax_out"];
-
-      MPSGraphTensor* indicesTensor = nil;
-      if ([argreduceOutTensor dataType] != MPSDataTypeInt64) {
-        indicesTensor = [mpsGraph castTensor:argreduceOutTensor toType:MPSDataTypeInt64 name:@"cast_out"];
-      }
-
-      if ([outputTensor dataType] != getMPSDataType(output_t)) {
-        outputTensor = castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type());
-      }
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->indicesTensor_ = indicesTensor;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
-    auto indicesPlaceholder = Placeholder(cachedGraph->indicesTensor_, indices_t, apparent_out_shape);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder, indicesPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
+  argmax_argmin_out_mps(input_t, dim_, keepdim, indices_t, reduction_type, func_name);
+  int64_t dims[1] = {dim_};
+  auto iter = at::meta::make_reduction(input_t, output_t, IntArrayRef(dims, 1), keepdim, input_t.scalar_type());
+  value_reduction_kernel_mps(iter, reduction_type == MPSReductionType::MIN ? "min_" : "max_");
 }
 
 // Min/Max with dim
@@ -753,6 +663,22 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     input = input_t;
     output_view = keepdim ? output_t : output_t.unsqueeze(dim_);
     reduce_dim = dim_;
+    // A permuted view becomes contiguous once the reduced dim is moved
+    // innermost or outermost (free for transposes); sliced or padded views
+    // stay strided and are handled by the strided outer path below.
+    // output_view moves along so the generic fallback still sees matching
+    // input/output dim order.
+    if (!input.is_contiguous()) {
+      if (auto moved_inner = input_t.movedim(dim_, -1); moved_inner.is_contiguous()) {
+        input = std::move(moved_inner);
+        reduce_dim = input.dim() - 1;
+        output_view = output_view.movedim(dim_, -1);
+      } else if (auto moved_outer = input_t.movedim(dim_, 0); moved_outer.is_contiguous()) {
+        input = std::move(moved_outer);
+        reduce_dim = 0;
+        output_view = output_view.movedim(dim_, 0);
+      }
+    }
   } else {
     input = input_t.contiguous().view(-1);
     output_view = output_t.view({1});
@@ -773,46 +699,223 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   const auto op_prefix = is_argmax ? "argmax" : "argmin";
   const auto in_str = scalarToMetalTypeString(in_kdtype);
   MPSStream* stream = getCurrentMPSStream();
+  const auto nd = input.dim();
 
-  // Fast paths: when the reduced dim is the outermost or innermost dim of a
-  // contiguous input (and the output is contiguous), dispatch a specialized
-  // kernel with a tuned grid layout, mirroring value_reduction_outer /
-  // value_reduction_inner.
-  if (dim.has_value() && input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 2 &&
-      (reduce_dim == 0 || reduce_dim == input.dim() - 1)) {
-    const bool is_outer = (reduce_dim == 0);
-    const uint32_t M = is_outer ? static_cast<uint32_t>(input.size(0))
-                                : static_cast<uint32_t>(input.numel() / input.size(input.dim() - 1));
-    const uint32_t N = is_outer ? static_cast<uint32_t>(input.numel() / input.size(0))
-                                : static_cast<uint32_t>(input.size(input.dim() - 1));
-    const auto kernel_name = fmt::format("{}_reduction_{}_{}_long", op_prefix, is_outer ? "outer" : "inner", in_str);
+  // Size-1 reduced dim: only index 0 is reachable.
+  if (dim.has_value() && input.size(reduce_dim) == 1) {
+    output_t.fill_(0);
+    return;
+  }
+
+  auto encode_arg_inner = [&](const Tensor& in, uint32_t num_rows, uint32_t row_len) {
+    const auto kname = fmt::format("{}_reduction_inner_{}_long", op_prefix, in_str);
+    const auto num_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
+    auto ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 4> sizes_s{num_rows, row_len, 0, 0};
+    mtl_setArgs(ce, in, output_t, sizes_s);
+    [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  // The outer kernel views the input as [outer_size, dim_size, inner_size]
+  // through explicit strides (contiguous callers pass the contiguous
+  // strides of that view), reducing dim; grid z walks the outer batches.
+  // With partials, this is split-K pass 1 over a single batch: grid y cuts
+  // the dim rows into num_segs segments, one (value, index) pair each.
+  auto encode_arg_outer = [&](const Tensor& in,
+                              uint32_t dim_size,
+                              uint32_t inner_size,
+                              uint32_t outer_size,
+                              uint32_t dim_stride,
+                              uint32_t inner_stride,
+                              uint32_t outer_stride,
+                              uint32_t num_segs,
+                              const std::optional<std::pair<Tensor, Tensor>>& partials) {
+    const auto split = partials.has_value();
+    const auto kname = split ? fmt::format("{}_reduction_outer_p1_{}", op_prefix, in_str)
+                             : fmt::format("{}_reduction_outer_{}_long", op_prefix, in_str);
+    const auto num_tg_x = c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
+    auto ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, num_segs, 0};
+    const std::array<uint32_t, 4> strides_s{dim_stride, inner_stride, outer_stride, 0};
+    mtl_setArgs(ce, in, output_t, sizes_s, strides_s);
+    if (split) {
+      mtl_setArgs<4>(ce, partials->first, partials->second);
+    }
+    [ce dispatchThreads:MTLSizeMake(
+                            num_tg_x * OUTER_TG_WIDTH, (split ? num_segs : 1) * OUTER_TG_HEIGHT, split ? 1 : outer_size)
+        threadsPerThreadgroup:MTLSizeMake(OUTER_TG_WIDTH, OUTER_TG_HEIGHT, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  auto encode_arg_narrow_p1 = [&](const Tensor& in,
+                                  const Tensor& vals,
+                                  const Tensor& idxs,
+                                  uint32_t dim_size,
+                                  uint32_t inner_size,
+                                  uint32_t num_segs) {
+    const auto kname = fmt::format("{}_reduction_narrow_p1_{}", op_prefix, in_str);
+    auto ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, num_segs, 0};
+    mtl_setArgs(ce, in, vals, idxs, sizes_s);
+    const auto active = (NARROW_TG_SIZE / inner_size) * inner_size;
+    [ce dispatchThreads:MTLSizeMake(active, num_segs, 1) threadsPerThreadgroup:MTLSizeMake(active, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  auto encode_arg_inner_p1 = [&](const Tensor& in,
+                                 const Tensor& vals,
+                                 const Tensor& idxs,
+                                 uint32_t num_rows,
+                                 uint32_t row_len,
+                                 uint32_t seg_len,
+                                 uint32_t num_segs) {
+    const auto kname = fmt::format("{}_reduction_inner_p1_{}", op_prefix, in_str);
+    const auto num_partials = num_rows * num_segs;
+    const auto num_tgs = at::ceil_div(num_partials, INNER_TG_SIZE / c10::metal::simdgroup_size);
+    auto ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 4> sizes_s{num_partials, seg_len, num_segs, row_len};
+    mtl_setArgs(ce, in, output_t, sizes_s);
+    mtl_setArgs<4>(ce, vals, idxs);
+    [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  auto encode_arg_combine = [&](const Tensor& vals, const Tensor& idxs, uint32_t num_outputs, uint32_t num_segs) {
+    const auto kname = fmt::format("{}_reduction_combine_{}", op_prefix, in_str);
+    const auto num_tgs = at::ceil_div(num_outputs, INNER_TG_SIZE / c10::metal::simdgroup_size);
+    auto ce = stream->commandEncoder();
+    auto ps = lib.getPipelineStateForFunc(kname);
+    getMPSProfiler().beginProfileKernel(ps, func_name, {vals});
+    [ce setComputePipelineState:ps];
+    const std::array<uint32_t, 4> sizes_s{num_outputs, num_segs, 0, 0};
+    mtl_setArgs(ce, vals, output_t, sizes_s, idxs);
+    [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
+    getMPSProfiler().endProfileKernel(ps);
+  };
+  // Shared split-K driver: allocate the [num_outputs, num_segs] (value,
+  // index) partials, run the layout-specific pass 1, resolve with combine.
+  // Winning values are input elements, so the value partials keep the input
+  // dtype (no upcast needed) and the index partials are int32.
+  auto run_arg_split = [&](uint32_t num_outputs, uint32_t num_segs, void (^pass1)(const Tensor&, const Tensor&)) {
+    auto val_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(in_kdtype));
+    auto idx_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(kInt));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
-        id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
-        auto ps = lib.getPipelineStateForFunc(kernel_name);
-        getMPSProfiler().beginProfileKernel(ps, func_name, {input});
-        [ce setComputePipelineState:ps];
-        if (is_outer) {
-          constexpr uint32_t TG_X = 32, TG_Y = 32;
-          // 4th element is trailing pad so the host-side bind matches the
-          // kernel's `constant uint3&` slot (uint3 has 16-byte alignment in
-          // Metal even though only 12 bytes are read). Without this Metal
-          // API validation flags a buffer-length mismatch.
-          const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
-          mtl_setArgs(ce, input, output_t, sizes_s);
-          const auto num_tg_x = c10::metal::ceil_div(N, TG_X);
-          [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
-        } else {
-          constexpr uint32_t rows_per_tg = INNER_TG_SIZE / c10::metal::simdgroup_size;
-          const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
-          struct {
-            uint32_t M, N;
-          } sizes_s = {M, N};
-          mtl_setArgs(ce, input, output_t, sizes_s);
-          [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
-              threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
+        pass1(val_partials, idx_partials);
+        encode_arg_combine(val_partials, idx_partials, num_outputs, num_segs);
+      }
+    });
+  };
+
+  // Non-contiguous input that movedim could not normalize but whose dims
+  // still collapse to [outer_size, dim_size, inner_size] with the dim not
+  // innermost (a sliced or padded view): the outer kernel indexes through
+  // explicit strides. Strided innermost reductions stay on the generic
+  // kernel below. All fast-path kernels index in 32 bits.
+  if (!input.is_contiguous() && output_t.is_contiguous() && reduce_dim < nd - 1 && canUse32BitIndexMath(input)) {
+    c10::DimVector sizes(input.sizes().begin(), input.sizes().end());
+    c10::DimVector strides(input.strides().begin(), input.strides().end());
+    const auto [collapsed_dim, collapsed_ndim] = at::collapse_dims(sizes.data(), strides.data(), nd, reduce_dim);
+    // Usable when at most one collapsed block remains on each side of the
+    // reduced dim: [dim], [dim, inner], [outer, dim] or [outer, dim, inner].
+    if (collapsed_ndim <= 2 || (collapsed_ndim == 3 && collapsed_dim == 1)) {
+      const auto has_outer = collapsed_dim > 0;
+      const auto has_inner = collapsed_dim < collapsed_ndim - 1;
+      const auto outer_size = has_outer ? safe_downcast<uint32_t, int64_t>(sizes[0]) : 1u;
+      const auto dim_size = safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim]);
+      const auto inner_size = has_inner ? safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim + 1]) : 1u;
+      const auto dim_stride = safe_downcast<uint32_t, int64_t>(strides[collapsed_dim]);
+      const auto inner_stride = has_inner ? safe_downcast<uint32_t, int64_t>(strides[collapsed_dim + 1]) : 0u;
+      const auto outer_stride = has_outer ? safe_downcast<uint32_t, int64_t>(strides[0]) : 0u;
+      const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
+      // Tall skinny case: too few threadgroups to fill the GPU, so split
+      // the reduced dim into segments and resolve the (value, index)
+      // partials in a second pass.
+      if (outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS) {
+        const auto num_segs =
+            std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
+        run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+          encode_arg_outer(input, dim_size, inner_size, 1, dim_stride, inner_stride, 0, num_segs, {{vals, idxs}});
+        });
+        return;
+      }
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          encode_arg_outer(
+              input, dim_size, inner_size, outer_size, dim_stride, inner_stride, outer_stride, 1, std::nullopt);
         }
-        getMPSProfiler().endProfileKernel(ps);
+      });
+      return;
+    }
+  }
+
+  if (input.is_contiguous() && output_t.is_contiguous() && canUse32BitIndexMath(input)) {
+    // Any non-innermost dim reduces through the outer layout, viewed as
+    // [outer_size, dim_size, inner_size] with the dim reduced.
+    if (reduce_dim < nd - 1) {
+      const auto outer_size =
+          safe_downcast<uint32_t, int64_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
+      const auto dim_size = safe_downcast<uint32_t, int64_t>(input.size(reduce_dim));
+      const auto inner_size =
+          safe_downcast<uint32_t, int64_t>(input.numel() / (static_cast<int64_t>(outer_size) * dim_size));
+      const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
+      if (outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS) {
+        // inner_size below a threadgroup row: the narrow pass-1 layout
+        // keeps a full threadgroup busy.
+        if (inner_size < OUTER_TG_WIDTH) {
+          const auto num_segs = std::clamp<uint32_t>(
+              (static_cast<int64_t>(dim_size) * inner_size) / NARROW_SPLIT_ELEMS_PER_TG, 2u, SPLIT_MAX_SEGS);
+          run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+            encode_arg_narrow_p1(input, vals, idxs, dim_size, inner_size, num_segs);
+          });
+          return;
+        }
+        const auto num_segs =
+            std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
+        run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+          encode_arg_outer(input, dim_size, inner_size, 1, inner_size, 1, 0, num_segs, {{vals, idxs}});
+        });
+        return;
+      }
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          encode_arg_outer(
+              input, dim_size, inner_size, outer_size, inner_size, 1, dim_size * inner_size, 1, std::nullopt);
+        }
+      });
+      return;
+    }
+    // Innermost dim, which also covers the flattened dim=None view.
+    // Skinny-M/huge-K inputs split each row into segments resolved in a
+    // second pass.
+    const auto row_len = safe_downcast<uint32_t, int64_t>(input.size(nd - 1));
+    const auto num_rows = safe_downcast<uint32_t, int64_t>(input.numel() / row_len);
+    const auto inner_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
+    if (inner_tgs < ARG_SPLIT_MIN_TGS && row_len >= SPLIT_MIN_ROW_LEN) {
+      const auto max_segs =
+          std::min(row_len / ARG_SPLIT_MIN_SEG_LEN, std::max(2u, ARG_SPLIT_TARGET_PARTIALS / std::max(num_rows, 1u)));
+      const auto seg_len = at::ceil_div(row_len, std::max(max_segs, 2u));
+      const auto num_segs = at::ceil_div(row_len, seg_len);
+      run_arg_split(num_rows, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+        encode_arg_inner_p1(input, vals, idxs, num_rows, row_len, seg_len, num_segs);
+      });
+      return;
+    }
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        encode_arg_inner(input, num_rows, row_len);
       }
     });
     return;

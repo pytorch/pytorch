@@ -1746,17 +1746,30 @@ class TestSDPAFailureModes(NNTestCase):
         "kernel",
         PLATFORM_SPECIFIC_SDPA,
     )
-    def test_invalid_fused_inputs_dim_3(self, device, kernel: SDPBackend):
+    def test_fused_inputs_dim_3(self, device, kernel: SDPBackend):
+        size = (2, 3, 8)
+        dtype = torch.float16
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        attn_mask = (
+            None
+            if kernel == SDPBackend.FLASH_ATTENTION
+            else torch.randn(3, 3, device=device, dtype=dtype)
+        )
+
         with sdpa_kernel(backends=[kernel]):
-            # Dim is not 4
-            size = (2, 3, 8)
-            dtype = torch.float16
-            q = torch.randn(size, device=device, dtype=dtype)
-            k = torch.randn(size, device=device, dtype=dtype)
-            v = torch.randn(size, device=device, dtype=dtype)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels requires query, key and value to be 4 dimensional"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v, attn_mask), kernel.value
+            )
+            expected = torch.nn.functional.scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask
+            ).squeeze(0)
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask
+            )
+
+        self.assertEqual(actual, expected)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
@@ -2544,6 +2557,36 @@ class TestSDPACpuOnly(NNTestCase):
         else:
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.FLASH_ATTENTION.value:
                 raise AssertionError("expected FLASH_ATTENTION backend")
+
+    def test_fused_inputs_dim_3_cpu(self, device):
+        size = (2, 3, 8)
+        q = torch.randn(size, device=device)
+        k = torch.randn(size, device=device)
+        v = torch.randn(size, device=device)
+        masks = (
+            None,
+            torch.randn(3, 3, device=device),
+            torch.randn(2, 3, 3, device=device),
+        )
+
+        for attn_mask in masks:
+            normalized_mask = attn_mask
+            while normalized_mask is not None and normalized_mask.dim() < 4:
+                normalized_mask = normalized_mask.unsqueeze(0)
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                self.assertEqual(
+                    torch._fused_sdp_choice(q, k, v, attn_mask),
+                    SDPBackend.FLASH_ATTENTION.value,
+                )
+                expected = F.scaled_dot_product_attention(
+                    q.unsqueeze(0),
+                    k.unsqueeze(0),
+                    v.unsqueeze(0),
+                    normalized_mask,
+                ).squeeze(0)
+                actual = F.scaled_dot_product_attention(q, k, v, attn_mask)
+
+            self.assertEqual(actual, expected)
 
     def _generate_fixed_qkv_helper(
         self,
@@ -3813,7 +3856,6 @@ class TestSDPACudaOnly(NNTestCase):
         with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
             self.assertNotEqual(out1, out2)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
         # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
@@ -4158,6 +4200,23 @@ class TestSDPACudaOnly(NNTestCase):
 
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_single_query_tail_mask(self, device):
+        seq_len, num_heads, head_dim = 289, 16, 512
+        make_tensor = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        query = make_tensor(1, seq_len, num_heads, head_dim).transpose(1, 2)
+        key = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        value = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        mask = torch.ones(seq_len, seq_len, device=device, dtype=torch.bool).tril()[None, None]
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+
+        self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
@@ -5611,6 +5670,36 @@ class TestSDPAXpuOnly(NNTestCase):
         else:
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.OVERRIDEABLE.value:
                 raise AssertionError("expected OVERRIDEABLE backend")
+
+    def test_fused_inputs_dim_3_xpu(self, device):
+        size = (2, 3, 8)
+        q = torch.randn(size, device=device)
+        k = torch.randn(size, device=device)
+        v = torch.randn(size, device=device)
+        masks = (
+            None,
+            torch.randn(3, 3, device=device),
+            torch.randn(2, 3, 3, device=device),
+        )
+
+        for attn_mask in masks:
+            normalized_mask = attn_mask
+            while normalized_mask is not None and normalized_mask.dim() < 4:
+                normalized_mask = normalized_mask.unsqueeze(0)
+            with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+                self.assertEqual(
+                    torch._fused_sdp_choice(q, k, v, attn_mask),
+                    SDPBackend.OVERRIDEABLE.value,
+                )
+                expected = F.scaled_dot_product_attention(
+                    q.unsqueeze(0),
+                    k.unsqueeze(0),
+                    v.unsqueeze(0),
+                    normalized_mask,
+                ).squeeze(0)
+                actual = F.scaled_dot_product_attention(q, k, v, attn_mask)
+
+            self.assertEqual(actual, expected)
 
     def test_backends_set_to_math(self, device):
         dtype = torch.bfloat16
