@@ -13,7 +13,8 @@ import enum
 import sys
 import types
 import typing
-from functools import lru_cache, partial
+import weakref
+from functools import partial
 from typing import NoReturn, TYPE_CHECKING
 
 import torch
@@ -121,10 +122,19 @@ def binop_type_error(
     )
 
 
-@lru_cache(maxsize=256)
+# Weak-keyed so the cache does not keep locally-defined classes (and whatever
+# their methods close over) alive. Values are plain int tuples.
+_type_slots_cache: weakref.WeakKeyDictionary[type, tuple[int, int, int, int]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     """Get all type slots for a type (cached)."""
-    return get_type_slots(obj_type)
+    slots = _type_slots_cache.get(obj_type)
+    if slots is None:
+        slots = _type_slots_cache[obj_type] = get_type_slots(obj_type)
+    return slots
 
 
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
