@@ -186,7 +186,7 @@ def _format_key(args: tuple, kwargs: dict, key_fn: Callable | None) -> str:
 
 def _make_wrapper(
     fn: Callable[..., R],
-    op: str,
+    op: str | Callable[..., str],
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
@@ -230,7 +230,7 @@ def _make_wrapper(
                 outcome = "compiled" if compiled else "cache_hit"
             _emit(
                 CompileEvent(
-                    op=op,
+                    op=op(*args, **kwargs) if callable(op) else op,
                     dsl=dsl,
                     outcome=outcome,
                     compiled=compiled,
@@ -267,7 +267,7 @@ def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
 
 
 def instrument_cutedsl_compile(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
@@ -469,7 +469,7 @@ def instrument_helion_kernel(
 
 
 def instrumented_cutedsl_cache(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
