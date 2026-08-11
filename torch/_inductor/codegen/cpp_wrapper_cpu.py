@@ -46,11 +46,13 @@ from .cpp_utils import (
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
+    _get_profiling_input_handles,
     _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
     HasWriteLine,
+    kernel_profile_enabled,
     PythonWrapperCodegen,
     SymbolicCallArg,
     WrapperLine,
@@ -1875,6 +1877,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1885,10 +1890,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         debug_printer_manager.set_printer_args(
             debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
+        enable_kernel_profile = kernel_profile_enabled()
         enable_kernel_context_guard = (
             enable_kernel_profile and config.cpp.enable_kernel_context_guard
         )
@@ -1899,7 +1901,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             if enable_kernel_profile:
                 call_code = shim_fn_codes[0]
-                shim_fn_codes = ["{"]
+                stack_trace_str = ""
                 if enable_kernel_context_guard:
                     stack_trace_str = 'R"('
                     if stack_traces:
@@ -1908,16 +1910,85 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                 stack_trace_str += f"\n{line}"
                             stack_trace_str += "\n"
                     stack_trace_str += ')"'
-                    shim_fn_codes.append(
-                        f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+
+                has_profiling_inputs = input_handles or num_scalars > 0 or output_handle
+                if has_profiling_inputs:
+                    # Generate IValue conversions so that tensor shapes
+                    # and scalar types are recorded by the profiler.
+                    # Recorded order is [tensor inputs..., scalars..., out],
+                    # which is not the shim's argument order: `out` is passed
+                    # first, and scalars keep their schema position. This
+                    # matches the eager trace layout, so consumers must not zip
+                    # "Input Dims" against the kernel signature.
+                    ivalue_lines: list[str] = []
+                    ivalue_names: list[str] = []
+
+                    if input_handles:
+                        for idx, handle in enumerate(input_handles):
+                            ivalue_var = f"tmp_{shim_fn}_input_{idx}"
+                            ivalue_lines.extend(
+                                [
+                                    f"C10IValueHandle {ivalue_var};",
+                                    f"aoti_torch_tensor_to_ivalue({handle}, &{ivalue_var});",
+                                    f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                                ]
+                            )
+                            ivalue_names.append(ivalue_var)
+
+                    # Generate dummy scalar IValues (we only care about
+                    # shapes, so use int64(0) as a placeholder).
+                    for idx in range(num_scalars):
+                        ivalue_var = f"tmp_{shim_fn}_scalar_{idx}"
+                        ivalue_lines.extend(
+                            [
+                                f"C10IValueHandle {ivalue_var};",
+                                f"aoti_torch_int64_to_ivalue(0, &{ivalue_var});",
+                                f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                            ]
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    if output_handle:
+                        ivalue_var = f"tmp_{shim_fn}_output"
+                        ivalue_lines.extend(
+                            [
+                                f"C10IValueHandle {ivalue_var};",
+                                f"aoti_torch_tensor_to_ivalue({output_handle}, &{ivalue_var});",
+                                f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+                            ]
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    inputs_vec_var = f"{shim_fn}_inputs_"
+                    ivalue_lines.append(
+                        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
                     )
-                shim_fn_codes.extend(
-                    [
-                        f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
-                        call_code,
-                        "}",
-                    ]
-                )
+
+                    shim_fn_codes = ["{", *ivalue_lines]
+                    if enable_kernel_context_guard:
+                        shim_fn_codes.append(
+                            f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                        )
+                    shim_fn_codes.extend(
+                        [
+                            f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr, {inputs_vec_var});""",
+                            call_code,
+                            "}",
+                        ]
+                    )
+                else:
+                    shim_fn_codes = ["{"]
+                    if enable_kernel_context_guard:
+                        shim_fn_codes.append(
+                            f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                        )
+                    shim_fn_codes.extend(
+                        [
+                            f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                            call_code,
+                            "}",
+                        ]
+                    )
             self.writelines(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
@@ -1937,8 +2008,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
+        # input_handles / num_scalars are consumed only inside the C shim's
+        # enable_kernel_profile branch, so compute them only when profiling is on.
+        input_handles = None
+        num_scalars = 0
+        if kernel_profile_enabled():
+            num_kwargs = sum(
+                1 for key in extern_kernel.ordered_kwargs_for_cpp_kernel if key != "out"
+            )
+            input_handles = _get_profiling_input_handles(extern_kernel.inputs)
+            num_scalars = len(extern_kernel.constant_args) + num_kwargs
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            extern_kernel.get_kernel_name(),
+            args,
+            device,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -1964,6 +2049,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_c_shim_fallback_kernel(
         self, fallback_kernel: ir.FallbackKernel, args: list[str]
     ) -> None:
+        # input_handles / num_scalars are consumed only inside the C shim's
+        # enable_kernel_profile branch, so compute them only when profiling is on.
+        input_handles = None
+        num_scalars = 0
+        if kernel_profile_enabled():
+            input_handles = _get_profiling_input_handles(fallback_kernel.inputs)
+            num_kwargs = sum(
+                1
+                for key in fallback_kernel.ordered_kwargs_for_cpp_kernel
+                if key != "out"
+            )
+            num_scalars = len(fallback_kernel.constant_args) + num_kwargs
+
         output_args = []
         output_raii_handles = []
         output_name_base = fallback_kernel.get_name()
@@ -2001,6 +2099,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2013,16 +2113,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
             self.writeline(f"auto {out_name} = {out_view};")
             args.insert(0, out_name)
         else:
+            out_name = out
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
-            kernel, args, device, stack_traces=stack_traces
+            kernel,
+            args,
+            device,
+            stack_traces=stack_traces,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
+            output_handle=out_name,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -2196,17 +2305,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
     def _generate_symbolic_call_arg_helper(
-        self, arg: SymbolicCallArg, graph: GraphLowering
+        self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False
     ) -> None:
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
-        if enable_kernel_profile or (arg.inner, graph) not in self.kernel_numel_expr:
-            # When enable_kernel_profile is on, each kernel call is wrapped in
-            # its own {} scope block, so we must redeclare the variable each
-            # time since prior declarations are no longer visible.
-            self.kernel_numel_expr.add((arg.inner, graph))
+        if in_profile_scope or (arg.inner, graph) not in self.kernel_numel_expr:
+            # When inside a kernel profile {} scope block, we must always
+            # redeclare since prior declarations from other scope blocks are
+            # not visible. We intentionally skip adding to kernel_numel_expr
+            # in that case because the block-scoped declaration won't be
+            # visible at function scope either. At function scope, we declare
+            # on first use and assign thereafter.
+            if not in_profile_scope:
+                self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
@@ -4317,12 +4426,18 @@ if (!custom_op_wrapper) {
         # KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});
         # ... operations...
         # }
+        self._kernel_profile_scope_depth = (
+            getattr(self, "_kernel_profile_scope_depth", 0) + 1
+        )
         self.writeline("{")
 
     def write_kernel_context_guard_end(
         self,
     ):
         # End of a kernel context guarded block.
+        self._kernel_profile_scope_depth = (
+            getattr(self, "_kernel_profile_scope_depth", 0) - 1
+        )
         self.writeline("}")
 
     def write_kernel_context_guard(
@@ -4358,3 +4473,30 @@ if (!custom_op_wrapper) {
             stack_trace_str += "\n"
         stack_trace_str += ')"'
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        input_handles: list[str] | None = None,
+    ):
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        if input_handles:
+            for idx, handle in enumerate(input_handles):
+                ivalue_var = f"tmp_{sanitized}_input_{idx}"
+                self.writeline(f"C10IValueHandle {ivalue_var};")
+                self.writeline(f"aoti_torch_tensor_to_ivalue({handle}, &{ivalue_var});")
+                self.writeline(f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});")
+            inputs_vec = f"{sanitized}_inputs_"
+            ivalue_names = ", ".join(
+                f"tmp_{sanitized}_input_{idx}" for idx in range(len(input_handles))
+            )
+            self.writeline(
+                f"std::vector<C10IValueHandle> {inputs_vec}({{{ivalue_names}}});"
+            )
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr, {inputs_vec});'
+            )
+        else:
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+            )
