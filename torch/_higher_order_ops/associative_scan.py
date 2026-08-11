@@ -20,6 +20,7 @@ from torch._higher_order_ops.utils import (
     create_bw_fn,
     first_slice_copy,
     first_slice_copy_with_grad,
+    get_tensor_mask,
     materialize_as_graph,
     reenter_make_fx,
     register_fake,
@@ -176,11 +177,8 @@ def associative_scan(
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, satisfy the associative property and have no
-            side-effects. It may close over lifted arguments (e.g. freevars). On the
-            autograd path in eager mode, tensor freevars are permitted as long as they do
-            not require gradients (gradients for lifted arguments are not supported). Under
-            ``torch.compile`` with ``backend="inductor"`` tensor freevars are still rejected
-            outright; only ``int``/``SymInt`` lifted arguments are supported there.
+            side-effects. It may close over lifted arguments (e.g. freevars); gradients
+            are computed for tensor freevars, but not for ``int``/``SymInt`` ones.
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
@@ -635,6 +633,16 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             This gives the final input gradients:
                 g_xs = [∂L/∂xs0, ∂L/∂xs1, ..., ∂L/∂xsT]
 
+        7.) Compute the gradients of the additional_inputs (freevars)
+            Each additional_input h feeds combine_fn at every step, so its total gradient
+            is the sum over all steps of the local gradient ∂/∂h combine_fn scaled by
+            the accumulated output gradient g_ys computed in step 5:
+                g_h = sum_t bw_h(ys{t-1}, xst, g_yst),
+            where the per-step bw_h is computed as in step 4,
+            but with g_ys as the upstream gradient (instead of ones).
+            Step t = 0 (ys0 = xs0, where combine_fn is not applied) is excluded from the sum.
+            Non-tensor additional_inputs (e.g. lifted SymInts) receive no gradient (None).
+
         NOTE: [scan partial grad handling]
             If any element of xs or of the outputs does not require gradients
             (i.e., requires_grad=False), then the corresponding gradients will be returned
@@ -656,6 +664,9 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         xs, additional_inputs = split_into_chunks(
             operands, [num_xs, num_additional_inputs]
         )
+
+        # Only tensor entries participate in autograd.
+        ctx._additional_inputs_tensor_mask = get_tensor_mask(additional_inputs)
 
         scan_length = xs[0].shape[0]
         ctx._scan_length = scan_length
@@ -688,6 +699,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         scan_length = ctx._scan_length
         num_xs = ctx._num_xs
         num_additional_inputs = ctx._num_additional_inputs
+        additional_inputs_tensor_mask = ctx._additional_inputs_tensor_mask
 
         # Extract the inputs to the forward path and outputs from the forward path
         flat_args = saved_values(ctx)
@@ -699,7 +711,10 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             return (
                 *[None] * 3,
                 *[torch.zeros_like(x) for x in xs],
-                *[None] * num_additional_inputs,
+                *[
+                    torch.zeros_like(a) if m else None
+                    for m, a in zip(additional_inputs_tensor_mask, additional_inputs)
+                ],
             )
 
         # First_slice_copy does not keep the original requires_grad flag,
@@ -740,9 +755,9 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             *([0] * num_xs),
         )
 
-        # create_bw_fn returns one grad per primal: 2*num_xs (for ys{t-1} and xs) plus
-        # one per additional_input, appended last. Drop the trailing additional_input grads
-        # as they are not differentiated.
+        # combine_fn_bw_gm returns one grad per primal: 2*num_xs (for ys{t-1} and xs) plus
+        # Drop the trailing additional_input grads as they are not
+        # needed for the xs gradients.
         def combine_fn_bw_gm_xs(*args):
             return combine_fn_bw_gm(*args)[: 2 * num_xs]
 
@@ -790,7 +805,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         def compute_grad(
             bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor
-        ) -> torch.Tensor:
+        ) -> tuple[torch.Tensor, torch.Tensor]:
             # The first output ys0 equals xs0, so its instantaneous input gradient is 1.
             # Build a fresh tensor rather than mutating bwxs in place: for an additive
             # combine_fn the joint graph can return the same tensor object for both the
@@ -803,38 +818,58 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             # 6.) Scale with the instantaneous input gradients bwxs
             g_xs = g_ys * bwxs
 
-            return g_xs
+            # g_ys is returned as well because it is required to compute
+            # the additional_inputs gradients.
+            return g_xs, g_ys
 
         # Compute the per-leaf gradients in parallel through vmap.
-        g_xs_stacked = torch.vmap(compute_grad, in_dims=-1, out_dims=-1)(
+        g_xs_stacked, g_ys_stacked = torch.vmap(compute_grad, in_dims=-1, out_dims=-1)(
             torch.stack(bwxs, -1), torch.stack(bwys, -1), torch.stack(gl_ys, -1)
         )
         g_xs = torch.unbind(g_xs_stacked, -1)
 
-        # TODO: Currently the gradients for the additional_inputs are not computed properly
-        return *[None] * 3, *g_xs, *[None] * num_additional_inputs
+        if num_additional_inputs == 0:
+            return None, None, None, *g_xs
+
+        # 7.) Compute the gradients of the additional_inputs.
+        # Each additional_input feeds every scan step, so its total gradient is the sum
+        # over all steps of the per-step gradient scaled by the accumulated output
+        # gradient g_ys.
+        def combine_fn_bw_gm_additional_fn(*args):
+            return combine_fn_bw_gm(*args)[2 * num_xs :]
+
+        additional_out_dims = [0 if m else None for m in additional_inputs_tensor_mask]
+        combine_fn_bw_gm_additional = torch.vmap(
+            combine_fn_bw_gm_additional_fn,
+            in_dims,
+            additional_out_dims,  # pyrefly: ignore [bad-argument-type]
+        )
+
+        g_ys = torch.unbind(g_ys_stacked, -1)
+        grads_additional = combine_fn_bw_gm_additional(
+            *(o.roll(1, dim) for o in outs), *fw_operands, *g_ys
+        )
+
+        # The per-step gradient at t = 0 corresponds to ys0 = xs0, where combine_fn is
+        # not applied, so it must be excluded from the accumulation.
+        grad_additional_inputs = [
+            torch.sum(g[1:], dim) if m else None
+            for m, g in zip(additional_inputs_tensor_mask, grads_additional)
+        ]
+
+        return *[None] * 3, *g_xs, *grad_additional_inputs
 
 
 @associative_scan_op.py_autograd_impl
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
     num_xs = len(xs)
 
-    # additional_inputs may interleave Tensors with integer/SymInt constants lifted
-    # by dynamo (e.g. shape SymInts of a dynamic-shaped closed-over tensor, inserted
-    # before the tensor itself). Only Tensor additional_inputs participate in autograd;
-    # gradients for lifted parameters are not supported yet.
-    # NOTE: the isinstance guard below is defensive against such interleaved non-Tensor
-    # entries. It is currently unexercised in CI because every pointwise autograd test
-    # skips compile_dynamic_shape, which is what would produce a lifted SymInt here.
-    if any(a.requires_grad for a in additional_inputs if isinstance(a, torch.Tensor)):
-        raise RuntimeError(
-            "Associative_scan does currently not support gradients for lifted parameters!"
-        )
-
     # Pass all additional_inputs through in their original order. combine_fn is invoked
     # purely positionally as operator(*lhs, *rhs, *additional_inputs), so preserving the
-    # interleaved order is required; backward excludes them from the vmap batch dims and
-    # drops their grad slots (see AssociativeScanAutogradOp.backward).
+    # interleaved order is required. additional_inputs may interleave Tensors with
+    # integer/SymInt constants lifted by dynamo (e.g. shape SymInts of a dynamic-shaped
+    # closed-over tensor); only the Tensor entries receive gradients in backward, the
+    # rest get None (see AssociativeScanAutogradOp.backward).
     flat_out = AssociativeScanAutogradOp.apply(
         combine_fn,
         num_xs,

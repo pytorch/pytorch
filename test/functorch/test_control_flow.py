@@ -6628,10 +6628,17 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    def test_associative_scan_pointwise_multiple_additional_inputs_autograd(self):
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("scan_length", [9, 16])
+    @parametrize("additional_inputs_requires_grad", [False, True])
+    def test_associative_scan_pointwise_multiple_additional_inputs_autograd(
+        self, compile_mode, reverse, scan_length, additional_inputs_requires_grad
+    ):
         device = torch.device("cuda")
-        H1 = torch.rand(2, device=device, requires_grad=False)
-        H2 = torch.rand(2, device=device, requires_grad=False)
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+        H1 = torch.rand(2, device=device, requires_grad=additional_inputs_requires_grad)
+        H2 = torch.rand(2, device=device, requires_grad=additional_inputs_requires_grad)
 
         # Multiplicative body so bwys is non-unit: this is what exercises the
         # bwys-alignment (torch.cat([bwys[1:], ones])) in the reversed backward scan.
@@ -6640,27 +6647,69 @@ class GraphModule(torch.nn.Module):
         def combine_fn(x, y):
             return x * y * H1 * H2
 
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        result = associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
-        result_ref = _fake_associative_scan(combine_fn, xs, dim=0)
+        xs = torch.randn(scan_length, 2, device=device, requires_grad=True)
+        result = scan_fct(
+            combine_fn, xs, dim=0, reverse=reverse, combine_mode="pointwise"
+        )
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0, reverse=reverse)
         self.assertEqual(result, result_ref)
 
-        grads = torch.autograd.grad(result.sum(), xs)
-        grads_ref = torch.autograd.grad(result_ref.sum(), xs)
+        grad_params = [xs, H1, H2] if additional_inputs_requires_grad else [xs]
+        grads = torch.autograd.grad(result.sum(), grad_params)
+        grads_ref = torch.autograd.grad(result_ref.sum(), grad_params)
         self.assertEqual(grads, grads_ref)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    def test_associative_scan_pointwise_additional_input_requires_grad_raises(self):
+    @parametrize("reverse", [False, True])
+    def test_associative_scan_pointwise_additional_inputs_partial_grad(self, reverse):
+        device = torch.device("cuda")
+        H_grad = torch.rand(2, device=device, requires_grad=True)
+        H_nograd = torch.rand(2, device=device, requires_grad=False)
+        scale = torch.rand(2, device=device, requires_grad=True)
+
+        def combine_fn(x, y):
+            with torch.no_grad():
+                factor = H_nograd * H_nograd
+            return x * y * H_grad * scale * factor
+
+        xs = torch.randn(9, 2, device=device, requires_grad=True)
+        result = associative_scan(
+            combine_fn, xs, dim=0, reverse=reverse, combine_mode="pointwise"
+        )
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0, reverse=reverse)
+        self.assertEqual(result, result_ref)
+
+        grad_params = [xs, H_grad, scale]
+        grads = torch.autograd.grad(result.sum(), grad_params)
+        grads_ref = torch.autograd.grad(result_ref.sum(), grad_params)
+        self.assertEqual(grads, grads_ref)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_additional_inputs_symint_no_grad(self):
         device = torch.device("cuda")
         H = torch.rand(2, device=device, requires_grad=True)
 
-        def combine_fn(x, y):
-            return x + y + H
+        def model(xs):
+            n = xs.shape[0]
 
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
-            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+            def combine_fn(x, y):
+                return x * y * H * n
+
+            return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="eager")
+        xs = torch.randn(9, 2, device=device, requires_grad=True)
+        result = compiled(xs)
+
+        n = xs.shape[0]
+        result_ref = _fake_associative_scan(lambda x, y: x * y * H * n, xs, dim=0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), [xs, H])
+        grads_ref = torch.autograd.grad(result_ref.sum(), [xs, H])
+        self.assertEqual(grads, grads_ref)
 
     @requires_cuda
     def test_associative_scan_input_mutation(self):
