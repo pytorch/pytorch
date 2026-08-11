@@ -6608,6 +6608,28 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
         check_vmap_fallback(self, test, torch._test_check_tensor)
 
+    def test_block_diag_batch_size_0(self, device):
+        # Regression test for #192024: batch size 0 crashed in at::cat.
+        def op(*tensors):
+            return torch.block_diag(*tensors)
+
+        x = torch.rand(0, 3, device=device)
+        y = torch.rand(0, 4, device=device)
+        self.assertEqual(vmap(op)(x, y).shape, (0, 2, 7))
+        self.assertEqual(vmap(op)(x).shape, (0, 1, 3))
+        self.assertEqual(vmap(op)(torch.rand(0, 2, 3, device=device)).shape, (0, 2, 3))
+        s0 = torch.rand(0, device=device)
+        self.assertEqual(vmap(op)(s0, s0.clone()).shape, (0, 2, 2))
+        unbatched = torch.rand(4, device=device)
+        self.assertEqual(vmap(op, in_dims=(0, None))(x, unbatched).shape, (0, 2, 7))
+        y64 = torch.rand(0, 4, device=device, dtype=torch.float64)
+        self.assertEqual(vmap(op)(x, y64).dtype, torch.float64)
+        xg = x.clone().requires_grad_()
+        result = vmap(op)(xg, y)
+        self.assertTrue(result.requires_grad)
+        result.sum().backward()
+        self.assertEqual(xg.grad, torch.zeros_like(xg))
+
 
 @markDynamoStrictTest
 class TestVmapNestedTensor(Namespace.TestVmapBase):
