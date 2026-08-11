@@ -30,6 +30,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
+    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
 from torch._inductor.kernel.gemm_epilogue import (
@@ -54,6 +55,12 @@ from torch.utils._ordered_set import OrderedSet
 class GroupedTensorSSALayout(GemmReductionGeometry):
     """Describe a grouped M/N TensorSSA view inside the generated epilogue."""
 
+    swapped: bool = False
+
+    @property
+    def tensorssa_axis(self) -> int:
+        return 1 - self.axis if self.swapped else self.axis
+
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the local group size available in this epilogue fragment."""
         return (
@@ -71,7 +78,7 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
     def tensorssa_shape(self, source: Any) -> str:
         fragment_group_size = self.fragment_group_size_expr(source)
         repeats = self.fragment_repeat_expr(source)
-        if self.axis == 1:
+        if self.tensorssa_axis == 1:
             return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
         return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
 
@@ -79,12 +86,16 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
         return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
 
     @property
+    def needs_physical_callbacks(self) -> bool:
+        return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
+
+    @property
     def needs_physical_combine(self) -> bool:
         return self.needs_physical_callbacks
 
     @property
     def reduction_profile(self) -> str:
-        if self.axis == 1:
+        if self.tensorssa_axis == 1:
             return "((None, 1, None), 1, 1)"
         return "((1, None, None), 1, 1)"
 
@@ -461,7 +472,7 @@ def lower_tensorssa_reduce(
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
-        if layout.axis == 0:
+        if layout.tensorssa_axis == 0:
             local_reduce_store_sources[node] = source
             return source
     reduced = _generate_like(
