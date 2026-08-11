@@ -9,6 +9,7 @@ import keyword
 import math
 import os
 import pickle
+import sys
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -692,25 +693,11 @@ class ConfigModule(ModuleType):
         # additional imports required
         imports = set()
 
-        def get_module_name(func: Callable, add_dot: bool) -> str:
-            module_name = func.__module__
-            if module_name == "builtins":
-                module_name = ""
-            if add_dot and module_name != "":
-                module_name += "."
-            return module_name
-
-        def add_import(func: Callable) -> None:
-            module_name = get_module_name(func, False)
-            if module_name:
-                imports.add(module_name)
-
-        def list_of_callables_to_string(v: list | set) -> list[str]:
-            return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
-
-        def importable_callable(v: Any) -> bool:
-            # functools.partial has no attributes below but is a callable
-            return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
+        def skipped_config_line(mod: str, key: str) -> str:
+            return (
+                f"# {mod}.{key} omitted because its value is not representable "
+                "as Python source"
+            )
 
         def importable_ref(func: Any) -> tuple[str, str] | None:
             try:
@@ -731,7 +718,9 @@ class ConfigModule(ModuleType):
                     not name.isidentifier() or keyword.iskeyword(name) for name in names
                 ):
                     return None
-                resolved = importlib.import_module(module_name)
+                resolved = sys.modules.get(module_name)
+                if resolved is None:
+                    return None
                 for name in qualname.split("."):
                     resolved = getattr(resolved, name)
                 if resolved is not func:
@@ -741,6 +730,20 @@ class ConfigModule(ModuleType):
                 return f"{prefix}{qualname}", import_name
             except Exception:
                 return None
+
+        def callable_references(values: list | set) -> list[str] | None:
+            refs = []
+            import_names = set()
+            for value in values:
+                func_info = importable_ref(value)
+                if func_info is None:
+                    return None
+                func_ref, import_name = func_info
+                refs.append(func_ref)
+                if import_name:
+                    import_names.add(import_name)
+            imports.update(import_names)
+            return refs
 
         def serialize_partial_arg(val: Any) -> str:
             if type(val) in (type(None), bool, int, str, bytes) or (
@@ -795,21 +798,31 @@ class ConfigModule(ModuleType):
             """
             if isinstance(v, functools.partial):
                 return get_partial_line(mod, k, v)
-            elif importable_callable(v):
-                add_import(v)
-                return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
-            elif isinstance(v, (list, set)) and all(
-                importable_callable(item) for item in v
-            ):
-                for item in v:
-                    add_import(item)
-                v_list = list_of_callables_to_string(v)
+            elif callable(v):
+                func_info = importable_ref(v)
+                if func_info is None:
+                    return skipped_config_line(mod, k)
+                func_ref, import_name = func_info
+                if import_name:
+                    imports.add(import_name)
+                return f"{mod}.{k} = {func_ref}"
+            elif isinstance(v, (list, set)) and v and all(callable(i) for i in v):
+                v_list = callable_references(v)
+                if v_list is None:
+                    return skipped_config_line(mod, k)
                 if isinstance(v, list):
-                    return f"{mod}.{k} = {v_list}"
+                    return f"{mod}.{k} = [{', '.join(v_list)}]"
                 else:
-                    return f"{mod}.{k} = {{ {', '.join(v_list)} }}"
+                    return f"{mod}.{k} = {{ {', '.join(sorted(v_list))} }}"
             else:
-                return f"{mod}.{k} = {v!r}"
+                value = repr(v)
+                config_line = f"{mod}.{k} = {value}"
+                try:
+                    compile(value, "<config>", "eval")
+                    compile(config_line, "<config>", "exec")
+                except (SyntaxError, ValueError):
+                    return skipped_config_line(mod, k)
+                return config_line
 
         lines = []
         mod = self.__name__
@@ -819,9 +832,8 @@ class ConfigModule(ModuleType):
             readonly_values=True,
         ).items():
             lines.append(get_config_line(mod, k, v))
-        for import_name in imports:
-            lines.insert(0, f"import {import_name}")
-        return "\n".join(lines)
+        import_lines = [f"import {import_name}" for import_name in sorted(imports)]
+        return "\n".join(import_lines + lines)
 
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""

@@ -589,6 +589,21 @@ class FxGraphRunnableTest(TestCase):
         self.assertNotIn("# Fixup: ensure sum(repeats) == output_size", payload)
 
 
+class TestStandaloneAotRepro(TestCase):
+    def test_non_importable_callable_config_is_not_emitted_as_source(self):
+        from torch._dynamo.repro.after_aot import generate_standalone_repro
+
+        gm = torch.fx.symbolic_trace(lambda x: x.sin())
+        with torch._dynamo.config.patch(
+            "reorderable_logging_functions", {lambda _: None}
+        ):
+            repro = generate_standalone_repro(gm, [torch.randn(2)])
+
+        self.assertIn("reorderable_logging_functions omitted", repro)
+        self.assertNotIn("__main__.<lambda>", repro)
+        compile(repro, "<repro>", "exec")
+
+
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
 class TestFxGraphRunnableMultiProcessGroup(TestCase):
     @unittest.skipIf(
