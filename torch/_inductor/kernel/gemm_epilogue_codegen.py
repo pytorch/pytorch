@@ -1,13 +1,18 @@
 # mypy: allow-untyped-defs
 """Shared CuTeDSL emission primitives for GEMM epilogues."""
 
+import ast
+import dataclasses
 from typing import Any
 
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+    canonical_tensorssa_reduction_type,
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
+    materialize_tensorssa_reduction,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 from torch._inductor.virtualized import V
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -36,6 +41,107 @@ def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
     }
 
 
+def materialize_epilogue_function(source: str, cute: Any) -> Any:
+    function_names = [
+        node.name
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef)
+    ]
+    if len(function_names) != 1:
+        raise NotImplementedError("expected one GEMM epilogue function")
+    scope = gemm_epilogue_op_scope(cute)
+    exec(source, scope)
+    return scope[function_names[0]]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class GemmReductionCompileConfig:
+    args: GemmReductionArguments
+    reduction: Any
+    consumer: Any
+    secondary_consumer: Any
+
+    @classmethod
+    def from_args(
+        cls, args: GemmReductionArguments, cute: Any
+    ) -> "GemmReductionCompileConfig":
+        def materialize(source: str | None) -> Any:
+            return (
+                None if source is None else materialize_epilogue_function(source, cute)
+            )
+
+        reduction = materialize_tensorssa_reduction(
+            canonical_tensorssa_reduction_type(args.reduction_type),
+            args.source_type,
+            args.reduction_type,
+        )
+        finalizer = materialize(args.finalizer_fn)
+        if finalizer is not None:
+            reduction = dataclasses.replace(reduction, finalize=finalizer)
+
+        def materialize_consumer(source: str | None) -> Any:
+            consumer = materialize(source)
+            if consumer is None or finalizer is not None:
+                return consumer
+
+            def consume(accumulator, primary_reduction, secondary_reduction):
+                return consumer(
+                    accumulator,
+                    reduction.finalize(primary_reduction, args.group),
+                    secondary_reduction,
+                )
+
+            return consume
+
+        return cls(
+            args=args,
+            reduction=reduction,
+            consumer=materialize_consumer(args.consumer_fn),
+            secondary_consumer=materialize_consumer(args.secondary_consumer_fn),
+        )
+
+    def _common_constexprs(self) -> tuple[Any, ...]:
+        args = self.args
+        return (
+            args.group,
+            args.axis,
+            args.reduction_type,
+            args.source_type,
+            args.feeds_main,
+        )
+
+    def _primary_callbacks(self) -> tuple[Any, ...]:
+        reduction = self.reduction
+        return (
+            reduction.reduce_op,
+            reduction.init_val,
+            reduction.combine,
+            reduction.source,
+            reduction.finalize,
+            self.consumer,
+        )
+
+    def primary_constexprs(self) -> tuple[Any, ...]:
+        return self._common_constexprs() + self._primary_callbacks()
+
+    def blockscaled_primary_constexprs(self) -> tuple[Any, ...]:
+        args = self.args
+        return (
+            args.group,
+            args.axis,
+            args.feeds_main,
+            *self._primary_callbacks(),
+        )
+
+    def constexprs(self) -> tuple[Any, ...]:
+        return (
+            *self._common_constexprs(),
+            self.args.secondary_feed_type,
+            *self._primary_callbacks(),
+            self.secondary_consumer,
+        )
+
+
 class GemmEpilogueCuteDSLBody:
     def __init__(self) -> None:
         self.lines: list[str] = []
@@ -47,17 +153,22 @@ class GemmEpilogueCuteDSLBody:
 class GemmEpilogueCuteDSLCSE:
     def __init__(self) -> None:
         self.index = 0
+        self.cache: dict[str, CuteDSLCSEVariable] = {}
 
     def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+        if expr in self.cache:
+            return self.cache[expr]
         name = f"tmp{self.index}"
         self.index += 1
         body.writeline(f"{name} = {expr}")
-        return CuteDSLCSEVariable(
+        value = CuteDSLCSEVariable(
             name,
             ValueRanges.unknown() if bounds is None else bounds,
             dtype=dtype,
             shape=shape,
         )
+        self.cache[expr] = value
+        return value
 
 
 class GemmEpilogueCuteDSLKernel:

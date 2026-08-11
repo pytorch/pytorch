@@ -480,7 +480,23 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             if node.target is inductor_prims.prepare_softmax_online
         )
         self.assertIn(prepare_softmax, analysis.matches)
-        self.assertIsNone(analysis.matches[prepare_softmax].reduction_type)
+        self.assertEqual(analysis.matches[prepare_softmax].reduction_type, "generated")
+
+    def test_epilogue_analysis_marks_composed_reduction_generated(self):
+        from torch._inductor.kernel.gemm_epilogue_analysis import (
+            GemmLocalReduceAnalysis,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(x):
+            reduced = x.view(4, 4, 2).sum(-1)
+            return reduced + 1
+
+        graph_module = make_fx(body)(torch.randn(4, 8))
+        analysis = GemmLocalReduceAnalysis.from_graph_module(graph_module)
+        output = next(node for node in graph_module.graph.nodes if node.op == "output")
+        result = output.args[0]
+        self.assertEqual(analysis.matches[result].reduction_type, "generated")
 
     def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
@@ -1784,7 +1800,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        match = FlexGemmLocalReduceMatch(aux, geometry)
+        match = FlexGemmLocalReduceMatch(value_node=aux, geometry=geometry)
         analysis = FlexGemmLocalReduceAnalysis(
             GemmEpilogueGraph(dependencies={}, normalized_nodes={})
         )
@@ -1793,7 +1809,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceMatch(object(), geometry)
+            FlexGemmLocalReduceMatch(value_node=object(), geometry=geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
@@ -1835,8 +1851,8 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         output = graph.placeholder("output")
         reduced = graph.placeholder("reduced")
         match = FlexGemmLocalReduceMatch(
-            reduced,
-            FlexGemmLocalReduceGeometry(8, 0),
+            value_node=reduced,
+            geometry=FlexGemmLocalReduceGeometry(8, 0),
             reduction_type="max",
         )
         outputs = FlexGemmOutputPlan(
@@ -1851,16 +1867,30 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertEqual(
             outputs.reduction_plan,
             GemmReductionPlan(
-                "reduced",
-                8,
-                0,
-                "max",
-                "identity",
-                "output",
+                reduction_output="reduced",
+                group=8,
+                axis=0,
+                reduction_type="max",
+                source_type="identity",
+                primary_output="output",
                 feeds_main=True,
                 feed_output="output",
             ),
         )
+
+        generated = FlexGemmOutputPlan(
+            output,
+            local_reduce=FlexGemmOutputLocalReducePlan(
+                FlexGemmLocalReduceMatch(
+                    value_node=reduced,
+                    geometry=FlexGemmLocalReduceGeometry(8, 0),
+                ),
+                store=FlexGemmLocalReduceStore(reduced, 0),
+            ),
+        )
+        generated_plan = generated.reduction_plan
+        self.assertIsNotNone(generated_plan)
+        self.assertEqual(generated_plan.reduction_type, "generated")
 
     def test_ordered_outputs_restore_local_reduce_position(self):
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
