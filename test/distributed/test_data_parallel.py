@@ -14,15 +14,18 @@ from torch import nn
 from torch.amp import autocast
 from torch.testing._internal.common_utils import TEST_MULTIACCELERATOR
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
+    requires_capabilities,
     skipMeta,
 )
 from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
     dtype2prec_DONTUSE,
     gradcheck,
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TestCase,
@@ -42,6 +45,8 @@ _assertGradAndGradgradChecks = functools.partial(
 
 
 class TestDataParallel(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR or DEVICE_TYPE == "npu", "gradcheck with float32 not reliable on NPU")
     def test_data_parallel_buffers_requiring_grad(self):
         class TestModule(nn.Module):
@@ -985,9 +990,12 @@ class TestDataParallel(TestCase):
 
 
 class TestDataParallelDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     @skipMeta
     @dtypes(torch.float, torch.half)
+    @requires_capabilities(Capability.distributed.backend)
     def test_data_parallel_module(self, device, dtype):
         l = nn.Linear(10, 5).to(device, dtype)
         i = torch.randn(20, 10, device=device, dtype=dtype)
@@ -1000,6 +1008,7 @@ class TestDataParallelDeviceType(TestCase):
     @onlyAccelerator
     @skipMeta
     @dtypes(torch.float, torch.half)
+    @requires_capabilities(Capability.distributed.backend)
     def test_data_parallel_module_kwargs_only(self, device, dtype):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -1020,6 +1029,7 @@ class TestDataParallelDeviceType(TestCase):
     @onlyAccelerator
     @skipMeta
     @dtypes(torch.float, torch.half)
+    @requires_capabilities(Capability.distributed.backend)
     def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -1040,6 +1050,7 @@ class TestDataParallelDeviceType(TestCase):
     @onlyAccelerator
     @skipMeta
     @dtypes(torch.float, torch.half)
+    @requires_capabilities(Capability.distributed.backend)
     def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -1060,6 +1071,7 @@ class TestDataParallelDeviceType(TestCase):
     @onlyAccelerator
     @skipMeta
     @dtypes(torch.float, torch.half)
+    @requires_capabilities(Capability.distributed.backend)
     def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):
         class Net(nn.Module):
             def __init__(self) -> None:
