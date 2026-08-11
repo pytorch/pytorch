@@ -12,6 +12,7 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
     run_tests,
@@ -233,6 +234,8 @@ class ProfilerTree:
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
 class TestProfilerTree(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
@@ -277,10 +280,6 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
     def test_profiler_experimental_tree(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile() as p:
@@ -335,10 +334,6 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
     def test_profiler_experimental_tree_with_record_function(self):
         with torch.profiler.profile() as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
@@ -388,10 +383,6 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "Test not working for CUDA and XPU",
-    )
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(profile_memory=True) as p:
@@ -786,6 +777,35 @@ class TestProfilerTree(TestCase):
                 torch/profiler/profiler.py(...): stop
                   ...""",
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    # Kept in sync with TestProfilerTree.assertTreesMatch.
+    def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
+        if not expecttest.ACCEPT:
+            actual = actual.ljust(len(expected))
+        self.maxDiff = None
+
+        replicate = getattr(self, "tree_replicate", None)
+        self.assertIsNotNone(
+            replicate, "Please annotate test with `@ProfilerTree.test`"
+        )
+
+        if replicate:
+            self.assertEqual(actual, expected)
+        else:
+            try:
+                self.assertExpectedInline(actual, expected, skip=1)
+            except AssertionError as e:
+                if allow_failure:
+                    self.tree_replicate = None
+                    msg = traceback.format_exception_only(type(e), e)[0]
+                    print(msg.split("AssertionError:")[-1])
+                else:
+                    raise
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
