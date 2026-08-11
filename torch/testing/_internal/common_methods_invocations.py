@@ -23088,8 +23088,13 @@ if "flydsl" in dsl_ops_by_dsl:
             dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
             dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
             supports_out=False,
-            supports_forward_ad=False,
-            supports_fwgrad_bwgrad=False,
+            # Matches the base nn.functional.rms_norm entry: the override only
+            # replaces the forward, and returns the FP32 rstd that aten's
+            # backward consumes, so autograd is unaffected. Note the gradient
+            # suites filter to float64/complex128, which this variant does not
+            # list -- test_flydsl_rmsnorm_fwd.py covers gradients instead.
+            supports_forward_ad=True,
+            supports_fwgrad_bwgrad=True,
             sample_inputs_func=sample_inputs_rms_norm_flydsl,
             decorators=[
                 onlyCUDA,

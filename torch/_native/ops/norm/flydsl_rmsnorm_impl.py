@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import functools
-
 import torch
 
 from ... import flydsl_utils as fu
@@ -17,7 +15,6 @@ _HIP_AVAILABLE = torch.version.hip is not None
 _is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
 
 
-@functools.cache
 def _is_supported_arch(device_index: int) -> bool:
     # HSA_OVERRIDE_GFX_VERSION may carry feature flags ("gfx950:sramecc+") and
     # _resolve_rocm_arch passes those through, so compare the base arch only --
@@ -91,6 +88,8 @@ def _fused_rms_norm_cond(
 ) -> bool:
     n = normalized_shape_1d(normalized_shape)
     if n is None:
+        return False
+    if eps is not None and not eps >= 0.0:
         return False
     if not _common_supported(input, n, weight):
         return False

@@ -1,9 +1,11 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import os
 import unittest
 from unittest.mock import patch
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import torch.backends.python_native as pn
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -71,14 +73,21 @@ class TestFlyDSLRMSNormArch(TestCase):
     def test_arch_gate_allows_only_gfx950(self, arch, expected):
         import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
 
-        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
-        # Another test may already have cached the real device's answer.
-        arch_is_supported.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
         with patch.object(
             flydsl_rmsnorm_impl.fu, "_resolve_rocm_arch", return_value=arch
         ):
-            self.assertEqual(arch_is_supported(0), expected)
+            self.assertEqual(flydsl_rmsnorm_impl._is_supported_arch(0), expected)
+
+    def test_arch_gate_follows_env_changes(self):
+        # The gate must not cache: _resolve_rocm_arch re-reads FLYDSL_GPU_ARCH
+        # on every call and rmsnorm_fwd compiles for whatever it returns, so a
+        # remembered verdict would admit work for one arch and build for another.
+        import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
+
+        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
+            self.assertTrue(flydsl_rmsnorm_impl._is_supported_arch(0))
+        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
+            self.assertFalse(flydsl_rmsnorm_impl._is_supported_arch(0))
 
 
 class TestFlyDSLRMSNormHelpers(TestCase):
@@ -202,6 +211,90 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
         self.assertEqual(got_dx, ref_dx)
         self.assertEqual(got_dw, ref_dw)
+
+    def test_forward_ad_through_override_matches_aten(self):
+        # The OpInfo variant advertises forward AD, but the gradient suites
+        # filter to float64/complex128, which it does not list, so nothing there
+        # ever reaches this kernel. Assert the JVP here instead, and that the
+        # override really ran while producing it.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import (
+            clear_rmsnorm_caches,
+            rmsnorm_cache_info,
+        )
+
+        x, weight = self._make_inputs(DISPATCH_M, DISPATCH_N, torch.float32)
+        tangent_x = make_tensor(x.shape, device=x.device, dtype=x.dtype)
+        tangent_w = make_tensor(weight.shape, device=x.device, dtype=x.dtype)
+
+        def jvp():
+            with fwAD.dual_level():
+                dual_x = fwAD.make_dual(x, tangent_x)
+                dual_w = fwAD.make_dual(weight, tangent_w)
+                out = torch.rms_norm(dual_x, (DISPATCH_N,), dual_w, EPS)
+                primal, tangent = fwAD.unpack_dual(out)
+                return primal.clone(), tangent.clone()
+
+        clear_rmsnorm_caches()
+        with pn.flydsl.disabled():
+            ref_primal, ref_tangent = jvp()
+        self._assert_no_flydsl_compiles()
+
+        got_primal, got_tangent = jvp()
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+        self.assertEqual(got_primal, ref_primal)
+        self.assertEqual(got_tangent, ref_tangent)
+
+    def test_double_backward_through_override_matches_aten(self):
+        # Same gap as the forward-AD case: fwgrad_bwgrad is advertised but the
+        # dtype filter keeps the OpInfo suites off this kernel entirely.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import (
+            clear_rmsnorm_caches,
+            rmsnorm_cache_info,
+        )
+
+        x, weight = self._make_inputs(
+            DISPATCH_M, DISPATCH_N, torch.float32, requires_grad=True
+        )
+        grad_out = make_tensor(x.shape, device=x.device, dtype=x.dtype)
+
+        def gradgrad():
+            out = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+            dx, dw = torch.autograd.grad(out, (x, weight), grad_out, create_graph=True)
+            return torch.autograd.grad(dx.sum() + dw.sum(), (x, weight))
+
+        clear_rmsnorm_caches()
+        with pn.flydsl.disabled():
+            ref_ddx, ref_ddw = gradgrad()
+        self._assert_no_flydsl_compiles()
+
+        got_ddx, got_ddw = gradgrad()
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+        self.assertEqual(got_ddx, ref_ddx)
+        self.assertEqual(got_ddw, ref_ddw)
+
+    @parametrize("eps_kind", ("cancelling", "negative", "nan"))
+    def test_nonpositive_eps_falls_back_to_aten(self, eps_kind):
+        # A negative eps can drive mean(x^2) + eps to exactly zero under one
+        # reduction order and to a tiny positive value under another. Measured
+        # on this shape with eps = -mean(x^2): the kernel returned rstd=inf
+        # where aten returned 2896.31, and every element of that row differed.
+        # The predicate declines instead, so aten's answer is the only answer.
+        m, n = 2048, 16384
+        x, weight = self._make_inputs(m, n, torch.float32)
+        if eps_kind == "cancelling":
+            eps = -(x.double() ** 2).mean(dim=-1)[0].item()
+        elif eps_kind == "negative":
+            eps = -1.0
+        else:
+            eps = float("nan")
+
+        out, rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, eps)
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, eps)
+
+        self._assert_no_flydsl_compiles()
+        self._assert_nonfinite_matches(out, ref)
+        self._assert_nonfinite_matches(rstd, ref_rstd)
 
     def test_direct_forward_matches_aten_and_reuses_cache(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import (
