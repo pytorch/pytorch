@@ -176,8 +176,11 @@ def associative_scan(
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, satisfy the associative property and have no
-            side-effects. It may close over lifted arguments (e.g. freevars), but those
-            must not require gradients (gradients for lifted arguments are not supported).
+            side-effects. It may close over lifted arguments (e.g. freevars). On the
+            autograd path in eager mode, tensor freevars are permitted as long as they do
+            not require gradients (gradients for lifted arguments are not supported). Under
+            ``torch.compile`` with ``backend="inductor"`` tensor freevars are still rejected
+            outright; only ``int``/``SymInt`` lifted arguments are supported there.
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
@@ -556,18 +559,18 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
             return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl) # gl_next + bw_next * gl
 
-        gl_ys_pinit = [gl_ys4, gl_ys3, gl_ys2, gl_ys1, 0]
-        bwys_pinit =  [bwys43, bwys32, bwys21,      1, 1]
+        The recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst) means step t consumes
+        bwys shifted one step forward: bwys_aligned = [bwys21, bwys32, bwys43, 1], where
+        bwys21 abbreviates bw(ys2, ys1) and so on. The final step (g_ys4) has no successor,
+        so bwys_aligned is padded with a single 1. gl_ys is used as-is (no padding):
 
-        where bwys21 is an abbreviation for bw(ys2, ys1), and so on and so forth.
-
-        The 1s appended to bwys_pinit are length-padding so that bwys_pinit and
-        gl_ys_pinit have the same shape; they do not affect the final g_ys values.
+        bwys_aligned = [bwys21, bwys32, bwys43, 1]
+        gl_ys        = [gl_ys1, gl_ys2, gl_ys3, gl_ys4]
 
         g_ys is recovered by flipping, scanning left-to-right, and flipping back:
-            leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
+            leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
             result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
-            g_ys = result_rev[1].flip([0])[:-1]
+            g_ys = result_rev[1].flip([0])
 
         References: https://justintchiu.com/blog/pscan_diff/
 
@@ -611,20 +614,20 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             g_ys_combine_fn_flat above, so the backward scan is Triton-lowerable under
             compiled autograd; in eager it dispatches to generic_associative_scan.
 
-            5.1) Append the initial values to gl_ys and bwys
+            5.1) Align bwys to the recurrence
 
-                gl_ys_pinit = torch.cat([gl_ys, torch.zeros_like(gl_ys[0:1])], 0)
-                bwys_pinit = torch.cat([bwys[1:], torch.ones_like(bwys[0:1]), torch.ones_like(bwys[0:1])], 0)
+                bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
 
-                The zero appended to gl_ys is the identity for the accumulation.
-                The two ones appended to bwys are length-padding so bwys_pinit and
-                gl_ys_pinit have the same shape; they do not affect the final g_ys.
+                Step t consumes bwys[t+1] (the local ys-gradient of the next step), so bwys
+                is shifted one step forward. The final step has no successor, so a single 1
+                is appended as padding; it does not affect the final g_ys. gl_ys is used
+                unchanged.
 
-            5.2) Flip, scan left-to-right, flip back, and drop the last (padding) element
+            5.2) Flip, scan left-to-right, and flip back
 
-                leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
+                leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
                 result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
-                g_ys = result_rev[1].flip([0])[:-1]
+                g_ys = result_rev[1].flip([0])
 
         6.) Scale with the instantaneous input gradients bwxs
             g_xs = g_ys * bwxs
@@ -788,9 +791,11 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         def compute_grad(
             bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor
         ) -> torch.Tensor:
-            # Set the first gradient component of bwxs to 1.0, per definition.
-            # Set ∂ys0 / ∂xs0 = 1
-            torch.select(bwxs, dim, 0).fill_(1.0)
+            # The first output ys0 equals xs0, so its instantaneous input gradient is 1.
+            # Build a fresh tensor rather than mutating bwxs in place: for an additive
+            # combine_fn the joint graph can return the same tensor object for both the
+            # ys and xs grads, so bwxs may alias bwys and an in-place fill_ would clobber it.
+            bwxs = torch.cat([torch.ones_like(bwxs[0:1]), bwxs[1:]], 0)
 
             # 5.) Compute the gradients via an associative_scan
             g_ys = compute_gys_associative_scan(gl_ys, bwys)
@@ -802,9 +807,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         # Compute the gradients of all leaves sequentially
         # TODO: Use torch.vmap here for parallelization, requires vmap of associative_scan
-        g_xs = [
-            compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(len(gl_ys))
-        ]
+        g_xs = [compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(num_xs)]
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
@@ -818,6 +821,9 @@ def associative_scan_autograd(combine_fn, xs, additional_inputs):
     # by dynamo (e.g. shape SymInts of a dynamic-shaped closed-over tensor, inserted
     # before the tensor itself). Only Tensor additional_inputs participate in autograd;
     # gradients for lifted parameters are not supported yet.
+    # NOTE: the isinstance guard below is defensive against such interleaved non-Tensor
+    # entries. It is currently unexercised in CI because every pointwise autograd test
+    # skips compile_dynamic_shape, which is what would produce a lifted SymInt here.
     if any(a.requires_grad for a in additional_inputs if isinstance(a, torch.Tensor)):
         raise RuntimeError(
             "Associative_scan does currently not support gradients for lifted parameters!"
