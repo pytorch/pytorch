@@ -2017,7 +2017,7 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. CustomClassObjectVariable's getattro_impl
+            # after the generator call. CustomClassObjectVariable's tp_getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
@@ -2352,7 +2352,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
-        from .user_defined import _CONSTANT_BASE_TYPES
+        from .ctx_manager import GenericContextWrappingVariable
+        from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
@@ -2367,6 +2368,12 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
             result = UserDefinedConstantVariable(value, source=self.source)
+        elif is_generic_ctx_manager_cls(type(value)):
+            # A generic context manager built inside the compiled region (via
+            # SideEffects.get_variable_cls) must wrap the same way when it is
+            # reconstructed from a source across a graph break, so a `with` on
+            # the reconstructed object can still be entered.
+            result = GenericContextWrappingVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -2552,11 +2559,14 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defined]
-            var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defined]
-                value._dynamo_static_input_type
-            )
+            # A tensor-subclass parameter (e.g. under torch.nn.utils.parametrize)
+            # can be tracked as a UserDefinedObjectVariable, which has no graph
+            # proxy node to annotate. mark_static_address above still marks it,
+            # so only stamp the metadata when there is a real tensor proxy node.
+            if isinstance(var, TensorVariable):
+                var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
+                    value._dynamo_static_input_type  # type: ignore[attr-defined]
+                )
 
     def wrap_module(self, value: torch.nn.Module) -> VariableTracker:
         from ..eval_frame import OptimizedModule
@@ -5158,7 +5168,7 @@ class SourcelessBuilder:
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.getattro_impl(tx, value.__func__.__name__)
+                    return cls_obj_vt.tp_getattro_impl(tx, value.__func__.__name__)
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:

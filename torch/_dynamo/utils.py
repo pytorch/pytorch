@@ -65,6 +65,7 @@ from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
+import torch._library.utils as library_utils
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -1053,7 +1054,7 @@ def identity(x: T) -> T:
     return x
 
 
-def hashable(x: Any) -> bool:
+def hashable(x: object) -> bool:
     try:
         hash(x)
         return True
@@ -1238,7 +1239,7 @@ if sys.version_info >= (3, 14):
     _builtin_final_typing_classes += (typing.Union,)
 
 
-def is_typing(value: Any) -> bool:
+def is_typing(value: object) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
@@ -1256,7 +1257,7 @@ def is_typing(value: Any) -> bool:
     )
 
 
-def is_numpy_int_type(value: Any) -> bool:
+def is_numpy_int_type(value: object) -> bool:
     if not np:
         return False
 
@@ -1275,7 +1276,7 @@ def is_numpy_int_type(value: Any) -> bool:
     )
 
 
-def is_numpy_float_type(value: Any) -> bool:
+def is_numpy_float_type(value: object) -> bool:
     if not np:
         return False
 
@@ -1386,7 +1387,7 @@ def allow_lru_cache_wrapper_trace_without_warning(
     _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
 
 
-def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: object) -> bool:
     return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
@@ -2766,20 +2767,25 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
     return None
 
 
-def getfile(obj: Any) -> str | None:
+def getfile(obj: object) -> str | None:
     try:
-        return inspect.getfile(obj)
+        # inspect.getfile is typed to accept only a narrow union of callable
+        # and module-like objects, but at runtime it accepts any object and
+        # raises TypeError for unsupported ones, which this function catches.
+        return inspect.getfile(obj)  # type: ignore[arg-type]
     except (TypeError, OSError):
         return None
 
 
-def is_namedtuple(obj: Any) -> bool:
+def is_namedtuple(obj: object) -> bool:
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
     return is_namedtuple_cls(type(obj))
 
 
-def is_namedtuple_cls(cls: Any) -> bool:
+def is_namedtuple_cls(cls: object) -> bool:
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
+    if not isinstance(cls, type):
+        return False
     try:
         if issubclass(cls, tuple):
             module = getattr(cls, "__module__", None)
@@ -2937,7 +2943,7 @@ if has_triton_package():
 """
 
 
-def is_safe_constant(v: Any) -> bool:
+def is_safe_constant(v: object) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(
@@ -2965,7 +2971,7 @@ def common_constants() -> set[int]:
     }
 
 
-def is_torch_sym(value: Any) -> TypeGuard[torch.SymBool | torch.SymInt]:
+def is_torch_sym(value: object) -> TypeGuard[torch.SymBool | torch.SymInt]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -4046,6 +4052,11 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
+_FAKE_TENSOR_DATA_PTR_ERROR = (
+    "Cannot access data pointer of Tensor (e.g. FakeTensor, FunctionalTensor)."
+)
+
+
 def _is_custom_op_fake_tensor_subclass_data_ptr_error(
     node: torch.fx.Node, args: Any, kwargs: Any, cause: BaseException
 ) -> bool:
@@ -4053,23 +4064,52 @@ def _is_custom_op_fake_tensor_subclass_data_ptr_error(
         return False
 
     target = node.target
-    custom_op_namespace: str | None
-    if isinstance(target, torch._ops.OpOverload):
-        custom_op_namespace = target.namespace
-    elif isinstance(target, torch._ops.OpOverloadPacket):
-        custom_op_namespace = target._qualified_op_name.split("::", maxsplit=1)[0]
-    else:
-        custom_op_namespace = None
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        overloads = tuple(target.overloads())
+        if len(overloads) == 1:
+            target = getattr(target, overloads[0])
+        else:
+            try:
+                overload = torch._C._jit_resolve_packet(
+                    target._qualified_op_name, *args, **kwargs
+                )
+            except RuntimeError:
+                return False
+            target = getattr(target, overload)
 
-    if (
-        custom_op_namespace is None
-        or custom_op_namespace in {"aten", "prim", "prims"}
-        or "Cannot access data pointer of Tensor" not in str(cause)
-    ):
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    if library_utils.is_builtin(target) or not library_utils.has_fake_kernel(target):
+        return False
+    current_cause: BaseException | None = cause
+    seen_causes: set[int] = set()
+    while current_cause is not None and id(current_cause) not in seen_causes:
+        seen_causes.add(id(current_cause))
+        try:
+            if _FAKE_TENSOR_DATA_PTR_ERROR in str(current_cause):
+                break
+        except Exception:
+            pass
+        next_cause = current_cause.__cause__
+        if next_cause is None and not current_cause.__suppress_context__:
+            next_cause = current_cause.__context__
+        current_cause = next_cause
+    else:
         return False
 
-    return pytree.tree_any(
-        lambda x: is_traceable_wrapper_subclass(x) and is_fake(x), (args, kwargs)
+    def is_fake_traceable_wrapper_subclass(value: torch.Tensor) -> bool:
+        # This is a best-effort diagnostic classifier running while another
+        # exception is already being handled. User-defined ``__tensor_flatten__``
+        # and attribute methods called by these checks may raise, which must not
+        # mask the original data pointer error.
+        try:
+            return is_traceable_wrapper_subclass(value) and is_fake(value)
+        except Exception:
+            return False
+
+    return any(
+        is_fake_traceable_wrapper_subclass(value)
+        for value in library_utils.iter_tensors(args, kwargs)
     )
 
 
@@ -4352,26 +4392,31 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
-        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        if _is_custom_op_fake_tensor_subclass_data_ptr_error(node, args, kwargs, cause):
-            _wrap_graph_break_with_torch_runtime_err(
-                lambda: unimplemented(
-                    gb_type="Custom op Tensor subclass data pointer access",
-                    context="",
-                    explanation=(
-                        "A Tensor subclass argument reached a custom op while Dynamo "
-                        f"was running fake tensor propagation: {msg}"
-                    ),
-                    hints=[
-                        "A Tensor subclass argument reached this custom op during fake-value propagation. In this case, the subclass's `__torch_dispatch__` may run the custom op implementation instead of the registered fake impl.",
-                        "This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors.",
-                        "Handle FakeTensor-wrapped subclass inputs in the custom op implementation, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.",
-                    ],
-                    from_exc=cause,
-                )
+        elif _is_custom_op_fake_tensor_subclass_data_ptr_error(node, args, kwargs, e):
+            if not node.users:
+                tx.output.graph.erase_node(node)
+            unimplemented(
+                gb_type="Custom op Tensor subclass data pointer access",
+                context=f"{node.op} {node.target}",
+                explanation=(
+                    "A custom op with a fake implementation received an argument "
+                    "containing a fake Tensor subclass and attempted to access a data "
+                    "pointer during fake-value propagation. The access may have come "
+                    "from the fake implementation itself, or from the custom op "
+                    "implementation if the subclass's `__torch_dispatch__` passed "
+                    "the wrapper through."
+                ),
+                hints=[
+                    "Fake implementations must use only PyTorch operations and may not directly access tensor storage or data.",
+                    "If the custom op implementation ran, handle FakeTensor-wrapped subclass inputs there, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.",
+                    "This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors.",
+                ],
+                # Suppress the original C++ message because it recommends wrapping
+                # the kernel in a custom op, but this operator is already a custom op.
+                from_exc=None,
             )
-            raise AssertionError("should not be reachable") from None
 
+        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         from .exc import (
             FakeTensorObservedException,
             ObservedException,
@@ -4609,7 +4654,7 @@ def import_submodule(mod: types.ModuleType) -> None:
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
-def object_has_getattribute(value: Any) -> bool:
+def object_has_getattribute(value: object) -> bool:
     return class_has_getattribute(type(value))
 
 
@@ -4970,7 +5015,7 @@ def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
     return cache_key
 
 
-def is_safe_numpy_wrapper(obj: Any) -> bool:
+def is_safe_numpy_wrapper(obj: object) -> bool:
     return numpy_wrapper_cache_key(obj) is not None
 
 
@@ -5023,14 +5068,14 @@ def _disable_side_effect_safety_checks_for_current_subtracer(
     return fn(*args, **kwargs)
 
 
-def is_utils_checkpoint(obj: Any) -> bool:
+def is_utils_checkpoint(obj: object) -> bool:
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_invoke_subgraph(obj: Any) -> bool:
+def is_invoke_subgraph(obj: object) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
     return obj is invoke_subgraph_placeholder
@@ -5418,7 +5463,7 @@ def get_static_address_type(t: Any) -> StaticInputType | None:
     return None
 
 
-def is_rng_state_getter_or_setter(value: Any) -> bool:
+def is_rng_state_getter_or_setter(value: object) -> bool:
     getters = (
         # The following two functions are not identical, so don't remove anyone!
         torch._C.Generator.get_state,
@@ -5435,7 +5480,7 @@ def is_rng_state_getter_or_setter(value: Any) -> bool:
     return value in (*setters, *getters)
 
 
-def is_tensor_base_attr_getter(value: Any) -> bool:
+def is_tensor_base_attr_getter(value: object) -> bool:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
@@ -5465,7 +5510,7 @@ def is_torch_class(cls: type) -> bool:
     return module is not None and (module == "torch" or module.startswith("torch."))
 
 
-def is_torch_function_object(value: Any) -> bool:
+def is_torch_function_object(value: object) -> bool:
     return hasattr(value, "__torch_function__")
 
 
@@ -5515,10 +5560,13 @@ def to_fake_tensor(
 
 
 # NB: this works for both classes and instances
-def is_frozen_dataclass(value: Any) -> bool:
-    return (
+def is_frozen_dataclass(value: object) -> bool:
+    # value may be either a dataclass instance or a dataclass type; both are
+    # accepted by getattr_static, so the class_has_getattribute call is safe
+    # even though it is annotated to take a type.
+    return bool(
         not object_has_getattribute(value)
-        and not class_has_getattribute(value)
+        and not class_has_getattribute(value)  # type: ignore[arg-type]
         and is_dataclass(value)
         and hasattr(value, "__dataclass_params__")
         and hasattr(value.__dataclass_params__, "frozen")
@@ -6015,7 +6063,7 @@ def get_traced_code() -> list[CodeType] | None:
     return TracingContext.get_traced_code()
 
 
-def is_pybind11_enum_member(value: Any) -> bool:
+def is_pybind11_enum_member(value: object) -> bool:
     """Check if value is a pybind11 enum member (with stable hash and eq).
 
     Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
