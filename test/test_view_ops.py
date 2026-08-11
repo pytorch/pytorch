@@ -27,9 +27,9 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
 )
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     gradcheck,
     gradgradcheck,
+    HardwareClassification,
     IS_FBCODE,
     numpy_to_torch_dtype_dict,
     run_tests,
