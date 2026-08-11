@@ -1019,6 +1019,26 @@ class _NestedReductionBase:
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
+    def test_producer_consumer_sub_parent_source_mutated_later(self):
+        B, D, G = 8, 1024, 16
+
+        def f(x):
+            norm = (x.square().mean(-1) + 1e-5).rsqrt()
+            xg = x.view(B, D // G, G)
+            scale = (xg.abs() * norm[:, None, None]).amax(-1).clamp_min(1e-12)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            packed = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            x.add_(3.0)
+            return packed, scale, x
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        ref_x = x.clone()
+        expected = f(ref_x)
+        actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, ref_x)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+
     def test_producer_consumer_rejects_sub_parent_grouped_axis_x(self):
         import torch.nn.functional as F
 
