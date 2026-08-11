@@ -27,6 +27,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
@@ -70,6 +71,8 @@ def _generate_input(shape, dtype, device, with_extremal):
 
 
 class TestShapeOps(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_unbind(self, device):
         x = torch.rand(2, 3, 4, 5, device=device)
         for dim in range(4):
@@ -830,6 +833,8 @@ class TestShapeOps(TestCase):
 
 
 class TestShapeOpsOnCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @dtypes(torch.float)
     def test_diagonal_multidim(self, device, dtype):
         x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
