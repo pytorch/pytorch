@@ -160,15 +160,23 @@ class DeviceInterface:
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
-        Raises a `RuntimeError` with the appropriate human-readable instructions
-        to resolve the issue if Triton is not available for the given device, or
-        the default device if `device` is `None`.
+        Raises a `TritonUnavailableError` with human-readable instructions if
+        the Triton backend for the given device (or the default device if
+        `device` is `None`) is not built. Implementations may raise a
+        different, more specific error when the device itself is not
+        Triton-capable (e.g. CUDA raises `GPUTooOldForTriton`), so callers
+        that only want an availability answer should check
+        `is_triton_capable()` first.
 
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
+        from torch._dynamo.exc import TritonUnavailableError
+
         if not cls.is_triton_capable():
-            raise RuntimeError("This device is not capable of supporting Triton")
+            raise TritonUnavailableError(
+                "This device is not capable of supporting Triton"
+            )
 
 
 class DeviceGuard:
@@ -271,13 +279,18 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
+        # Use the Worker API (device properties cached in the main process
+        # before fork) instead of torch.cuda.get_device_properties directly, so
+        # the capability check stays safe when called from spawn-based compile
+        # workers.
         return (
             torch.version.hip is not None
-            or torch.cuda.get_device_properties(device).major >= 7
+            or CudaInterface.Worker.get_device_properties(device).major >= 7
         )
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._dynamo.exc import TritonUnavailableError
         from torch._inductor.exc import GPUTooOldForTriton
 
         if not CudaInterface.is_triton_capable(device):
@@ -288,9 +301,9 @@ class CudaInterface(DeviceInterface):
 
         if torch.version.hip is not None:
             if "amd" not in triton.backends.backends:
-                raise RuntimeError("triton not built with the 'amd' backend")
+                raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'nvidia' backend")
+            raise TritonUnavailableError("triton not built with the 'nvidia' backend")
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -374,8 +387,10 @@ class MtiaInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "mtia" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'mtia' backend")
+            raise TritonUnavailableError("triton not built with the 'mtia' backend")
 
 
 get_xpu_stream: Callable[[int], int] | None
@@ -461,8 +476,10 @@ class XpuInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "intel" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'intel' backend")
+            raise TritonUnavailableError("triton not built with the 'intel' backend")
 
 
 @dataclass
@@ -525,8 +542,10 @@ class CpuInterface(DeviceInterface):
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
+        from torch._dynamo.exc import TritonUnavailableError
+
         if "cpu" not in triton.backends.backends:
-            raise RuntimeError("triton not built with the 'cpu' backend")
+            raise TritonUnavailableError("triton not built with the 'cpu' backend")
 
 
 class MpsInterface(DeviceInterface):
