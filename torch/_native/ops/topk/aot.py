@@ -6,8 +6,9 @@ must decide the same set), and cpp_dispatch_prelude()/cpp_dispatch()
 (the AOT library's dispatch chain). Keep them in sync by hand; drift
 is benign but wasteful (a call all sides decline lands on stock aten).
 
-Module scope must import with stdlib alone (torchgen loads this
-pre-build); torch is imported lazily inside covered_axes.
+Module scope must stay torch-free (torchgen loads this pre-build;
+torchgen itself is fine to import); torch is imported lazily inside
+covered_axes.
 """
 
 ATEN_OP = "topk"

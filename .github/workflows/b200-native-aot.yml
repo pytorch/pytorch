@@ -3,7 +3,7 @@ name: CI for native-AOT embedded DSL kernels on B200
 
 # Exercises the full native-AOT path: stage 2 of the build exports the
 # DSL kernels for Blackwell (TORCH_CUDA_ARCH_LIST gates export to the
-# supported arch subset; see tools/native_aot/export.py EXPORT_SMS) and
+# supported arch subset; see export.py EXPORTABLE_ARCHES) and
 # embeds them in libtorch_cuda; the test job asserts the wheel carries
 # them and runs the python_native suites on a B200.
 

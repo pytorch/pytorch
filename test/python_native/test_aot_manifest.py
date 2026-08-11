@@ -93,7 +93,8 @@ class TestCovers(TestCase):
             )
 
     def test_defaults_fill_omitted_args(self):
-        # k-only call: dim/largest/sorted come from the manifest defaults.
+        # k-only call: dim/largest/sorted come from covered_axes' own
+        # signature defaults.
         with ManifestFixture():
             x = self._covered_tensor()
             self.assertTrue(aot_manifest.covers("fakeop", "CUDA", (x, 8), {}))
@@ -144,9 +145,9 @@ class TestCovers(TestCase):
             self.assertFalse(aot_manifest.covers("fakeop", "CPU", (x, 8), {}))
 
     def test_bind_failure_is_uncovered(self):
-        # A bind() that raises (attribute missing on the argument, or the
-        # call not binding the signature) must degrade to "uncovered",
-        # not propagate.
+        # A covered_axes call that raises (attribute missing on the
+        # argument, or arguments that don't match its signature) must
+        # degrade to "uncovered", not propagate.
         with ManifestFixture():
             self.assertFalse(aot_manifest.covers("fakeop", "CUDA", (object(), 8), {}))
             # Too few args to bind at all:

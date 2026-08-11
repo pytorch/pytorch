@@ -499,12 +499,14 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-_run_symm_mem_tests() {
+_run_fabric_handle_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -515,7 +517,7 @@ test_h100_symm_mem() {
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
   export NCCL_NVLS_ENABLE=0
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_fabric() {
@@ -524,7 +526,7 @@ test_h100_fabric() {
 }
 
 test_b200_symm_mem() {
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_cutlass_backend() {
@@ -535,6 +537,13 @@ test_h100_cutlass_backend() {
 }
 
 test_native_aot() {
+  # These suites exercise the Python JIT route as well as the embedded
+  # kernels, so they need the DSL runtime. Installed here rather than baked
+  # into the image via requirements-ci.txt: that file is shared by every
+  # image, so pinning it there put ~190 MB of CUDA-only tooling into the
+  # CPU, ROCm and XPU images too.
+  install_cutlass_dsl
+
   # native-AOT: DSL kernels embedded into libtorch_cuda by stage 2 of the
   # build (tools/native_aot/build_stage2.py). First assert the wheel under
   # test actually carries them -- a silently artifact-free wheel would make
@@ -1121,6 +1130,45 @@ test_inductor_micro_benchmark() {
     test_inductor_set_cpu_affinity
   fi
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
+}
+
+test_better_benchmark() {
+  local test_reports_dir
+  test_reports_dir="$(pwd)/test/test-reports"
+  local debug_dir
+  debug_dir="$(pwd)/test/debug/better-benchmark"
+  local benchmark_dir
+  benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
+  mkdir -p "${test_reports_dir}" "${debug_dir}"
+
+  git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  pushd "${benchmark_dir}"
+
+  local gpu_indices
+  gpu_indices="$(python - <<'PY'
+import sys
+import torch
+
+count = torch.cuda.device_count()
+if count < 1:
+    raise RuntimeError("Expected at least one GPU")
+print(f"Found {count} GPUs", file=sys.stderr)
+print(",".join(str(index) for index in range(count)))
+PY
+)"
+
+  python scripts/bench_parallel.py \
+    repros/canonical \
+    --all-shapes \
+    --gpus "${gpu_indices}" \
+    --output "${debug_dir}/current.json"
+  # TODO: Add a single-input CI export mode to bench_report.py. For now it
+  # requires --compare, so compare the result with itself and export the
+  # unchanged head values as PyTorch v3 dashboard records.
+  python scripts/bench_report.py \
+    --compare "${debug_dir}/current.json" "${debug_dir}/current.json" \
+    --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
+  popd
 }
 
 test_inductor_halide() {
@@ -2385,6 +2433,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *inductor_better_benchmark* ]]; then
+  test_better_benchmark
 elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
   test_inductor_aoti_cross_compile_for_windows
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then

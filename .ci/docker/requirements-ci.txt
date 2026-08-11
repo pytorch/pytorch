@@ -438,17 +438,3 @@ uv
 #Description: required for running spin commands via uvx
 #Pinned version:
 #test that import:
-
-nvidia-cutlass-dsl==4.5.2 ; platform_machine == "x86_64" and platform_system == "Linux"
-#Description: CuTeDSL runtime for native-AOT kernel export (stage 2 of the
-#torch build, tools/native_aot/build_stage2.py) and the python_native JIT
-#override tests. The build skips stage 2 cleanly when absent.
-#Pinned versions: 4.5.2
-#test that import: test/python_native/test_cutedsl_smoketest.py
-
-apache-tvm-ffi==0.1.11 ; platform_machine == "x86_64" and platform_system == "Linux"
-#Description: fast DLPack exchange used by the CuTeDSL kernel modules
-#(torch/_native, enable_tvm_ffi=True); required alongside nvidia-cutlass-dsl
-#for native-AOT stage-2 export and the python_native tests.
-#Pinned versions: 0.1.11
-#test that import: test/python_native/test_cutedsl_smoketest.py
