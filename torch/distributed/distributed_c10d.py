@@ -737,24 +737,27 @@ def _nccl2_device(
 
     process_group = opts.process_group
     device = process_group.bound_device_id if process_group is not None else None
-    if device is None:
-        if torch.cuda.is_initialized():
-            device_index = torch.cuda.current_device()
-        elif "LOCAL_RANK" in os.environ:
-            device_index = get_node_local_rank()
-        else:
-            device_count = torch.cuda.device_count()
-            if device_count == 0:
-                raise RuntimeError("nccl2 requires at least one CUDA device")
-            global_rank = (
-                opts.global_ranks_in_group[opts.group_rank]
-                if opts.global_ranks_in_group
-                else opts.group_rank
-            )
-            device_index = global_rank % device_count
-        device = torch.device("cuda", device_index)
-        if process_group is not None:
-            process_group.bound_device_id = device
+    if device is not None:
+        return device
+
+    if torch.cuda.is_initialized():
+        device_index = torch.cuda.current_device()
+    elif "LOCAL_RANK" in os.environ:
+        device_index = get_node_local_rank()
+    else:
+        device_count = torch.cuda.device_count()
+        if device_count == 0:
+            raise RuntimeError("nccl2 requires at least one CUDA device")
+        global_rank = (
+            opts.global_ranks_in_group[opts.group_rank]
+            if opts.global_ranks_in_group
+            else opts.group_rank
+        )
+        device_index = global_rank % device_count
+
+    device = torch.device("cuda", device_index)
+    if process_group is not None:
+        process_group.bound_device_id = device
 
     return device
 
