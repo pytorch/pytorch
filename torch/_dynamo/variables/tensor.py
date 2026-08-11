@@ -235,6 +235,8 @@ class TensorVariable(VariableTracker):
         "class_type",
         "specialized_value",
         "_is_name_set",
+        "_metadata_mutation_aliases",
+        "_python_id",
         *VariableTracker._nonvar_fields,
     }
 
@@ -273,6 +275,8 @@ class TensorVariable(VariableTracker):
         stride: tuple[Any, ...] | None = None,
         is_contiguous: tuple[torch.memory_format, ...] | None = None,
         _is_name_set: bool | None = None,
+        _metadata_mutation_aliases: list["TensorVariable"] | None = None,
+        _python_id: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -294,6 +298,29 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
+        self._metadata_mutation_aliases = _metadata_mutation_aliases
+        if _metadata_mutation_aliases is not None and all(
+            alias is not self for alias in _metadata_mutation_aliases
+        ):
+            _metadata_mutation_aliases.append(self)
+        self._python_id = (
+            id(self.proxy.node.meta["example_value"])
+            if _python_id is None
+            else _python_id
+        )
+
+    def _propagate_metadata_mutation_alias(self, other: "TensorVariable") -> None:
+        aliases = self._metadata_mutation_aliases
+        if aliases is None:
+            return
+        self_fake = self.proxy.node.meta.get("example_value")
+        other_fake = other.proxy.node.meta.get("example_value")
+        if self_fake is not other_fake:
+            return
+        if all(alias is not other for alias in aliases):
+            aliases.append(other)
+        other._metadata_mutation_aliases = aliases
+        other._python_id = self._python_id
 
     def synchronize_attributes(
         self, tx: "InstructionTranslatorBase", target_cls: type | None = None
@@ -338,6 +365,9 @@ class TensorVariable(VariableTracker):
             and version_after > version_before
         ):
             self.synchronize_attributes(tx)
+            for alias in self._metadata_mutation_aliases or ():
+                if alias is not self:
+                    alias.synchronize_attributes(tx)
             tx.output.check_input_mutation_on_current_stream(tx)
 
     def debug_repr(self) -> str:
@@ -1107,6 +1137,8 @@ class TensorVariable(VariableTracker):
         version_before = self._get_fake_version()
         with ctx():
             result = wrap_fx_proxy(tx, proxy)
+        if isinstance(result, TensorVariable):
+            self._propagate_metadata_mutation_alias(result)
         self._sync_if_inplace_mutation(tx, version_before)
 
         return result
@@ -1587,6 +1619,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
+        self.as_proxy().node.meta["data_ptr_accessed"] = True
         return DataPtrVariable(self)
 
     def method_const_data_ptr(
@@ -1595,6 +1628,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
+        self.as_proxy().node.meta["data_ptr_accessed"] = True
         return DataPtrVariable(self, method_name="const_data_ptr")
 
     def method_record_stream(
@@ -2356,6 +2390,7 @@ class TensorVariable(VariableTracker):
     def method_untyped_storage(
         self, tx: "InstructionTranslatorBase"
     ) -> "UntypedStorageVariable":
+        self.as_proxy().node.meta["untyped_storage_accessed"] = True
         return UntypedStorageVariable(
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
@@ -2695,10 +2730,9 @@ class TensorVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
-        # Always use the FakeTensor identity so aliased tensors
-        # (e.g. y = x.add_(1)) hash consistently.
-        fake = self.as_proxy().node.meta["example_value"]
-        return id(fake), True
+        # Preserve the original FakeTensor identity when a TensorVariable's
+        # proxy advances to a same-object mutating result.
+        return self._python_id, True
 
     def nb_subtract_impl(
         self,

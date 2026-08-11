@@ -2916,6 +2916,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     install_guard(arg.source.make_guard(guard_type))
             return VariableTracker.build(tx, real_id)
 
+        if isinstance(arg, variables.TensorVariable):
+            return FakeIdVariable(arg._python_id)
+
         return FakeIdVariable(id(arg))
 
     def call_deepcopy(

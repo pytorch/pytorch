@@ -2611,6 +2611,306 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertTrue(same(ref, res))
 
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @parametrize("reduction", [(2, False), (0, True)])
+    def test_out_variant_resize_in_graph_tensor(self, backend, reduction):
+        dim, keepdim = reduction
+
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool).to(input_tensor.device)
+            result = torch.all(
+                input_tensor, dim=dim, keepdim=keepdim, out=output_tensor
+            )
+            return result, output_tensor.size(), output_tensor.stride(), output_tensor
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        expected = torch.all(input_tensor, dim=dim, keepdim=keepdim)
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result, output_size, output_stride, output_tensor = opt_fn(input_tensor)
+
+        self.assertTrue(same(result, expected))
+        self.assertEqual(output_size, expected.size())
+        self.assertEqual(output_stride, expected.stride())
+        self.assertTrue(same(output_tensor, expected))
+
+    def test_out_variant_resize_in_graph_tensor_metadata(self):
+        graphs = []
+
+        def backend(gm, args):
+            graphs.append(gm)
+            return gm
+
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool).to(input_tensor.device)
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+        self.assertTrue(same(result, torch.all(input_tensor, dim=2)))
+
+        nodes = list(graphs[0].graph.nodes)
+        empty_node = next(node for node in nodes if node.target is torch.empty)
+        to_node = next(node for node in nodes if node.target == "to")
+        all_node = next(node for node in nodes if node.target is torch.all)
+
+        self.assertEqual(empty_node.meta["example_value"].shape, torch.Size([0]))
+        self.assertEqual(to_node.meta["example_value"].shape, torch.Size([0]))
+        self.assertEqual(all_node.meta["example_value"].shape, torch.Size([2, 3]))
+        self.assertNotIn("out", all_node.kwargs)
+
+    def test_out_variant_resize_graph_input(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(input_tensor, output_tensor):
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        output_tensor = torch.empty((0,), dtype=torch.bool)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            fn(input_tensor, output_tensor)
+
+    def test_out_variant_resize_in_graph_tensor_not_allowlisted(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=input_tensor.dtype)
+            return torch.sigmoid(input_tensor, out=output_tensor)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            fn(torch.randn(2, 3))
+
+    @parametrize(
+        "out_kind",
+        [
+            "input_alias",
+            "nonempty",
+            "mismatched_dtype",
+            "pinned",
+            "nonresizable",
+            "prior_use",
+            "prior_mutation",
+            "storage_alias",
+            "data_ptr",
+        ],
+    )
+    @parametrize("backend", ["eager", "inductor"])
+    def test_out_variant_resize_in_graph_tensor_not_rewriteable(
+        self, out_kind, backend
+    ):
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(input_tensor):
+            if out_kind == "input_alias":
+                output_tensor = input_tensor.clone()
+            elif out_kind == "nonempty":
+                output_tensor = torch.empty((1,), dtype=torch.bool)
+            elif out_kind == "pinned":
+                output_tensor = torch.empty((0,), dtype=torch.bool, pin_memory=True)
+            elif out_kind == "nonresizable":
+                output_tensor = torch.from_numpy(np.empty((0,), dtype=np.bool_))
+            elif out_kind == "prior_use":
+                output_tensor = torch.empty((0,), dtype=torch.bool)
+                output_tensor.clone()
+            elif out_kind == "prior_mutation":
+                output_tensor = torch.empty((0,), dtype=torch.bool)
+                output_tensor.zero_()
+            elif out_kind == "storage_alias":
+                output_tensor = torch.empty((0,), dtype=torch.bool)
+                output_tensor.untyped_storage()
+            elif out_kind == "data_ptr":
+                output_tensor = torch.empty((0,), dtype=torch.bool)
+                output_tensor.data_ptr()
+            else:
+                output_tensor = torch.empty((0,), dtype=torch.uint8)
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            fn(torch.randint(0, 2, (2, 3, 4), dtype=torch.bool))
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_out_variant_resize_in_graph_tensor_observable_to_alias(self, backend):
+        def fn(input_tensor):
+            orig = torch.empty((0,), dtype=torch.bool)
+            output_tensor = orig.to(input_tensor.device)
+            torch.all(input_tensor, dim=2, out=output_tensor)
+            return orig.size(), output_tensor.size()
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+        self.assertEqual(result, (torch.Size([2, 3]), torch.Size([2, 3])))
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @parametrize("mutated_alias", ["out", "result"])
+    @parametrize("mutation", ["method", "aten"])
+    def test_out_variant_resize_in_graph_tensor_later_metadata_mutation(
+        self, backend, mutated_alias, mutation
+    ):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            result = torch.all(input_tensor, dim=2, out=output_tensor)
+            alias = output_tensor if mutated_alias == "out" else result
+            if mutation == "method":
+                mutation_result = alias.transpose_(0, 1)
+            else:
+                mutation_result = torch.ops.aten.transpose_.default(alias, 0, 1)
+            return (
+                output_tensor.size(),
+                result.size(),
+                output_tensor.stride(),
+                result.stride(),
+                id(mutation_result) == id(output_tensor),
+                output_tensor,
+                result,
+            )
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        expected = fn(input_tensor)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+
+        self.assertEqual(actual, expected)
+        self.assertIs(actual[-2], actual[-1])
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_out_variant_resize_in_graph_tensor_python_identity(self, backend):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            values = {output_tensor: 123}
+            output_hash = hash(output_tensor)
+            result = torch.all(input_tensor, dim=2, out=output_tensor)
+            return (
+                id(result) == id(output_tensor),
+                result is output_tensor,
+                values[result],
+                output_hash == hash(output_tensor) == hash(result),
+            )
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        self.assertEqual(
+            torch.compile(fn, backend=backend, fullgraph=True)(input_tensor),
+            (True, True, 123, True),
+        )
+
+    def test_out_variant_resize_in_graph_tensor_version(self):
+        def backend(gm, args):
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            return gm
+
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        expected = fn(input_tensor)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+
+        self.assertEqual(actual._version, expected._version)
+
+    def test_out_variant_resize_in_graph_tensor_inference_mode(self):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        with torch.inference_mode():
+            expected = fn(input_tensor)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(input_tensor)
+        self.assertEqual(actual, expected)
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_out_variant_resize_in_graph_tensor_reused_out(self, backend):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            first = torch.all(input_tensor, dim=2, out=output_tensor)
+            second = torch.all(input_tensor, dim=2, out=output_tensor)
+            return (
+                id(first) == id(output_tensor),
+                id(second) == id(output_tensor),
+                first is output_tensor,
+                second is output_tensor,
+                hash(second) == hash(output_tensor),
+            )
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        self.assertEqual(
+            torch.compile(fn, backend=backend, fullgraph=True)(input_tensor),
+            (True, True, True, True, True),
+        )
+
+    def test_out_variant_resize_in_graph_tensor_subclass(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        input_subclass = TwoTensor(input_tensor, input_tensor.clone())
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            fn(input_subclass)
+
+    @parametrize("backend", ["eager", "inductor"])
+    @parametrize("out_kind", ["view", "alias", "detach"])
+    def test_out_variant_resize_in_graph_tensor_view_alias_or_detach(
+        self, backend, out_kind
+    ):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            if out_kind == "view":
+                output_tensor = output_tensor.view(0)
+            elif out_kind == "alias":
+                output_tensor = torch.ops.aten.alias.default(output_tensor)
+            else:
+                output_tensor = output_tensor.detach()
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+
+    @parametrize("backend", ["eager", "inductor"])
+    @parametrize("container_type", [tuple, list], name_fn=lambda t: t.__name__)
+    @parametrize("out_kind", ["view", "alias", "detach"])
+    def test_out_variant_resize_in_graph_tuple_list_view_alias_or_detach(
+        self, backend, container_type, out_kind
+    ):
+        def make_out(dtype):
+            output_tensor = torch.empty((0,), dtype=dtype)
+            if out_kind == "view":
+                return output_tensor.view(0)
+            elif out_kind == "alias":
+                return torch.ops.aten.alias.default(output_tensor)
+            else:
+                return output_tensor.detach()
+
+        def fn(input_tensor):
+            values = make_out(input_tensor.dtype)
+            indices = make_out(torch.long)
+            torch.sort(input_tensor, out=container_type((values, indices)))
+            return values, indices
+
+        input_tensor = torch.randn(3, 5)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= list of tensor variants",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+
     def test_out_root_cell_shape_change(self):
         @torch.compile(backend="eager")
         def fn():

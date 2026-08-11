@@ -47,7 +47,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -138,6 +138,9 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+# Tensor version increments are observable side effects and must survive FX DCE.
+torch.fx.node.has_side_effect(torch._C._increment_version)
 
 
 def _is_supported_out_tensor_layout(
@@ -3481,9 +3484,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # symbolic_shape guards. Mutating them destroys the information
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
-        # changed. If it has, graph break.
+        # changed. If it has, graph break unless the out= tensor is an internal
+        # zero-element torch.all output that can be replaced by the functional
+        # operator before fake propagation mutates it.
         saved_out_shapes = None
         out_kwarg_vt = None
+
         if "out" in kwargs:
             out_kwarg_vt = kwargs["out"]
 
@@ -3503,20 +3509,198 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
+        functional_out_aliases: list[variables.TensorVariable] | None = None
+        if (
+            fn_ is torch.all
+            and isinstance(out_kwarg_vt, variables.TensorVariable)
+            and saved_out_shapes is not None
+        ):
+            fake_out = out_kwarg_vt.as_proxy().node.meta["example_value"]
+            out_node = out_kwarg_vt.as_proxy().node
+            if (
+                out_node.op != "placeholder"
+                and type(fake_out) is FakeTensor
+                and not fake_out._is_view()
+                and fake_out._base is None
+                and fake_out._version == 0
+                and guard_if_dyn(fake_out.numel() == 0)
+                and _is_supported_out_tensor_layout(fake_out, false_if_dde=True)
+            ):
+                non_out_fakes: list[torch.Tensor] = []
+
+                def as_fake_or_constant(vt: VariableTracker) -> Any:
+                    if vt.is_tensor():
+                        fake = vt.as_proxy().node.meta["example_value"]
+                        non_out_fakes.append(fake)
+                        return fake
+                    if vt.is_python_constant():
+                        return vt.as_python_constant()
+                    proxy = vt.as_proxy()
+                    if not isinstance(proxy, torch.fx.Proxy):
+                        raise AssertionError(
+                            "Expected symbolic torch.all argument to have a proxy"
+                        )
+                    return proxy.node.meta["example_value"]
+
+                fake_args = tuple(as_fake_or_constant(arg) for arg in args)
+                fake_kwargs = {
+                    key: as_fake_or_constant(value)
+                    for key, value in kwargs.items()
+                    if key != "out"
+                }
+                # pyrefly: ignore [missing-attribute]
+                is_alias_of = torch._C._is_alias_of
+                if (
+                    non_out_fakes
+                    and all(type(fake) is FakeTensor for fake in non_out_fakes)
+                    and not any(is_alias_of(fake_out, other) for other in non_out_fakes)
+                ):
+                    fake_mode = tx.fake_mode
+                    if fake_mode is None:
+                        raise AssertionError("fake_mode must not be None")
+                    with fake_mode:
+                        functional_fake = fn_(*fake_args, **fake_kwargs)
+                    if not isinstance(functional_fake, torch.Tensor):
+                        raise AssertionError(
+                            "Expected functional out= rewrite to return a tensor"
+                        )
+
+                    same_object_nodes: list[torch.fx.Node] = []
+                    has_safe_producer = False
+                    has_unsafe_alias = False
+                    for node in tx.output.current_tracer.graph.nodes:
+                        other = node.meta.get("example_value")
+                        if not isinstance(other, torch.Tensor):
+                            continue
+                        if other is fake_out:
+                            same_object_nodes.append(node)
+                            if (
+                                node.op == "placeholder"
+                                or node.kwargs.get("pin_memory") is True
+                                or node.meta.get("untyped_storage_accessed", False)
+                                or node.meta.get("data_ptr_accessed", False)
+                            ):
+                                has_unsafe_alias = True
+                                break
+                            if (
+                                node.op == "call_function"
+                                and node.target is torch.empty
+                            ):
+                                has_safe_producer = True
+                            elif node.op == "call_method" and node.target == "to":
+                                source_node = node.args[0]
+                                if isinstance(source_node, torch.fx.Node):
+                                    source_fake = source_node.meta.get("example_value")
+                                    if (
+                                        isinstance(source_fake, torch.Tensor)
+                                        and source_fake is not fake_out
+                                    ):
+                                        # A copying to() call creates fresh, resizable
+                                        # storage even when its input did not have it.
+                                        has_safe_producer = True
+                            else:
+                                # Only torch.empty and same-object/copying to()
+                                # are proven to produce resizable storage here.
+                                has_unsafe_alias = True
+                                break
+                            continue
+                        if is_alias_of(fake_out, other):
+                            # This catches distinct TensorImpl aliases such as
+                            # views, aten.alias, and detach.
+                            has_unsafe_alias = True
+                            break
+
+                    if not has_unsafe_alias:
+                        same_object_node_set = set(same_object_nodes)
+                        for node in same_object_nodes:
+                            if any(
+                                user not in same_object_node_set
+                                or user.op != "call_method"
+                                or user.target != "to"
+                                for user in node.users
+                            ):
+                                # The original empty tensor may have escaped to
+                                # an earlier graph user that the functional
+                                # replacement cannot update.
+                                has_unsafe_alias = True
+                                break
+
+                    if (
+                        has_safe_producer
+                        and not has_unsafe_alias
+                        and guard_if_dyn(saved_out_shapes != functional_fake.shape)
+                        and fake_out.dtype == functional_fake.dtype
+                        and fake_out.device == functional_fake.device
+                        and fake_out.layout == functional_fake.layout
+                        and type(functional_fake) is FakeTensor
+                    ):
+                        functional_out_aliases = [out_kwarg_vt]
+                        functional_out_aliases.extend(
+                            vt
+                            for vt in tx.output.current_tracer.tracked_proxyable_vt
+                            if vt is not out_kwarg_vt
+                            and isinstance(vt, variables.TensorVariable)
+                            and vt.as_proxy().node.meta.get("example_value") is fake_out
+                        )
+
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
+        call_kwargs = (
+            {key: value for key, value in kwargs.items() if key != "out"}
+            if functional_out_aliases is not None
+            else kwargs
+        )
+        metadata_mutation_versions = [
+            (vt, vt._get_fake_version())
+            for vt in [*args, *kwargs.values()]
+            if isinstance(vt, variables.TensorVariable)
+            and vt._metadata_mutation_aliases is not None
+        ]
         with ctx():
+            result_proxy = tx.output.create_proxy(
+                "call_function",
+                fn_,
+                *proxy_args_kwargs(args, call_kwargs),
+            )
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+                proxy=result_proxy,
             )
+            if functional_out_aliases is not None:
+                # Eager out= writes bump the result's version counter once.
+                # This primitive is registered as effectful so graph DCE cannot
+                # drop it, and it is safe for inference tensors without counters.
+                version_proxy = tx.output.create_proxy(
+                    "call_function",
+                    torch._C._increment_version,
+                    ([result_proxy],),
+                    {},
+                )
+                wrap_fx_proxy(tx=tx, proxy=version_proxy)
+
+        if isinstance(tensor_variable, variables.TensorVariable):
+            for vt, version_before in metadata_mutation_versions:
+                vt._propagate_metadata_mutation_alias(tensor_variable)
+                vt._sync_if_inplace_mutation(tx, version_before)
+
+        if functional_out_aliases is not None:
+            if not isinstance(tensor_variable, variables.TensorVariable):
+                raise AssertionError(
+                    "Expected functional out= rewrite to return a TensorVariable"
+                )
+            if not isinstance(out_kwarg_vt, variables.TensorVariable):
+                raise AssertionError(
+                    "Expected functional out= rewrite to have a TensorVariable out="
+                )
+            for vt in functional_out_aliases:
+                vt.proxy = result_proxy
+                vt.synchronize_attributes(tx)
+                vt._metadata_mutation_aliases = functional_out_aliases
+            tensor_variable = out_kwarg_vt
+            saved_out_shapes = None
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
@@ -3626,6 +3810,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
+
+            if (
+                isinstance(out_kwarg_vt, variables.TensorVariable)
+                and out_kwarg_vt._metadata_mutation_aliases is not None
+            ):
+                # A prior functional out= rewrite established that this VT is
+                # the Python object returned by later out= calls as well.
+                tensor_variable = out_kwarg_vt
 
         return tensor_variable
 
