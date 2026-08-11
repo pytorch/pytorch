@@ -393,7 +393,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        err_msg_reg = "^The server socket has failed to listen on any local .*(?i:address already in use)"
         with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
