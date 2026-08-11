@@ -1,9 +1,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <vector>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 struct SizeAndStride {
   int64_t size;
@@ -70,6 +68,4 @@ bool maybeOverlappingIndices(const TensorBase& t) {
   return false;
 }
 
-} // detail
-} // cuda
-} // at
+} // namespace at::cuda::detail

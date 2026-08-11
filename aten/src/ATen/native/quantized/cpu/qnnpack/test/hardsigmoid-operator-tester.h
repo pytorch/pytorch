@@ -145,7 +145,7 @@ class HardsigmoidOperatorTester {
               (int32_t(input[i * inputStride() + c]) -
                int32_t(inputZeroPoint()));
           const float hardsigmoidX =
-            std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+            std::clamp(x + 3.0f, 0.0f, 6.0f) / 6.0f;
           const float scaledHardsigmoidX = hardsigmoidX / outputScale();
           float y = scaledHardsigmoidX;
           y = std::min<float>(y, int32_t(qmax()) - int32_t(outputZeroPoint()));
