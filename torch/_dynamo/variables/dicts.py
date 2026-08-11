@@ -81,7 +81,7 @@ if TYPE_CHECKING:
 # [Adding a new supported class within the keys of ConstDictVariable]
 # - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
-# - Implement richcompare_impl() for key equality
+# - Implement tp_richcompare_impl() for key equality
 
 
 def pydict_check(obj: VariableTracker) -> bool:
@@ -194,7 +194,7 @@ class ConstDictVariable(VariableTracker):
             for k, v in self.items.items()
         }
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = [
             f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
             for key, value in self.items.items()
@@ -472,7 +472,7 @@ class ConstDictVariable(VariableTracker):
         # Unhashable key check happens inside HashableTracker (hash_impl → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
@@ -768,7 +768,7 @@ class ConstDictVariable(VariableTracker):
             self.items[hkey] = value
         return ConstantVariable.create(None)
 
-    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
@@ -810,7 +810,7 @@ class ConstDictVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
@@ -839,7 +839,7 @@ class ConstDictVariable(VariableTracker):
             return VariableTracker.build(tx, not eq_result.as_python_constant())
         return eq_result
 
-    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
+    def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
         # DictGuardManager does not support getattr_manager for plain dicts,
@@ -849,7 +849,7 @@ class ConstDictVariable(VariableTracker):
         type_attr = mro_lookup(self.python_type(), name)
         if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
             return variables.CallMethodVariable(self, name)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class OrderedDictVariable(ConstDictVariable):
@@ -947,7 +947,7 @@ class OrderedDictVariable(ConstDictVariable):
         items = [(k.vt.debug_repr(), v.debug_repr()) for k, v in self.items.items()]
         return self._ordered_dict_repr(items)
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
         items = [
@@ -1109,16 +1109,16 @@ class MappingProxyVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.tp_iter_impl(tx)
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # https://github.com/python/cpython/blob/60403a5409ff/Objects/descrobject.c#L1087-L1095
-        return self.dv_dict.sq_contains(tx, item)
+        return self.dv_dict.sq_contains_impl(tx, item)
 
-    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self.dv_dict.mp_length(tx)
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.dv_dict.mp_length_impl(tx)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # mappingproxy_richcompare delegates to the underlying mapping:
@@ -1207,7 +1207,7 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # dictview_mapping getset returns a read-only mappingproxy of the
@@ -1215,9 +1215,9 @@ class DictViewVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
         if name == "mapping":
             return MappingProxyVariable(self.dv_dict)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
             items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
         elif self.kv == "values":
@@ -1253,7 +1253,7 @@ class DictViewVariable(VariableTracker):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for dict view objects."""
         return VariableTracker.build(tx, len(self.view_items))
 
@@ -1338,13 +1338,13 @@ class DictKeysVariable(DictViewVariable):
                 items.append(key_str)
             return "dict_keys([" + ", ".join(items) + "])"
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
-        return self.dv_dict.sq_contains(tx, item)
+        return self.dv_dict.sq_contains_impl(tx, item)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
@@ -1419,7 +1419,7 @@ class DictValuesVariable(DictViewVariable):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator(self.dv_dict.items)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # dict_values has no tp_richcompare (inherits object's).
@@ -1470,7 +1470,7 @@ class DictItemsVariable(DictViewVariable):
                 items.append(f"({key_str}, {val_str})")
             return "dict_items([" + ", ".join(items) + "])"
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6433-L6451
@@ -1492,7 +1492,7 @@ class DictItemsVariable(DictViewVariable):
 
         return iter_contains(self.view_items_vt, item, tx)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
