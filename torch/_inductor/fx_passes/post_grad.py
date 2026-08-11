@@ -142,25 +142,36 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
-def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
-    """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
+def respecialize_current_device_nodes(graph: torch.fx.Graph) -> None:
+    """[device-as-parameter] Re-specialize CooR _coor_current_device() device nodes.
 
-    Under compile_on_one_rank, make_fx rewrites a baked accelerator device operand to a
-    ``coor::current_device()`` node so the FX graph is rank-agnostic. Inductor has no
-    device-valued IR and cannot lower a device-returning op, so raise a clear, actionable
-    error instead of failing later with a cryptic lowering assertion. A follow-up adds
-    real support by stripping the node before lowering.
+    Under compile-on-one-rank, make_fx rewrites a baked accelerator device operand to a
+    ``_coor_current_device()`` node so the FX graph is rank-agnostic. Inductor has no
+    device-valued IR, so before lowering we replace each use of that node with the node's
+    own runtime value -- the concrete current device (``_coor_current_device()``), the
+    authoritative source, not the consumer's meta. Runs in post_grad, before GraphLowering,
+    so the node never reaches the call_function OpOverload assertion. ``_coor_current_device``
+    lives in core fx and only reads torch.accelerator, so this never imports
+    torch.distributed for a non-distributed compile.
     """
-    import torch.fx.experimental.proxy_tensor
+    # Importing proxy_tensor registers the coor::current_device op (core fx, no
+    # torch.distributed) and gives us its impl for the concrete value.
+    from torch.fx.experimental.proxy_tensor import _coor_current_device
 
     target = torch.ops.coor.current_device.default
-    if any(n.op == "call_function" and n.target is target for n in graph.nodes):
-        raise RuntimeError(
-            "compile_on_one_rank is not supported with the inductor backend when the "
-            "graph contains a device-derived factory or cast (it emits a "
-            "coor::current_device node that inductor cannot lower). Use a non-inductor "
-            "backend (e.g. aot_eager) or disable compile_on_one_rank."
-        )
+    nodes = graph.find_nodes(op="call_function", target=target)
+    if not nodes:
+        return
+    device = _coor_current_device()
+    for node in nodes:
+        for user in list(node.users):
+            user.args = torch.fx.map_arg(
+                user.args, lambda n: device if n is node else n
+            )
+            user.kwargs = torch.fx.map_arg(
+                user.kwargs, lambda n: device if n is node else n
+            )
+        graph.erase_node(node)
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -220,9 +231,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         _remove_profiler_ops
     )
 
-    # [device-as-parameter] Reject CooR device nodes inductor can't lower (clear error).
-    GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
-        reject_current_device_nodes
+    # [device-as-parameter] Re-specialize CooR current_device() device nodes before
+    # lowering (inductor has no device-valued IR).
+    GraphTransformObserver(gm, "respecialize_current_device").apply_graph_pass(
+        respecialize_current_device_nodes
     )
 
     if config.pattern_matcher:
