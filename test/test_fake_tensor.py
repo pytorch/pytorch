@@ -45,6 +45,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_constant,
     maybe_get_fake_device,
     maybe_get_fake_mode,
+    maybe_get_real_tensor,
     MetadataMismatchError,
     unset_fake_temporarily,
     UnsupportedOperatorException,

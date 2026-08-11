@@ -61,7 +61,7 @@ static PyObject* recursive_to_list(
   return list.release();
 }
 
-const Tensor& recursive_unwrap(const Tensor& tensor) {
+static const Tensor& recursive_unwrap(const Tensor& tensor) {
   if (auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor))
     return recursive_unwrap(wrapper->value());
   return tensor;
