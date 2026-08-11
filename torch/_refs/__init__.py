@@ -2538,6 +2538,12 @@ def amin(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Attempting to cast from {a.dtype} to out tensor with "
+            f"dtype {out.dtype}, but this can't be cast because it is not safe!",
+        )
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2562,6 +2568,12 @@ def amax(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Attempting to cast from {a.dtype} to out tensor with "
+            f"dtype {out.dtype}, but this can't be cast because it is not safe!",
+        )
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
