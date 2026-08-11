@@ -116,7 +116,7 @@ struct TORCH_API AccumulateGrad : public Node {
   //     . We aren't setting up for double-backward.
   //     . No other user-visible tensor references new_grad.
   //     . new_grad obeys the "Gradient Layout Contract", there has a special
-  //       case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
+  //       case, For MKLDNN tensor, which is an opaque tensor, assuming it obeys
   //       layout_contract.
   //   - Case 1.2: Stealable sparse new_grad
   //     . Can't detach sparse tensor (since metadata changes are not allowed
