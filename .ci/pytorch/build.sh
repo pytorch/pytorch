@@ -287,9 +287,20 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # embedded, and patch the relinked library back into the wheel handed
   # to test jobs. Needs the INSTALLED torch (kernel builders import it),
   # which is why it runs post-install rather than inside the PEP 517
-  # build. Skips cleanly (printing why) when the DSL runtime is absent
-  # or no supported arch is targeted; past those checks a failure fails
-  # the build. See tools/native_aot/build_stage2.py.
+  # build. Skips cleanly (printing why) with TORCH_NATIVE_AOT=0, on a
+  # non-CUDA build, when no toolchain targets this backend, or when no
+  # supported arch is targeted. Past those checks the DSL runtimes are
+  # required and any failure fails the build. See
+  # tools/native_aot/build_stage2.py.
+  #
+  # The DSL wheels are installed HERE rather than in
+  # .ci/docker/requirements-ci.txt: that file is shared by every image, so
+  # pinning them there put ~190 MB of CUDA-only tooling into the CPU, ROCm
+  # and XPU images -- and made capability probes lie there (a ROCm image
+  # with the wheel reports CUTLASS available, then fails cuInit).
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    install_cutlass_dsl
+  fi
   python tools/native_aot/build_stage2.py --wheel "$(echo dist/*.whl)"
 
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must

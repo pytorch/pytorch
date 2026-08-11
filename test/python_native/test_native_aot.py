@@ -1,12 +1,11 @@
 # Owner(s): ["module: dsl-native-ops"]
 """End-to-end tests for native-AOT kernels on aten::topk @ CUDA.
 
-Three-layer routing under test (see torch/_native/ops/topk/
-aot_manifest.yaml):
+Three-layer routing under test (see torch/_native/ops/topk/aot.py):
 
-  * manifest-covered calls (fp32/bf16 on the exported grid) -> the AOT
+  * declaration-covered calls (fp32/bf16 on the exported grid) -> the AOT
     kernel embedded in the structured wrapper, reached because the
-    Python JIT layer's conds subtract manifest coverage
+    Python JIT layer's conds subtract AOT coverage
   * uncovered-but-JIT-eligible calls (e.g. off-grid fp32) -> the JIT
     override
   * everything else -> stock aten

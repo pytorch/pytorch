@@ -7,13 +7,15 @@ torchgen consumes the declarations to (a) generate
 NativeAotStubs.h -- one at::native DispatchStub per declared op,
 signature-matched to the structured impl and with no kernel registered
 by default -- and (b) emit a stub consultation between op.meta() and
-op.impl() in the generated structured wrapper. The AOT kernel library
-(built separately, from the same declarations) registers its kernels on
-the stubs at load time via set_<device>_dispatch_ptr.
+op.impl() in the generated structured wrapper. The AOT kernels (built
+separately, from the same declarations) are linked into libtorch_cuda and
+register on the stubs from static initializers, via
+set_<device>_dispatch_ptr.
 
-Only the identity torchgen needs is modeled here; the precompile grid
-and C++-generating functions are consumed by the export tool and
-gen_aot_lib, covered_axes by torch._native.aot_manifest at runtime.
+Only the identity torchgen needs is modeled here; the precompile grid is
+consumed by the export tool and torch._native.aot_manifest, the
+C++-generating functions by gen_aot_lib, covered_axes by
+torch._native.aot_manifest at runtime.
 """
 
 from __future__ import annotations
@@ -68,6 +70,8 @@ def parse_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest] = {}
     if not os.path.isdir(ops_dir):
         return manifests
+    # Only the (dispatch_key, op) keys matter here; the declaration objects
+    # they map to are for the export tool and gen_aot_lib.
     for key_str, op in discover_declarations(ops_dir):
         key = DispatchKey.parse(key_str)
         manifests[(key, op)] = NativeAotManifest(op=op, dispatch_key=key)

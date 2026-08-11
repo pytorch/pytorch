@@ -9,7 +9,10 @@ import torch
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
-from torch._native.ops.sum.inner_tree_plan import compute_inner_tree_params, vec_size
+from torch._native.ops.reductions.inner_tree_plan import (
+    compute_inner_tree_params,
+    vec_size,
+)
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
