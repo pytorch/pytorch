@@ -16,9 +16,18 @@ if not dist.is_available():
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_device_type import (
+    Capability,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -138,6 +147,8 @@ class AllReducer(Joinable):
 
 
 class TestJoin(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r"""Test cases for the generic join context."""
 
     def setUp(self):
@@ -282,6 +293,8 @@ class TestJoin(MultiProcessTestCase):
             for allreducer in allreducers:
                 self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_main_hooks(self):
         r"""Tests the main hooks of a single :class:`Joinable`."""
@@ -306,6 +319,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_post_hooks(self):
         r"""Tests the post-hooks of a single :class:`Joinable`."""
@@ -323,6 +338,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable(self):
         r"""
@@ -351,6 +368,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_multiple_joinables(self):
         r"""
@@ -380,6 +399,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_disable(self):
         r"""Tests ``enable=False`` for a single :class:`Joinable`."""
@@ -401,6 +422,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_multiple_joinable_disable(self):
         r"""
@@ -427,6 +450,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_throw(self):
         r"""
@@ -448,6 +473,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_multiple_joinables_throw(self):
         r"""
@@ -472,6 +499,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
+    @requires_capabilities(Capability.distributed.backend)
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_join_kwargs(self):
         r"""
