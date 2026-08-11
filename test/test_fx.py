@@ -5196,6 +5196,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
             "Deserialized graph should contain triton_kernel_wrapper_functional",
         )
 
+instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
 
 class TestOperatorSignatures(JitTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
