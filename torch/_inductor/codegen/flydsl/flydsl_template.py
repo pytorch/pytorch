@@ -97,8 +97,7 @@ class FlyDSLTemplate(KernelTemplate):
                     f"Got {input_call_args}, expected prefix {expected_input_args}."
                 )
 
-            with kernel._patch_get_dtype_for_args():
-                arg_defs, call_args, _, _ = kernel.args.python_argdefs()
+            arg_defs, call_args, _, _ = kernel.args.python_argdefs()
             expected_args = list(input_call_args)
             expected_args.append(output_node.get_name())
             if list(call_args)[: len(expected_args)] != expected_args:
