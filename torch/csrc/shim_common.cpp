@@ -225,17 +225,16 @@ static c10::IValue to_ivalue(
           static_cast<c10::DeviceType>(static_cast<int8_t>(
               static_cast<uint32_t>((stable_ivalue >> 32) & 0xFFFFFFFF)));
       TORCH_CHECK(
-          device_index >= std::numeric_limits<int8_t>::min() &&
-              device_index <= std::numeric_limits<int8_t>::max(),
+          device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
           "Device index ",
           device_index,
-          " is out of range for int8_t [",
-          static_cast<int>(std::numeric_limits<int8_t>::min()),
+          " is out of range for DeviceIndex [",
+          -1,
           ", ",
-          static_cast<int>(std::numeric_limits<int8_t>::max()),
+          c10::Device::MAX_NUM_DEVICES - 1,
           "]");
-      return c10::IValue(
-          c10::Device(device_type, static_cast<int8_t>(device_index)));
+      return c10::IValue(c10::Device(
+          device_type, static_cast<c10::DeviceIndex>(device_index)));
     }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(torch::stable::detail::_to<c10::Layout>(
@@ -742,7 +741,9 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
-    c10::Device device(static_cast<c10::DeviceType>(device_type), device_index);
+    c10::Device device(
+        static_cast<c10::DeviceType>(device_type),
+        torch::aot_inductor::checked_device_index(device_index, true));
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
     at::Tensor tensor;
@@ -882,7 +883,7 @@ AOTITorchError torch_generator_get_device(
         torch::aot_inductor::generator_handle_to_generator_pointer(generator)
             ->device();
     *ret_device_type = static_cast<int32_t>(device.type());
-    *ret_device_index = static_cast<int16_t>(device.index());
+    *ret_device_index = static_cast<int32_t>(device.index());
   });
 }
 

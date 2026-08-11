@@ -204,6 +204,12 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
       value <= std::numeric_limits<c10::DeviceIndex>::max() &&
           value >= std::numeric_limits<c10::DeviceIndex>::min(),
       "Overflow when unpacking DeviceIndex");
+  TORCH_CHECK(
+      value < c10::Device::MAX_NUM_DEVICES,
+      "Device index must be less than ",
+      c10::Device::MAX_NUM_DEVICES,
+      ", got ",
+      value);
   return (c10::DeviceIndex)value;
 }
 

@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <c10/core/Device.h>
 #include <torch/xpu.h>
 
 namespace torch::xpu {
@@ -38,6 +39,15 @@ void manual_seed_all(uint64_t seed) {
 
 void synchronize(int64_t device_index) {
   TORCH_CHECK(is_available(), "No XPU are available");
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
   at::detail::getXPUHooks().deviceSynchronize(
       static_cast<c10::DeviceIndex>(device_index));
 }

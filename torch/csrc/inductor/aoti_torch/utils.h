@@ -3,7 +3,7 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
-#include <c10/core/DeviceType.h>
+#include <c10/core/Device.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
@@ -41,6 +41,23 @@ TORCH_API void set_last_error(const char* msg);
   return AOTI_TORCH_SUCCESS;
 
 namespace torch::aot_inductor {
+
+inline c10::DeviceIndex checked_device_index(
+    int32_t device_index,
+    bool allow_default = false) {
+  const int32_t lower_bound = allow_default ? -1 : 0;
+  TORCH_CHECK(
+      device_index >= lower_bound &&
+          device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      lower_bound,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 inline at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
   return reinterpret_cast<at::Tensor*>(handle);
@@ -154,7 +171,7 @@ inline std::optional<c10::Device> pointer_to_optional_device(
     int32_t device_index) {
   return device_type ? std::make_optional(c10::Device(
                            static_cast<c10::DeviceType>(*device_type),
-                           static_cast<c10::DeviceIndex>(device_index)))
+                           checked_device_index(device_index, true)))
                      : std::nullopt;
 }
 

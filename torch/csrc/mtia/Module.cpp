@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <torch/csrc/Generator.h>
@@ -9,6 +10,23 @@
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch::mtia {
+
+namespace {
+
+c10::DeviceIndex checked_mtia_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
+} // namespace
 
 struct _MTIAGraph {
   // MTIA use accelerator hooks to connect pytorch and outside.
@@ -79,14 +97,16 @@ void initModule(PyObject* module) {
     return torch::utils::is_device_in_bad_fork(at::kMTIA);
   });
 
-  m.def("_mtia_getCurrentStream", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_getCurrentStream", [](int64_t device_index) {
+    const auto c10_device_index = checked_mtia_device_index(device_index);
     torch::utils::device_lazy_init(at::kMTIA);
-    return at::detail::getMTIAHooks().getCurrentStream(device_index);
+    return at::detail::getMTIAHooks().getCurrentStream(c10_device_index);
   });
 
-  m.def("_mtia_getCurrentRawStream", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_getCurrentRawStream", [](int64_t device_index) {
+    const auto c10_device_index = checked_mtia_device_index(device_index);
     torch::utils::device_lazy_init(at::kMTIA);
-    return at::detail::getMTIAHooks().getCurrentRawStream(device_index);
+    return at::detail::getMTIAHooks().getCurrentRawStream(c10_device_index);
   });
 
   m.def("_mtia_deviceSynchronize", []() {
@@ -95,34 +115,36 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().getCurrentDevice());
   });
 
-  m.def("_mtia_exchangeDevice", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_exchangeDevice", [](int64_t device_index) {
     if (device_index < 0) {
       return static_cast<c10::DeviceIndex>(-1);
     }
-    return at::detail::getMTIAHooks().exchangeDevice(device_index);
+    return at::detail::getMTIAHooks().exchangeDevice(
+        checked_mtia_device_index(device_index));
   });
 
-  m.def("_mtia_maybeExchangeDevice", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_maybeExchangeDevice", [](int64_t device_index) {
     if (device_index < 0) {
       return static_cast<c10::DeviceIndex>(-1);
     }
-    return at::detail::getMTIAHooks().maybeExchangeDevice(device_index);
+    return at::detail::getMTIAHooks().maybeExchangeDevice(
+        checked_mtia_device_index(device_index));
   });
 
-  m.def("_mtia_getDefaultStream", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_getDefaultStream", [](int64_t device_index) {
+    const auto c10_device_index = checked_mtia_device_index(device_index);
     torch::utils::device_lazy_init(at::kMTIA);
-    return at::detail::getMTIAHooks().getDefaultStream(device_index);
+    return at::detail::getMTIAHooks().getDefaultStream(c10_device_index);
   });
 
   m.def(
       "_mtia_setStream",
-      [](int64_t stream_id,
-         c10::DeviceIndex device_index,
-         int64_t device_type) {
+      [](int64_t stream_id, int64_t device_index, int64_t device_type) {
+        const auto c10_device_index = checked_mtia_device_index(device_index);
         torch::utils::device_lazy_init(at::kMTIA);
         at::detail::getMTIAHooks().setCurrentStream(c10::Stream::unpack3(
             stream_id,
-            device_index,
+            c10_device_index,
             static_cast<c10::DeviceType>(device_type)));
       });
 
@@ -135,21 +157,24 @@ void initModule(PyObject* module) {
     at::detail::getMTIAHooks().setCurrentStream(stream);
   });
 
-  m.def("_mtia_memoryStats", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_memoryStats", [](int64_t device_index) {
+    const auto c10_device_index = checked_mtia_device_index(device_index);
     PyObject* raw_pyobject =
-        at::detail::getMTIAHooks().memoryStats(device_index);
+        at::detail::getMTIAHooks().memoryStats(c10_device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 
-  m.def("_mtia_getDeviceCapability", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_getDeviceCapability", [](int64_t device_index) {
+    const auto c10_device_index = checked_mtia_device_index(device_index);
     PyObject* raw_pyobject =
-        at::detail::getMTIAHooks().getDeviceCapability(device_index);
+        at::detail::getMTIAHooks().getDeviceCapability(c10_device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 
-  m.def("_mtia_getDeviceProperties", [](c10::DeviceIndex device_index) {
+  m.def("_mtia_getDeviceProperties", [](int64_t device_index) {
+    const auto c10_device_index = checked_mtia_device_index(device_index);
     PyObject* raw_pyobject =
-        at::detail::getMTIAHooks().getDeviceProperties(device_index);
+        at::detail::getMTIAHooks().getDeviceProperties(c10_device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 
@@ -183,12 +208,14 @@ void initModule(PyObject* module) {
     return at::detail::getMTIAHooks().getCurrentDevice();
   });
 
-  m.def("_mtia_setDevice", [](c10::DeviceIndex device_index) {
-    at::detail::getMTIAHooks().setCurrentDevice(device_index);
+  m.def("_mtia_setDevice", [](int64_t device_index) {
+    at::detail::getMTIAHooks().setCurrentDevice(
+        checked_mtia_device_index(device_index));
   });
 
-  m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
-    at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
+  m.def("_mtia_resetPeakMemoryStats", [](int64_t device_index) {
+    at::detail::getMTIAHooks().resetPeakMemoryStats(
+        checked_mtia_device_index(device_index));
   });
 
   m.def("_mtia_graphPoolHandle", []() {

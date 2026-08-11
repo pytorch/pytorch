@@ -114,7 +114,7 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
 
   ctx.device_id =
       (device.is_cuda() || device.is_privateuseone() || device.is_mtia())
-      ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
+      ? static_cast<int32_t>(device.index())
       : 0;
 
   switch (device.type()) {
@@ -193,6 +193,24 @@ Device dlDeviceToTorchDevice(
       TORCH_CHECK_BUFFER(
           false, "Unsupported device_type: ", std::to_string(type));
   }
+}
+
+static c10::DeviceIndex checkedDLDeviceIndex(
+    DLDeviceType type,
+    int32_t device_id) {
+  if (type == DLDeviceType::kDLCPU) {
+    return 0;
+  }
+  TORCH_CHECK_VALUE(
+      device_id >= 0 && device_id < c10::Device::MAX_NUM_DEVICES,
+      "DLPack device id ",
+      device_id,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_id);
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
@@ -461,7 +479,10 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
 
   DLTensor& dl_tensor = src->dl_tensor;
   Device device = dlDeviceToTorchDevice(
-      dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
+      dl_tensor.device.device_type,
+      checkedDLDeviceIndex(
+          dl_tensor.device.device_type, dl_tensor.device.device_id),
+      dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
@@ -536,7 +557,8 @@ Tensor maybeCopyTensor(
   if (optional_dl_device.has_value()) {
     auto device = at::dlDeviceToTorchDevice(
         optional_dl_device->device_type,
-        static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
+        checkedDLDeviceIndex(
+            optional_dl_device->device_type, optional_dl_device->device_id));
 
     if (device != data.device()) {
       TORCH_CHECK_VALUE(

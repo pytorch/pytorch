@@ -2057,11 +2057,14 @@ class NativeCachingAllocator : public XPUAllocator {
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
   void init(DeviceIndex device_count) override {
-    const auto size = static_cast<DeviceIndex>(device_allocators.size());
-    if (size < device_count) {
-      device_allocators.resize(device_count);
-      for (const auto i : c10::irange(size, device_count)) {
-        device_allocators[i] = std::make_unique<DeviceCachingAllocator>(i);
+    TORCH_CHECK(device_count >= 0, "Invalid XPU device count ", device_count);
+    const auto size = device_allocators.size();
+    const auto target_size = static_cast<size_t>(device_count);
+    if (size < target_size) {
+      device_allocators.resize(target_size);
+      for (const auto i : c10::irange(size, target_size)) {
+        device_allocators[i] = std::make_unique<DeviceCachingAllocator>(
+            static_cast<DeviceIndex>(i));
       }
     }
   }
@@ -2078,7 +2081,7 @@ class NativeCachingAllocator : public XPUAllocator {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocators.size(),
         "Allocator not initialized for device ",
-        static_cast<int16_t>(device),
+        static_cast<int>(device),
         ": did you call init?");
     Block* block = device_allocators[device]->malloc(device, size, queue);
     add_allocated_block(block);

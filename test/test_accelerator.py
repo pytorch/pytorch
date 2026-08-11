@@ -36,6 +36,19 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.set_device_index("cpu")
 
+    def test_logical_device_index_upper_bound(self):
+        out_of_range = 32767
+        msg = "Device index 32767 is out of range for DeviceIndex"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.accelerator.set_device_index(out_of_range)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.accelerator.current_stream(out_of_range)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.accelerator.synchronize(out_of_range)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.accelerator.device_index(out_of_range):
+                pass
+
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
         orig_device = torch.accelerator.current_device_index()

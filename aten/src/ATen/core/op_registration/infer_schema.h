@@ -8,6 +8,8 @@
 #include <ATen/core/function_schema.h>
 #include <c10/util/Metaprogramming.h>
 
+#include <cstdint>
+
 namespace c10 {
 namespace detail::infer_schema {
 
@@ -29,14 +31,21 @@ struct bool_t {};
 template<> struct bool_t<true> : std::true_type {};
 template<> struct bool_t<false> : std::false_type {};
 
+template <class T>
+using valid_integral_arg_type = bool_t<
+    !std::is_integral_v<T> || std::is_same_v<T, int8_t> ||
+    std::is_same_v<T, int16_t> || std::is_same_v<T, int64_t> ||
+    std::is_same_v<T, bool>>;
+
 /// Checks the static C++ types `Types` for correctness to catch common error cases.
 template <class... Types>
 constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
  static_assert(std::conjunction_v<
-     bool_t<!std::is_integral_v<Types> || std::is_same_v<Types, int8_t> || std::is_same_v<Types, int64_t> || std::is_same_v<Types, bool>>...
-   >, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
+     valid_integral_arg_type<Types>...
+   >, "INVALID TYPE: Only int8_t, int16_t, int64_t and bool are supported "
+       "as an integral argument type");
  static_assert(std::conjunction_v<
      bool_t<!std::is_same_v<Types, float>>...
    >, "INVALID TYPE: float is not supported as an argument type, use double instead");

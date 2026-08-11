@@ -6,9 +6,23 @@
 #include <torch/csrc/xpu/Module.h>
 #include <torch/csrc/xpu/Stream.h>
 
+#include <c10/core/Device.h>
 #include <structmember.h>
 
 PyObject* THXPStreamClass = nullptr;
+
+static c10::DeviceIndex checked_stream_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 static PyObject* THXPStream_pynew(
     PyTypeObject* type,
@@ -47,7 +61,7 @@ static PyObject* THXPStream_pynew(
   at::xpu::XPUStream stream = (stream_id || device_index || device_type)
       ? at::xpu::XPUStream::unpack3(
             stream_id,
-            static_cast<c10::DeviceIndex>(device_index),
+            checked_stream_device_index(device_index),
             static_cast<c10::DeviceType>(device_type))
       : at::xpu::getStreamFromPool(priority, current_device);
 

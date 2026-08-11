@@ -1,7 +1,25 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
+
+namespace {
+
+c10::DeviceIndex checkedDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
+} // namespace
 
 namespace torch::accelerator {
 
@@ -18,14 +36,15 @@ void initModule(PyObject* module) {
     }
   });
 
-  m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_setDeviceIndex", [](int64_t device_index) {
     // If device index is negative, no-op
     if (device_index < 0) {
       return;
     }
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
-    at::accelerator::setDeviceIndex(device_index);
+    at::accelerator::setDeviceIndex(c10_device_index);
   });
 
   m.def("_accelerator_getDeviceIndex", []() {
@@ -34,10 +53,11 @@ void initModule(PyObject* module) {
     return at::accelerator::getDeviceIndex();
   });
 
-  m.def("_accelerator_getDeviceCapability", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_getDeviceCapability", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
-    auto caps = at::accelerator::getDeviceCapability(device_index);
+    auto caps = at::accelerator::getDeviceCapability(c10_device_index);
 
     py::dict dict;
 
@@ -63,14 +83,16 @@ void initModule(PyObject* module) {
     at::accelerator::setCurrentStream(stream);
   });
 
-  m.def("_accelerator_getStream", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_getStream", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::getCurrentStream(device_index);
+    return at::accelerator::getCurrentStream(c10_device_index);
   });
 
-  m.def("_accelerator_synchronizeDevice", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_synchronizeDevice", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     if (torch::utils::is_device_lazy_init_supported(device_type) &&
         !torch::utils::is_device_initialized(device_type)) {
       return;
@@ -78,20 +100,22 @@ void initModule(PyObject* module) {
     torch::utils::maybe_initialize_device(device_type);
     {
       py::gil_scoped_release no_gil;
-      at::accelerator::synchronizeDevice(device_index);
+      at::accelerator::synchronizeDevice(c10_device_index);
     }
   });
 
-  m.def("_accelerator_exchangeDevice", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_exchangeDevice", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::exchangeDevice(device_index);
+    return at::accelerator::exchangeDevice(c10_device_index);
   });
 
-  m.def("_accelerator_maybeExchangeDevice", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_maybeExchangeDevice", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::maybeExchangeDevice(device_index);
+    return at::accelerator::maybeExchangeDevice(c10_device_index);
   });
 
   m.def("_accelerator_isAllocatorInitialized", []() {
@@ -110,13 +134,14 @@ void initModule(PyObject* module) {
     at::accelerator::emptyHostCache();
   });
 
-  m.def("_accelerator_getDeviceStats", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_getDeviceStats", [](int64_t device_index) {
     using c10::CachingAllocator::Stat;
     using c10::CachingAllocator::StatArray;
     using c10::CachingAllocator::StatType;
     using c10::CachingDeviceAllocator::DeviceStats;
 
-    const auto stats = at::accelerator::getDeviceStats(device_index);
+    const auto c10_device_index = checkedDeviceIndex(device_index);
+    const auto stats = at::accelerator::getDeviceStats(c10_device_index);
     const auto stat_to_dict = [](const Stat& stat) -> py::dict {
       py::dict dict;
       dict["current"] = stat.current;
@@ -158,20 +183,20 @@ void initModule(PyObject* module) {
     return result;
   });
 
-  m.def(
-      "_accelerator_resetAccumulatedStats", [](c10::DeviceIndex device_index) {
-        at::accelerator::resetAccumulatedStats(device_index);
-      });
-
-  m.def("_accelerator_resetPeakStats", [](c10::DeviceIndex device_index) {
-    at::accelerator::resetPeakStats(device_index);
+  m.def("_accelerator_resetAccumulatedStats", [](int64_t device_index) {
+    at::accelerator::resetAccumulatedStats(checkedDeviceIndex(device_index));
   });
 
-  m.def("_accelerator_getMemoryInfo", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_resetPeakStats", [](int64_t device_index) {
+    at::accelerator::resetPeakStats(checkedDeviceIndex(device_index));
+  });
+
+  m.def("_accelerator_getMemoryInfo", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
     py::gil_scoped_release no_gil;
-    return at::accelerator::getMemoryInfo(device_index);
+    return at::accelerator::getMemoryInfo(c10_device_index);
   });
 
   m.def("_accelerator_getAllocatorSettings", []() {
@@ -182,10 +207,11 @@ void initModule(PyObject* module) {
     c10::CachingAllocator::setAllocatorSettings(env);
   });
 
-  m.def("_accelerator_getDefaultGenerator", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_getDefaultGenerator", [](int64_t device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
+    const auto c10_device_index = checkedDeviceIndex(device_index);
     torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::getDefaultGenerator(device_index);
+    return at::accelerator::getDefaultGenerator(c10_device_index);
   });
 
   // Accelerator Graph class binding

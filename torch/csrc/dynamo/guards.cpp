@@ -1,5 +1,6 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/autocast_mode.h>
+#include <c10/core/Device.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
@@ -7434,8 +7435,18 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
 static PyObject* _torchinductor_thp_device_new(
     int device_type,
     int device_index) {
-  return THPDevice_New(
-      c10::Device(static_cast<c10::DeviceType>(device_type), device_index));
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return THPDevice_New(c10::Device(
+      static_cast<c10::DeviceType>(device_type),
+      static_cast<c10::DeviceIndex>(device_index)));
 }
 
 static PyObject* _torchinductor_get_thp_dtype(int dtype) {

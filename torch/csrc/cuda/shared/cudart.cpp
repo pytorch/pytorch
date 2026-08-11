@@ -8,10 +8,29 @@
 #endif
 
 #include <ATen/core/CachingHostAllocator.h>
+#include <c10/core/Device.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 
 namespace torch::cuda::shared {
+
+namespace {
+
+c10::DeviceIndex checkedDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
+} // namespace
 
 #ifdef USE_ROCM
 namespace {
@@ -115,8 +134,8 @@ void initCudartBindings(PyObject* module) {
   cudart.def(
       "cuda"
       "MemGetInfo",
-      [](c10::DeviceIndex device) -> std::pair<size_t, size_t> {
-        c10::cuda::CUDAGuard guard(device);
+      [](int64_t device) -> std::pair<size_t, size_t> {
+        c10::cuda::CUDAGuard guard(checkedDeviceIndex(device));
         size_t device_free = 0;
         size_t device_total = 0;
         py::gil_scoped_release no_gil;

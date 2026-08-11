@@ -731,6 +731,24 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
   }
 
  private:
+  static c10::DeviceIndex CheckedDLDeviceIndex(
+      DLDeviceType device_type,
+      int32_t device_id) {
+    if (device_type == DLDeviceType::kDLCPU) {
+      return 0;
+    }
+    TORCH_CHECK(
+        device_id >= 0 && device_id < c10::Device::MAX_NUM_DEVICES,
+        "DLPack device id ",
+        device_id,
+        " is out of range for DeviceIndex [",
+        0,
+        ", ",
+        c10::Device::MAX_NUM_DEVICES - 1,
+        "]");
+    return static_cast<c10::DeviceIndex>(device_id);
+  }
+
   // Fast non-owning PyObject→DLTensor conversion
   static int DLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
     try {
@@ -784,12 +802,13 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     try {
       at::IntArrayRef shape(
           prototype->shape, prototype->shape + prototype->ndim);
-      at::TensorOptions options =
-          at::TensorOptions()
-              .dtype(at::toScalarType(prototype->dtype))
-              .device(at::dlDeviceToTorchDevice(
-                  prototype->device.device_type,
-                  static_cast<c10::DeviceIndex>(prototype->device.device_id)));
+      at::TensorOptions options = at::TensorOptions()
+                                      .dtype(at::toScalarType(prototype->dtype))
+                                      .device(at::dlDeviceToTorchDevice(
+                                          prototype->device.device_type,
+                                          CheckedDLDeviceIndex(
+                                              prototype->device.device_type,
+                                              prototype->device.device_id)));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -812,7 +831,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       }
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
         *out_stream = at::accelerator::getCurrentStream(
-                          static_cast<c10::DeviceIndex>(device_id))
+                          CheckedDLDeviceIndex(device_type, device_id))
                           .native_handle();
       }
       return 0;
@@ -2492,6 +2511,19 @@ void _initCrashHandler() {
   *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
 }
 
+c10::DeviceIndex checkedAcceleratorHooksDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
 } // anonymous namespace
 
 extern "C" TORCH_PYTHON_API PyObject* initModule();
@@ -3191,13 +3223,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py_module.def(
-      "_accelerator_hooks_set_current_device",
-      [](c10::DeviceIndex device_index) {
+      "_accelerator_hooks_set_current_device", [](int64_t device_index) {
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
+          const auto c10_device_index =
+              checkedAcceleratorHooksDeviceIndex(device_index);
           at::globalContext()
               .getAcceleratorHooksInterface(device_type)
-              .setCurrentDevice(device_index);
+              .setCurrentDevice(c10_device_index);
         }
       });
 
@@ -3211,25 +3244,27 @@ Call this whenever a new thread is created in order to propagate values from
     return static_cast<c10::DeviceIndex>(-1);
   });
 
-  py_module.def(
-      "_accelerator_hooks_exchange_device", [](c10::DeviceIndex device_index) {
-        auto device_type = at::getAccelerator();
-        if (device_type.has_value()) {
-          return at::globalContext()
-              .getAcceleratorHooksInterface(device_type)
-              .exchangeDevice(device_index);
-        }
-        return static_cast<c10::DeviceIndex>(-1);
-      });
+  py_module.def("_accelerator_hooks_exchange_device", [](int64_t device_index) {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      const auto c10_device_index =
+          checkedAcceleratorHooksDeviceIndex(device_index);
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type)
+          .exchangeDevice(c10_device_index);
+    }
+    return static_cast<c10::DeviceIndex>(-1);
+  });
 
   py_module.def(
-      "_accelerator_hooks_maybe_exchange_device",
-      [](c10::DeviceIndex device_index) {
+      "_accelerator_hooks_maybe_exchange_device", [](int64_t device_index) {
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
+          const auto c10_device_index =
+              checkedAcceleratorHooksDeviceIndex(device_index);
           return at::globalContext()
               .getAcceleratorHooksInterface(device_type)
-              .maybeExchangeDevice(device_index);
+              .maybeExchangeDevice(c10_device_index);
         }
         return static_cast<c10::DeviceIndex>(-1);
       });

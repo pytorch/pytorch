@@ -17,6 +17,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
+#include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
@@ -193,6 +194,15 @@ inline ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
     const int device_idx) {
+  TORCH_CHECK(
+      device_idx >= 0 && device_idx < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_idx,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
   auto& syclDevice =
       c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx));
   auto& syclContext = c10::xpu::get_device_context();

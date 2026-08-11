@@ -12012,6 +12012,29 @@ graph():
 
         check_device_and_fake_mode()
 
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_export_fake_cuda_device_uses_logical_device_limit(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with FakeTensorMode():
+            x = torch.empty(1, device="cuda:32766")
+            exported_program = torch.export.export(Model(), (x,))
+            out = exported_program.module()(x)
+            all_meta_val = [
+                node.meta["val"]
+                for node in exported_program.graph_module.graph.nodes
+                if "val" in node.meta
+            ]
+
+        self.assertEqual(out.device, torch.device("cuda:32766"))
+        self.assertTrue(
+            all(
+                val.device == x.device for val in all_meta_val if hasattr(val, "device")
+            )
+        )
+
     def test_run_decomposition_supports_user_input_mutation(self):
         class SingleOp(torch.nn.Module):
             def __init__(self) -> None:

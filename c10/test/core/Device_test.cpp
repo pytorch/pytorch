@@ -19,6 +19,7 @@ TEST(DeviceTest, BasicConstruction) {
       {"cpu:0", c10::DeviceType::CPU, 0},
       {"cuda:0", c10::DeviceType::CUDA, 0},
       {"cuda:1", c10::DeviceType::CUDA, 1},
+      {"cuda:32766", c10::DeviceType::CUDA, 32766},
   };
   std::vector<std::string> invalid_device_strings = {
       "cpu:x",
@@ -28,6 +29,7 @@ TEST(DeviceTest, BasicConstruction) {
       "cpu:0:0",
       "cpu:0:",
       "cpu:-1",
+      "cuda:32767",
       "::",
       ":",
       "cpu:00",

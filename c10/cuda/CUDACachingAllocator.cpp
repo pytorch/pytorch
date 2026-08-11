@@ -4666,30 +4666,18 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   double getMemoryFraction(c10::DeviceIndex device) override {
-    TORCH_INTERNAL_ASSERT(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
-        "Allocator not initialized for device ",
-        device,
-        ": did you call init?");
+    assertValidDevice(device);
     return device_allocator[device]->getMemoryFraction();
   }
 
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
-    TORCH_CHECK(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
-        "Allocator not initialized for device ",
-        device,
-        ": did you call init?");
+    assertValidDevice(device);
     device_allocator[device]->setMemoryFraction(fraction);
   }
 
   std::vector<StreamSegmentSize> getExpandableSegmentSizes(
       c10::DeviceIndex device) override {
-    TORCH_INTERNAL_ASSERT(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
-        "Allocator not initialized for device ",
-        device,
-        ": did you call init?");
+    assertValidDevice(device);
     return device_allocator[device]->getExpandableSegmentSizes();
   }
 
@@ -4792,6 +4780,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       const std::unordered_set<void*>& expected_live_allocations) override {
+    assertValidDevice(device);
     return device_allocator[device]->checkPoolLiveAllocations(
         mempool_id, expected_live_allocations);
   }
@@ -4924,6 +4913,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
+    assertValidDevice(device);
     return device_allocator[device]->getCheckpointState(id);
   }
 
@@ -4942,6 +4932,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> as) override {
+    assertValidDevice(device);
     std::shared_ptr<PrivatePoolState> pps =
         std::dynamic_pointer_cast<PrivatePoolState>(as);
 
@@ -5020,6 +5011,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
   }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override {
+    assertValidDevice(device);
     device_allocator[device]->cacheInfo(largestBlock);
   }
   void assertValidDevice(c10::DeviceIndex device) {

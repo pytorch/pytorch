@@ -5,6 +5,20 @@
 #include "OpenRegFunctions.h"
 
 namespace c10::openreg {
+namespace {
+
+c10::DeviceIndex checked_device_index_from_int(int device) {
+  TORCH_CHECK(
+      device >= 0 && device < c10::Device::MAX_NUM_DEVICES,
+      "OpenReg device index ",
+      device,
+      " is out of range for DeviceIndex [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device);
+}
+
+} // namespace
 
 orError_t GetDeviceCount(int* dev_count) {
   return orGetDeviceCount(dev_count);
@@ -13,7 +27,9 @@ orError_t GetDeviceCount(int* dev_count) {
 orError_t GetDevice(DeviceIndex* device) {
   int tmp_device = -1;
   auto err = orGetDevice(&tmp_device);
-  *device = static_cast<DeviceIndex>(tmp_device);
+  if (err == orSuccess) {
+    *device = checked_device_index_from_int(tmp_device);
+  }
   return err;
 }
 // LITERALINCLUDE START: OPENREG SetDevice FUNCTION
@@ -39,7 +55,7 @@ OPENREG_EXPORT DeviceIndex device_count() noexcept {
     try {
       auto result = device_count_impl();
       TORCH_CHECK(
-          result <= std::numeric_limits<DeviceIndex>::max(),
+          result <= c10::Device::MAX_NUM_DEVICES,
           "Too many devices, DeviceIndex overflowed");
       return result;
     } catch (const Error& ex) {
@@ -66,14 +82,15 @@ OPENREG_EXPORT void set_device(DeviceIndex device) {
 // LITERALINCLUDE END: OPENREG set_device FUNCTION
 
 OPENREG_EXPORT DeviceIndex ExchangeDevice(DeviceIndex device) {
+  check_device_index(device);
   int current_device = -1;
-  orGetDevice(&current_device);
+  OPENREG_CHECK(orGetDevice(&current_device));
 
   if (device != current_device) {
-    orSetDevice(device);
+    OPENREG_CHECK(orSetDevice(device));
   }
 
-  return current_device;
+  return checked_device_index_from_int(current_device);
 }
 
 OPENREG_EXPORT DeviceIndex maybe_exchange_device(DeviceIndex to_device) {

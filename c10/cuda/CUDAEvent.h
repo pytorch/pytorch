@@ -307,7 +307,7 @@ class CUDAEventPool {
   // Acquire an event associated with a given device. If device is invalid, fall
   // back to a regular CUDAEvent and no pooling.
   Event get(const DeviceIndex device) {
-    if (device < 0 || device >= (DeviceIndex)pools_.size()) {
+    if (device < 0 || device >= static_cast<int64_t>(pools_.size())) {
       auto deleter = [](CUDAEvent* event) { delete event; };
       return Event(std::make_unique<CUDAEvent>().release(), deleter);
     }

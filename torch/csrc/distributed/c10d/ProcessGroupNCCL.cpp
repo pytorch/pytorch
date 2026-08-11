@@ -12,6 +12,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
@@ -44,6 +45,19 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
 
 namespace {
+
+c10::DeviceIndex checkedDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 // NCCL op mapping
 const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
@@ -5339,7 +5353,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   // 1st choice: Use user defined GPU device ids if provided
   if (!opts.device_ids.empty()) {
     // Use the first device id because PG NCCL is single-device now
-    barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
+    barDevIdx = checkedDeviceIndex(opts.device_ids[0]);
   } else {
     // 2nd choice: Use the bound or used GPU device id if available.
     barDevIdx = guessDeviceId();

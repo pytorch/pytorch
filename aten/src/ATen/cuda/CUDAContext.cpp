@@ -48,7 +48,7 @@ cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
   initCUDAContextVectors();
   if (device == -1)
     device = c10::cuda::current_device();
-  AT_ASSERT(
+  TORCH_CHECK(
       device >= 0 && device < num_gpus,
       "device=",
       static_cast<int>(device),
@@ -64,13 +64,13 @@ bool canDeviceAccessPeer(
   initCUDAContextVectors();
   if (device == -1)
     device = c10::cuda::current_device();
-  AT_ASSERT(
+  TORCH_CHECK(
       device >= 0 && device < num_gpus,
       "device=",
       static_cast<int>(device),
       ", num_gpus=",
       static_cast<int>(num_gpus));
-  AT_ASSERT(
+  TORCH_CHECK(
       peer_device >= 0 && peer_device < num_gpus,
       "peer_device=",
       static_cast<int>(peer_device),
