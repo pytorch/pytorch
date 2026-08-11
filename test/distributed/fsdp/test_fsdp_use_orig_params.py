@@ -1505,26 +1505,19 @@ instantiate_device_type_tests(
     TestFSDPUseOrigParamsMultipleParamGroups,
     globals(),
     except_for="cpu",
-    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestFSDPUseOrigParamsUnshardReshard, globals(), except_for="cpu", allow_xpu=True
+    TestFSDPUseOrigParamsUnshardReshard, globals(), except_for="cpu"
 )
 instantiate_device_type_tests(
-    TestFSDPUseOrigParamsParamAccess, globals(), except_for="cpu", allow_xpu=True
+    TestFSDPUseOrigParamsParamAccess, globals(), except_for="cpu"
 )
 instantiate_device_type_tests(
-    TestFSDPUseOrigParamsWriteback, globals(), except_for="cpu", allow_xpu=True
+    TestFSDPUseOrigParamsWriteback, globals(), except_for="cpu"
 )
-instantiate_device_type_tests(
-    TestFSDPUseOrigParamsFQNs, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestFSDPUseOrigParamsInit, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestFSDPUseOrigParamsFQNs, globals(), except_for="cpu")
+instantiate_device_type_tests(TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu")
+instantiate_device_type_tests(TestFSDPUseOrigParamsInit, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
