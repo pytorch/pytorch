@@ -14,7 +14,6 @@ from ..scheduler import (
 )
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
-from .flydsl.flydsl_scheduling import FlyDSLScheduling
 from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
@@ -53,7 +52,6 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
-        self._flydsl_scheduling = FlyDSLScheduling(scheduler)
         self._nv_universal_gemm_scheduling = NVUniversalGemmScheduling(scheduler)
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
@@ -66,8 +64,6 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._rocm_cpp_scheduling
         if self._cutedsl_scheduling.is_cutedsl_template(node):
             return self._cutedsl_scheduling
-        if self._flydsl_scheduling.is_flydsl_template(node):
-            return self._flydsl_scheduling
         if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node):
             return self._nv_universal_gemm_scheduling
         if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_fused_template(node):
@@ -87,10 +83,6 @@ class CUDACombinedScheduling(BaseScheduling):
         elif self._cutedsl_scheduling.is_cutedsl_template(
             node1
         ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
-            return False
-        elif self._flydsl_scheduling.is_flydsl_template(
-            node1
-        ) or self._flydsl_scheduling.is_flydsl_template(node2):
             return False
         # Only intercept when node1 is the NVGEMM template (epilogue direction).
         # Prologue direction (node1=pointwise, node2=template) must fall through to
@@ -125,10 +117,6 @@ class CUDACombinedScheduling(BaseScheduling):
                 )  # always False at the moment
             if self._cutedsl_scheduling.is_cutedsl_template(node):
                 return self._cutedsl_scheduling.can_fuse_horizontal(
-                    node1, node2
-                )  # always False at the moment
-            if self._flydsl_scheduling.is_flydsl_template(node):
-                return self._flydsl_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
             if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
@@ -190,14 +178,6 @@ class CUDACombinedScheduling(BaseScheduling):
             if prologue_nodes:
                 raise AssertionError("cutedsl template does not support prologue nodes")
             return self._cutedsl_scheduling.codegen_template(
-                template_node, epilogue_nodes, prologue_nodes
-            )
-        elif self._flydsl_scheduling.is_flydsl_template(template_node):
-            if epilogue_nodes:
-                raise AssertionError("flydsl template does not support epilogue nodes")
-            if prologue_nodes:
-                raise AssertionError("flydsl template does not support prologue nodes")
-            return self._flydsl_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
