@@ -159,7 +159,18 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 void ProcessGroupNCCL::runAbortHooks() {
-  for (const auto& [_, hook] : abortHooks_) {
+  // Snapshot rather than hold the lock across the hooks: a hook may
+  // unregister itself, and the FlightRecorder hook blocks other threads for the
+  // length of its dump, which must not also block an unrelated unregister.
+  std::vector<::c10d::AbortHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
+    hooks.reserve(abortHooks_.size());
+    for (const auto& [_, hook] : abortHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  for (const auto& hook : hooks) {
     try {
       hook();
     } catch (const std::exception& e) {
@@ -173,11 +184,59 @@ void ProcessGroupNCCL::runAbortHooks() {
 void ProcessGroupNCCL::registerAbortHook(
     int64_t hook_id,
     ::c10d::AbortHook hook) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.emplace(hook_id, std::move(hook));
 }
 
 void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.erase(hook_id);
+}
+
+bool ProcessGroupNCCL::hasCompletionHooks() {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  return !completionHooks_.empty();
+}
+
+void ProcessGroupNCCL::runCompletionHooks(
+    const ::c10d::Work* work,
+    std::optional<float> duration_ms) {
+  // Snapshot rather than hold the lock across the hooks, and for a harder
+  // reason than runAbortHooks has: a hook's owner unregisters with its own lock
+  // held (c10d::FlightRecorderHook::remove does), so calling into a hook while
+  // holding completion_hooks_mutex_ would be the reverse order and deadlock.
+  std::vector<::c10d::CompletionHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+    hooks.reserve(completionHooks_.size());
+    for (const auto& [_, hook] : completionHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  ::c10d::CompletionHookArgs args;
+  args.work = work;
+  args.duration_ms = duration_ms;
+  for (const auto& hook : hooks) {
+    try {
+      hook(args);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "[TC] Completion hook threw exception: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "[TC] Completion hook threw unknown exception.";
+    }
+  }
+}
+
+void ProcessGroupNCCL::registerCompletionHook(
+    int64_t hook_id,
+    ::c10d::CompletionHook hook) {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  completionHooks_.emplace(hook_id, std::move(hook));
+}
+
+void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  completionHooks_.erase(hook_id);
 }
 
 void ProcessGroupNCCL::shutdown() {
