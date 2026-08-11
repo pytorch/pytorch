@@ -43,20 +43,9 @@ try:
 except ImportError:
     # PyTorch can be built without distributed support (USE_DISTRIBUTED=0),
     # e.g. standard macOS CI, where torch._C._distributed_c10d is absent and
-    # common_distributed cannot be imported. This file must stay importable
-    # there, so provide a no-op stand-in and skip the test class below.
+    # common_distributed cannot be imported. TestSkipIfLtXGpu is skipped below via
+    # _SKIP_IF_LT_X_GPU_DISTRIBUTED when USE_DISTRIBUTED=0.
     _SKIP_IF_LT_X_GPU_DISTRIBUTED = False
-
-    def skip_if_lt_x_gpu(x, *, allow_cpu=False):
-        def decorator(func):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
-
 else:
     _SKIP_IF_LT_X_GPU_DISTRIBUTED = True
 
