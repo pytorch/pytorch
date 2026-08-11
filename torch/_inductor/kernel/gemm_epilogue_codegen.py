@@ -126,6 +126,15 @@ class GemmReductionCompileConfig:
             include_consumer=include_consumer
         )
 
+    def blockscaled_primary_constexprs(self) -> tuple[Any, ...]:
+        args = self.args
+        return (
+            args.group,
+            args.axis,
+            args.feeds_main,
+            *self._primary_callbacks(),
+        )
+
     def constexprs(self, *, include_consumers: bool = True) -> tuple[Any, ...]:
         constexprs = (
             *self._common_constexprs(),
