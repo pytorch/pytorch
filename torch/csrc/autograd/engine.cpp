@@ -40,6 +40,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -1058,15 +1059,45 @@ void validate_outputs(
   return validate_outputs_impl(input_metadata, grads, format_error);
 }
 
+static std::string format_tensor_metadata(const variable_list& variables) {
+  std::ostringstream metadata;
+  metadata << '[';
+  for (const auto i : c10::irange(variables.size())) {
+    if (i > 0) {
+      metadata << ", ";
+    }
+    const auto& variable = variables[i];
+    if (!variable.defined()) {
+      metadata << "undefined";
+      continue;
+    }
+    metadata << "Tensor(shape=";
+    if (variable.is_nested() &&
+        !variable.unsafeGetTensorImpl()->is_python_dispatch()) {
+      metadata << "<nested>";
+    } else {
+      metadata << variable.sym_sizes();
+    }
+    metadata << ", dtype=" << variable.dtype()
+             << ", device=" << variable.device() << ')';
+  }
+  metadata << ']';
+  return std::move(metadata).str();
+}
+
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
-    InputBuffer& inputBuffer) {
+    InputBuffer& inputBuffer,
+    std::string* grad_outputs_metadata) {
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
   inputs = call_pre_hooks(fn, std::move(inputs));
+  if (grad_outputs_metadata != nullptr) {
+    *grad_outputs_metadata = format_tensor_metadata(inputs);
+  }
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
@@ -1182,7 +1213,11 @@ void Engine::evaluate_function(
     }
   }
 
-  auto outputs = call_function(graph_task, func, inputs);
+  const bool check_nan =
+      AnomalyMode::is_enabled() && AnomalyMode::should_check_nan();
+  std::string grad_outputs_metadata;
+  auto outputs = call_function(
+      graph_task, func, inputs, check_nan ? &grad_outputs_metadata : nullptr);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
@@ -1200,7 +1235,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
+  if (check_nan) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
@@ -1211,7 +1246,10 @@ void Engine::evaluate_function(
           fn.name(),
           "' returned nan values in its ",
           i,
-          "th output.");
+          "th output.\ngrad_outputs: ",
+          grad_outputs_metadata,
+          "\ngrad_inputs: ",
+          format_tensor_metadata(outputs));
     }
   }
 
