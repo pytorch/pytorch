@@ -521,6 +521,30 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     @mock.patch("filter_test_configs.download_json")
+    def test_remove_disabled_jobs_reenabled(self, mock_download_json: Any) -> None:
+        mock_download_json.return_value = MOCKED_DISABLED_UNSTABLE_JOBS
+        test_matrix = yaml.safe_load('{include: [{config: "default"}]}')
+
+        filtered_test_matrix = remove_disabled_jobs(
+            "pull",
+            "mock-platform-1 / build",
+            test_matrix,
+            reenabled_issues={"1"},
+        )
+        self.assertEqual(
+            '{"include": [{"config": "default"}]}',
+            json.dumps(filtered_test_matrix),
+        )
+
+        filtered_test_matrix = remove_disabled_jobs(
+            "pull",
+            "mock-platform-1 / build",
+            test_matrix,
+            reenabled_issues={"2"},
+        )
+        self.assertEqual('{"include": []}', json.dumps(filtered_test_matrix))
+
+    @mock.patch("filter_test_configs.download_json")
     def test_mark_unstable_jobs(self, mock_download_json: Any) -> None:
         mock_download_json.return_value = MOCKED_DISABLED_UNSTABLE_JOBS
 
