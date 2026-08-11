@@ -21,43 +21,38 @@ from torch._native.ops.norm.flydsl_rmsnorm_utils import (
 )
 
 
-BLOCK_THREADS = 256
-VEC_WIDTH = 8
+FLYDSL_DTYPE_CONFIGS = {
+    "f32": (fx.Float32, 32),
+    "f16": (fx.Float16, 16),
+    "bf16": (fx.BFloat16, 16),
+}
 
 
 def get_warp_size(arch: str) -> int:
-    """Return wave64 for CDNA GPUs and wave32 for RDNA GPUs.
-
-    The dispatcher currently admits gfx950 only, so the wave32 answer -- and
-    with it the RED_SLOTS > 1 branch of block_reduce_add that a 32-lane wave
-    forces at every block size -- is unreachable and untested. It is kept
-    because the wave size is baked into the reduction: whoever widens
-    _SUPPORTED_ARCHES must not have to notice that this was hardcoded.
-    """
+    """Return wave64 for CDNA GPUs and wave32 for RDNA GPUs."""
     return 32 if is_rdna_arch(arch) else 64
 
 
-def _make_single_reduction_storage(red_slots: int):
+def _make_single_reduction_storage(reduction_slots: int):
     """Shared storage for one block-reduction accumulator."""
 
     @fx.struct
     class SharedStorage:
-        s_red: fx.Array[fx.Float32, red_slots, 16]
+        reduction_buffer: fx.Array[fx.Float32, reduction_slots, 16]
 
     return SharedStorage
 
 
+def _dtype_config(dtype_str: str):
+    try:
+        return FLYDSL_DTYPE_CONFIGS[dtype_str]
+    except KeyError as exc:
+        raise ValueError(f"unsupported dtype: {dtype_str!r}") from exc
+
+
 def dtype_to_elem_type(dtype_str: str):
-    """Map the three supported PyTorch dtype strings to FlyDSL types."""
-    if dtype_str == "f32":
-        return fx.Float32
-    if dtype_str == "f16":
-        return fx.Float16
-    if dtype_str == "bf16":
-        return fx.BFloat16
-    raise ValueError(
-        f"unsupported dtype: {dtype_str!r} (expected 'f32', 'f16', or 'bf16')"
-    )
+    """Map a supported PyTorch dtype string to its FlyDSL type."""
+    return _dtype_config(dtype_str)[0]
 
 
 def _load_vec(copy_atom, vec_width, elem_dtype, div_tensor, idx):
@@ -90,7 +85,7 @@ def _forward_block_threads(n: int) -> int:
         return 1024
     if n >= 12288:
         return 512
-    return BLOCK_THREADS
+    return 256
 
 
 def build_rmsnorm_module(
@@ -98,18 +93,15 @@ def build_rmsnorm_module(
     dtype_str: str,
     arch: str,
 ):
-    # Baked into the kernel below, so it must come from the arch this module is
-    # compiled for -- not from whichever device happened to be current at
-    # import time. A wave64 reduction on a wave32 device is silently wrong.
     WARP_SIZE = get_warp_size(arch)
 
     block_threads = _forward_block_threads(N)
-    elem_bits = 32 if dtype_str == "f32" else 16
-    vec_width = 4 if dtype_str == "f32" else VEC_WIDTH
+    _, elem_bits = _dtype_config(dtype_str)
+    vec_width = 128 // elem_bits
     tile_cols = block_threads * vec_width
-    RED_SLOTS = max(1, (block_threads + WARP_SIZE - 1) // WARP_SIZE)
+    reduction_slots = max(1, (block_threads + WARP_SIZE - 1) // WARP_SIZE)
 
-    SharedStorage = _make_single_reduction_storage(RED_SLOTS)
+    SharedStorage = _make_single_reduction_storage(reduction_slots)
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def rmsnorm_kernel(
@@ -127,7 +119,7 @@ def build_rmsnorm_module(
         n_float = float(N)
 
         lds = fx.SharedAllocator().allocate(SharedStorage).peek()
-        s_red = lds.s_red.view(fx.make_layout(RED_SLOTS, 1))
+        reduction_buffer = lds.reduction_buffer.view(fx.make_layout(reduction_slots, 1))
 
         def wave_reduce_add(x):
             w = x
@@ -137,24 +129,24 @@ def build_rmsnorm_module(
             return w
 
         def block_reduce_add(val):
-            if const_expr(RED_SLOTS == 1):
+            if const_expr(reduction_slots == 1):
                 return wave_reduce_add(val)
             lane = tid % WARP_SIZE
             wave = tid // WARP_SIZE
             w = wave_reduce_add(val)
             if lane == 0:
-                fx.memref_store(w, s_red, wave)
+                fx.memref_store(w, reduction_buffer, wave)
             gpu.barrier()
             if wave == 0:
-                in_range = lane < RED_SLOTS
+                in_range = lane < reduction_slots
                 lane_safe = in_range.select(lane, 0)
-                v = s_red[lane_safe]
+                v = reduction_buffer[lane_safe]
                 ww = in_range.select(v, 0.0)
                 ww = wave_reduce_add(ww)
                 if lane == 0:
-                    fx.memref_store(ww, s_red, 0)
+                    fx.memref_store(ww, reduction_buffer, 0)
             gpu.barrier()
-            return s_red[0]
+            return reduction_buffer[0]
 
         # ==================================================================
         # Fast path: N is a multiple of tile_cols
@@ -377,10 +369,6 @@ def rmsnorm_fwd(
     device_index = input.device.index
     arch = _resolve_rocm_arch(device_index)
     if arch is None:
-        # The dispatcher predicate resolves the arch too and declines when it
-        # cannot, so this only fires for direct callers. The arch selects the
-        # wave size baked into the reduction, so guessing would be silently
-        # wrong rather than merely slow.
         raise RuntimeError(
             f"Could not determine the ROCm arch of device {device_index}; "
             "set FLYDSL_GPU_ARCH to build the FlyDSL RMSNorm kernel"
@@ -427,12 +415,15 @@ def rmsnorm_fwd(
 def clear_rmsnorm_caches() -> None:
     """Clear native-op-level compile caches (used by tests/benchmarks)."""
 
-    _compile_rmsnorm_fwd.cache_clear()
+    # flydsl_jit_cache attaches cache_clear/cache_info at runtime and
+    # instrument_flydsl_compile forwards them, so neither is on the declared
+    # Callable type.
+    _compile_rmsnorm_fwd.cache_clear()  # pyrefly: ignore[missing-attribute]
 
 
 def rmsnorm_cache_info() -> dict[str, object]:
     """Return forward cache statistics for diagnostics."""
 
     return {
-        "fwd": _compile_rmsnorm_fwd.cache_info(),
+        "fwd": _compile_rmsnorm_fwd.cache_info(),  # pyrefly: ignore[missing-attribute]
     }

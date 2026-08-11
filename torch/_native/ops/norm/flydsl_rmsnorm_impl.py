@@ -75,10 +75,7 @@ def _common_supported(
 
 def _fused_rms_norm_fwd_perf_wins(input: torch.Tensor, n: int) -> bool:
     rows_m = input.numel() // n
-    # Tuned on gfx950 (MI355). Measured at rows_m=2048, the last N where all
-    # three dtypes keep a margin is 114688. Unlike the other bands this bound
-    # is not a power of two; rounding down to 65536 would give up a measured
-    # 1.1x-1.6x across 81920..114688.
+    # Tuned on gfx950 (MI355)
     return (
         (4096 <= n < 8192 and rows_m >= 8192)
         or (8192 <= n < 16384 and rows_m >= 4096)
@@ -111,10 +108,7 @@ def _fused_rms_norm_impl(
     if weight is None:
         raise RuntimeError("FlyDSL RMSNorm requires an explicit weight")
     if eps is None:
-        # nn.RMSNorm defaults eps to None, so this is the common path rather
-        # than an edge case. Match aten/src/ATen/native/cuda/layer_norm_kernel.cu:
-        # aten picks eps from the *accumulator* dtype, which is float32 for
-        # every dtype in SUPPORTED_DTYPES.
+        # Match aten/src/ATen/native/cuda/layer_norm_kernel.cu
         eps = torch.finfo(torch.float32).eps
 
     # Imported on first dispatch, not at module scope: the kernel module pulls
