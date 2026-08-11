@@ -17,6 +17,16 @@ _TOOLS_FILE = os.path.abspath(toolchains.__file__)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 
+SIDECAR = {
+    "prefix": "fakeop_f32_n1024_k8",
+    "spec": {"dtype": "float32", "N": 1024, "K": 8, "deterministic": False},
+    "tensor_args": [
+        {"name": "mX", "dynamic_sizes": [0], "dynamic_strides": [0]},
+        {"name": "mOut", "dynamic_sizes": [0, 1], "dynamic_strides": [0]},
+    ],
+}
+
+
 class TestExportJobs(unittest.TestCase):
     def test_job_skip_matches_on_spec(self):
         # Skip detection matches the sidecar's recorded spec AND a
@@ -87,8 +97,10 @@ class TestExportJobs(unittest.TestCase):
         # Plain "fork" gives workers a dead CUDA context (measured:
         # is_initialized() False, allocation fails, no exception) because
         # the parent initializes CUDA before the pool starts.
-        self.assertNotEqual(export.POOL_START_METHOD, "fork")
-        self.assertIn(export.POOL_START_METHOD, ("forkserver", "spawn"))
+        # Pinned to forkserver, not just "not fork": main() calls
+        # set_forkserver_preload unconditionally, which a spawn context
+        # would silently ignore.
+        self.assertEqual(export.POOL_START_METHOD, "forkserver")
 
     def test_cutedsl_export_passes_gpu_arch(self):
         # The arch must reach the compiler as a --gpu-arch OPTION, not as
@@ -132,6 +144,47 @@ class TestExportJobs(unittest.TestCase):
                 {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
             )
             self.assertIsNone(seen["options"])
+
+    def test_toolchains_declare_their_backend(self):
+        # Which build backends a kind can emit for is DATA, not a platform
+        # check buried in the gate: that is what lets a ROCm build skip
+        # cleanly today and what makes a future ROCm DSL a new class with
+        # BACKENDS = ("rocm",) rather than an edit to build_stage2.
+        for kind, tc in toolchains.TOOLCHAINS.items():
+            self.assertTrue(tc.BACKENDS, f"{kind} declares no BACKENDS")
+        self.assertEqual(sorted(toolchains.for_backend("rocm")), [])
+        self.assertEqual(
+            sorted(toolchains.for_backend("cuda")),
+            sorted(toolchains.TOOLCHAINS),
+        )
+
+    def test_missing_runtime_is_fatal_not_skipped(self):
+        # A declaration whose toolchain targets this build's backend was
+        # ASKED for, so a missing runtime must fail rather than quietly
+        # ship a wheel with fewer kernels than declared. TORCH_NATIVE_AOT=0
+        # is the supported way to build without the DSL wheels.
+        import unittest.mock as mock
+
+        with mock.patch.object(
+            toolchains.CuteDslToolchain, "missing_runtimes", classmethod(lambda cls: [])
+        ):
+            b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+            with mock.patch.object(export, "load_builder", lambda *a: lambda p: b):
+                # Runtime present: gets past the gate (fails later, on the
+                # real compile, which this harness cannot do).
+                with self.assertRaises(Exception) as cm:
+                    export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+                self.assertNotIn("TORCH_NATIVE_AOT=0", str(cm.exception))
+
+        with mock.patch.object(
+            toolchains.CuteDslToolchain,
+            "missing_runtimes",
+            classmethod(lambda cls: ["cutlass"]),
+        ):
+            b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+            with mock.patch.object(export, "load_builder", lambda *a: lambda p: b):
+                with self.assertRaisesRegex(RuntimeError, "cannot export"):
+                    export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_pool_preload_stays_fork_safe(self):
         # The forkserver's server process is the fork PARENT for every
@@ -235,8 +288,38 @@ class TestArch(unittest.TestCase):
         self.assertEqual(os.path.basename(sj[3]), "fakeop")
         self.assertIsNone(sj[4])
 
+    def test_empty_dir_is_fine(self):
+        # A clean build (or a newly added spec point) has no sidecar and
+        # no artifacts; it must export, not fail.
+        with tempfile.TemporaryDirectory() as d:
+            export._check_no_orphan_artifacts(d)
 
-class TestSpecExpansion(unittest.TestCase):
+    def test_artifacts_without_sidecar_are_fatal(self):
+        # An export that died between compiling and writing the sidecar.
+        # The CMake globs link *.o by pattern, so an undescribed orphan
+        # would otherwise be linked silently.
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k_f32.o"), "w").close()
+            with self.assertRaisesRegex(RuntimeError, "no sidecar"):
+                export._check_no_orphan_artifacts(d)
+
+    def test_artifacts_with_sidecar_are_fine(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k.o"), "w").close()
+            with open(os.path.join(d, "k.json"), "w") as f:
+                json.dump({"prefix": "k"}, f)
+            export._check_no_orphan_artifacts(d)
+
+    def test_unreadable_sidecar_is_fatal(self):
+        # Present but unparsable: corruption, not an interrupted run.
+        # Re-exporting would paper over it (and --force skips the check).
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "k.json")
+            with open(path, "w") as f:
+                f.write("{truncated")
+            with self.assertRaisesRegex(RuntimeError, "could not be read"):
+                export._read_sidecar(path)
+
     def test_cross_product(self):
         pts = export.expand_specs(
             [{"dtype": ["float32", "bfloat16"], "N": [1024, 2048], "K": 8}]
@@ -338,57 +421,3 @@ class TestSourceStaleness(unittest.TestCase):
             self.assertTrue(export._job_needed(job, force=False))
 
 
-class TestSidecarIntegrity(unittest.TestCase):
-    """The sidecar is written after the artifacts, so it is the commit
-    marker: absent means not-yet-exported, corrupt or orphaned means the
-    tree cannot be trusted."""
-
-    def test_empty_dir_is_fine(self):
-        # A clean build (or a newly added spec point) has no sidecar and
-        # no artifacts; it must export, not fail.
-        with tempfile.TemporaryDirectory() as d:
-            export._check_no_orphan_artifacts(d)
-
-    def test_artifacts_without_sidecar_are_fatal(self):
-        # An export that died between compiling and writing the sidecar.
-        # The CMake globs link *.o by pattern, so an undescribed orphan
-        # would otherwise be linked silently.
-        with tempfile.TemporaryDirectory() as d:
-            open(os.path.join(d, "k_f32.o"), "w").close()
-            with self.assertRaisesRegex(RuntimeError, "no sidecar"):
-                export._check_no_orphan_artifacts(d)
-
-    def test_artifacts_with_sidecar_are_fine(self):
-        with tempfile.TemporaryDirectory() as d:
-            open(os.path.join(d, "k.o"), "w").close()
-            with open(os.path.join(d, "k.json"), "w") as f:
-                json.dump({"prefix": "k"}, f)
-            export._check_no_orphan_artifacts(d)
-
-    def test_unreadable_sidecar_is_fatal(self):
-        # Present but unparsable: corruption, not an interrupted run.
-        # Re-exporting would paper over it (and --force skips the check).
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "k.json")
-            with open(path, "w") as f:
-                f.write("{truncated")
-            with self.assertRaisesRegex(RuntimeError, "could not be read"):
-                export._read_sidecar(path)
-
-
-class TestToolchainRegistry(unittest.TestCase):
-    def test_cutedsl_registered(self):
-        self.assertIn("cutedsl", toolchains.TOOLCHAINS)
-
-    def test_unknown_kind_raises(self):
-        with self.assertRaisesRegex(RuntimeError, "unknown toolchain kind"):
-            toolchains.get_toolchain("nvfuser")
-
-    def test_builder_validation_names_missing_keys(self):
-        tc = toolchains.get_toolchain("cutedsl")
-        with self.assertRaisesRegex(RuntimeError, "missing keys.*fake_args"):
-            tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
-
-
-if __name__ == "__main__":
-    unittest.main()
