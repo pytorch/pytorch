@@ -1213,11 +1213,14 @@ void Engine::evaluate_function(
     }
   }
 
-  const bool check_nan =
+  const bool capture_grad_metadata =
       AnomalyMode::is_enabled() && AnomalyMode::should_check_nan();
   std::string grad_outputs_metadata;
   auto outputs = call_function(
-      graph_task, func, inputs, check_nan ? &grad_outputs_metadata : nullptr);
+      graph_task,
+      func,
+      inputs,
+      capture_grad_metadata ? &grad_outputs_metadata : nullptr);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
@@ -1235,7 +1238,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (check_nan) {
+  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
