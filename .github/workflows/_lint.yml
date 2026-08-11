@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.14
         with:
           use-arc: true
 

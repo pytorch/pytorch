@@ -4,7 +4,7 @@ name: Build Triton wheels
 on:
   push:
     branches:
-      - main
+      - release/2.14
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
@@ -37,7 +37,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.14
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -103,7 +103,7 @@ jobs:
           chmod +x /usr/bin/sudo
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.14
         with:
           submodules: false
           use-arc: true
@@ -216,7 +216,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.14
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}

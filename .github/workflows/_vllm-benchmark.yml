@@ -103,12 +103,12 @@ jobs:
 
       - name: Download build artifacts
         # Full repo path, not ./ — local actions don't resolve on the OSDC ARC runner.
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@release/2.14
         with:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
 
-      - uses: pytorch/test-infra/.github/actions/setup-uv@main
+      - uses: pytorch/test-infra/.github/actions/setup-uv@release/2.14
         with:
           python-version: "3.12"
           activate-environment: "true"
@@ -287,7 +287,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results to OSS benchmark database for the dashboard
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.14
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
           benchmark-name: 'PyTorch x vLLM benchmark'
