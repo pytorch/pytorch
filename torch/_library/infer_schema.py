@@ -10,8 +10,8 @@ from torch.utils._exposed_in import exposed_in
 
 from .opaque_object import (
     _resolve_opaque_type_info,
-    is_opaque_reference_type,
-    is_opaque_type,
+    is_custom_class,
+    is_opaque_symbolic_type,
 )
 
 
@@ -47,7 +47,7 @@ def infer_schema(
         prototype_function: The function from which to infer a schema for from its type annotations.
         op_name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
             name is not included in the inferred schema. Note that the input schema to
-            ``torch.library.Library.define`` requires a operator name.
+            ``torch.library.Library.define`` requires an operator name.
         mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
         tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
             inferred schema. Use ``torch.Tag.inplace`` or ``torch.Tag.out`` to
@@ -92,9 +92,19 @@ def infer_schema(
     def convert_type_string(annotation_type: str):
         try:
             return eval(annotation_type, pf_globals, pf_locals)
-        except Exception:
+        except NameError as e:
             error_fn(
-                f"Unsupported type annotation {annotation_type}. It is not a type."
+                f"Unsupported type annotation {annotation_type}. It is not a type. "
+                f"({e}). "
+                f"If you are using 'from __future__ import annotations', note that "
+                f"annotations are evaluated lazily as strings; make sure all types "
+                f"referenced in annotations are importable at module scope, not only "
+                f"inside a local function."
+            )
+        except Exception as e:
+            error_fn(
+                f"Unsupported type annotation {annotation_type}. It is not a type. "
+                f"({type(e).__name__}: {e})"
             )
 
     def unstringify_types(
@@ -151,7 +161,7 @@ def infer_schema(
 
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if is_opaque_type(annotation_type):
+            if is_custom_class(annotation_type):
                 schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
@@ -373,7 +383,7 @@ def parse_return(annotation, error_fn):
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
-            if is_opaque_reference_type(annotation):
+            if is_opaque_symbolic_type(annotation):
                 return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
             error_fn(
                 f"Return has unsupported type {annotation}. "
@@ -384,7 +394,7 @@ def parse_return(annotation, error_fn):
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_reference_type(arg):
+        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_symbolic_type(arg):
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."

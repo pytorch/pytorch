@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 import operator
+import struct
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -14,12 +16,28 @@ from torch.utils._pytree import tree_flatten, tree_iter
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Hashable
 
     from torch._ops import OpOverloadPacket
     from torch.utils._pytree import TreeSpec
 
 aten = torch.ops.aten
+
+
+@dataclasses.dataclass(frozen=True)
+class _ScalarKey:
+    tag: str
+    bits: bytes
+
+
+def _normalize_cse_arg(val: Any) -> Any:
+    # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
+    # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
+    if type(val) is float:
+        return _ScalarKey("float", struct.pack(">d", val))
+    if type(val) is complex:
+        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
+    return val
 
 
 def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
@@ -67,7 +85,11 @@ def _storage_refs_from_value(value: object) -> set[StorageWeakRef] | None:
 def _node_storage_refs(node: fx.Node) -> set[StorageWeakRef] | None:
     if "val" not in node.meta:
         return None
-    return _storage_refs_from_value(node.meta["val"])
+    storage_refs = _storage_refs_from_value(node.meta["val"])
+    # Metadata without tensor storage is ambiguous: for example, ``None`` can
+    # mean tensor metadata propagation was incomplete.  Fail closed rather
+    # than treating the runtime value as provably storage-free.
+    return storage_refs if storage_refs else None
 
 
 def _node_has_tensor_storage(node: fx.Node) -> bool:
@@ -223,16 +245,21 @@ def _can_cse_across_mutation_regions(
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
+def fx_graph_cse(
+    fx_g: torch.fx.graph.Graph,
+    extra_node_key: Callable[[fx.Node], Hashable] | None = None,
+) -> fx.Graph:
     new_graph = fx.Graph()
     env: dict[
         fx.Node, fx.Node
     ] = {}  # map from node in the old graph to node in the new graph
     hash_env: dict[
-        tuple[str, int], fx.Node
+        tuple[Any, Hashable | None, int], fx.Node
     ] = {}  # map from hash to a node in the new graph
-    token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
-    old_node_for_hash: dict[tuple[str, int], fx.Node] = {}
+    token_map: dict[
+        tuple[Any, Hashable | None, int], dict[str, Any]
+    ] = {}  # map from hash to token
+    old_node_for_hash: dict[tuple[Any, Hashable | None, int], fx.Node] = {}
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
@@ -251,6 +278,14 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             f"expected output_node.op to be 'output', got '{output_node.op}'"
         )
 
+    def custom_context_key(node: fx.Node) -> tuple[int, int | None, int | None]:
+        custom = node.meta.get("custom", {})
+        return (
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
+        )
+
     output_storages = {
         StorageWeakRef(n.meta["val"].untyped_storage())
         for n in output_node.all_input_nodes
@@ -263,17 +298,54 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
+    # A node used as the mutable base of a functional-wrapper op is a distinct
+    # mutable buffer. Two identical factory ops feeding distinct bases (e.g. the
+    # forward and backward ``aten.full`` from a pair of ``ones_like`` calls) must
+    # not be CSE-merged, or the later mutation aliases a buffer that still has a
+    # live downstream view and reinplacing fails (mirrors the aten.empty
+    # exclusion below). See pytorch/pytorch#170160.
+    from torch._higher_order_ops.auto_functionalize import get_mutable_args
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        triton_kernel_wrapper_functional,
+    )
+
+    def _add_base(node: Any, bases: set[fx.Node]) -> None:
+        for b in node if isinstance(node, (list, tuple)) else (node,):
+            if isinstance(b, fx.Node):
+                bases.add(b)
+
+    nodes_used_as_mutation_base: set[fx.Node] = set()
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        # v2 lists its mutable buffers explicitly in ``_all_bases``.
+        for base in n.kwargs.get("_all_bases", ()):
+            _add_base(base, nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        # v1 has no ``_all_bases``; the mutated tensors are the args named by the
+        # wrapped op's schema (``_mutable_op`` is the first positional).
+        mutable_op = n.args[0]
+        mutable_args_names, _ = get_mutable_args(mutable_op)
+        for name in mutable_args_names:
+            _add_base(n.kwargs.get(name), nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=triton_kernel_wrapper_functional
+    ):
+        inner_kwargs = n.kwargs.get("kwargs", {})
+        for name in n.kwargs.get("tensors_to_clone", ()):
+            _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
+
     # If a candidate result is mutated later, CSE would redirect that mutation
     # to the earlier replacement result.  Keep such nodes distinct.
     mutated_storage_refs: set[StorageWeakRef] = set()
-    nodes_that_alias_mutated_storages: set[fx.Node] = set()
+    possibly_mutated_nodes: set[fx.Node] = set()
     for n in fx_g.nodes:
         if is_mutation_op(n):
             possibly_mutated_values = _get_possibly_mutated_argument_values(n)
-            nodes_that_alias_mutated_storages.update(
-                _collect_nodes_and_ancestors(
-                    _collect_graph_nodes_from_values(possibly_mutated_values)
-                )
+            possibly_mutated_nodes.update(
+                _collect_graph_nodes_from_values(possibly_mutated_values)
             )
             node_mutated_storage_refs = _collect_storage_refs_from_graph_values(
                 possibly_mutated_values
@@ -281,6 +353,9 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             if node_mutated_storage_refs is not None:
                 mutated_storage_refs.update(node_mutated_storage_refs)
 
+    nodes_that_alias_mutated_storages = _collect_nodes_and_ancestors(
+        possibly_mutated_nodes
+    )
     if mutated_storage_refs:
         for n in fx_g.nodes:
             node_storage_refs = _node_storage_refs(n)
@@ -296,12 +371,15 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
+            or n.is_impure()
             or get_aten_target(n) in rand_ops
             # aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            # Keep distinct functional-wrapper mutation bases independent.
+            or n in nodes_used_as_mutation_base
             or n in nodes_that_alias_mutated_storages
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
@@ -333,6 +411,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
                         arg_list[i] = env[v]
                     if isinstance(v, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                         arg_list[i] = v.node
+                    arg_list[i] = _normalize_cse_arg(arg_list[i])
                 return tuple(arg_list), spec
 
             args, args_spec = substitute(n.args)
@@ -340,12 +419,15 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
 
             # each token corresponds to a unique node
             # nodes with the same token can be substituted
+            extra_key = extra_node_key(n) if extra_node_key is not None else None
             token = {
                 "target": n.target,
+                "extra_key": extra_key,
                 "args": args,
                 "args_spec": args_spec,
                 "kwargs": kwargs,
                 "kwargs_spec": kwargs_spec,
+                "custom_context": custom_context_key(n),
             }
 
             # hash substituted args to a number, do not hash specs because specs are not hashable
@@ -354,7 +436,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             hash_arg = hash(
                 (tuple((a, type(a)) for a in args), tuple((a, type(a)) for a in kwargs))
             )
-            hash_val = (n.target, hash_arg)
+            hash_val = (n.target, extra_key, hash_arg)
 
             # check if a node has a substitute and can be eliminated
             hash_val_in_hash_env = hash_val in hash_env

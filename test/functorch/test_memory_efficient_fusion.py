@@ -1,6 +1,7 @@
 # Owner(s): ["module: functorch"]
 
 import inspect
+import operator
 import random
 import unittest
 from collections.abc import Callable
@@ -11,6 +12,7 @@ import torch.nn as nn
 from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -309,6 +311,34 @@ class NoChangeTestCase(TestCase):
         fx_g = gms[0]
         check(fx_g, None, 0, check_val=False, graph_input=True)
 
+    def test_neg_nan_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, -float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
+    def test_neg_zero_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, 0.0)
+            b = torch.full_like(x, -0.0)
+            return torch.stack([a.reciprocal(), b.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(f, t, 0)
+
+    def test_complex_neg_zero_not_merged(self):
+        def f(x):
+            y = x.to(torch.cfloat)
+            a = torch.full_like(y, complex(0.0, 0.0))
+            b = torch.full_like(y, complex(-0.0, 0.0))
+            return torch.stack([a.real.reciprocal(), b.real.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(f, t, 0)
+
 
 class ReduceTestCase(TestCase):
     def test_immutable_list_type(self):
@@ -406,6 +436,43 @@ class ReduceTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 1)
 
+    def test_nan_full_deduplication(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_non_factory_op(self):
+        def f(x):
+            a = x.clamp(min=float("nan"))
+            b = x.clamp(min=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_constant_pad(self):
+        def f(x):
+            a = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            b = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_complex_nan_full_deduplication(self):
+        def f(x):
+            y = x.to(torch.cfloat)
+            a = torch.full_like(y, complex(float("nan"), 0.0))
+            b = torch.full_like(y, complex(float("nan"), 0.0))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
 
 class RandomOpTestCase(TestCase):
     def test_random(self):
@@ -431,21 +498,19 @@ class CrossMutationRegionCSETestCase(TestCase):
     def _count_target(graph, target):
         return sum(1 for n in graph.nodes if n.target == target)
 
-    def _assert_target_count_after_cse(self, graph, target, expected_count):
-        new_graph = fx_graph_cse(graph)
+    def _assert_target_count_after_cse(
+        self, graph, target, expected_count, extra_node_key=None
+    ):
+        new_graph = fx_graph_cse(graph, extra_node_key=extra_node_key)
         self.assertEqual(self._count_target(new_graph, target), expected_count)
 
-        second_pass_graph = fx_graph_cse(new_graph)
+        second_pass_graph = fx_graph_cse(new_graph, extra_node_key=extra_node_key)
         self.assertEqual(len(second_pass_graph.nodes), len(new_graph.nodes))
         self.assertEqual(self._count_target(second_pass_graph, target), expected_count)
         return new_graph
 
     @staticmethod
     def _build_split_graph_with_mutation(mutation_kind):
-        import operator
-
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         aten = torch.ops.aten
         with FakeTensorMode() as fake_mode:
             graph = fx.Graph()
@@ -510,8 +575,6 @@ class CrossMutationRegionCSETestCase(TestCase):
 
     @staticmethod
     def _build_graph_that_mutates_previous_duplicate_result():
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         aten = torch.ops.aten
         with FakeTensorMode() as fake_mode:
             graph = fx.Graph()
@@ -537,8 +600,6 @@ class CrossMutationRegionCSETestCase(TestCase):
 
     @staticmethod
     def _build_graph_that_mutates_current_duplicate_result():
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         aten = torch.ops.aten
         with FakeTensorMode() as fake_mode:
             graph = fx.Graph()
@@ -574,8 +635,6 @@ class CrossMutationRegionCSETestCase(TestCase):
         def unknown_mutation_():
             pass
 
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         aten = torch.ops.aten
         with FakeTensorMode() as fake_mode:
             graph = fx.Graph()
@@ -604,8 +663,6 @@ class CrossMutationRegionCSETestCase(TestCase):
         def unknown_mutation_(dst, src):
             dst.copy_(src)
 
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         aten = torch.ops.aten
         with FakeTensorMode() as fake_mode:
             graph = fx.Graph()
@@ -633,8 +690,6 @@ class CrossMutationRegionCSETestCase(TestCase):
 
     @staticmethod
     def _build_graph_that_mutates_view_of_duplicate_result_with_missing_meta():
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         aten = torch.ops.aten
         with FakeTensorMode() as fake_mode:
             graph = fx.Graph()
@@ -659,11 +714,56 @@ class CrossMutationRegionCSETestCase(TestCase):
 
         return graph
 
+    @staticmethod
+    def _build_graph_with_missing_input_meta_and_mutation():
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            x_fake = fake_mode.from_tensor(torch.randn(4, 4))
+            dst_fake = fake_mode.from_tensor(torch.randn(4, 4))
+            src_fake = fake_mode.from_tensor(torch.randn(4, 4))
+
+            x = graph.placeholder("x")
+            x.meta["val"] = None
+            dst = graph.placeholder("dst")
+            dst.meta["val"] = dst_fake
+            src = graph.placeholder("src")
+            src.meta["val"] = src_fake
+
+            cos_1 = graph.call_function(aten.cos.default, (x,))
+            cos_1.meta["val"] = aten.cos.default(x_fake)
+            mutation = graph.call_function(aten.copy_.default, (dst, src))
+            mutation.meta["val"] = dst.meta["val"]
+            cos_2 = graph.call_function(aten.cos.default, (x,))
+            cos_2.meta["val"] = aten.cos.default(x_fake)
+            out = graph.call_function(aten.add.Tensor, (cos_2, 1.0))
+            out.meta["val"] = aten.add.Tensor(cos_2.meta["val"], 1.0)
+            graph.output(out)
+
+        return graph
+
     def test_cse_dedup_split_across_unrelated_mutation(self):
         aten = torch.ops.aten
         graph = self._build_split_graph_with_mutation("unrelated")
         self.assertEqual(self._count_target(graph, aten.split_with_sizes.default), 3)
         self._assert_target_count_after_cse(graph, aten.split_with_sizes.default, 1)
+
+    def test_cse_respects_extra_node_key_across_unrelated_mutation(self):
+        aten = torch.ops.aten
+        graph = self._build_split_graph_with_mutation("unrelated")
+        split_nodes = [
+            node for node in graph.nodes if node.target == aten.split_with_sizes.default
+        ]
+        split_nodes[0].meta["partition"] = 0
+        split_nodes[1].meta["partition"] = 0
+        split_nodes[2].meta["partition"] = 1
+
+        self._assert_target_count_after_cse(
+            graph,
+            aten.split_with_sizes.default,
+            2,
+            extra_node_key=lambda node: node.meta.get("partition"),
+        )
 
     def test_cse_dedup_split_when_input_is_only_read_by_mutation(self):
         aten = torch.ops.aten
@@ -714,6 +814,23 @@ class CrossMutationRegionCSETestCase(TestCase):
         graph = self._build_graph_with_unknown_mutation()
         self.assertEqual(self._count_target(graph, aten.cos.default), 2)
         self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+    def test_cse_no_dedup_when_missing_meta_input_aliases_mutation(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_with_missing_input_meta_and_mutation()
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(4, 4)
+        expected_input = x.clone()
+        actual_input = x.clone()
+        self.assertEqual(
+            gm(expected_input, expected_input, src),
+            new_gm(actual_input, actual_input, src),
+        )
 
     def test_cse_no_redirect_through_unknown_mutation_of_duplicate_result(self):
         aten = torch.ops.aten
