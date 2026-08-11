@@ -257,15 +257,6 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   using namespace mps;
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
-  // Integer dtypes would require float64-precision pow to match CPU/CUDA's
-  // truncated output; MPS is limited to float32, which gives off-by-one results
-  // on exact integer powers (10**3 -> 999.9994 -> 999). Rather than return
-  // silently-wrong values, we don't claim integer support. See #137635.
-  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/false),
-              "logspace: integer dtypes are not supported on the MPS backend "
-              "(float32 cannot reproduce the reference truncation for integer outputs). "
-              "Use a floating dtype and cast, or run on CPU.");
-
   if (result.numel() != steps) {
     result.resize_({steps});
   }
@@ -276,6 +267,15 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     result.fill_(std::pow(base, start.to<double>()));
     return result;
   }
+
+  // Integer dtypes would require float64-precision pow to match CPU/CUDA's
+  // truncated output; MPS is limited to float32, which gives off-by-one results
+  // on exact integer powers (10**3 -> 999.9994 -> 999). Rather than return
+  // silently-wrong values, we don't claim integer support. See #137635.
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "logspace: integer dtypes are not supported on the MPS backend "
+              "(float32 cannot reproduce the reference truncation for integer outputs). "
+              "Use a floating dtype and cast, or run on CPU.");
 
   if (isComplexType(result.scalar_type())) {
     linspace_out_mps(start, end, steps, result);
