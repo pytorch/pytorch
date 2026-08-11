@@ -1380,15 +1380,17 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     # Read layout/sparseness once (hot-path Python properties on FakeTensor).
     layout = t.layout
     _is_sparse_any: bool = is_sparse_any(t)
-    memory_format = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
-    # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or _is_sparse_any
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
-        memory_format = None  # type: ignore[assignment]
+    # will go badly (guards will be messed up?). suggest_memory_format walks
+    # sizes and strides, which is symbolic arithmetic for such a tensor, so
+    # skip it too rather than computing a value we are about to discard.
+    memory_format: torch.memory_format | None
+    if t._has_symbolic_sizes_strides or _is_sparse_any:
+        memory_format = None
+    else:
+        memory_format = suggest_memory_format(t)
+        if not t.is_contiguous(memory_format=memory_format):
+            memory_format = None
 
     storage_offset = t.storage_offset()
 

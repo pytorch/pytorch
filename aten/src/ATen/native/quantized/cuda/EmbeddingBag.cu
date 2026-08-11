@@ -22,16 +22,19 @@
 namespace at::native {
 
 // BEGIN QUANTIZE HELPER FUNCTIONS
+// Get the bit field of [pos, pos+len) bits from val, i.e.
+// (val >> pos) & ((1u << len) - 1u), and return it as a float.
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
-#ifdef USE_ROCM
-  return *reinterpret_cast<float*>((val >> pos) && ((1u << len) - 1u ));
-#else
   uint32_t ret;
-  // Get the bit field of [pos, pos+len) bits from val:
-  // (val >> pos) && ( (1u << len) - 1u )
+#ifdef USE_ROCM
+  // Bitwise-AND (`&`), not logical-AND (`&&`): the logical form yields a bool,
+  // which the previous implementation reinterpret_cast to float* and
+  // dereferenced, faulting on ROCm.
+  ret = (val >> pos) & ((1u << len) - 1u);
+#else
   asm("bfe.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(val), "r"(pos), "r"(len));
-  return __uint2float_rn(ret);
 #endif
+  return __uint2float_rn(ret);
 }
 
 // FMA with constant scale/bias for all 4 floats in fa
