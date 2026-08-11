@@ -1370,9 +1370,10 @@ class IndexPutFallbackLine(WrapperLine):
             for idx in self.indices
         ]
 
-        self.wrapper._generate_index_put_fallback(
-            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
-        )
+        with self.wrapper.profiled_kernel_scope(node.get_kernel_name(), node):
+            self.wrapper._generate_index_put_fallback(
+                node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_index_put_fallback
@@ -1393,16 +1394,17 @@ class ScatterFallbackLine(WrapperLine):
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        self.wrapper._generate_scatter_fallback(
-            x,
-            [x, node.constant_args[0], index, src],
-            node.cpp_kernel_name,
-            node.python_kernel_name,
-            node.src_is_tensor,
-            node.kwargs["reduce"],
-            node.codegen_kwargs(),
-            device,
-        )
+        with self.wrapper.profiled_kernel_scope(node.cpp_kernel_name, node):
+            self.wrapper._generate_scatter_fallback(
+                x,
+                [x, node.constant_args[0], index, src],
+                node.cpp_kernel_name,
+                node.python_kernel_name,
+                node.src_is_tensor,
+                node.kwargs["reduce"],
+                node.codegen_kwargs(),
+                device,
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_scatter_fallback
@@ -5159,6 +5161,50 @@ class PythonWrapperCodegen(CodeGen):
         Mark the end of kernel context guard
         """
         return
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        input_handles: list[str] | None = None,
+    ):
+        return
+
+    @contextlib.contextmanager
+    def profiled_kernel_scope(self, kernel_name, node_schedule):
+        """Context manager that wraps a kernel call in a RAIIAtenRecordFunctionHandle
+        profiling block when config.cpp.enable_kernel_profile is enabled, plus a
+        KernelContextGuard when config.cpp.enable_kernel_context_guard is also enabled.
+        On PythonWrapperCodegen the write_* methods are no-ops, so this is
+        effectively a no-op.  CppWrapperCpu overrides those methods, making
+        this context manager emit real profiling wrappers."""
+        try:
+            if kernel_profile_enabled():
+                self.write_kernel_context_guard_begin()
+                if config.cpp.enable_kernel_context_guard:
+                    self.write_kernel_context_guard(kernel_name, node_schedule)
+                # Deriving the handles emits codegen for ReinterpretView
+                # inputs, which only the C++ wrapper consumes.
+                input_handles = None
+                if V.graph.cpp_wrapper:
+                    input_handles = self._get_extern_kernel_input_handles(
+                        node_schedule
+                    )
+                self.write_record_function_handle(kernel_name, input_handles)
+            yield
+        finally:
+            if kernel_profile_enabled():
+                self.write_kernel_context_guard_end()
+
+    @staticmethod
+    def _get_extern_kernel_input_handles(node_schedule) -> list[str] | None:
+        """Extract tensor input handle expressions from an ExternKernel node.
+
+        Uses the shared helper so a ReinterpretView records its logical view
+        shape. get_name() would return the base buffer, which the profiler
+        would report as a real but wrong shape."""
+        if not isinstance(node_schedule, ir.ExternKernel):
+            return None
+        return _get_profiling_input_handles(node_schedule.inputs) or None
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):

@@ -1113,6 +1113,19 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             for x in inputs
         ]
 
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        input_handles: list[str] | None = None,
+    ):
+        # ArrayRef tensors are not AtenTensorHandle, so we cannot call
+        # aoti_torch_tensor_to_ivalue on them.  Emit RAIIAtenRecordFunctionHandle
+        # without input metadata instead.
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        self.writeline(
+            f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+        )
+
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
