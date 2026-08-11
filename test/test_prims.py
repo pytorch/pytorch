@@ -348,6 +348,23 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
     def test_mul_complex(self):
         prims.mul(torch.randn(2), 1 + 1j)
 
+    def test_inductor_force_stride_order_eager_single_copy(self):
+        import torch._inductor.inductor_prims
+        from torch.profiler import ProfilerActivity, profile
+
+        x = torch.randn(4, 8)
+        for stride in (x.stride(), (1, 4)):
+            out = torch.ops.prims.inductor_force_stride_order.default(x, stride)
+            self.assertEqual(out.stride(), stride)
+            self.assertEqual(out, x)
+            # functional op: the output may not alias the input even when strides match
+            self.assertNotEqual(out.data_ptr(), x.data_ptr())
+
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ops.prims.inductor_force_stride_order.default(x, x.stride())
+        ops = {e.key for e in prof.key_averages()}
+        self.assertNotIn("aten::clone", ops)
+
     def test_clone_complex(self):
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.randn(4, dtype=torch.complex64, device='meta').conj()

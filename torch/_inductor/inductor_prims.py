@@ -46,11 +46,14 @@ def make_prim(
 
 
 def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
-    if input_tensor.stride() == stride:
-        return input_tensor
-    new_tensor = input_tensor.clone().as_strided(
+    # A copy is mandatory even when input_tensor already has the requested
+    # stride: the op is registered as a functional custom op, so returning
+    # the input would trip the library-level aliasing check.
+    new_tensor = torch.empty_strided(
         input_tensor.shape,
         stride,
+        dtype=input_tensor.dtype,
+        device=input_tensor.device,
     )
     new_tensor.copy_(input_tensor)
     return new_tensor
