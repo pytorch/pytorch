@@ -28,6 +28,21 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    def test_cleanup_hook_tolerates_missing_name(self):
+        # During interpreter shutdown the scope's module __dict__ may already be
+        # cleared before the weakref callback fires the hook. The hook must not
+        # raise KeyError (which would surface as an "Exception ignored in
+        # weakref callback").
+        scope = {}
+        hook = utils.CleanupHook.create(scope, "myglobal", object())
+        del scope["myglobal"]
+        hook()
+
+        # The normal path still removes the installed global.
+        hook2 = utils.CleanupHook.create(scope, "myglobal", object())
+        hook2()
+        self.assertNotIn("myglobal", scope)
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
@@ -1125,14 +1140,14 @@ class TestDynamoTimed(TestCase):
     def test_ir_count(self):
         # Different python versions have different potential IR counts.
         version = (sys.version_info[0], sys.version_info[1])
-        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14)))
+        self.assertIn(version, ((3, 10), (3, 11), (3, 12), (3, 13), (3, 14), (3, 15)))
         first, second = {
-            (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (11, 7),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
             (3, 14): (11, 7),
+            (3, 15): (11, 7),
         }[version]
 
         def test1(x):

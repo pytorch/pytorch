@@ -415,6 +415,7 @@ std::string _memory_snapshot_pickled() {
   IValue segment_unmap_s = "segment_unmap";
   IValue snapshot_s = "snapshot";
   IValue oom_s = "oom";
+  IValue annotate_s = "annotate";
   IValue device_free_s = "device_free";
 
   using namespace c10::cuda::CUDACachingAllocator;
@@ -439,6 +440,8 @@ std::string _memory_snapshot_pickled() {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::ANNOTATE:
+        return annotate_s;
     }
     TORCH_CHECK(false, "unreachable");
   };

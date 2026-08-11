@@ -1838,7 +1838,6 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2197,6 +2196,39 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
         self.assertEqual(t, t_orig)
 
+    def test_misaligned_saved_for_backward_input(self):
+        # A user input saved for backward but unused in forward compute reaches
+        # the backward graph as a primal. The backward compile must not assume
+        # it is aligned just because the first call's example was: unlike
+        # params/buffers, its address changes every call.
+        N = 1024
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, value, weight):
+                ctx.save_for_backward(weight)
+                return value.expand(N).clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (weight,) = ctx.saved_tensors
+                return (grad_output * weight).sum().reshape(1), None
+
+        compiled = torch.compile(ScaleGradient.apply, dynamic=False)
+
+        def run(weight):
+            value = torch.ones(1, device=device_type, requires_grad=True)
+            compiled(value, weight).sum().backward()
+            self.assertEqual(value.grad, weight.sum().to(value.dtype).reshape(1))
+
+        aligned = torch.ones(N, device=device_type, dtype=torch.int32)
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        run(aligned)
+
+        misaligned = torch.ones(N + 1, device=device_type, dtype=torch.int32)[1:]
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        run(misaligned)
+
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -2279,6 +2311,124 @@ class CudaReproTests(TestCase):
         out, code = run_and_get_code(outer_reduce, a)
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
+
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_selection_uses_tiling_scores(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(x):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            return torch.amax(torch.abs(grouped), dim=-1)
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        expected = fn(x)
+        out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(expected, out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
+        self.assertNotIn("for roffset", persistent_code)
+
+    @parametrize("use_block_ptr", [False, True])
+    @parametrize("dynamic_batch", [False, True])
+    @config.patch(
+        {
+            "triton.multi_kernel": 0,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": False,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+    )
+    def test_persistent_reduction_cse_reindexed_epilogue(
+        self, use_block_ptr, dynamic_batch
+    ):
+        if device_type != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        out_dtype = torch.float16
+        fp8_min = -448.0
+        fp8_max = 448.0
+        min_fp8_scale = 1.0 / (fp8_max * 512.0)
+
+        def fn(out, x, scales_out, scale_ub):
+            hidden = x.shape[1] // 2
+            group_size = 128
+            gate = x[:, :hidden].to(torch.float32)
+            up = x[:, hidden:].to(torch.float32)
+            prod = F.silu(gate) * up
+            grouped = prod.view(x.shape[0], hidden // group_size, group_size)
+            scales = torch.amax(torch.abs(grouped), dim=-1)
+            scales = torch.clamp(scales, max=scale_ub)
+            scales = torch.clamp(scales * (1.0 / fp8_max), min=min_fp8_scale)
+            y = torch.clamp(grouped / scales[:, :, None], fp8_min, fp8_max).to(
+                out.dtype
+            )
+            scales_out.copy_(scales)
+            out.copy_(y.view_as(out))
+
+        x = torch.randn(4, 512, device=device_type, dtype=torch.bfloat16)
+        out = torch.empty(4, 256, device=device_type, dtype=out_dtype)
+        scales_out = torch.empty(4, 2, device=device_type)
+        expected_out = torch.empty_like(out)
+        expected_scales = torch.empty_like(scales_out)
+        scale_ub = torch.tensor(1e6, device=device_type)
+
+        fn(expected_out, x, expected_scales, scale_ub)
+        if dynamic_batch:
+            for tensor in (x, out, scales_out):
+                torch._dynamo.mark_dynamic(tensor, 0)
+        with config.patch("triton.use_block_ptr", use_block_ptr):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            _, code = run_and_get_code(
+                compiled_fn,
+                out,
+                x,
+                scales_out,
+                scale_ub,
+            )
+            if dynamic_batch:
+                x2 = torch.randn(7, 512, device=device_type, dtype=torch.bfloat16)
+                out2 = torch.empty(7, 256, device=device_type, dtype=out_dtype)
+                scales_out2 = torch.empty(7, 2, device=device_type)
+                expected_out2 = torch.empty_like(out2)
+                expected_scales2 = torch.empty_like(scales_out2)
+                fn(expected_out2, x2, expected_scales2, scale_ub)
+                compiled_fn(out2, x2, scales_out2, scale_ub)
+                self.assertEqual(expected_out2, out2)
+                self.assertEqual(expected_scales2, scales_out2)
+        self.assertEqual(expected_out, out)
+        self.assertEqual(expected_scales, scales_out)
+
+        code = "\n".join(code)
+        self.assertIn("@triton_heuristics.persistent_reduction", code)
+        self.assertEqual(1, code.count("@triton_heuristics.persistent_reduction"))
+        persistent_code = code.split("@triton_heuristics.persistent_reduction", 1)[1]
+        if use_block_ptr:
+            self.assertIn("tl.make_block_ptr(in_ptr0", persistent_code)
+            self.assertEqual(
+                2, persistent_code.count("tl.load(tl.make_block_ptr(in_ptr0")
+            )
+        else:
+            self.assertEqual(2, persistent_code.count("tl.load(in_ptr0 +"))
+        self.assertLessEqual(persistent_code.count("libdevice.exp"), 1)
 
     def test_scaled_dot_product_efficient_attention_backward(self):
         from torch import nn, Tensor
@@ -2791,7 +2941,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2874,6 +3023,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(default_output, max_autotune_output)
 
+    @tf32_on_and_off(0.005)
     def test_adaptive_avg_pool3d_issue_157248(self):
         """Test for GitHub issue #157248: Conv2d-unsqueeze-AdaptiveAvgPool3d produces incorrect results"""
 
@@ -2914,11 +3064,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     compiled_output = compiled_model(input_tensor)
 
                 # They should be identical (or very close)
-                self.assertTrue(
-                    torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
-                    f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
-                )
+                self.assertEqual(eager_output, compiled_output)
 
     @parametrize(
         "quantiles_shape,quantiles_strides,batch_size",
@@ -3013,9 +3159,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
-        msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
+        msg="_scaled_dot_product_efficient_attention returns log_sumexp in the query "
+        "dtype instead of float32, tripping Inductor's fake kernel metadata check"
     )
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
@@ -3061,7 +3207,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     v,
                     attn_bias,
                     dropout_p=0.0,
-                    is_causal=True,
+                    is_causal=False,
                     scale=scale,
                     compute_log_sumexp=True,
                 )
