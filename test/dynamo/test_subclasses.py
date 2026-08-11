@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
@@ -1947,6 +1947,46 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             test_automatic_dynamic(f, [x, a, z], dim_dynamic, 3, 3)
             # Recompile 2 times, first with dim 0 become Dynamic, second with dim 1 becomes Dynamic.
             test_automatic_dynamic(f, [x, b, z], dim_dynamic, 3, 3)
+
+    def test_parametrized_subclass_param_nested_graph_break(self):
+        # Regression test: under nested graph breaks, realizing the value stack
+        # for a partial subgraph routes a module with a tensor-subclass parameter
+        # through wrap_module -> mark_static_input. The subclass param is tracked
+        # as a UserDefinedObjectVariable (no graph proxy node), which previously
+        # crashed with "'UserDefinedObjectVariable' object has no attribute 'proxy'".
+        from torch.nn.utils.parametrize import (
+            register_parametrization,
+            remove_parametrizations,
+        )
+        from torch.testing._internal.common_subclass import (
+            subclass_db,
+            WrapperTensorWithCustomSizes,
+        )
+
+        create_fn = subclass_db[WrapperTensorWithCustomSizes].create_fn
+
+        def body():
+            class MyModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(create_fn((3, 3)))
+
+                def forward(self, x):
+                    return self.weight + x
+
+            class MyParametrization(torch.nn.Module):
+                def forward(self, X):
+                    return -X
+
+            m = MyModule()
+            register_parametrization(m, "weight", MyParametrization())
+            out = m(create_fn((3, 3)))
+            remove_parametrizations(m, "weight", leave_parametrized=True)
+            return out
+
+        self.assertTrue(torch._dynamo.config.nested_graph_breaks)
+        out = torch._dynamo.optimize("eager")(body)()
+        self.assertIsInstance(out, WrapperTensorWithCustomSizes)
 
     def test_compile_with_functionalization(self):
         x = torch.randn([3, 4])
@@ -4761,7 +4801,7 @@ class GraphModule(torch.nn.Module):
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 

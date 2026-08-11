@@ -53,24 +53,38 @@ from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.nn import functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM80OrLater,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     skipIfWindows,
+    skipIfXpu,
     subtest,
+    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+)
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -626,7 +640,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -770,7 +783,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
@@ -965,7 +978,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -987,7 +1000,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1021,7 +1034,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1043,7 +1056,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1063,7 +1076,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1116,7 +1129,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1194,7 +1207,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(fn(a3), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1250,7 +1263,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertEqual(fn(a2), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1315,7 +1328,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.local_var_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1375,7 +1388,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertEqual(fn(a2), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1437,7 +1450,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.recursive_func_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1493,7 +1506,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.factory_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1561,7 +1574,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.lru_cache_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2047,7 +2060,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2062,8 +2075,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def f(x, y):
             return x.sin() + y
 
-        x = torch.randn(10, device="cuda")
-        y = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=device_type)
+        y = torch.randn(10, device=device_type)
         with torch.no_grad():
             result = f(x, y)
             self.assertEqual(result, x.sin() + y)
@@ -2108,7 +2121,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2118,7 +2131,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @functorch_config.patch({"saved_tensors_hooks_filtering_mode": "all"})
     def test_saved_tensors_hooks_autograd_cache(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
-        device = torch.device("cuda:0")
+        device = torch.device(f"{device_type}:0")
 
         def pack_cpu(x):
             return x.to(device="cpu")
@@ -2210,7 +2223,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2231,7 +2244,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             x = x.relu()
             return x
 
-        device = torch.device("cuda:0")
+        device = torch.device(f"{device_type}:0")
         backend = "inductor"
 
         def inp_fn():
@@ -3339,6 +3352,133 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    @requires_triton()
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_FLASH_ATTENTION and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+        "requires flash and efficient attention",
+    )
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_sdpa_kernel_cache_distinguishes_policy(self):
+        def fn(q, k, v):
+            bias = torch.full(
+                (1, 1, q.shape[-2], k.shape[-2]),
+                0.0,
+                dtype=q.dtype,
+                device=q.device,
+            )
+            bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        q = torch.randn((2, 4, 16, 64), device=GPU_TYPE, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=GPU_TYPE, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.zeros((2, 4, 16, 16), device=GPU_TYPE, dtype=q.dtype)
+        flash_params = torch.backends.cuda.SDPAParams(q, k, v, None, 0.0, False, False)
+        efficient_params = torch.backends.cuda.SDPAParams(
+            q, k, v, bias, 0.0, False, False
+        )
+        if not (
+            torch.backends.cuda.can_use_flash_attention(flash_params)
+            and torch.backends.cuda.can_use_efficient_attention(efficient_params)
+        ):
+            raise unittest.SkipTest("SDPA inputs do not support both fused backends")
+
+        def compile_with_policy(backends):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            with sdpa_kernel(backends, set_priority=True):
+                output = compiled(q, k, v)
+            stats = counters["aot_autograd"]
+            return output, (
+                stats["autograd_cache_miss"],
+                stats["autograd_cache_hit"],
+            )
+
+        flash_first = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        efficient_first = [
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+        ]
+
+        with fresh_cache():
+            flash_out, stats = compile_with_policy(flash_first)
+            self.assertEqual(stats, (1, 0))
+
+            efficient_out, stats = compile_with_policy(efficient_first)
+            self.assertEqual(stats, (1, 0))
+            self.assertEqual(flash_out, efficient_out, atol=2e-4, rtol=1e-2)
+
+            _, stats = compile_with_policy(SDPBackend.EFFICIENT_ATTENTION)
+            self.assertEqual(stats, (1, 0))
+
+            _, stats = compile_with_policy(flash_first)
+            self.assertEqual(stats, (0, 1))
+
+    @unittest.skipIf(not HAS_GPU, "requires accelerator")
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    def test_autocast_in_graph_is_cacheable(self):
+        """
+        An autocast context manager inside the compiled region is traced into
+        _enter_autocast/_exit_autocast nodes. Those are cacheable, and the dtype
+        they carry is part of the key, so graphs compiled under different dtypes
+        must not be reused for each other.
+        """
+
+        def fn(x, w, dtype):
+            with torch.amp.autocast(GPU_TYPE, dtype=dtype):
+                return torch.nn.functional.gelu(x @ w)
+
+        def run(dtype):
+            torch._dynamo.reset()
+            counters.clear()
+            compiled = torch.compile(fn, backend="inductor")
+            with torch.no_grad():
+                out = compiled(x, w, dtype)
+            return out, (
+                counters["aot_autograd"]["autograd_cache_miss"],
+                counters["aot_autograd"]["autograd_cache_hit"],
+                counters["aot_autograd"]["autograd_cache_bypass"],
+            )
+
+        with fresh_cache():
+            x = torch.randn(8, 64, device=GPU_TYPE)
+            w = torch.randn(64, 64, device=GPU_TYPE)
+
+            out_bf16, (miss, hit, bypass) = run(torch.bfloat16)
+            self.assertEqual(out_bf16.dtype, torch.bfloat16)
+            # Previously this bypassed the cache entirely.
+            self.assertEqual(bypass, 0)
+            self.assertEqual((miss, hit), (1, 0))
+
+            # A different dtype must not reuse the bfloat16 entry.
+            out_fp16, (miss, hit, bypass) = run(torch.float16)
+            self.assertEqual(out_fp16.dtype, torch.float16)
+            self.assertEqual(bypass, 0)
+            self.assertEqual((miss, hit), (1, 0))
+
+            # Recompiling the original dtype hits.
+            out_bf16_2, (miss, hit, bypass) = run(torch.bfloat16)
+            self.assertEqual(out_bf16_2.dtype, torch.bfloat16)
+            self.assertEqual((miss, hit), (0, 1))
+            self.assertEqual(out_bf16_2, out_bf16)
+
+            # ...and so does the second dtype, with its own entry.
+            out_fp16_2, (miss, hit, bypass) = run(torch.float16)
+            self.assertEqual(out_fp16_2.dtype, torch.float16)
+            self.assertEqual((miss, hit), (0, 1))
+            self.assertEqual(out_fp16_2, out_fp16)
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -3450,7 +3590,7 @@ class _MockEntryForPickleTest:
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return device_type
 
     def default_config(self):
         return AOTConfig(
@@ -4005,7 +4145,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4091")
+    @requires_gpu_and_triton
     def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
         """prepare_for_pickle clears benchmark_failure_reasons which can hold
         exec'd launcher keys that aren't picklable.

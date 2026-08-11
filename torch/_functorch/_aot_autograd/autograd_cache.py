@@ -172,6 +172,13 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # An autocast context manager *inside* a compiled region is traced into
+        # these calls. What they do is fully determined by their arguments
+        # (device type, dtype, enabled, cache_enabled), which are constants in
+        # the graph and therefore part of the cache key, so a graph compiled
+        # under one autocast setting can never be reused for another.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -544,6 +551,21 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             if torch.is_autocast_enabled(device_type):
                 self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
+        # Composite SDPA selects and decomposes a backend while AOTAutograd is
+        # tracing.  Preserve every global selector input that can change the
+        # resulting graph, including the relative order of enabled backends.
+        self.sdpa_runtime_state = {
+            "priority_order": tuple(torch._C._get_sdp_priority_order()),
+            "cudnn": torch._C._get_cudnn_sdp_enabled(),
+            "flash": torch._C._get_flash_sdp_enabled(),
+            "fa3": torch._C._get_fa3_sdp_enabled(),
+            "mem_efficient": torch._C._get_mem_efficient_sdp_enabled(),
+            "math": torch._C._get_math_sdp_enabled(),
+            "math_allow_fp16_bf16_reduction": torch._C._get_math_sdp_allow_fp16_bf16_reduction(),
+            "overrideable": torch._C._get_overrideable_sdp_enabled(),
+            "rocm_fa": str(torch._C._get_rocm_fa_preferred_backend()),
+            "deterministic_warn_only": torch.is_deterministic_algorithms_warn_only_enabled(),
+        }
         self.autograd_config = config.save_config()
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
@@ -566,8 +588,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        symint_name_map: dict[str, str] | None = None,
+        graph_symint_names: set[str] | None = None,
+    ) -> None:
         super().__init__(gm)
+        self._symint_name_map: dict[str, str] = symint_name_map or {}
+        self._graph_symint_names: set[str] = graph_symint_names or set()
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
             {
@@ -576,6 +605,21 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
+
+    def _reduce_symint(
+        self, s: torch.SymInt
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        name = str(s)
+        normalized = self._symint_name_map.get(name)
+        if normalized is not None:
+            if name in self._graph_symint_names:
+                return (_ident, (normalized,))
+            # Non-graph SymInt with non-deterministic name (from MetaConverter).
+            # Include the hint to distinguish different specializations.
+            hint = s.node.hint
+            if hint is not None:
+                return (_ident, (normalized, hint))
+        return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
@@ -774,10 +818,18 @@ def normalize_placeholder_names(
 
     # Track all the old state of placeholders
     old_placeholder_names = []
+    old_symint_names = []
     old_used_names = copy(gm.graph._graph_namespace._used_names)
     i = 0
+    j = 0
     for n in gm.graph.find_nodes(op="placeholder", sort=True):
-        if n.type != torch.SymInt:
+        if n.type == torch.SymInt:
+            new_name = f"s_{j}"
+            old_symint_names.append((n.name, n.target))
+            n.target = new_name
+            n._rename(new_name)
+            j += 1
+        else:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
@@ -795,8 +847,14 @@ def normalize_placeholder_names(
         gm.graph._graph_namespace._used_names = set()
         # Restore the placeholder names
         i = 0
+        j = 0
         for n in gm.graph.find_nodes(op="placeholder", sort=True):
-            if n.type != torch.SymInt:
+            if n.type == torch.SymInt:
+                (name, target) = old_symint_names[j]
+                n.target = target
+                n._rename(name)
+                j += 1
+            else:
                 (name, target) = old_placeholder_names[i]
                 n.target = target
                 n._rename(name)
@@ -804,6 +862,10 @@ def normalize_placeholder_names(
         if i != len(old_placeholder_names):
             raise AssertionError(
                 f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
+            )
+        if j != len(old_symint_names):
+            raise AssertionError(
+                f"j={j} != len(old_symint_names)={len(old_symint_names)}"
             )
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
@@ -875,8 +937,22 @@ def autograd_cache_key(
     """
 
     gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
-    with sanitize_gm_for_cache(gm):
-        try:
+    try:
+        # Capture graph SymInt placeholder names before normalization so the
+        # pickler can distinguish graph-native SymInts (deterministic names)
+        # from MetaConverter-generated SymInts (non-deterministic names).
+        graph_symint_names: set[str] = set()
+        symint_name_map: dict[str, str] = {}
+        if torch._functorch.config.autograd_cache_normalize_inputs:
+            for n in gm.graph.find_nodes(op="placeholder", sort=True):
+                if n.type == torch.SymInt:
+                    graph_symint_names.add(n.target)
+            j = 0
+            for inp in example_inputs:
+                if isinstance(inp, torch.SymInt):
+                    symint_name_map[str(inp)] = f"s_{j}"
+                    j += 1
+        with sanitize_gm_for_cache(gm):
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
@@ -886,24 +962,24 @@ def autograd_cache_key(
                 create_fx_config(compiler_config_extra),
                 act_input_paths,
             )
-            pickler = AOTAutogradCachePickler(gm)
+            pickler = AOTAutogradCachePickler(gm, symint_name_map, graph_symint_names)
             # The prefix distinguishes among the other kinds of objects we cache
             key = AOTAUTOGRAD_CACHE_PREFIX + pickler.get_hash(details)
             debug_lines = _get_debug_lines_for_cache_key(pickler, details, key)
             return key, debug_lines
-        except Exception:
-            # If enable_aot_compile is set, we're in AOT precompile mode where we always
-            # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
-            # a proper key because we are guaranteed in an AOT precompile world users are in
-            # complete control of distributing and loading artifacts.
-            if torch._functorch.config.bypass_autograd_cache_key:
-                log.info(
-                    "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
-                    exc_info=True,
-                )
-                return str(random.random()), []
-            else:
-                raise
+    except Exception:
+        # If enable_aot_compile is set, we're in AOT precompile mode where we always
+        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+        # a proper key because we are guaranteed in an AOT precompile world users are in
+        # complete control of distributing and loading artifacts.
+        if torch._functorch.config.bypass_autograd_cache_key:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
+            return str(random.random()), []
+        else:
+            raise
 
 
 @contextlib.contextmanager
