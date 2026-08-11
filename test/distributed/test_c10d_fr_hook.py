@@ -950,7 +950,8 @@ class AbstractFlightRecorderHookTest:
         # a backend that establishes completion before that runs has nothing to
         # hand the callback to. Dropping it retires nothing and the collective
         # reads "scheduled" for ever -- the false hang this feature exists to
-        # rule out -- so the completion has to be stashed and claimed.
+        # rule out -- so the post-hook asks the Work whether it has already
+        # finished instead of waiting for a push that is not coming.
         #
         # Constructed, not raced. Post-hooks fire in hook_id order and the
         # flight recorder hook's ids start far above any hand-picked one, so
@@ -1003,7 +1004,7 @@ class AbstractFlightRecorderHookTest:
         target = observed["target"]
         self.assertFalse(target["retired"], msg=str(target))
         self.assertNotEqual(target["state"], "completed", msg=str(target))
-        # ... and the post-hook then claims it, rather than leaving a finished
+        # ... and the post-hook then retires it, rather than leaving a finished
         # collective looking hung for the rest of the job.
         entries = self._await_retired(before + 2)[before:]
         self.assertEqual(len(entries), 2, msg=str(entries))

@@ -151,11 +151,6 @@ std::optional<c10::Device> opDevice(const PreHookArgs& args) {
 // hooked groups get distinct ids from here whether or not they share one.
 std::atomic<size_t> next_pg_id{0};
 
-// Cap on stashed early completions, see FlightRecorderHook::onCompletion. Only
-// ops issued concurrently on different threads can queue up here, so this is
-// generous; it exists so an unclaimable entry cannot accumulate.
-constexpr size_t kMaxEarlyCompletions = 16;
-
 // Both accessors throw rather than return empty on a backend that does not
 // implement them (Backend's defaults, which custom backends keep), and neither
 // is required to record, so ask by trying.
@@ -222,7 +217,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     hook->pg_->registerCompletionHook(
         hook->hook_id_, [weak](const CompletionHookArgs& args) {
           if (auto self = weak.lock()) {
-            self->onCompletion(args);
+            self->retireCompleted(args.work, args.duration_ms);
           }
         });
     hook->push_completion_ = true;
@@ -369,7 +364,6 @@ void FlightRecorderHook::remove() {
     inflight = std::move(inflight_);
     inflight_.clear();
     work_ids_.clear();
-    early_completions_.clear();
     had_completion_hook = std::exchange(push_completion_, false);
     had_abort_hook = std::exchange(abort_hook_registered_, false);
   }
@@ -387,35 +381,22 @@ void FlightRecorderHook::remove() {
   inflight.clear();
 }
 
-void FlightRecorderHook::onCompletion(const CompletionHookArgs& args) {
-  // Runs on whichever thread the backend established completion on, usually its
-  // watchdog. Only the map lookup happens under mutex_; the recorder call does
-  // not, for the same reason onPre's does not -- see the lock-order note.
+void FlightRecorderHook::retireCompleted(
+    const Work* work,
+    std::optional<float> duration) {
+  // From the completion hook this runs on whichever thread the backend
+  // established completion on, usually its watchdog. Only the map lookup
+  // happens under mutex_; the recorder call does not, for the same reason
+  // onPre's does not -- see the lock-order note.
   InflightOp op;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto id_it = work_ids_.find(args.work);
+    auto id_it = work_ids_.find(work);
     if (id_it == work_ids_.end()) {
-      // Either not one of ours -- an op recorded by a natively recording
-      // backend, one issued under a graph capture, one already evicted, or one
-      // from before this hook was attached -- or the post-hook that registers
-      // the Work has not run yet. The backend wins that race whenever it
-      // establishes completion for a fast op between issue and firePostHook,
-      // and a dropped callback retires nothing, so the collective reads
-      // "scheduled" for ever: the false hang this hook exists to rule out.
-      // Stash it for onPost to claim instead.
-      //
-      // Only while an op is between its pre- and post-hook: with none
-      // outstanding this cannot be that race, and an entry nothing claims could
-      // later be matched by a Work that reuses the address. The cap bounds what
-      // an op whose post-hook never runs (the backend threw after enqueueing)
-      // leaves behind.
-      if (inflight_.size() > work_ids_.size()) {
-        early_completions_.emplace_back(args.work, args.duration_ms);
-        if (early_completions_.size() > kMaxEarlyCompletions) {
-          early_completions_.pop_front();
-        }
-      }
+      // Not one of ours -- an op recorded by a natively recording backend, one
+      // issued under a graph capture, one already evicted, or one from before
+      // this hook was attached -- or already retired, since erasing the entry
+      // here is what claims it and only one caller can win that.
       return;
     }
     auto op_id = id_it->second;
@@ -426,13 +407,27 @@ void FlightRecorderHook::onCompletion(const CompletionHookArgs& args) {
     }
     op = std::move(it->second);
     inflight_.erase(it);
-    // The hook only hears about successful completion, so this is the last op
-    // known to have finished.
+    // Only successful completion gets here, so this is the last op known to
+    // have finished.
     pg_status_->lastCompletedSeq = op_id;
     pg_status_->lastCompletedWorkName = std::string(hookOpName(op.name));
   }
   op.recorder->retire_completed(
-      op.trace_id.id, op.trace_id.reset_epoch, args.duration_ms);
+      op.trace_id.id, op.trace_id.reset_epoch, duration);
+}
+
+std::optional<float> FlightRecorderHook::workDuration(const Work& work) {
+  if (!work_can_time_.load(std::memory_order_relaxed)) {
+    return std::nullopt;
+  }
+  try {
+    return work.getDuration();
+  } catch (const std::exception&) {
+    // Refused because the backend does not time collectives, which is a
+    // property of the backend and not of the op -- so ask no further op.
+    work_can_time_.store(false, std::memory_order_relaxed);
+    return std::nullopt;
+  }
 }
 
 void FlightRecorderHook::onPre(const PreHookArgs& args) {
@@ -650,29 +645,16 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
       // it names the op by this Work.
       it->second.work = args.work;
       work_ids_[args.work.get()] = args.op_id;
-      // Unless it already finished: a completion the backend pushed before this
-      // registration was stashed rather than dropped (see onCompletion), and
-      // now that the Work resolves to an op_id it can be replayed, keeping the
-      // backend's own duration.
-      std::optional<float> duration;
-      bool early = false;
-      for (auto e = early_completions_.begin(); e != early_completions_.end();
-           ++e) {
-        if (e->first == args.work.get()) {
-          duration = e->second;
-          early_completions_.erase(e);
-          early = true;
-          break;
-        }
-      }
-      if (inflight_.size() == work_ids_.size()) {
-        // Nothing is between its pre- and post-hook any more, so nothing left
-        // in the stash can ever be claimed.
-        early_completions_.clear();
-      }
       lock.unlock();
-      if (early) {
-        onCompletion(CompletionHookArgs{args.work.get(), duration});
+      // A completion established before that registration found no mapping and
+      // retired nothing, leaving a finished collective reading "scheduled" for
+      // ever, so ask the Work rather than wait for a push that has been and
+      // gone. isSuccess() as well: isCompleted() is true for failed and
+      // timed-out work too, which stays un-retired so a dump keeps saying it
+      // was never seen to finish (Hooks.hpp). Asked with the lock dropped,
+      // since isCompleted() calls into the backend -- see the lock-order note.
+      if (args.work->isCompleted() && args.work->isSuccess()) {
+        retireCompleted(args.work.get(), workDuration(*args.work));
       }
       return;
     }

@@ -13,8 +13,14 @@
 // That is stock ProcessGroupNCCL's model -- its watchdog retires on real
 // completion -- and it is what lets a dump tell a finished collective from a
 // hung one: a collective that never completes is never retired and reads
-// "scheduled", one that finished reads "completed". Nothing is polled: a hang
-// needs no observer, since work that never completes is simply never reported.
+// "scheduled", one that finished reads "completed". A hang needs no observer,
+// since work that never completes is simply never reported.
+//
+// The post-hook is the only place a Work and its op_id are seen together, so
+// it is where the completion hook's key is registered -- and a fast collective
+// can be finished before it runs. So the post-hook also asks the Work whether
+// it has already finished: a completion earlier than the registration is
+// caught there, a later one finds the mapping, and none falls between.
 //
 // Backends with no completion hook fall back to retiring in the post-hook, i.e.
 // at issue. Such an entry carries no duration and never reads "completed", only
@@ -52,7 +58,7 @@
 
 #pragma once
 
-#include <deque>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -129,9 +135,13 @@ class TORCH_API FlightRecorderHook
   const BackendTarget& targetFor(std::optional<c10::Device> device) const;
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args);
-  // Retires the entry of the op whose Work just completed. Fires on the
-  // backend's thread; see the lock-order note on mutex_.
-  void onCompletion(const CompletionHookArgs& args);
+  // Retires the entry of an op whose Work completed successfully, unless it is
+  // already retired: the entry is claimed out of inflight_ under mutex_, so
+  // the backend's completion hook and the post-hook's own check retire it
+  // exactly once between them however they race.
+  void retireCompleted(const Work* work, std::optional<float> duration);
+  // The backend's own measurement, or nullopt if it cannot time collectives.
+  std::optional<float> workDuration(const Work& work);
   // Dumps the trace to disk, at most once per process. Deliberately takes no
   // hook lock; see the definition.
   void onAbort();
@@ -148,6 +158,9 @@ class TORCH_API FlightRecorderHook
   // the one ProcessGroup routes hook registration to, so a mixed group whose
   // default backend has no completion hooks falls back for all of its ops.
   bool push_completion_{false};
+  // Whether Work::getDuration() is worth asking: it throws when the backend
+  // does not time its collectives, so the first refusal is remembered.
+  std::atomic<bool> work_can_time_{true};
   size_t pg_id_;
   // Cap on inflight_, see onPre.
   size_t max_inflight_{0};
@@ -177,12 +190,8 @@ class TORCH_API FlightRecorderHook
   // by its Work, since op_id is assigned above the backend and a Work does not
   // carry it, and the post-hook is where the two are seen together. Kept in
   // step with inflight_ -- every entry here has a live entry there holding the
-  // Work -- so inflight_.size() - work_ids_.size() is the number of ops sitting
-  // between their pre-hook and their post-hook.
+  // Work.
   std::unordered_map<const Work*, int64_t> work_ids_;
-  // Completions that arrived before the post-hook could register their Work,
-  // waiting for it to claim them. Bounded; see onCompletion.
-  std::deque<std::pair<const Work*, std::optional<float>>> early_completions_;
 };
 
 } // namespace c10d
