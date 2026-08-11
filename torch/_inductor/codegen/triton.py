@@ -3099,7 +3099,7 @@ class TMACompatibilityChecker:
             and innermost_block_symt in TritonSymbols.reduction_types
         ):
             log.debug(
-                "%s strict sum linear accumulation requires a reduction block size of 1",
+                "%s strict reduction linear accumulation requires a reduction block size of 1",
                 self.failed_debug_prefix,
             )
             return False
@@ -7483,7 +7483,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if V.graph.sizevars.statically_known_geq(rblock, rnumel):
                 return rblock
             raise AssertionError(
-                "persistent strict sum requires its planned reduction block "
+                "persistent strict reduction requires its planned reduction block "
                 "to cover the reduction"
             )
         return self._get_persistent_RBLOCK(rnumel)

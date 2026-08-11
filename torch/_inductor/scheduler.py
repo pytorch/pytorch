@@ -3553,7 +3553,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
 
-        # Keep strict sums standalone so their planned R0_BLOCK cannot change.
+        # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
         filtered_nodes = [
             node for node in filtered_nodes if not node.has_strict_reduction()
         ]
@@ -8119,7 +8119,7 @@ class Scheduler:
         why = WhyNoFuse(node1, node2)
 
         if node1.is_template() and node2.has_strict_reduction():
-            why("template fusion does not preserve strict sum ordering")
+            why("template fusion does not preserve strict reduction ordering")
             return False
 
         if (
@@ -8127,7 +8127,7 @@ class Scheduler:
             and node1.is_reduction()
             and node2.is_reduction()
         ):
-            why("reduction fusion does not preserve strict sum ordering")
+            why("reduction fusion does not preserve strict reduction ordering")
             return False
 
         if node1.is_template() and self.get_backend(
