@@ -173,8 +173,9 @@ def check_node_safe(node: Node) -> None:
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
         # Dynamo-inserted autocast CM nodes. dtype=None is resolved from ambient
-        # get_autocast_dtype at call time; that ambient state (enabled + dtype +
-        # cache_enabled) is recorded unconditionally in _record_runtime_state.
+        # get_autocast_dtype at call time; that ambient state is recorded in
+        # _record_runtime_state when the graph contains these nodes (or when
+        # ambient autocast is already enabled).
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
     )
@@ -541,29 +542,35 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        # Full ambient autocast snapshot for every supported device.
-        #
-        # dtype must be recorded even when autocast is disabled: in-graph
-        # torch.autocast(dev) with dtype=None resolves via get_autocast_dtype
-        # at call time, and GraphModule.__reduce__ strips node.meta, so that
-        # resolved dtype would otherwise be missing from the key. Dynamo's
-        # AutocastState::operator== also skips dtype when a device is disabled
-        # on both sides, so this key cannot delegate upward for disabled-device
-        # dtype -- it must record every device unconditionally.
+        # Ambient autocast snapshot. Only key devices that can affect the
+        # artifact:
+        #   - every device when the graph has in-graph autocast (dtype=None
+        #     resolves via get_autocast_dtype at call time; GraphModule.__reduce__
+        #     strips node.meta, so ambient dtype must live in the key), or
+        #   - devices that are currently enabled.
         #
         # enabled must be recorded too: ambient-on vs ambient-off with the same
-        # default dtype must not share a key (AOT tracing under ambient
-        # autocast bakes casts into the artifact). Deliberately stricter than
-        # Dynamo's AutocastState comparison, which skips dtype for devices
-        # disabled on both sides -- that skip is what this dict must not do.
+        # default dtype must not share a key -- AOT tracing under ambient
+        # autocast bakes casts into the artifact.
+        #
+        # Deliberately stricter than Dynamo's AutocastState comparison, which
+        # skips dtype for devices disabled on both sides -- that skip is what
+        # this dict must not do when in-graph autocast is present.
+        has_in_graph_autocast = any(
+            node.target is torch.amp.autocast_mode._enter_autocast
+            for node in gm.graph.nodes
+        )
         self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
             device_type: (
                 torch.is_autocast_enabled(device_type),
                 torch.get_autocast_dtype(device_type),
             )
             for device_type in torch._C._autocast_supported_devices()
+            if has_in_graph_autocast or torch.is_autocast_enabled(device_type)
         }
-        self.autocast_cache_enabled = torch.is_autocast_cache_enabled()
+        self.autocast_cache_enabled = (
+            torch.is_autocast_cache_enabled() if has_in_graph_autocast else None
+        )
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
@@ -587,8 +594,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        symint_name_map: dict[str, str] | None = None,
+        graph_symint_names: set[str] | None = None,
+    ) -> None:
         super().__init__(gm)
+        self._symint_name_map: dict[str, str] = symint_name_map or {}
+        self._graph_symint_names: set[str] = graph_symint_names or set()
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
             {
@@ -597,6 +611,21 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
+
+    def _reduce_symint(
+        self, s: torch.SymInt
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        name = str(s)
+        normalized = self._symint_name_map.get(name)
+        if normalized is not None:
+            if name in self._graph_symint_names:
+                return (_ident, (normalized,))
+            # Non-graph SymInt with non-deterministic name (from MetaConverter).
+            # Include the hint to distinguish different specializations.
+            hint = s.node.hint
+            if hint is not None:
+                return (_ident, (normalized, hint))
+        return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
@@ -795,10 +824,18 @@ def normalize_placeholder_names(
 
     # Track all the old state of placeholders
     old_placeholder_names = []
+    old_symint_names = []
     old_used_names = copy(gm.graph._graph_namespace._used_names)
     i = 0
+    j = 0
     for n in gm.graph.find_nodes(op="placeholder", sort=True):
-        if n.type != torch.SymInt:
+        if n.type == torch.SymInt:
+            new_name = f"s_{j}"
+            old_symint_names.append((n.name, n.target))
+            n.target = new_name
+            n._rename(new_name)
+            j += 1
+        else:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
@@ -816,8 +853,14 @@ def normalize_placeholder_names(
         gm.graph._graph_namespace._used_names = set()
         # Restore the placeholder names
         i = 0
+        j = 0
         for n in gm.graph.find_nodes(op="placeholder", sort=True):
-            if n.type != torch.SymInt:
+            if n.type == torch.SymInt:
+                (name, target) = old_symint_names[j]
+                n.target = target
+                n._rename(name)
+                j += 1
+            else:
                 (name, target) = old_placeholder_names[i]
                 n.target = target
                 n._rename(name)
@@ -825,6 +868,10 @@ def normalize_placeholder_names(
         if i != len(old_placeholder_names):
             raise AssertionError(
                 f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
+            )
+        if j != len(old_symint_names):
+            raise AssertionError(
+                f"j={j} != len(old_symint_names)={len(old_symint_names)}"
             )
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
@@ -896,8 +943,22 @@ def autograd_cache_key(
     """
 
     gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
-    with sanitize_gm_for_cache(gm):
-        try:
+    try:
+        # Capture graph SymInt placeholder names before normalization so the
+        # pickler can distinguish graph-native SymInts (deterministic names)
+        # from MetaConverter-generated SymInts (non-deterministic names).
+        graph_symint_names: set[str] = set()
+        symint_name_map: dict[str, str] = {}
+        if torch._functorch.config.autograd_cache_normalize_inputs:
+            for n in gm.graph.find_nodes(op="placeholder", sort=True):
+                if n.type == torch.SymInt:
+                    graph_symint_names.add(n.target)
+            j = 0
+            for inp in example_inputs:
+                if isinstance(inp, torch.SymInt):
+                    symint_name_map[str(inp)] = f"s_{j}"
+                    j += 1
+        with sanitize_gm_for_cache(gm):
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
@@ -907,24 +968,24 @@ def autograd_cache_key(
                 create_fx_config(compiler_config_extra),
                 act_input_paths,
             )
-            pickler = AOTAutogradCachePickler(gm)
+            pickler = AOTAutogradCachePickler(gm, symint_name_map, graph_symint_names)
             # The prefix distinguishes among the other kinds of objects we cache
             key = AOTAUTOGRAD_CACHE_PREFIX + pickler.get_hash(details)
             debug_lines = _get_debug_lines_for_cache_key(pickler, details, key)
             return key, debug_lines
-        except Exception:
-            # If enable_aot_compile is set, we're in AOT precompile mode where we always
-            # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
-            # a proper key because we are guaranteed in an AOT precompile world users are in
-            # complete control of distributing and loading artifacts.
-            if torch._functorch.config.bypass_autograd_cache_key:
-                log.info(
-                    "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
-                    exc_info=True,
-                )
-                return str(random.random()), []
-            else:
-                raise
+    except Exception:
+        # If enable_aot_compile is set, we're in AOT precompile mode where we always
+        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+        # a proper key because we are guaranteed in an AOT precompile world users are in
+        # complete control of distributing and loading artifacts.
+        if torch._functorch.config.bypass_autograd_cache_key:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
+            return str(random.random()), []
+        else:
+            raise
 
 
 @contextlib.contextmanager

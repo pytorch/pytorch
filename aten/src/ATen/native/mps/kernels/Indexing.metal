@@ -1215,7 +1215,6 @@ kernel void scatter_nonzero_indices(
     constant uint& block_base [[buffer(7)]],
     uint tid [[thread_position_in_grid]],
     uint tgid [[threadgroup_position_in_grid]],
-    uint lid [[thread_position_in_threadgroup]],
     uint tgsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
@@ -1315,7 +1314,6 @@ kernel void scatter_nonzero_indices(
       constant uint& block_base [[buffer(7)]],                \
       uint tid [[thread_position_in_grid]],                   \
       uint tgid [[threadgroup_position_in_grid]],             \
-      uint lid [[thread_position_in_threadgroup]],            \
       uint tgsize [[threads_per_threadgroup]],                \
       uint simd_lane_id [[thread_index_in_simdgroup]],        \
       uint simd_group_id [[simdgroup_index_in_threadgroup]])

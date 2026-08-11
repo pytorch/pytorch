@@ -634,7 +634,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -3347,6 +3346,62 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    @unittest.skipIf(not HAS_GPU, "requires accelerator")
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    def test_autocast_in_graph_is_cacheable(self):
+        """
+        An autocast context manager inside the compiled region is traced into
+        _enter_autocast/_exit_autocast nodes. Those are cacheable, and the dtype
+        they carry is part of the key, so graphs compiled under different dtypes
+        must not be reused for each other.
+        """
+
+        def fn(x, w, dtype):
+            with torch.amp.autocast(GPU_TYPE, dtype=dtype):
+                return torch.nn.functional.gelu(x @ w)
+
+        def run(dtype):
+            torch._dynamo.reset()
+            counters.clear()
+            compiled = torch.compile(fn, backend="inductor")
+            with torch.no_grad():
+                out = compiled(x, w, dtype)
+            return out, (
+                counters["aot_autograd"]["autograd_cache_miss"],
+                counters["aot_autograd"]["autograd_cache_hit"],
+                counters["aot_autograd"]["autograd_cache_bypass"],
+            )
+
+        with fresh_cache():
+            x = torch.randn(8, 64, device=GPU_TYPE)
+            w = torch.randn(64, 64, device=GPU_TYPE)
+
+            out_bf16, (miss, hit, bypass) = run(torch.bfloat16)
+            self.assertEqual(out_bf16.dtype, torch.bfloat16)
+            # Previously this bypassed the cache entirely.
+            self.assertEqual(bypass, 0)
+            self.assertEqual((miss, hit), (1, 0))
+
+            # A different dtype must not reuse the bfloat16 entry.
+            out_fp16, (miss, hit, bypass) = run(torch.float16)
+            self.assertEqual(out_fp16.dtype, torch.float16)
+            self.assertEqual(bypass, 0)
+            self.assertEqual((miss, hit), (1, 0))
+
+            # Recompiling the original dtype hits.
+            out_bf16_2, (miss, hit, bypass) = run(torch.bfloat16)
+            self.assertEqual(out_bf16_2.dtype, torch.bfloat16)
+            self.assertEqual((miss, hit), (0, 1))
+            self.assertEqual(out_bf16_2, out_bf16)
+
+            # ...and so does the second dtype, with its own entry.
+            out_fp16_2, (miss, hit, bypass) = run(torch.float16)
+            self.assertEqual(out_fp16_2.dtype, torch.float16)
+            self.assertEqual((miss, hit), (0, 1))
+            self.assertEqual(out_fp16_2, out_fp16)
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -3435,7 +3490,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_in_graph_autocast_default_dtype_cache_hit(self):
-        """torch.autocast(dev) with no dtype is cacheable; ambient dtype is keyed."""
+        """torch.autocast(dev) with no dtype is cacheable under non-default ambient dtype."""
 
         def fn(x):
             with torch.autocast("cpu"):
@@ -3443,14 +3498,15 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         prev = torch.get_autocast_dtype("cpu")
         try:
-            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            # cpu default is already bfloat16; use float16 so ambient keying is real.
+            torch.set_autocast_dtype("cpu", torch.float16)
             with fresh_cache():
                 compiled = torch.compile(fn, backend="inductor")
                 x = torch.randn(16, 16, requires_grad=True)
                 out = compiled(x)
                 out.sum().backward()
 
-                self.assertEqual(out.dtype, torch.bfloat16)
+                self.assertEqual(out.dtype, torch.float16)
                 self.assertEqual(out, fn(x.detach()))
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
@@ -3462,13 +3518,45 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 out2 = compiled(x2)
                 out2.sum().backward()
 
-                self.assertEqual(out2.dtype, torch.bfloat16)
+                self.assertEqual(out2.dtype, torch.float16)
                 self.assertEqual(out2, fn(x2.detach()))
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
         finally:
             torch.set_autocast_dtype("cpu", prev)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_autocast_free_graph_ignores_disabled_ambient_dtype(self):
+        """Autocast-free graphs must still cache-hit when only a disabled
+        device's ambient dtype differs (set by autocast(..., enabled=False)).
+        """
+
+        def fn(x):
+            return (x @ x).relu()
+
+        with fresh_cache():
+            compiled = torch.compile(fn, backend="inductor")
+            x = torch.randn(16, 16, requires_grad=True)
+            out = compiled(x)
+            out.sum().backward()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            with torch.autocast("cpu", dtype=torch.float16, enabled=False):
+                x2 = torch.randn(16, 16, requires_grad=True)
+                out2 = compiled(x2)
+                out2.sum().backward()
+
+            self.assertEqual(out2, fn(x2.detach()))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -3992,7 +4080,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             torch.set_autocast_dtype("cpu", prev)
 
     def test_ambient_autocast_enabled_changes_cache_key(self):
-        # Ambient autocast on vs off with the same dtype must not collide.
+        # Ambient autocast on vs off with the same dtype must not collide
+        # (enabled devices are still keyed even without in-graph autocast).
         def fn(x):
             return (x @ x).sum()
 
@@ -4002,6 +4091,19 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         with torch.autocast("cpu", dtype=torch.bfloat16):
             c_on = self.gen_cache_key(fn, config, inputs=inputs)
         self.assertNotEqual(c_off, c_on)
+
+    def test_autocast_free_graph_key_ignores_disabled_ambient_dtype(self):
+        # No in-graph autocast: disabled-device ambient dtype must not affect key
+        # (autocast(..., enabled=False) still calls set_autocast_dtype).
+        def fn(x):
+            return (x @ x).sum()
+
+        config = self.default_config()
+        inputs = [torch.ones(3, 3)]
+        c_base = self.gen_cache_key(fn, config, inputs=inputs)
+        with torch.autocast("cpu", dtype=torch.float16, enabled=False):
+            c_disabled_fp16 = self.gen_cache_key(fn, config, inputs=inputs)
+        self.assertEqual(c_base, c_disabled_fp16)
 
     def test_autocast_cache_enabled_changes_cache_key(self):
         def fn(x):
