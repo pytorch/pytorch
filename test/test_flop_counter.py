@@ -13,10 +13,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    requires_cuda,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -33,8 +35,6 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
-HAS_CUDA = torch.cuda.is_available()
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -539,7 +539,6 @@ class TestFlopCounter(TestCase):
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
 )
-@requires_cuda
 class TestFlopCounterCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -549,7 +548,7 @@ class TestFlopCounterCUDA(TestCase):
         or not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
         "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
     )
-    def test_sdpa(self):
+    def test_sdpa(self, device):
         batch_size = 4
         n_heads = 8
         seq_len_q = 128
@@ -576,7 +575,7 @@ class TestFlopCounterCUDA(TestCase):
                 n_heads,
                 seq_len_q,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -585,7 +584,7 @@ class TestFlopCounterCUDA(TestCase):
                 n_heads,
                 seq_len_k,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -594,7 +593,7 @@ class TestFlopCounterCUDA(TestCase):
                 n_heads,
                 seq_len_k,
                 head_dim_v,
-                device="cuda",
+                device=device,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -708,7 +707,7 @@ class TestFlopCounterCUDA(TestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Flash attention not supported (pre-SM80 hardware on CUDA)",
     )
-    def test_sdpa_gqa(self):
+    def test_sdpa_gqa(self, device):
         """Test flop counting for grouped-query attention (GQA)."""
         batch_size = 2
         n_heads_q = 32
@@ -722,7 +721,7 @@ class TestFlopCounterCUDA(TestCase):
             n_heads_q,
             seq_len,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
         key = torch.randn(
@@ -730,7 +729,7 @@ class TestFlopCounterCUDA(TestCase):
             n_heads_kv,
             seq_len,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
         value = torch.randn(
@@ -738,7 +737,7 @@ class TestFlopCounterCUDA(TestCase):
             n_heads_kv,
             seq_len,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
 
@@ -772,7 +771,7 @@ class TestFlopCounterCUDA(TestCase):
         or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
     )
-    def test_sdpa_nested_tensor(self):
+    def test_sdpa_nested_tensor(self, device):
         def get_flops(q, k, v, backend, with_backward=False):
             mode = FlopCounterMode()
 
@@ -836,7 +835,7 @@ class TestFlopCounterCUDA(TestCase):
                 ]
             )
             q_offsets, k_offsets = (
-                torch.cat((torch.tensor([0]), torch.cumsum(lengths, dim=0))).cuda()
+                torch.cat((torch.tensor([0]), torch.cumsum(lengths, dim=0))).to(device)
                 for lengths in (q_lengths, k_lengths)
             )
             q_values = torch.randn(
@@ -844,21 +843,21 @@ class TestFlopCounterCUDA(TestCase):
                 head_dim * n_heads,
                 dtype=dtype,
                 requires_grad=True,
-                device="cuda",
+                device=device,
             )
             k_values = torch.randn(
                 k_offsets[-1],
                 head_dim * n_heads,
                 dtype=dtype,
                 requires_grad=True,
-                device="cuda",
+                device=device,
             )
             v_values = torch.randn(
                 k_offsets[-1],
                 head_dim_v * n_heads,
                 dtype=dtype,
                 requires_grad=True,
-                device="cuda",
+                device=device,
             )
 
             q = torch.nested.nested_tensor_from_jagged(q_values, q_offsets)
@@ -989,9 +988,9 @@ class TestFlopCounterCUDA(TestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
     )
-    def test_nested_attention_fake_tensors(self):
-        x = torch.randn(123, 4, 16, device="cuda", dtype=torch.bfloat16)
-        offsets = torch.tensor([0, 30, 60, 90, 123], device="cuda")
+    def test_nested_attention_fake_tensors(self, device):
+        x = torch.randn(123, 4, 16, device=device, dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 30, 60, 90, 123], device=device)
         max_seqlen = 40
         with FakeTensorMode() as fake_mode:
             fake_x = fake_mode.from_tensor(x)
@@ -1011,7 +1010,7 @@ class TestFlopCounterCUDA(TestCase):
                     False,
                 )
 
-        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device="cuda")
+        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device=device)
 
         with FlopCounterMode() as real_flop_counter_mode:
             torch.ops.aten._flash_attention_forward(
@@ -1033,7 +1032,7 @@ class TestFlopCounterCUDA(TestCase):
         )
 
     @requires_cuda_and_triton
-    def test_flop_counter_custom_triton_manual_decomp(self):
+    def test_flop_counter_custom_triton_manual_decomp(self, device):
         import triton
         import triton.language as tl
 
@@ -1049,8 +1048,8 @@ class TestFlopCounterCUDA(TestCase):
             out = tl.sin(x)
             tl.store(out_ptr + offsets, out, mask=mask)
 
-        x = torch.randn(3, device="cuda")
-        out = torch.empty(3, device="cuda")
+        x = torch.randn(3, device=device)
+        out = torch.empty(3, device=device)
 
         @register_flop_formula(sin_kernel)
         def compute_sin_kernel_flops(*args, **kwargs) -> int:
@@ -1083,7 +1082,7 @@ class TestFlopCounterCUDA(TestCase):
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
     @requires_cuda_and_triton
-    def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self):
+    def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self, device):
         import triton
         import triton.language as tl
 
@@ -1109,8 +1108,8 @@ class TestFlopCounterCUDA(TestCase):
             out = tl.cos(x)
             tl.store(out_ptr + offsets, out, mask=mask)
 
-        x = torch.randn(3, device="cuda")
-        out = torch.empty(3, device="cuda")
+        x = torch.randn(3, device=device)
+        out = torch.empty(3, device=device)
 
         @register_flop_formula(sin_kernel)
         def compute_sin_kernel_flops(*args, **kwargs) -> int:
@@ -1160,7 +1159,7 @@ class TestFlopCounterCUDA(TestCase):
     @torch._functorch.config.patch("activation_memory_budget", 0.1)
     @torch._functorch.config.patch("activation_memory_budget_solver", "dp")
     @torch._functorch.config.patch("is_non_builtin_to_include", True)
-    def test_flop_counter_custom_triton_op_two_kernels_auto_ac(self):
+    def test_flop_counter_custom_triton_op_two_kernels_auto_ac(self, device):
         import triton
         import triton.language as tl
 
@@ -1187,7 +1186,7 @@ class TestFlopCounterCUDA(TestCase):
             tl.store(out_ptr + offsets, out, mask=mask)
 
         n_elements = int(1e7)
-        x = torch.randn(n_elements, device="cuda", requires_grad=True)
+        x = torch.randn(n_elements, device=device, requires_grad=True)
 
         cos_flops_recorded, sin_flops_recorded = 0, 0
 
@@ -1256,14 +1255,14 @@ class TestFlopCounterCUDA(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    def test_scaled_mm(self):
+    def test_scaled_mm(self, device):
         dtype = e4m3_type
         with FlopCounterMode() as mode:
             torch._scaled_mm(
-                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
-                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
-                scale_a=torch.ones((), device="cuda"),
-                scale_b=torch.ones((), device="cuda"),
+                torch.randn((3 * 16, 5 * 16), device=device).to(dtype),
+                torch.randn((7 * 16, 5 * 16), device=device).to(dtype).t(),
+                scale_a=torch.ones((), device=device),
+                scale_b=torch.ones((), device=device),
                 out_dtype=torch.bfloat16,
             )
 
@@ -1273,7 +1272,7 @@ class TestFlopCounterCUDA(TestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Flash attention not supported (pre-SM80 hardware on CUDA)",
     )
-    def test_varlen_attn(self):
+    def test_varlen_attn(self, device):
         import torch.nn.attention.varlen
 
         n_heads = 8
@@ -1284,7 +1283,7 @@ class TestFlopCounterCUDA(TestCase):
         cu_seqs = torch.tensor(
             [0] + list(torch.tensor(seq_lens).cumsum(0).tolist()),
             dtype=torch.int32,
-            device="cuda",
+            device=device,
         )
         max_s = max(seq_lens)
 
@@ -1292,7 +1291,7 @@ class TestFlopCounterCUDA(TestCase):
             total_tokens,
             n_heads,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
             requires_grad=True,
         )
@@ -1300,7 +1299,7 @@ class TestFlopCounterCUDA(TestCase):
             total_tokens,
             n_heads,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
             requires_grad=True,
         )
@@ -1308,7 +1307,7 @@ class TestFlopCounterCUDA(TestCase):
             total_tokens,
             n_heads,
             head_dim,
-            device="cuda",
+            device=device,
             dtype=dtype,
             requires_grad=True,
         )
@@ -1355,6 +1354,9 @@ class TestFlopCounterCUDA(TestCase):
         # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
         self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
+
+
+instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
 
 
 class TestFlexAttentionEstimation(TestCase):
@@ -1406,40 +1408,6 @@ class TestFlexAttentionEstimation(TestCase):
         )
         expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
         self.assertEqual(fwd_flops, expected_flops)
-
-    @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not HAS_CUDA, "requires CUDA")
-    def test_flex_attention_roofline_estimate(self):
-        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
-        from torch._inductor.fx_passes.overlap_scheduling import (
-            estimate_roofline_runtime_ms,
-        )
-
-        q_shape = (2, 16, 1024, 64)
-        k_shape = (2, 4, 1024, 64)
-        v_shape = (2, 4, 1024, 64)
-
-        graph = torch.fx.Graph()
-        q = graph.placeholder("q")
-        k = graph.placeholder("k")
-        v = graph.placeholder("v")
-        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
-        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
-        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
-
-        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
-        fwd.meta["val"] = (
-            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
-            torch.randn(
-                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
-            ),
-            torch.randn(
-                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
-            ),
-        )
-
-        est_ms = estimate_roofline_runtime_ms(fwd)
-        self.assertGreater(est_ms, 0.0)
 
     def test_sparsity_hint_annotate_propagates(self):
         """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
@@ -1528,6 +1496,47 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertGreater(dense_flops, 0)
         self.assertEqual(sparse_flops, dense_flops // 2)
 
+
+class TestFlexAttentionEstimationCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @xfailIfNoAcceleratorTriton
+    def test_flex_attention_roofline_estimate(self, device):
+        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+
+        est_ms = estimate_roofline_runtime_ms(fwd)
+        self.assertGreater(est_ms, 0.0)
+
+
+instantiate_device_type_tests(
+    TestFlexAttentionEstimationCudaOnly, globals(), only_for="cuda"
+)
 
 if __name__ == "__main__":
     run_tests()
