@@ -65,7 +65,7 @@ COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
 # Relies on pip replacing cuda-bindings installed from requirements-ci.txt / install_python.sh above.
-RUN if [ "${CUDA_VERSION}" = "13.4.0" ]; then python -mpip install cuda-bindings==13.4.0b1; fi
+RUN case "${CUDA_VERSION}" in 13.4*) python -mpip install cuda-bindings==13.4.0b1 ;; esac
 ENV DESIRED_CUDA=${CUDA_VERSION}
 ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 
