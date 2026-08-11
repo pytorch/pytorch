@@ -1307,6 +1307,19 @@ auto Engine::compute_dependencies(
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
+  // Log (once per process each) backward passes by the devices they span, to
+  // assess reliance on multithreaded autograd before changing its default.
+  // The two cases are independent and may both fire for the same pass: one
+  // for a second distinct non-CPU device (multi-device), one for a non-CPU
+  // device alongside CPU nodes (GPU + CPU).
+  static std::atomic<bool> multidevice_logged{false};
+  static std::atomic<bool> gpu_cpu_logged{false};
+  // Skip the logging-specific checks once both cases have already been logged.
+  const bool inspect_devices =
+      !multidevice_logged.load(std::memory_order_relaxed) ||
+      !gpu_cpu_logged.load(std::memory_order_relaxed);
+  std::optional<at::Device> first_noncpu_device;
+  bool saw_cpu = false;
 
   // See Note [ Engine threading optimization when single device ]
   // NB: When the user passes inputs=, only a subgraph is executed, so this can
@@ -1325,7 +1338,23 @@ auto Engine::compute_dependencies(
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
     }
-    distinct_devices.insert(fn->device());
+    auto device = fn->device();
+    distinct_devices.insert(device);
+    if (inspect_devices) {
+      if (should_run_in_cpu_ready_queue(device.type())) {
+        saw_cpu = true;
+      } else if (!first_noncpu_device.has_value()) {
+        first_noncpu_device = device;
+      } else if (
+          first_noncpu_device.value() != device &&
+          !multidevice_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.multidevice_backward");
+      }
+      if (saw_cpu && first_noncpu_device.has_value() &&
+          !gpu_cpu_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.gpu_cpu_backward");
+      }
+    }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
