@@ -89,7 +89,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
     PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -97,6 +96,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_S390X,
@@ -110,7 +110,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     subtest,
     TEST_HPU,
-    TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
 from torch.utils._sympy.numbers import int_oo
@@ -248,6 +247,8 @@ def _load_pybind11_enum_mod(*, load_inline):
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_storage_offset_scalar_output(self):
         def fn(x):
             return x.storage_offset()
@@ -345,61 +346,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
-
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
-    def test_assume_32_bit_indexing(self):
-        @torch.compile(backend="inductor")
-        def func(a, b):
-            # Multiple concat operations
-            x = torch.concat([a, b], dim=0)
-            y = torch.concat([a, b], dim=1)
-
-            # Reshape to create indexing patterns
-            x_flat = x.reshape(-1)
-            y_flat = y.reshape(-1)
-
-            # Take the smaller one and expand
-            min_size = min(x_flat.shape[0], y_flat.shape[0])
-            x_trunc = x_flat[:min_size]
-            y_trunc = y_flat[:min_size]
-
-            # Combine and compute
-            result = (x_trunc + y_trunc) * 10
-
-            # Cumulative operations create complex indexing
-            cumsum = result.cumsum(dim=0)
-
-            return cumsum.sum()
-
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
-
-        torch._dynamo.decorators.mark_unbacked(a, 0)
-        torch._dynamo.decorators.mark_unbacked(a, 1)
-        torch._dynamo.decorators.mark_unbacked(b, 0)
-        torch._dynamo.decorators.mark_unbacked(b, 1)
-
-        source_code = run_and_get_code(func, a, b)[1]
-        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
-        self.assertTrue(
-            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
-            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
-        )
-        # Check that 32-bit indexing is NOT used
-        self.assertFalse(
-            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
-            and ".to(tl.int64)" not in str(source_code)
-        )
-
-        torch._dynamo.reset()
-
-        with torch._inductor.config.patch(assume_32bit_indexing=True):
-            source_code = run_and_get_code(func, a, b)[1]
-            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
-            self.assertFalse(
-                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
-                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
-            )
 
     def test_dynamo_side_effect(self):
         class GlobalContext:
@@ -1325,102 +1271,6 @@ graph():
             torch.compile(fn, backend="eager", fullgraph=True)(
                 torch.randn(4), torch.randn(4)
             )
-
-    @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "requires Hopper+ (SM >= 9.0) for TMA",
-    )
-    @unittest.skipIf(
-        not torch.utils._triton.has_triton()
-        or not hasattr(__import__("triton"), "set_allocator"),
-        "requires triton with set_allocator support",
-    )
-    def test_triton_set_allocator_no_graph_break(self):
-        """set_allocator inside torch.compile does not graph break and
-        replays correctly at runtime (including cache hits)."""
-        import triton
-        import triton.language as tl
-        from triton.runtime._allocation import NullAllocator
-
-        @triton.jit
-        def tma_copy_kernel(
-            x_ptr,
-            out_ptr,
-            M,
-            N,
-            stride_m,
-            stride_n,
-            BLOCK_M: tl.constexpr,
-            BLOCK_N: tl.constexpr,
-        ):
-            pid = tl.program_id(0)
-            desc = tl.make_tensor_descriptor(
-                x_ptr,
-                shape=[M, N],
-                strides=[stride_m, stride_n],
-                block_shape=[BLOCK_M, BLOCK_N],
-            )
-            block = tl.load_tensor_descriptor(desc, [pid * BLOCK_M, 0])
-            out_desc = tl.make_tensor_descriptor(
-                out_ptr,
-                shape=[M, N],
-                strides=[stride_m, stride_n],
-                block_shape=[BLOCK_M, BLOCK_N],
-            )
-            tl.store_tensor_descriptor(out_desc, [pid * BLOCK_M, 0], block)
-
-        M, N, BLOCK_M, BLOCK_N = 128, 64, 64, 64
-
-        def run_kernel(x):
-            out = torch.empty_like(x)
-            tma_copy_kernel[(M // BLOCK_M,)](
-                x,
-                out,
-                M,
-                N,
-                x.stride(0),
-                x.stride(1),
-                BLOCK_M=BLOCK_M,
-                BLOCK_N=BLOCK_N,
-            )
-            return out
-
-        x = torch.randn(M, N, device="cuda")
-
-        from contextlib import contextmanager
-
-        from triton.runtime._allocation import _allocator
-
-        @contextmanager
-        def triton_allocator(allocator):
-            prev = _allocator.get()
-            triton.set_allocator(allocator)
-            try:
-                yield
-            finally:
-                triton.set_allocator(prev)
-
-        def fn_with_set_allocator(x):
-            triton.set_allocator(
-                lambda size, alignment, stream: torch.empty(
-                    size, device="cuda", dtype=torch.int8
-                )
-            )
-            return run_kernel(x)
-
-        opt_fn = torch.compile(
-            fn_with_set_allocator, backend="aot_eager", fullgraph=True
-        )
-
-        # set_allocator inside compiled region does NOT graph break
-        with triton_allocator(NullAllocator()):
-            out = opt_fn(x)
-            self.assertEqual(out, x)
-
-            # Verify set_allocator replays on cache hit (not just tracing)
-            triton.set_allocator(NullAllocator())
-            out2 = opt_fn(x)
-            self.assertEqual(out2, x)
 
     def test_closure_recompiles(self):
         cnt = CompileCounter()
@@ -5740,17 +5590,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         guards.__setstate__(json.dumps(legacy_json_guards))
         self.assertFalse(guards.check())
 
-        if BF16X9_SUPPORTED:
-            legacy_json_guards["allow_tf32"] = False
-            guards.__setstate__(json.dumps(legacy_json_guards))
-            torch.backends.cuda.matmul.fp32_precision = "bfx9"
-            self.assertFalse(guards.check())
-
-            x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
-            self.assertNotIn("allow_tf32", x9_json_guards)
-            guards.__setstate__(json.dumps(x9_json_guards))
-            self.assertTrue(guards.check())
-
         # Test on autocast states.
         def _test_autocast(dtype):
             with torch.autocast("cpu", dtype):
@@ -7410,34 +7249,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
-    @unittest.skipIf(
-        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
-    )
-    def test_clone_input_preserves_pinned_cpu_tensor_metadata(self):
-        base = torch.randn(4, 6, pin_memory=True)
-        x = base[:, ::2].requires_grad_()
-        x.grad = torch.ones_like(x).pin_memory()
-        x._dynamo_dynamic_indices = {1}
-
-        cloned = torch._dynamo.utils.clone_input(x)
-
-        self.assertTrue(cloned.is_pinned())
-        self.assertEqual(cloned.stride(), x.stride())
-        self.assertEqual(cloned, x)
-        self.assertNotEqual(cloned.data_ptr(), x.data_ptr())
-        self.assertTrue(cloned.requires_grad)
-        self.assertIsNotNone(cloned.grad)
-        self.assertTrue(cloned.grad.is_pinned())
-        self.assertEqual(cloned.grad, x.grad)
-        self.assertEqual(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
-        self.assertIsNot(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
-
-        expanded = torch.arange(3, dtype=torch.float32, pin_memory=True).expand(2, 3)
-        expanded_cloned = torch._dynamo.utils.clone_input(expanded)
-        self.assertTrue(expanded_cloned.is_pinned())
-        self.assertEqual(expanded_cloned, expanded)
-
     def test_clone_input_does_not_check_pinned_memory_for_wrapper_subclass(self):
         class WrapperSubclass(torch.Tensor):
             @staticmethod
@@ -7503,20 +7314,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager")
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
-
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
-    def test_cuda_tensor_is_pinned_constant_false(self):
-        def pinned_memory_of(arg):
-            return arg.is_pinned()
-
-        def fn(x):
-            if pinned_memory_of(x) or x.is_pinned(None) or x.is_pinned(device=None):
-                return x + 1
-            return x + 2
-
-        x = torch.randn(4, device="cuda")
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x), opt_fn(x))
 
     def test_python_slice(self):
         def f1(input):
@@ -10831,61 +10628,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_exporting())
         self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
 
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
-    def test_tracing_flags_autograd_worker_thread(self):
-        def run_backward(session_ctx):
-            recorded = []
-
-            class ProbeFn(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    return x.clone()
-
-                @staticmethod
-                def backward(ctx, g):
-                    recorded.append(
-                        (
-                            threading.current_thread() is threading.main_thread(),
-                            torch.compiler.is_compiling(),
-                            torch.compiler.is_exporting(),
-                            torch.compiler._is_non_strict_tracing(),
-                        )
-                    )
-                    return g
-
-            def once():
-                x = torch.randn(4, device="cuda", requires_grad=True)
-                y = ProbeFn.apply(x.sin())
-                torch.autograd.grad(y.sum(), (x,))
-
-            if session_ctx is None:
-                once()
-            else:
-                with session_ctx():
-                    once()
-            return recorded
-
-        session_ctxs = (
-            torch.compiler._compile_session_context,
-            _compiling_state_context,
-            torch.compiler._non_strict_tracing_context,
-            None,
-        )
-        expected = (
-            (True, False, False),
-            (True, True, False),
-            (False, False, True),
-            (False, False, False),
-        )
-        for session_ctx, want in zip(session_ctxs, expected):
-            records = run_backward(session_ctx)
-            self.assertTrue(records)
-            self.assertTrue(any(not is_main for is_main, _, _, _ in records))
-            self.assertEqual(set((c, e, n) for _, c, e, n in records), {want})
-        self.assertFalse(torch.compiler.is_compiling())
-        self.assertFalse(torch.compiler.is_exporting())
-        self.assertFalse(torch.compiler._is_non_strict_tracing())
-
     def test_torch_generator_set_state(self):
         def fn():
             default_state = torch.default_generator.get_state()
@@ -11313,23 +11055,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
-    def test_symint_as_device_kwarg_non_strict_export(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                # -2 to make device id 0 for easier testing on CI
-                return torch.ones(10, device=x.size(0) - 2)
-
-        x = torch.randn(2)
-        m = Mod()
-        d1 = torch.export.Dim("d1", max=2048)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
-        ):
-            ep = torch.export.export(
-                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
-            )
 
     def test_call_parent_non_class_methods_from_child(self):
         class A:
@@ -13672,31 +13397,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                             )
         finally:
             write_state(initial_state)
-
-    @unittest.skipUnless(
-        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
-    )
-    @recover_orig_fp32_precision
-    def test_recompile_on_bfx9_precision_change(self):
-        counter = CompileCounter()
-
-        @torch.compile(backend=counter)
-        def fn(x):
-            return x + 1
-
-        x = torch.randn(10)
-        torch.backends.cuda.matmul.fp32_precision = "ieee"
-        fn(x)
-        self.assertEqual(counter.frame_count, 1)
-
-        torch.backends.cuda.matmul.fp32_precision = "bfx9"
-        fn(x)
-        fn(x)
-        self.assertEqual(counter.frame_count, 2)
-
-        torch.backends.cuda.matmul.fp32_precision = "ieee"
-        fn(x)
-        self.assertEqual(counter.frame_count, 2)
 
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
@@ -20848,11 +20548,458 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(next(iterator), 1)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_scalar_isin_decomposition(self):
+        def f():
+            x = torch.tensor(0)
+            return torch.isin(x, x)
+
+        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+        ref = f()
+        res = opt_f()
+        self.assertEqual(ref, res)
+
+    def test_randint_no_graphbreak(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(actions, n_act, epsilon=0.1):
+            actions_random = torch.randint_like(actions, n_act)
+
+            return actions_random
+
+        x = torch.ones([1], dtype=torch.int64)
+        y = torch.tensor(5)
+        f(x, y)
+
+    def test_full_graph_capture_scalar_outputs(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def foo(a):
+            return torch.randn(5) * a.item()
+
+        # We expect to no longer raise here
+        foo(torch.tensor(2.0))
+
+    def test_full_graph_capture_dynamic_output_shape_ops(self):
+        def fn(x):
+            nz = torch.nonzero(x)
+            squared = nz * nz
+            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
+            view = sliced.unsqueeze(dim=0)
+            return view.squeeze(dim=0)
+
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        # we expect to no longer raise here
+        torch.compile(fn, fullgraph=True, backend="eager")(*example_inputs)
+
+    def test_dynamic_fill_diagonal_(self):
+        @torch.compile(dynamic=True, backend="eager")
+        def f(x):
+            x.fill_diagonal_(True)
+
+        x = torch.zeros(4, 4)
+        f(x)
+
+    def test_dynamic_float_scalar_tensor_coersion(self):
+        # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
+        class Foo:
+            def __init__(self):
+                self.config = type(
+                    "Config", (), {"pad_val": 1123581321.0, "tolerance": 1e-6}
+                )
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def forward(self, input):
+                outputs = torch.where(
+                    torch.abs(input - self.config.pad_val) < self.config.tolerance,
+                    torch.tensor(
+                        self.config.pad_val, dtype=input.dtype, device=input.device
+                    ),
+                    torch.tensor(
+                        self.config.pad_val + 1, dtype=input.dtype, device=input.device
+                    ),
+                )
+                return outputs
+
+        foo = Foo()
+        inputs = torch.randn(3, 4)
+        result = foo.forward(inputs)
+
+        original_pad_val = foo.config.pad_val
+        foo.config.pad_val += 1.0
+        result2 = foo.forward(inputs)
+
+        # Previously would crash with:
+        #   RuntimeError: value cannot be converted to type at::Half without overflow
+
 
 instantiate_parametrized_tests(MiscTests)
 
 
+@unittest.skipIf(not TEST_CUDA, "cuda needed")
+class MiscTestsCUDA(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_tracing_flags_autograd_worker_thread(self):
+        def run_backward(session_ctx):
+            recorded = []
+
+            class ProbeFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, g):
+                    recorded.append(
+                        (
+                            threading.current_thread() is threading.main_thread(),
+                            torch.compiler.is_compiling(),
+                            torch.compiler.is_exporting(),
+                            torch.compiler._is_non_strict_tracing(),
+                        )
+                    )
+                    return g
+
+            def once():
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                y = ProbeFn.apply(x.sin())
+                torch.autograd.grad(y.sum(), (x,))
+
+            if session_ctx is None:
+                once()
+            else:
+                with session_ctx():
+                    once()
+            return recorded
+
+        session_ctxs = (
+            torch.compiler._compile_session_context,
+            _compiling_state_context,
+            torch.compiler._non_strict_tracing_context,
+            None,
+        )
+        expected = (
+            (True, False, False),
+            (True, True, False),
+            (False, False, True),
+            (False, False, False),
+        )
+        for session_ctx, want in zip(session_ctxs, expected):
+            records = run_backward(session_ctx)
+            self.assertTrue(records)
+            self.assertTrue(any(not is_main for is_main, _, _, _ in records))
+            self.assertEqual(set((c, e, n) for _, c, e, n in records), {want})
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_exporting())
+        self.assertFalse(torch.compiler._is_non_strict_tracing())
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_global_state_guard_serialization_bfx9(self):
+        GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+        guards = GlobalStateGuard()
+        legacy_json_guards = json.loads(guards.__getstate__())
+        legacy_json_guards.pop("cuda_matmul_precision")
+        legacy_json_guards["allow_tf32"] = False
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        self.assertFalse(guards.check())
+
+        x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
+        self.assertNotIn("allow_tf32", x9_json_guards)
+        guards.__setstate__(json.dumps(x9_json_guards))
+        self.assertTrue(guards.check())
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_clone_input_preserves_pinned_cpu_tensor_metadata(self):
+        base = torch.randn(4, 6, pin_memory=True)
+        x = base[:, ::2].requires_grad_()
+        x.grad = torch.ones_like(x).pin_memory()
+        x._dynamo_dynamic_indices = {1}
+
+        cloned = torch._dynamo.utils.clone_input(x)
+
+        self.assertTrue(cloned.is_pinned())
+        self.assertEqual(cloned.stride(), x.stride())
+        self.assertEqual(cloned, x)
+        self.assertNotEqual(cloned.data_ptr(), x.data_ptr())
+        self.assertTrue(cloned.requires_grad)
+        self.assertIsNotNone(cloned.grad)
+        self.assertTrue(cloned.grad.is_pinned())
+        self.assertEqual(cloned.grad, x.grad)
+        self.assertEqual(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
+        self.assertIsNot(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
+
+        expanded = torch.arange(3, dtype=torch.float32, pin_memory=True).expand(2, 3)
+        expanded_cloned = torch._dynamo.utils.clone_input(expanded)
+        self.assertTrue(expanded_cloned.is_pinned())
+        self.assertEqual(expanded_cloned, expanded)
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_cuda_tensor_is_pinned_constant_false(self):
+        def pinned_memory_of(arg):
+            return arg.is_pinned()
+
+        def fn(x):
+            if pinned_memory_of(x) or x.is_pinned(None) or x.is_pinned(device=None):
+                return x + 1
+            return x + 2
+
+        x = torch.randn(4, device="cuda")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_recompile_on_bfx9_precision_change(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10)
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        fn(x)
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_assume_32_bit_indexing(self):
+        @torch.compile(backend="inductor")
+        def func(a, b):
+            # Multiple concat operations
+            x = torch.concat([a, b], dim=0)
+            y = torch.concat([a, b], dim=1)
+
+            # Reshape to create indexing patterns
+            x_flat = x.reshape(-1)
+            y_flat = y.reshape(-1)
+
+            # Take the smaller one and expand
+            min_size = min(x_flat.shape[0], y_flat.shape[0])
+            x_trunc = x_flat[:min_size]
+            y_trunc = y_flat[:min_size]
+
+            # Combine and compute
+            result = (x_trunc + y_trunc) * 10
+
+            # Cumulative operations create complex indexing
+            cumsum = result.cumsum(dim=0)
+
+            return cumsum.sum()
+
+        a = torch.rand(100, 30, device="cuda")
+        b = torch.rand(100, 30, device="cuda")
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        source_code = run_and_get_code(func, a, b)[1]
+        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
+        self.assertTrue(
+            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
+        )
+        # Check that 32-bit indexing is NOT used
+        self.assertFalse(
+            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
+            and ".to(tl.int64)" not in str(source_code)
+        )
+
+        torch._dynamo.reset()
+
+        with torch._inductor.config.patch(assume_32bit_indexing=True):
+            source_code = run_and_get_code(func, a, b)[1]
+            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
+            self.assertFalse(
+                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
+            )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "requires Hopper+ (SM >= 9.0) for TMA",
+    )
+    @unittest.skipIf(
+        not torch.utils._triton.has_triton()
+        or not hasattr(__import__("triton"), "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_set_allocator_no_graph_break(self):
+        """set_allocator inside torch.compile does not graph break and
+        replays correctly at runtime (including cache hits)."""
+        import triton
+        import triton.language as tl
+        from triton.runtime._allocation import NullAllocator
+
+        @triton.jit
+        def tma_copy_kernel(
+            x_ptr,
+            out_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            desc = tl.make_tensor_descriptor(
+                x_ptr,
+                shape=[M, N],
+                strides=[stride_m, stride_n],
+                block_shape=[BLOCK_M, BLOCK_N],
+            )
+            block = tl.load_tensor_descriptor(desc, [pid * BLOCK_M, 0])
+            out_desc = tl.make_tensor_descriptor(
+                out_ptr,
+                shape=[M, N],
+                strides=[stride_m, stride_n],
+                block_shape=[BLOCK_M, BLOCK_N],
+            )
+            tl.store_tensor_descriptor(out_desc, [pid * BLOCK_M, 0], block)
+
+        M, N, BLOCK_M, BLOCK_N = 128, 64, 64, 64
+
+        def run_kernel(x):
+            out = torch.empty_like(x)
+            tma_copy_kernel[(M // BLOCK_M,)](
+                x,
+                out,
+                M,
+                N,
+                x.stride(0),
+                x.stride(1),
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+            )
+            return out
+
+        x = torch.randn(M, N, device="cuda")
+
+        from contextlib import contextmanager
+
+        from triton.runtime._allocation import _allocator
+
+        @contextmanager
+        def triton_allocator(allocator):
+            prev = _allocator.get()
+            triton.set_allocator(allocator)
+            try:
+                yield
+            finally:
+                triton.set_allocator(prev)
+
+        def fn_with_set_allocator(x):
+            triton.set_allocator(
+                lambda size, alignment, stream: torch.empty(
+                    size, device="cuda", dtype=torch.int8
+                )
+            )
+            return run_kernel(x)
+
+        opt_fn = torch.compile(
+            fn_with_set_allocator, backend="aot_eager", fullgraph=True
+        )
+
+        # set_allocator inside compiled region does NOT graph break
+        with triton_allocator(NullAllocator()):
+            out = opt_fn(x)
+            self.assertEqual(out, x)
+
+            # Verify set_allocator replays on cache hit (not just tracing)
+            triton.set_allocator(NullAllocator())
+            out2 = opt_fn(x)
+            self.assertEqual(out2, x)
+
+
+@unittest.skipIf(not TEST_CUDA, "cuda needed")
+class MiscTestsCUDASpecific(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_torch_cudnn_is_acceptable(self):
+        def fn(x):
+            if torch.backends.cudnn.is_acceptable(tensor=x):
+                return x + 1
+            return x
+
+        x = torch.rand(4, device="cuda")
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_torch_cudnn_is_acceptable_bad_inputs(self):
+        def fn1(x):
+            if torch.backends.cudnn.is_acceptable("invalid"):
+                return x + 1
+            return x
+
+        def fn2(x):
+            if torch.backends.cudnn.is_acceptable(x, 3.14):
+                return x + 1
+            return x
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
+        ):
+            x1 = torch.rand(4, device="cuda")
+            opt_fn1 = torch.compile(fn1, backend="eager", fullgraph=True)
+            res1 = opt_fn1(x1)
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expect 1 input to cudnn.is_acceptable"
+        ):
+            x2 = torch.rand(4, device="cuda")
+            opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
+            res = opt_fn2(x2)
+
+    @torch._dynamo.config.patch(recompile_limit=999)
+    def test_legacy_cuda_tensor(self):
+        typs = [
+            torch.cuda.FloatTensor,
+            torch.cuda.DoubleTensor,
+            torch.cuda.HalfTensor,
+            torch.cuda.BFloat16Tensor,
+            torch.cuda.ByteTensor,
+            torch.cuda.CharTensor,
+            torch.cuda.IntTensor,
+            torch.cuda.ShortTensor,
+            torch.cuda.LongTensor,
+        ]
+
+        def f2(typ):
+            return typ([1, 2, 3])
+
+        compiled_f2 = torch.compile(f2, backend="eager", fullgraph=True)
+        for typ in typs:
+            output = compiled_f2(typ)
+            expected = f2(typ)
+            self.assertEqual(output, expected)
+
+
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize_pytree_module
     def test_tracing_pytree(self, pytree):
         def fn(xs):
@@ -21174,6 +21321,8 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
 
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_autograd_function_with_matmul_folding_at_output(self):
         """
         When tensor folding occurs during matmul operation returned tensor is a view.
@@ -21237,7 +21386,29 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(y.grad is not None)
 
 
+class MiscTestsExportDevice(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_symint_as_device_kwarg_non_strict_export(self, device):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                # -2 to make device id 0 for easier testing on CI
+                return torch.ones(10, device=x.size(0) - 2)
+
+        x = torch.randn(2, device=device)
+        m = Mod()
+        d1 = torch.export.Dim("d1", max=2048)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
+        ):
+            ep = torch.export.export(
+                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
+            )
+
+
 class MiscTestsDevice(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_rand(self, device):
         cnts = torch._dynamo.testing.CompileCounter()
         device = device
@@ -21316,76 +21487,11 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             else:
                 return x - 1
 
-        x = torch.rand(4)
+        x = torch.rand(4, device=device)
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
-
-    @onlyCUDA
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable(self, device):
-        def fn(x):
-            if torch.backends.cudnn.is_acceptable(tensor=x):
-                return x + 1
-            return x
-
-        x = torch.rand(4).to(device)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
-    @onlyCUDA
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable_bad_inputs(self, device):
-        def fn1(x):
-            if torch.backends.cudnn.is_acceptable("invalid"):
-                return x + 1
-            return x
-
-        def fn2(x):
-            if torch.backends.cudnn.is_acceptable(x, 3.14):
-                return x + 1
-            return x
-
-        with self.assertRaisesRegex(
-            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
-        ):
-            x1 = torch.rand(4).to(device)
-            opt_fn1 = torch.compile(fn1, backend="eager", fullgraph=True)
-            res1 = opt_fn1(x1)
-
-        with self.assertRaisesRegex(
-            AssertionError, "Expect 1 input to cudnn.is_acceptable"
-        ):
-            x2 = torch.rand(4).to(device)
-            opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
-            res = opt_fn2(x2)
-
-    @onlyCUDA
-    @torch._dynamo.config.patch(recompile_limit=999)
-    def test_legacy_cuda_tensor(self, device):
-        typs = [
-            torch.cuda.FloatTensor,
-            torch.cuda.DoubleTensor,
-            torch.cuda.HalfTensor,
-            torch.cuda.BFloat16Tensor,
-            torch.cuda.ByteTensor,
-            torch.cuda.CharTensor,
-            torch.cuda.IntTensor,
-            torch.cuda.ShortTensor,
-            torch.cuda.LongTensor,
-        ]
-
-        def f2(typ):
-            return typ([1, 2, 3])
-
-        compiled_f2 = torch.compile(f2, backend="eager", fullgraph=True)
-        for typ in typs:
-            output = compiled_f2(typ)
-            expected = f2(typ)
-            self.assertEqual(output, expected)
 
     def test_get_device(self, device):
         def fn(x, y):
@@ -21405,8 +21511,8 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             # -2 to make device id 0 for easier testing on CI
             return torch.ones(10, device=rank.size(0) - 2)
 
-        x = torch.randn(2)
-        out = f(torch.randn(2))
+        x = torch.randn(2, device=device)
+        out = f(x)
         opt_out = torch.compile(backend="eager", dynamic=True, fullgraph=True)(f)(x)
         self.assertEqual(out, opt_out)
 
@@ -21476,87 +21582,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         gc.collect()
         self.assertTrue(all(ref() is None for ref in real_tensor_refs))
-
-    def test_scalar_isin_decomposition(self):
-        def f():
-            x = torch.tensor(0)
-            return torch.isin(x, x)
-
-        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
-        ref = f()
-        res = opt_f()
-        self.assertEqual(ref, res)
-
-    def test_randint_no_graphbreak(self):
-        @torch.compile(backend="aot_eager", fullgraph=True)
-        def f(actions, n_act, epsilon=0.1):
-            actions_random = torch.randint_like(actions, n_act)
-
-            return actions_random
-
-        x = torch.ones([1], dtype=torch.int64)
-        y = torch.tensor(5)
-        f(x, y)
-
-    def test_full_graph_capture_scalar_outputs(self):
-        @torch.compile(fullgraph=True, backend="eager")
-        def foo(a):
-            return torch.randn(5) * a.item()
-
-        # We expect to no longer raise here
-        foo(torch.tensor(2.0))
-
-    def test_full_graph_capture_dynamic_output_shape_ops(self):
-        def fn(x):
-            nz = torch.nonzero(x)
-            squared = nz * nz
-            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
-            view = sliced.unsqueeze(dim=0)
-            return view.squeeze(dim=0)
-
-        example_inputs = (torch.randn(1, 1, 1, 1),)
-        # we expect to no longer raise here
-        torch.compile(fn, fullgraph=True, backend="eager")(*example_inputs)
-
-    def test_dynamic_fill_diagonal_(self):
-        @torch.compile(dynamic=True, backend="eager")
-        def f(x):
-            x.fill_diagonal_(True)
-
-        x = torch.zeros(4, 4)
-        f(x)
-
-    def test_dynamic_float_scalar_tensor_coersion(self):
-        # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
-        class Foo:
-            def __init__(self):
-                self.config = type(
-                    "Config", (), {"pad_val": 1123581321.0, "tolerance": 1e-6}
-                )
-
-            @torch.compile(fullgraph=True, backend="eager")
-            def forward(self, input):
-                outputs = torch.where(
-                    torch.abs(input - self.config.pad_val) < self.config.tolerance,
-                    torch.tensor(
-                        self.config.pad_val, dtype=input.dtype, device=input.device
-                    ),
-                    torch.tensor(
-                        self.config.pad_val + 1, dtype=input.dtype, device=input.device
-                    ),
-                )
-                return outputs
-
-        foo = Foo()
-        inputs = torch.randn(3, 4)
-        result = foo.forward(inputs)
-
-        original_pad_val = foo.config.pad_val
-        foo.config.pad_val += 1.0
-        result2 = foo.forward(inputs)
-
-        # Previously would crash with:
-        #   RuntimeError: value cannot be converted to type at::Half without overflow
 
     def test_symbool_tensor_mul(self, device):
         def symbool_mul_fn(x_bool, sentinel):
@@ -21653,13 +21678,15 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
             inp1 = torch.randn(4, 4, 4, device=device)
 
-            compiled_result1 = compiled(inp1)
+            with freeze_rng_state():
+                compiled_result1 = compiled(inp1)
             eager_result1 = container_eager(inp1)
-            same(compiled_result1, eager_result1)
+            self.assertTrue(same(compiled_result1, eager_result1))
 
-            compiled_result2 = compiled(inp1)
+            with freeze_rng_state():
+                compiled_result2 = compiled(inp1)
             eager_result2 = container_eager(inp1)
-            same(compiled_result2, eager_result2)
+            self.assertTrue(same(compiled_result2, eager_result2))
 
     def test_module_to_move_compile(self, device):
         class Model(torch.nn.Module):
@@ -21687,12 +21714,29 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
 instantiate_parametrized_tests(MiscTestsPyTree)
 
+_MISC_DEVICE_TEST_BASES = (MiscTestsExportDevice,)
+
+instantiate_device_type_tests(
+    MiscTestsExportDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 
+def get_misc_device_test_classes():
+    return [
+        cls
+        for cls in globals().values()
+        if isinstance(cls, type)
+        and cls not in _MISC_DEVICE_TEST_BASES
+        and issubclass(cls, _MISC_DEVICE_TEST_BASES)
+    ]
+
+
 class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tensorify_track_item_symint(self):
         def _random_resize(image: torch.Tensor):

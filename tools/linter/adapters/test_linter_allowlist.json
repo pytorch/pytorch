@@ -271,7 +271,6 @@
   "test/dynamo/test_len_protocol.py",
   "test/dynamo/test_list.py",
   "test/dynamo/test_logging.py",
-  "test/dynamo/test_misc.py",
   "test/dynamo/test_modes.py",
   "test/dynamo/test_nb_matrix_multiply.py",
   "test/dynamo/test_precompile_context.py",
