@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <mutex>
+#include <sstream>
+#include <cstring>
 
 namespace {
 
@@ -288,10 +290,88 @@ at::Tensor empty_strided_p2p(
       options);
 }
 
+static std::mutex rendezvous_counters_mutex;
+static std::unordered_map<std::string, int64_t> rendezvous_counters;
+
+void validate_rendezvous_alloc_id(
+    const c10::intrusive_ptr<c10d::Store>& store,
+    const std::string& group_name,
+    int rank,
+    int world_size,
+    int64_t rendezvous_idx,
+    int64_t local_alloc_id) {
+  if (!store || rank < 0 || world_size <= 1) {
+    return;
+  }
+
+  std::vector<std::string> peer_keys;
+  peer_keys.reserve(world_size);
+  for (int r = 0; r < world_size; ++r) {
+    std::ostringstream oss;
+    oss << "symm_mem_validate/" << group_name << '/' << rendezvous_idx << '/' << r;
+    peer_keys.push_back(std::move(oss).str());
+  }
+
+  {
+    std::vector<uint8_t> payload(
+        reinterpret_cast<uint8_t*>(&local_alloc_id),
+        reinterpret_cast<uint8_t*>(&local_alloc_id) + sizeof(int64_t));
+    store->set(peer_keys[rank], payload);
+  }
+
+  auto payloads = store->multiGet(peer_keys);
+
+  for (int r = 0; r < world_size; ++r) {
+    TORCH_CHECK(payloads[r].size() == sizeof(int64_t), "Validation payload size mismatch");
+    int64_t peer_alloc_id = 0;
+    std::memcpy(&peer_alloc_id, payloads[r].data(), sizeof(int64_t));
+    TORCH_CHECK(
+        peer_alloc_id == local_alloc_id,
+        "Symmetric window mismatch detected during rendezvous. "
+        "Rank ", rank, " has alloc_id ", local_alloc_id,
+        " but rank ", r, " has alloc_id ", peer_alloc_id,
+        ". This indicates that different ranks are reusing different slots of the Symmetric Memory MemPool, "
+        "which can lead to silent collective corruption. Please check allocation and free patterns across ranks.");
+  }
+}
+
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
     const at::Tensor& tensor,
     const std::optional<std::string>& group_name) {
   auto allocator = get_allocator(tensor.device().type());
+
+  std::string resolved_group_name = group_name.value_or("0");
+  c10::intrusive_ptr<c10d::Store> store = nullptr;
+  int rank = -1;
+  int world_size = -1;
+  {
+    std::lock_guard<std::mutex> lock(group_info_mutex);
+    auto it = group_info_map.find(resolved_group_name);
+    if (it != group_info_map.end()) {
+      store = it->second.store;
+      rank = it->second.rank;
+      world_size = it->second.world_size;
+    }
+  }
+
+  int64_t rendezvous_idx = 0;
+  if (store && rank >= 0 && world_size > 1) {
+    std::lock_guard<std::mutex> lock(rendezvous_counters_mutex);
+    rendezvous_idx = rendezvous_counters[resolved_group_name]++;
+  }
+
+  int64_t local_alloc_id = allocator->get_alloc_id(tensor.storage().data_ptr().get());
+
+  if (store && rank >= 0 && world_size > 1) {
+    validate_rendezvous_alloc_id(
+        store,
+        resolved_group_name,
+        rank,
+        world_size,
+        rendezvous_idx,
+        local_alloc_id);
+  }
+
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 

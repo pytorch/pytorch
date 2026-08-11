@@ -120,6 +120,9 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
 
   virtual void free(void* ptr) = 0;
   virtual size_t get_alloc_size(void* ptr) = 0;
+  virtual int64_t get_alloc_id(void* ptr) {
+    return -1;
+  }
   virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) = 0;
