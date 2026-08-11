@@ -230,7 +230,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           get_named_tuple_str_or_default(compilation_unit, t, type_str);
       types.emplace_back(named_tuple_str);
       continue;
-    } else if (type_str.find(torch_prefix) == 0) {
+    } else if (type_str.starts_with(torch_prefix)) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
@@ -276,7 +276,7 @@ std::pair<IValue, IValue> getFunctionTuple(
         This part adds the argument's name, type and default_value in
         `bytecode.pkl` This has to be consistent with the `code/` directory
         which has annotated py code of the entire module. `type_printer` uses
-        `TypeNameUniquer` to get the managled name of the argument. This helps
+        `TypeNameUniquer` to get the mangled name of the argument. This helps
         in having the right object reference when a class method is called using
         the `self` argument.
 
@@ -872,7 +872,7 @@ void ExportModule(
     } else {
       message << "Error while opening file: " << errno << '\n';
     }
-    TORCH_CHECK(false, message.str());
+    TORCH_CHECK(false, std::move(message).str());
   }
   ExportModule(
       module,

@@ -35,7 +35,7 @@ std::string concatName(const Iter& begin, const Iter& end) {
   for (Iter it = begin; it != end; ++it) {
     const std::string& sub_name = *it;
     if (!combined_name.empty()) {
-      combined_name += ".";
+      combined_name += '.';
     }
     combined_name += sub_name;
   }
@@ -758,7 +758,7 @@ class AttributePropagator {
 
     auto subgraph = n->g(attr::Subgraph);
     func(subgraph);
-    module_ = attrModule;
+    module_ = std::move(attrModule);
   }
 
   bool moduleEscapes(Module& subModule, std::shared_ptr<Graph>& graph) {

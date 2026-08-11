@@ -42,7 +42,7 @@ bool GraphPassManager::run_pass(Graph* graph, const GraphPassIdentifier& name) {
               << " nodes (delta: "
               << static_cast<int64_t>(nodesAfter) -
               static_cast<int64_t>(nodesBefore)
-              << ")";
+              << ')';
     } else {
       VLOG(1) << "Pass " << name << ": no change (" << nodesAfter << " nodes)";
     }
