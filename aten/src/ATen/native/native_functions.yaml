@@ -3689,6 +3689,7 @@
   dispatch:
     CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
+    MPS: logspace_out_mps
     XPU: logspace_xpu_out
 
 - func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
@@ -14550,6 +14551,8 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_vector_norm.out
+  dispatch:
+    SparseCPU, SparseCUDA, SparseMPS: linalg_vector_norm_sparse
   tags: reduction
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
