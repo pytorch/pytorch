@@ -932,23 +932,18 @@ class NestedReduction:
     def _sub_parent_epilogue_internal_reads_match(
         epilogue_nodes: Sequence[SchedulerNode],
         source_writes: dict[str, list[MemoryDep]],
-        renames: dict[str, str] | None = None,
     ) -> bool:
-        renames = renames or {}
         output_names = OrderedSet(
-            renames.get(name, name)
-            for node in epilogue_nodes
-            for name in node.get_buffer_names()
+            name for node in epilogue_nodes for name in node.get_buffer_names()
         )
         for node in epilogue_nodes:
-            for raw_dep in node.read_writes.reads:
-                dep_name = renames.get(raw_dep.name, raw_dep.name)
-                if dep_name not in output_names:
+            for dep in node.read_writes.reads:
+                if dep.name not in output_names:
                     continue
-                writes = source_writes.get(dep_name, [])
-                if not isinstance(raw_dep, MemoryDep) or len(writes) != 1:
+                writes = source_writes.get(dep.name, [])
+                if not isinstance(dep, MemoryDep) or len(writes) != 1:
                     return False
-                if raw_dep.rename(renames).normalize() != writes[0].normalize():
+                if dep.normalize() != writes[0].normalize():
                     return False
         return True
 
@@ -964,7 +959,6 @@ class NestedReduction:
         *,
         parent_rnumel: sympy.Expr,
         allow_contiguous: bool,
-        renames: dict[str, str] | None = None,
     ) -> tuple[tuple[MemoryDep, NestedReduction.SubParentSourceLayout], ...] | None:
         """Which reads feed the epilogue at lane resolution, and how.
 
@@ -976,7 +970,6 @@ class NestedReduction:
         means nothing needed planning. Callers that write ``if not source_deps``
         collapse them.
         """
-        renames = renames or {}
         contiguous_parent_rnumel = V.graph.sizevars.simplify(parent_rnumel)
         # Persistent code splits the padded block, so contiguous lanes must
         # align with that block rather than only the logical reduction extent.
@@ -1001,13 +994,11 @@ class NestedReduction:
             return True
 
         for node in nodes:
-            for raw_dep in node.read_writes.reads:
-                dep_name = renames.get(raw_dep.name, raw_dep.name)
-                if not isinstance(raw_dep, MemoryDep):
-                    if dep_name in fused_buffer_names:
+            for dep in node.read_writes.reads:
+                if not isinstance(dep, MemoryDep):
+                    if dep.name in fused_buffer_names:
                         continue
                     return None
-                dep = raw_dep.rename(renames)
                 if not V.graph.sizevars.statically_known_equals(
                     sub_parent_factor * sympy_product(dep.ranges.values()), full_numel
                 ):
@@ -1091,18 +1082,14 @@ class NestedReduction:
     def _sub_parent_epilogue_outputs_unread(
         nodes: Sequence[BaseSchedulerNode],
         epilogue_node_set: OrderedSet[SchedulerNode],
-        renames: dict[str, str] | None = None,
     ) -> bool:
         """Whether every epilogue output is a leaf within the group.
 
         Epilogue outputs only exist at lane resolution, so a non-epilogue node
         reading one would need a parent-resolution view that was never emitted.
         """
-        renames = renames or {}
         epilogue_output_names = OrderedSet(
-            renames.get(name, name)
-            for node in epilogue_node_set
-            for name in node.get_buffer_names()
+            name for node in epilogue_node_set for name in node.get_buffer_names()
         )
         if not epilogue_output_names:
             return True
@@ -1110,7 +1097,7 @@ class NestedReduction:
             if node in epilogue_node_set:
                 continue
             for dep in node.read_writes.reads:
-                if renames.get(dep.name, dep.name) in epilogue_output_names:
+                if dep.name in epilogue_output_names:
                     return False
         return True
 
@@ -1119,7 +1106,6 @@ class NestedReduction:
         nodes: Sequence[BaseSchedulerNode],
         epilogue_node_set: OrderedSet[SchedulerNode],
         source_deps: tuple[MemoryDep, ...],
-        renames: dict[str, str] | None = None,
     ) -> bool:
         """Whether non-epilogue readers of a planned source use the planned index.
 
@@ -1127,7 +1113,6 @@ class NestedReduction:
         reading the same buffer through a *different* index would silently be
         handed a lane rather than the value it asked for.
         """
-        renames = renames or {}
         source_deps_by_name: dict[str, OrderedSet[MemoryDep]] = {}
         for dep in source_deps:
             source_deps_by_name.setdefault(dep.name, OrderedSet()).add(dep)
@@ -1135,14 +1120,12 @@ class NestedReduction:
         for node in nodes:
             if node in epilogue_node_set:
                 continue
-            for raw_dep in node.read_writes.reads:
-                dep_name = renames.get(raw_dep.name, raw_dep.name)
-                planned_deps = source_deps_by_name.get(dep_name)
+            for dep in node.read_writes.reads:
+                planned_deps = source_deps_by_name.get(dep.name)
                 if planned_deps is None:
                     continue
-                if not isinstance(raw_dep, MemoryDep):
+                if not isinstance(dep, MemoryDep):
                     return False
-                dep = raw_dep.rename(renames)
                 if dep not in planned_deps:
                     return False
         return True
@@ -1153,7 +1136,6 @@ class NestedReduction:
         epilogue_node_set: OrderedSet[SchedulerNode],
         numel: sympy.Expr,
         source_names: OrderedSet[str],
-        renames: dict[str, str] | None = None,
     ) -> bool:
         """Whether parent-output-resolution siblings avoid the source buffers.
 
@@ -1161,7 +1143,6 @@ class NestedReduction:
         tile is no longer live. Letting one read a source would force the
         materialization to outlive the loop.
         """
-        renames = renames or {}
         for node in nodes:
             if node in epilogue_node_set or node.is_reduction():
                 continue
@@ -1172,7 +1153,7 @@ class NestedReduction:
             ):
                 continue
             for dep in node.read_writes.reads:
-                if renames.get(dep.name, dep.name) in source_names:
+                if dep.name in source_names:
                     return False
         return True
 
@@ -1680,35 +1661,32 @@ class NestedReduction:
         if any(node.has_aliasing_or_mutation() for node in sub_parent_nodes):
             return None
 
-        renames = outer_node.scheduler.mutation_renames
+        # read_writes is already node-locally versioned; global mutation renames
+        # may point at a later buffer version.
         grouped_reduction = domain_context.grouped_reduction
         all_nodes = [*outer_node.get_nodes(), *grouped_nodes]
         fused_buffer_names = OrderedSet(
-            renames.get(name, name)
-            for node in all_nodes
-            for name in node.get_buffer_names()
+            name for node in all_nodes for name in node.get_buffer_names()
         )
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
         reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
-        for raw_dep in grouped_reduction.read_writes.reads:
-            if isinstance(raw_dep, MemoryDep):
-                dep = raw_dep.rename(renames)
+        for dep in grouped_reduction.read_writes.reads:
+            if isinstance(dep, MemoryDep):
                 reduction_reads[dep.name].append(dep)
 
         source_writes: dict[str, list[MemoryDep]] = collections.defaultdict(list)
         for node in all_nodes:
-            for raw_dep in node.read_writes.writes:
-                if isinstance(raw_dep, MemoryDep):
-                    dep = raw_dep.rename(renames)
+            for dep in node.read_writes.writes:
+                if isinstance(dep, MemoryDep):
                     source_writes[dep.name].append(dep)
 
         sub_parent_node_set = OrderedSet(sub_parent_nodes)
         if not cls._sub_parent_epilogue_internal_reads_match(
-            sub_parent_nodes, source_writes, renames
+            sub_parent_nodes, source_writes
         ) or not cls._sub_parent_epilogue_outputs_unread(
-            all_nodes, sub_parent_node_set, renames
+            all_nodes, sub_parent_node_set
         ):
             return None
 
@@ -1721,7 +1699,6 @@ class NestedReduction:
             cls.NESTED_SUB_PARENT_FACTOR,
             parent_rnumel=domain_context.parent_full_domain[1],
             allow_contiguous=False,
-            renames=renames,
         )
         if not source_deps:
             return None
@@ -1729,29 +1706,22 @@ class NestedReduction:
             grouped_nodes,
             sub_parent_node_set,
             tuple(dep for dep, _layout in source_deps),
-            renames,
         ):
             return None
 
         source_layouts = tuple((dep.name, layout) for dep, layout in source_deps)
         broadcast_source_names = OrderedSet(
-            renames.get(name, name)
+            name
             for node, domain in pointwise_domains
             if domain is cls.PointwiseDomain.REDUCED
             for name in node.get_buffer_names()
         )
-        broadcast_source_names.update(
-            renames.get(name, name) for name in grouped_reduction.get_buffer_names()
-        )
+        broadcast_source_names.update(grouped_reduction.get_buffer_names())
         for node in outer_node.get_nodes():
             if node.is_reduction():
-                broadcast_source_names.update(
-                    renames.get(name, name) for name in node.get_buffer_names()
-                )
+                broadcast_source_names.update(node.get_buffer_names())
         sub_parent_read_names = OrderedSet(
-            renames.get(dep.name, dep.name)
-            for node in sub_parent_nodes
-            for dep in node.read_writes.reads
+            dep.name for node in sub_parent_nodes for dep in node.read_writes.reads
         )
         broadcast_source_names &= sub_parent_read_names
 
@@ -1759,17 +1729,14 @@ class NestedReduction:
             OrderedSet(name for name, _layout in source_layouts)
             | broadcast_source_names
             | OrderedSet(
-                renames.get(name, name)
-                for node in sub_parent_nodes
-                for name in node.get_buffer_names()
+                name for node in sub_parent_nodes for name in node.get_buffer_names()
             )
         )
         for node in sub_parent_nodes:
-            for raw_dep in node.read_writes.reads:
-                dep_name = renames.get(raw_dep.name, raw_dep.name)
+            for dep in node.read_writes.reads:
                 if (
-                    dep_name in fused_buffer_names
-                    and dep_name not in allowed_internal_names
+                    dep.name in fused_buffer_names
+                    and dep.name not in allowed_internal_names
                 ):
                     return None
 
@@ -9234,7 +9201,7 @@ class Scheduler:
         can_reorder: bool,
         producer_node: BaseSchedulerNode | None = None,
     ) -> bool:
-        index_equivalent_dep_names: OrderedSet[str] = OrderedSet()
+        derived_domain_names: OrderedSet[str] = OrderedSet()
         grouped_buf_names = OrderedSet(
             self.mutation_renames.get(name, name)
             for name in grouped_node.get_buffer_names()
@@ -9249,11 +9216,15 @@ class Scheduler:
                 self.mutation_renames.get(dep.name, dep.name)
                 for dep in sn.read_writes.reads
             )
-            index_equivalent_dep_names.update(
+            derived_domain_names.update(
                 dep_name for dep_name in reads if dep_name in grouped_buf_names
             )
-        # Derived-domain consumers may view grouped outputs at a different
-        # resolution. Relax matching only for those named producer outputs.
+        # Derived-domain consumers may view grouped outputs at a different resolution.
+        # Prove each read/write relation before relaxing dependency matching.
+        index_equivalent_dep_names = (
+            self._producer_output_names_read_by_consumer(grouped_node, other)
+            & derived_domain_names
+        )
         return self._can_fuse(
             producer_node if producer_node is not None else grouped_node,
             other,
