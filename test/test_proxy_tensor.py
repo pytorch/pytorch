@@ -2243,7 +2243,7 @@ only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
 
 
-class TestProxyTensor(TestCase):
+class TestGenericProxyTensorCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_amp_cache(self):
@@ -2282,13 +2282,12 @@ class TestProxyTensor(TestCase):
         )
 
 
-instantiate_device_type_tests(TestProxyTensor, globals(), only_for='cuda')
+instantiate_device_type_tests(TestGenericProxyTensorCUDA, globals(), only_for='cuda')
 
 
 class TestSymbolicTracingCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
         # Extracted from wave2vec2
         def f(a, b):
@@ -2305,7 +2304,6 @@ def forward(self, a_1, b_1):
     mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
     return mm""")
 
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_view_divisibility_unbacked_relatively_prime(self):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
@@ -2317,7 +2315,6 @@ def forward(self, a_1, b_1):
             return torch.zeros(256 * i0).view(-1, 447)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
 
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
@@ -2342,7 +2339,6 @@ def forward(self, a_1, b_1):
         #     r, """"""
         # )
 
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_unbacked_unify_dependency_violation(self):
         def f(x1, x2, x3, y):
             z1 = x1.item()
@@ -2371,6 +2367,7 @@ def forward(self, a_1, b_1):
                 torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
             )
 
+instantiate_device_type_tests(TestSymbolicTracingCUDA, globals(), only_for='cuda')
 
 if __name__ == '__main__':
     run_tests()
