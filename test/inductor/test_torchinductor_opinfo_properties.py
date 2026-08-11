@@ -57,6 +57,8 @@ from torch.testing._internal.common_utils import (
     getRocmVersion,
     IS_FBCODE,
     IS_WINDOWS,
+    isRocmArchAnyOf,
+    MI200_ARCH,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
@@ -476,7 +478,7 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
     },
     "inductor_default": {
         "nn.functional.linear": {ALL},
-        "log1p": {fp32},
+        "log1p": set() if isRocmArchAnyOf(MI200_ARCH) else {fp32},
     },
     "inductor_numerics": {
         "nn.functional.linear": {ALL},

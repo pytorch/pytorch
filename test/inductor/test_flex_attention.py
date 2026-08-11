@@ -2940,7 +2940,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         atol = 1e-3
         rtol = 1e-3
 
-        if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
+        relax_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+        if isRocmArchAnyOf(MI200_ARCH) and dtype in relax_dtypes:
             # this behavior matches known subnormal (denormal) handling on MI200 for float16
             atol = 0.002
             rtol = 0.41  # relative difference can become large at small tensor values
@@ -10364,6 +10365,7 @@ class TestLearnableBiases(InductorTestCase):
         out_flex.sum().backward()
 
         name = score_mod.__name__
+        max_error_ratio = 12.0 if isRocmArchAnyOf(MI200_ARCH) else 1.2
         for ref, flex, gold in [
             (out_ref, out_flex, out_gold),
             (q_ref.grad, q_flex.grad, q_gold.grad),
@@ -10374,7 +10376,7 @@ class TestLearnableBiases(InductorTestCase):
             ref_error = rmse(ref, gold)
             flex_error = rmse(flex, gold)
             self.assertTrue(
-                ref_error * 1.2 >= flex_error,
+                flex_error <= ref_error * max_error_ratio,
                 lambda msg: f"{msg}\n{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 

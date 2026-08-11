@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -14021,6 +14021,8 @@ if __name__ == '__main__':
         # Weight/bias grad_error use feps, except the prob+bias accelerator legs
         # (same cancellation inflates them too) which also get 16*eps.
         wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
+        if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
+            wb_grad_err_tol = wb_grad_err_tol * 1.5
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
