@@ -1025,6 +1025,15 @@ class TestOptimRenewed(TestCase):
             finally:
                 torch.set_default_dtype(old_default_dtype)
 
+    def _assert_large_tensor_matches_ref(self, optim_cls, param, optim_input, impl):
+        # A size-1 param stepped with the same config gives the expected value for
+        # every element, so a 32-bit index overflow shows up as the tail diverging.
+        ref = torch.ones(1, device=param.device, dtype=param.dtype)
+        ref.grad = torch.ones_like(ref)
+        optim_cls([ref], **{impl: True}, **optim_input.kwargs).step()
+        self.assertEqual(param[0], ref[0])
+        self.assertEqual(param[-1], ref[0])
+
     @onlyCUDA
     @largeTensorTest("72GB", "cuda")
     @serialTest()
@@ -1034,12 +1043,21 @@ class TestOptimRenewed(TestCase):
     )
     def test_foreach_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
+        if optim_cls.__name__ == "Adafactor":
+            # Adafactor scales by p.norm(2) / sqrt(p.numel()) computed in the param
+            # dtype. At 2**32 elements sqrt(numel) is 65536, just past the fp16 max
+            # of 65504, so the norm is inf and every param goes nan. Pre-existing:
+            # this test passed only because it asserted nothing.
+            self.skipTest("Adafactor overflows the fp16 norm at 2**32 elements")
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2**32, device=device, dtype=dtype)]
-            params[0].grad = torch.zeros_like(params[0])
+            params[0].grad = torch.ones_like(params[0])
             optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
             optimizer.step()
+            self._assert_large_tensor_matches_ref(
+                optim_cls, params[0], optim_input, "foreach"
+            )
 
     @onlyCUDA
     @optims(
@@ -1244,7 +1262,7 @@ class TestOptimRenewed(TestCase):
         dtypes=[torch.float16],
     )
     def test_fused_large_tensor(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
@@ -1252,9 +1270,12 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2**32, device=device, dtype=dtype)]
-            params[0].grad = torch.zeros_like(params[0])
+            params[0].grad = torch.ones_like(params[0])
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
+            self._assert_large_tensor_matches_ref(
+                optim_cls, params[0], optim_input, "fused"
+            )
 
     @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
@@ -2382,7 +2403,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             inpts, models, optimizers = [], [], []
             for dev in ("cpu", _get_device_type(device)):
-                kwargs = optim_input.kwargs
+                kwargs = deepcopy(optim_input.kwargs)
                 kwargs["fused"] = True
                 inpt = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=dev
@@ -2410,7 +2431,7 @@ class TestOptimRenewed(TestCase):
                 inpts.append(inpt)
                 models.append(model)
                 optimizers.append(optimizer)
-        self._compare_between(inpts, models, optimizers)
+            self._compare_between(inpts, models, optimizers)
 
     @onlyCUDA
     @optims(
