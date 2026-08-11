@@ -1,13 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
-
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCPUIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfCrossRef,
     TestCase,
@@ -22,6 +24,8 @@ class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
     into their constituent ops to avoid item() graph breaks.
     When False, the original ops are preserved.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfCrossRef
     def test_addcmul_inplace_decomposition_enabled(self):
@@ -594,6 +598,8 @@ class GraphModule(torch.nn.Module):
 class TestDynamoDecompositionsNumerics(TestCase):
     """Numerics tests for dynamo decompositions across devices."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcmul_tensor_value_numerics(self, device):
@@ -770,6 +776,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
         actual = torch.compile(fn, fullgraph=True)(x.clone(), other, alpha)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual, atol=0, rtol=0)
 
+    @skipCPUIf(True, "accelerator fma numerics")
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_add_tensor_alpha_fma_matches_aten(self, device):
@@ -843,7 +850,6 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcdiv_scalar_value_cuda(self, device):
         """Compiled addcdiv_ with scalar value matches eager on CUDA.
 
@@ -864,7 +870,6 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcdiv_tensor_value_cuda(self, device):
         """Compiled addcdiv_ with tensor value matches eager on CUDA.
 
@@ -900,7 +905,11 @@ class TestDynamoDecompositionsNumerics(TestCase):
         self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(TestDynamoDecompositionsNumerics, globals())
+instantiate_device_type_tests(
+    TestDynamoDecompositionsNumerics,
+    globals(),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
