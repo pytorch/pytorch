@@ -32,6 +32,7 @@ from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import (
+    get_code,
     is_big_gpu,
     maybe_aoti_standalone_config,
     run_and_get_cpp_code,
@@ -6308,6 +6309,222 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_proxy_executor(self, enable_kernel_profile):
+        """Test RAIIAtenRecordFunctionHandle profiling for AOT ProxyExecutor path.
+
+        Custom ops are not in the c-shim so they go through FallbackKernel ->
+        proxy_executor in AOT mode. This verifies profiling is emitted around
+        aoti_torch_proxy_executor_call_function.
+        """
+
+        if sys.platform not in ["linux", "win32"]:
+            raise unittest.SkipTest(
+                "enable_kernel_profile only supported on linux and win32"
+            )
+
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            torch.library.define(
+                "proftest::add_one",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "proftest::add_one", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("proftest::add_one", lib=lib)
+            def add_one_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.proftest.add_one(x)
+
+            example_inputs = (torch.randn(4, 4, device=self.device),)
+            with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+                _, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, Model(), example_inputs
+                )
+                FileCheck().check("aoti_torch_proxy_executor_call_function").run(code)
+                if enable_kernel_profile:
+                    FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+                self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        config.triton.native_matmul, "different kernel name when native matmul"
+    )
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_input_shapes(self):
+        # Verify that kernel profiling records tensor input shapes,
+        # scalar args, output handles, and ReinterpretView logical shapes.
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                # addmm: exercises scalar args (alpha, beta) and output handle
+                out = torch.nn.functional.linear(a, self.weight, self.bias)
+                # mm with transposed view: exercises ReinterpretView input path
+                return torch.mm(out.t(), a)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Verify that tensor inputs are converted to IValues for
+            # shape recording (3-arg RAIIAtenRecordFunctionHandle form).
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            # Verify dummy scalar IValues are generated for non-tensor args.
+            FileCheck().check("aoti_torch_int64_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            # Verify output tensor is included in IValues for out-variant
+            # kernels.
+            FileCheck().check_regex(r"tmp_.*_output\b").run(code)
+            # Verify ReinterpretView inputs use reinterpret_tensor_wrapper
+            # for correct logical shapes in profiling.
+            FileCheck().check("reinterpret_tensor_wrapper").run(code)
+
+            self.check_model(Model(N, K, self.device), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_conv_input_shapes(self):
+        # Convolution is a single-output ExternKernelAlloc, so it flows through
+        # the alloc codegen path; verify its tensor inputs are recorded with
+        # shapes when profiling is enabled (3-arg RAIIAtenRecordFunctionHandle
+        # with an IValue vector).
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, padding=1).to(device)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = Model(self.device)
+        x = torch.randn(2, 3, 16, 16, device=self.device)
+        example_inputs = (x,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Conv tensor inputs are converted to IValues for shape recording,
+            # collected into a vector, and passed to the record function.
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            # Conv on CUDA uses TF32, which differs from the fp32 reference by
+            # ~1e-3; the profiling assertions above are this test's focus.
+            self.check_model(Model(self.device), example_inputs, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_multi_output_fallback_input_shapes(self):
+        # A tuple-returning fallback (scaled_dot_product_attention) is the
+        # representative kernel reaching generate_c_shim_fallback_kernel;
+        # zero-output and dict-returning fallbacks route there too. Its q/k/v
+        # are transposed views, so this pins down that the recorded shapes are
+        # the logical view shapes and not the base buffers.
+        #
+        # A fused backend is required: without one SDPA decomposes to math and
+        # emits no extern shim. CPU always has one; XPU has no fp32 fused path.
+        if self.device == "xpu":
+            raise unittest.SkipTest("XPU has no fused fp32 SDPA backend")
+        if self.device != "cpu" and not (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        ):
+            raise unittest.SkipTest("Some archs don't support fused SDPA")
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v):
+                # transpose() makes each operand a ReinterpretView whose logical
+                # shape differs from its base buffer.
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+                )
+
+        example_inputs = tuple(
+            torch.randn(4, 8, 2, 16, device=self.device) for _ in range(3)
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # The handle must be the reinterpret expression, not a bare buffer
+            # name: a base-buffer handle would record the wrong shape while
+            # still looking populated to a trace consumer. The IValue variable
+            # carries the shim name, so match it in the same line to pin the
+            # assertion to this kernel rather than any transposed GEMM.
+            FileCheck().check_regex(
+                r"aoti_torch_tensor_to_ivalue\(wrap_with_raii_handle_if_needed\("
+                r"reinterpret_tensor_wrapper.*"
+                r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
+            ).run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_tensor_list_input_shapes(self):
+        # A tensor-list fallback collapses its whole list into a single codegen
+        # arg, so the profiling handles for its ReinterpretView inputs have no
+        # positional correspondence with the kernel's args.
+        if self.device != "cpu":
+            raise unittest.SkipTest("aten.cat only falls back to ATen for cpu uint8")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                # Slicing makes every list element a ReinterpretView, and four
+                # elements outnumber the kernel's args.
+                return torch.cat([a[:, :2], b[:, :2], c[:, :2], d[:, :2]], dim=1)
+
+        example_inputs = tuple(
+            torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=self.device)
+            for _ in range(4)
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            FileCheck().check("aoti_torch_cpu_cat").run(code)
+            # A handle for the fourth input proves the handles are derived per
+            # input: the kernel's args collapse the whole list into a single
+            # entry, so a positional args lookup cannot reach index 3.
+            FileCheck().check("tmp_aoti_torch_cpu_cat_input_3").run(code)
+            # The IValue variable name is built from the loop index alone, so
+            # pin the handle expression too: the slices must be recorded as
+            # reinterpret views rather than their base buffers.
+            FileCheck().check(
+                "aoti_torch_tensor_to_ivalue(wrap_with_raii_handle_if_needed("
+                "reinterpret_tensor_wrapper"
+            ).run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
     @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
@@ -6353,6 +6570,79 @@ class AOTInductorTestsTemplate:
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
             )
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_combo_kernel_numel(self):
+        # Combo kernels (multiple independent pointwise ops fused together)
+        # are NOT wrapped in {} profiling scope blocks, unlike regular kernels.
+        # Their numel variables are declared at function scope. With profiling
+        # enabled, the codegen must not re-emit int64_t declarations for the
+        # same numel variable at function scope, which would cause a
+        # "redefinition" C++ compilation error.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("combo kernels require GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                # Two independent pointwise ops on same-shaped tensors
+                # triggers combo kernel fusion
+                return a.sin(), b.cos()
+
+        example_inputs = (
+            torch.randn(4, 8, device=self.device),
+            torch.randn(4, 8, device=self.device),
+        )
+        dim0 = Dim("dim0", min=1, max=32)
+        dynamic_shapes = {"a": {0: dim0}, "b": {0: dim0}}
+
+        with config.patch({"cpp.enable_kernel_profile": True, "combo_kernels": True}):
+            # This compilation would fail with "redefinition of
+            # '..._xnumel'" if numel declarations at function scope
+            # were not properly deduplicated.
+            self.check_model(
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_scatter_fallback(self):
+        # Scatter fallback kernels use a separate codegen path
+        # (_generate_scatter_fallback) that must also be wrapped in
+        # KernelContextGuard and RAIIAtenRecordFunctionHandle profiling
+        # blocks when profiling is enabled.  RAIIAtenRecordFunctionHandle
+        # is what actually creates the RecordFunction / External id linkage.
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                return torch.scatter(inp, 1, index, src)
+
+        example_inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            FileCheck().check("KernelContextGuard").run(code)
+            # RAIIAtenRecordFunctionHandle creates the RecordFunction that
+            # produces the External id linkage in GPU traces.
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
 
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -9620,6 +9910,165 @@ class TestCheckLowerboundConfig(TestCase):
                 0,
                 exactly=True,
             ).run(code)
+
+
+class TestCppWrapperFallbackProfiling(TestCase):
+    """Test RAIIAtenRecordFunctionHandle profiling for non-AOT cpp_wrapper fallback paths.
+
+    These paths are only triggered in cpp_wrapper mode WITHOUT AOT (i.e., torch.compile
+    with config.cpp_wrapper=True), so they cannot be tested via AOTIRunnerUtil.compile.
+    Uses get_code to generate code without compiling/running (avoids ASAN issues).
+    """
+
+    device = "cpu"
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_nopython_dispatcher(self, enable_kernel_profile):
+        """Test profiling for non-AOT nopython dispatcher path.
+
+        Custom ops with simple types (Tensor -> Tensor) go through
+        aoti_torch_call_dispatcher in non-AOT cpp_wrapper mode because they
+        are StableIValue-compatible and not in the c-shim.
+        """
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            torch.library.define(
+                "proftest::nopython_add",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "proftest::nopython_add", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("proftest::nopython_add", lib=lib)
+            def nopython_add_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.proftest.nopython_add(x)
+
+            example_inputs = (torch.randn(4, 4),)
+            with config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "cpp.enable_kernel_profile": enable_kernel_profile,
+                }
+            ):
+                compiled = torch.compile(Model())
+                codes = get_code(compiled, *example_inputs)
+                code = codes[0]
+                FileCheck().check("aoti_torch_call_dispatcher").run(code)
+                if enable_kernel_profile:
+                    FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_python_fallback(self, enable_kernel_profile):
+        """Test profiling for non-AOT Python fallback path.
+
+        Custom ops whose return type is not boxed-dispatch compatible (only
+        Tensor, Tensor? and () are) go through PyObject_CallObject in non-AOT
+        cpp_wrapper mode. A Tensor[] return is the cheapest such schema; a
+        Tensor[] argument is boxed-compatible and would not reach this path.
+        """
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            torch.library.define(
+                "proftest::python_cat",
+                "(Tensor[] tensors, int dim=0) -> Tensor[]",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            # CompositeExplicitAutograd also covers Meta, so it supplies the
+            # shape propagation that tracing needs. A separate Python fake impl
+            # would additionally require a C++ m.set_python_module companion.
+            @torch.library.impl(
+                "proftest::python_cat", "CompositeExplicitAutograd", lib=lib
+            )
+            def python_cat_impl(
+                tensors: list[torch.Tensor], dim: int = 0
+            ) -> list[torch.Tensor]:
+                return [torch.cat(tensors, dim=dim)]
+
+            class Model(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.proftest.python_cat([x, y])[0]
+
+            example_inputs = (torch.randn(4, 4), torch.randn(4, 4))
+            with config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "cpp.enable_kernel_profile": enable_kernel_profile,
+                }
+            ):
+                compiled = torch.compile(Model())
+                codes = get_code(compiled, *example_inputs)
+                code = codes[0]
+                FileCheck().check("PyObject_CallObject").run(code)
+                if enable_kernel_profile:
+                    FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_gpu_non_triton(self, enable_kernel_profile):
+        """Test profiling for GPU non-Triton kernel call path (CUTLASS/ROCm templates).
+
+        Non-Triton GPU kernels use kernels.{name}() direct calls. This path requires
+        max_autotune with CUTLASS backend availability (SM80+).
+        """
+        if not SM80OrLater:
+            raise unittest.SkipTest("CUTLASS requires SM80+")
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+
+        if not try_import_cutlass():
+            raise unittest.SkipTest("CUTLASS lib not available")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(64, 64, device=device, dtype=torch.float16)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight)
+
+        model = Model(GPU_TYPE)
+        example_inputs = (torch.randn(2, 64, device=GPU_TYPE, dtype=torch.float16),)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cpp.enable_kernel_profile": enable_kernel_profile,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Non-Triton kernels use direct kernels.{name}() calls
+            if "kernels." in code:
+                if enable_kernel_profile:
+                    FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+
+common_utils.instantiate_parametrized_tests(TestCppWrapperFallbackProfiling)
 
 
 if __name__ == "__main__":
