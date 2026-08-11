@@ -125,103 +125,24 @@ _SDPA_TARGETS = {
     torch.ops.aten.scaled_dot_product_attention.default,
 }
 
-_PRESERVE_VALUES_FUNCTION_TARGETS = {
-    operator.getitem,
-    torch.ops.aten.alias.default,
-    torch.ops.aten.clone.default,
-    torch.ops.aten.detach.default,
-    torch.ops.aten.expand.default,
-    torch.ops.aten.permute.default,
-    torch.ops.aten.reshape.default,
-    torch.ops.aten.select.int,
-    torch.ops.aten.slice.Tensor,
-    torch.ops.aten.squeeze.default,
-    torch.ops.aten.squeeze.dim,
-    torch.ops.aten.transpose.int,
-    torch.ops.aten.unsqueeze.default,
-    torch.ops.aten.view.default,
+_SDPA_QUERY_DTYPES = {
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
 }
 
-_PRESERVE_VALUES_METHOD_TARGETS = {
-    "clone",
-    "contiguous",
-    "detach",
-    "expand",
-    "permute",
-    "reshape",
-    "squeeze",
-    "transpose",
-    "unsqueeze",
-    "view",
-}
+_GE_TARGETS = {operator.ge}
 
-_BITWISE_AND_TARGETS = {
-    operator.and_,
-    torch.bitwise_and,
-    torch.logical_and,
-    torch.ops.aten.bitwise_and.Tensor,
-    torch.ops.aten.logical_and.default,
-}
+_ADD_TARGETS = {operator.add}
 
-_GE_TARGETS = {
-    operator.ge,
-    torch.ge,
-    torch.ops.aten.ge.Scalar,
-    torch.ops.aten.ge.Tensor,
-}
+_SUB_TARGETS = {operator.sub}
 
-_ADD_TARGETS = {
-    operator.add,
-    torch.add,
-    torch.ops.aten.add.Scalar,
-    torch.ops.aten.add.Tensor,
-}
+_ARANGE_TARGETS = {torch.arange}
 
-_SUB_TARGETS = {
-    operator.sub,
-    torch.sub,
-    torch.ops.aten.sub.Scalar,
-    torch.ops.aten.sub.Tensor,
-}
+_ONES_TARGETS = {torch.ones}
 
-_MUL_TARGETS = {
-    operator.mul,
-    torch.mul,
-    torch.ops.aten.mul.Scalar,
-    torch.ops.aten.mul.Tensor,
-}
-
-_ARANGE_TARGETS = {
-    torch.arange,
-    torch.ops.aten.arange.default,
-    torch.ops.aten.arange.start,
-    torch.ops.aten.arange.start_step,
-}
-
-_ONES_TARGETS = {
-    torch.ones,
-    torch.ones_like,
-    torch.ops.aten.ones.default,
-    torch.ops.aten.ones_like.default,
-}
-
-_SCALAR_TARGETS = {
-    torch.tensor,
-    torch.ops.aten.scalar_tensor.default,
-}
-
-_ZEROS_TARGETS = {
-    torch.zeros,
-    torch.zeros_like,
-    torch.ops.aten.zeros.default,
-    torch.ops.aten.zeros_like.default,
-}
-
-_MASKED_FILL_TARGETS = {
-    torch.masked_fill,
-    torch.ops.aten.masked_fill.Scalar,
-    torch.ops.aten.masked_fill.Tensor,
-}
+_SCALAR_TARGETS = {torch.tensor}
 
 
 def _node_meta_tensor(node: Node) -> torch.Tensor | None:
@@ -233,392 +154,25 @@ def _node_meta_tensor(node: Node) -> torch.Tensor | None:
 
 
 def _node_dtype(node: Node) -> torch.dtype | None:
-    meta_tensor = _node_meta_tensor(node)
-    if meta_tensor is not None:
-        return meta_tensor.dtype
-    return None
+    value = _node_meta_tensor(node)
+    return value.dtype if value is not None else None
 
 
-def _node_requires_grad(node: Node) -> bool:
-    meta_tensor = _node_meta_tensor(node)
-    if meta_tensor is not None:
-        return meta_tensor.requires_grad
-    return False
-
-
-def _node_has_signed_integer_dtype(node: Node) -> bool:
-    dtype = _node_dtype(node)
-    if not isinstance(dtype, torch.dtype):
+def _is_exact_number(value: object, expected: int | float) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-
-    try:
-        info = torch.iinfo(dtype)
-    except (TypeError, ValueError):
+    if isinstance(value, float) and not math.isfinite(value):
         return False
-
-    return info.min < 0
-
-
-def _is_nonnegative_constant(value: object) -> bool:
-    return isinstance(value, (int, float)) and value >= 0
+    return value == expected
 
 
-def _is_nonpositive_constant(value: object) -> bool:
-    return isinstance(value, (int, float)) and value <= 0
-
-
-def _constant_product_is_nonnegative(lhs: object, rhs: object) -> bool:
-    return (
-        isinstance(lhs, (int, float))
-        and isinstance(rhs, (int, float))
-        and lhs * rhs >= 0
-    )
-
-
-def _is_constant(value: object, constant: int | float | bool) -> bool:
-    if isinstance(value, bool) or isinstance(constant, bool):
-        return value is constant
-    return isinstance(value, (int, float, bool)) and value == constant
-
-
-def _fill_value(node: Node) -> object:
-    if node.target is torch.full or node.target is torch.ops.aten.full.default:
-        return node.args[1] if len(node.args) > 1 else node.kwargs.get("fill_value")
-    if node.target in _SCALAR_TARGETS:
-        return node.args[0] if node.args else None
-    return None
-
-
-def _first_arg(node: Node) -> object:
-    if node.args:
-        return node.args[0]
-    return None
-
-
-def _arange_start_end_step(node: Node) -> tuple[object, object, object] | None:
-    if node.target not in _ARANGE_TARGETS or not node.args:
-        return None
-
-    if node.target in (torch.arange, torch.ops.aten.arange.default):
-        if len(node.args) == 1:
-            return 0, node.args[0], 1
-        start = node.args[0]
-        end = node.args[1]
-        step = node.args[2] if len(node.args) > 2 else 1
-        return start, end, step
-
-    if node.target is torch.ops.aten.arange.start:
-        return node.args[0], node.args[1], 1
-
-    return node.args[0], node.args[1], node.args[2]
-
-
-def _needs_explicit_arange_range_check(node: Node) -> bool:
-    dtype = node.kwargs.get("dtype")
-    if not isinstance(dtype, torch.dtype):
+def _is_finite_scalar_in_dtype(value: object, dtype: torch.dtype) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-
-    try:
-        info = torch.iinfo(dtype)
-    except (TypeError, ValueError):
+    if isinstance(value, float) and not math.isfinite(value):
         return False
-
-    return info.min < 0
-
-
-def _explicit_arange_range_stays_nonnegative(node: Node) -> bool:
-    values = _arange_start_end_step(node)
-    if values is None:
-        return False
-
-    start, end, step = values
-    if (
-        not isinstance(start, int)
-        or not isinstance(end, int)
-        or not isinstance(step, int)
-        or isinstance(start, bool)
-        or isinstance(end, bool)
-        or isinstance(step, bool)
-    ):
-        return False
-
-    if start < 0 or step <= 0:
-        return False
-
-    if end <= start:
-        return True
-
-    dtype = node.kwargs.get("dtype")
-    if not isinstance(dtype, torch.dtype):
-        return False
-    dtype_max = torch.iinfo(dtype).max
-    last_value = start + ((end - start - 1) // step) * step
-    return last_value <= dtype_max
-
-
-def _is_arange_start_nonnegative(node: Node) -> bool:
-    values = _arange_start_end_step(node)
-    if values is None:
-        return False
-
-    start, _, step = values
-
-    if not (
-        _is_nonnegative_constant(start) and isinstance(step, (int, float)) and step > 0
-    ):
-        return False
-
-    if _needs_explicit_arange_range_check(node):
-        return _explicit_arange_range_stays_nonnegative(node)
-
-    return True
-
-
-def _signed_integer_add_is_nonnegative(
-    lhs: object, rhs: object, alpha: object, memo: dict[Node, bool]
-) -> bool:
-    if isinstance(lhs, Node) and (_is_constant(alpha, 0) or _is_constant(rhs, 0)):
-        return _is_nonnegative_index_node(lhs, memo)
-
-    if isinstance(rhs, Node) and _is_constant(lhs, 0) and _is_constant(alpha, 1):
-        return _is_nonnegative_index_node(rhs, memo)
-
-    return False
-
-
-def _is_nonnegative_index_node(
-    node: object, memo: dict[Node, bool] | None = None
-) -> bool:
-    if not isinstance(node, Node):
-        return _is_nonnegative_constant(node)
-
-    if memo is None:
-        memo = {}
-    if node in memo:
-        return memo[node]
-    memo[node] = False
-
-    result = False
-    if node.op == "call_function":
-        if _is_arange_start_nonnegative(node):
-            result = True
-        elif node.target in _PRESERVE_VALUES_FUNCTION_TARGETS:
-            result = _is_nonnegative_index_node(_first_arg(node), memo)
-        elif node.target in _ADD_TARGETS and len(node.args) >= 2:
-            lhs, rhs = node.args[0], node.args[1]
-            alpha = node.kwargs.get("alpha", 1)
-            if _node_has_signed_integer_dtype(node):
-                result = _signed_integer_add_is_nonnegative(lhs, rhs, alpha, memo)
-            else:
-                result = (
-                    _is_nonnegative_index_node(lhs, memo)
-                    and _constant_product_is_nonnegative(alpha, rhs)
-                ) or (
-                    _is_nonnegative_constant(lhs)
-                    and _is_nonnegative_constant(alpha)
-                    and _is_nonnegative_index_node(rhs, memo)
-                )
-    elif node.op == "call_method":
-        if node.target in _PRESERVE_VALUES_METHOD_TARGETS:
-            result = _is_nonnegative_index_node(_first_arg(node), memo)
-
-    memo[node] = result
-    return result
-
-
-def _is_known_one_additive_mask_node(
-    node: object, memo: dict[Node, bool] | None = None
-) -> bool:
-    if not isinstance(node, Node):
-        return _is_constant(node, 1)
-
-    if memo is None:
-        memo = {}
-    if node in memo:
-        return memo[node]
-    memo[node] = False
-
-    if _node_dtype(node) is torch.bool or _node_requires_grad(node):
-        return False
-
-    result = False
-    if node.op == "call_function":
-        if node.target in _ONES_TARGETS:
-            result = True
-        elif (
-            node.target is torch.full
-            or node.target is torch.ops.aten.full.default
-            or node.target in _SCALAR_TARGETS
-        ):
-            result = _is_constant(_fill_value(node), 1)
-        elif node.target in _PRESERVE_VALUES_FUNCTION_TARGETS:
-            result = _is_known_one_additive_mask_node(_first_arg(node), memo)
-    elif node.op == "call_method":
-        if node.target == "to" or node.target in _PRESERVE_VALUES_METHOD_TARGETS:
-            result = _is_known_one_additive_mask_node(_first_arg(node), memo)
-
-    memo[node] = result
-    return result
-
-
-def _is_known_false_mask_node(
-    node: object, memo: dict[Node, bool] | None = None
-) -> bool:
-    if not isinstance(node, Node):
-        return node is False
-
-    if memo is None:
-        memo = {}
-    if node in memo:
-        return memo[node]
-    memo[node] = False
-
-    if _node_dtype(node) is not torch.bool:
-        return False
-
-    result = False
-    if node.op == "call_function":
-        if node.target in _ZEROS_TARGETS:
-            result = True
-        elif (
-            node.target is torch.full
-            or node.target is torch.ops.aten.full.default
-            or node.target in _SCALAR_TARGETS
-        ):
-            result = _fill_value(node) is False
-        elif node.target in _PRESERVE_VALUES_FUNCTION_TARGETS:
-            result = _is_known_false_mask_node(_first_arg(node), memo)
-        elif node.target in _BITWISE_AND_TARGETS and len(node.args) >= 2:
-            result = any(_is_known_false_mask_node(arg, memo) for arg in node.args[:2])
-    elif node.op == "call_method":
-        if node.target == "to" and _is_known_zero_additive_mask_node(_first_arg(node)):
-            result = True
-        elif node.target == "to":
-            result = _is_known_false_mask_node(_first_arg(node), memo)
-        elif node.target in _PRESERVE_VALUES_METHOD_TARGETS:
-            result = _is_known_false_mask_node(_first_arg(node), memo)
-
-    memo[node] = result
-    return result
-
-
-def _is_finite_scalar_constant(value: object) -> bool:
-    return isinstance(value, (int, float)) and math.isfinite(value)
-
-
-def _is_zero_times_constant(node: Node, memo: dict[Node, bool]) -> bool:
-    if len(node.args) < 2:
-        return False
-    lhs, rhs = node.args[0], node.args[1]
-    return (
-        _is_known_zero_additive_mask_node(lhs, memo) and _is_finite_scalar_constant(rhs)
-    ) or (
-        _is_finite_scalar_constant(lhs) and _is_known_zero_additive_mask_node(rhs, memo)
-    )
-
-
-def _is_known_zero_additive_mask_node(
-    node: object, memo: dict[Node, bool] | None = None
-) -> bool:
-    if not isinstance(node, Node):
-        return _is_constant(node, 0)
-
-    if memo is None:
-        memo = {}
-    if node in memo:
-        return memo[node]
-    memo[node] = False
-
-    if _node_dtype(node) is torch.bool or _node_requires_grad(node):
-        return False
-
-    result = False
-    if node.op == "call_function":
-        if node.target in _ZEROS_TARGETS:
-            result = True
-        elif (
-            node.target is torch.full
-            or node.target is torch.ops.aten.full.default
-            or node.target in _SCALAR_TARGETS
-        ):
-            result = _is_constant(_fill_value(node), 0)
-        elif node.target in _PRESERVE_VALUES_FUNCTION_TARGETS:
-            result = _is_known_zero_additive_mask_node(_first_arg(node), memo)
-        elif node.target in _ADD_TARGETS and len(node.args) >= 2:
-            alpha = node.kwargs.get("alpha", 1)
-            result = (
-                _is_known_zero_additive_mask_node(node.args[0], memo)
-                and _is_known_zero_additive_mask_node(node.args[1], memo)
-                and _is_constant(alpha, 1)
-            )
-        elif node.target in _SUB_TARGETS and len(node.args) >= 2:
-            alpha = node.kwargs.get("alpha", 1)
-            result = _is_constant(alpha, 1) and (
-                (
-                    _is_known_zero_additive_mask_node(node.args[0], memo)
-                    and _is_known_zero_additive_mask_node(node.args[1], memo)
-                )
-                or (
-                    _is_known_one_additive_mask_node(node.args[0])
-                    and _is_known_one_additive_mask_node(node.args[1])
-                )
-            )
-        elif node.target in _MUL_TARGETS:
-            result = _is_zero_times_constant(node, memo)
-        elif node.target in _MASKED_FILL_TARGETS and len(node.args) >= 3:
-            result = _is_known_zero_additive_mask_node(
-                node.args[0], memo
-            ) and _is_known_false_mask_node(node.args[1])
-    elif node.op == "call_method":
-        if node.target == "to" or node.target in _PRESERVE_VALUES_METHOD_TARGETS:
-            result = _is_known_zero_additive_mask_node(_first_arg(node), memo)
-        elif node.target == "masked_fill" and len(node.args) >= 3:
-            result = _is_known_zero_additive_mask_node(
-                node.args[0], memo
-            ) and _is_known_false_mask_node(node.args[1])
-
-    memo[node] = result
-    return result
-
-
-def _is_known_true_mask_node(
-    node: object, memo: dict[Node, bool] | None = None
-) -> bool:
-    if not isinstance(node, Node):
-        return node is True
-
-    if memo is None:
-        memo = {}
-    if node in memo:
-        return memo[node]
-    memo[node] = False
-
-    if _node_dtype(node) is not torch.bool:
-        return False
-
-    result = False
-    if node.op == "call_function":
-        if node.target in _ONES_TARGETS:
-            result = True
-        elif node.target is torch.full or node.target is torch.ops.aten.full.default:
-            fill_value = (
-                node.args[1] if len(node.args) > 1 else node.kwargs.get("fill_value")
-            )
-            result = fill_value is True
-        elif node.target in _PRESERVE_VALUES_FUNCTION_TARGETS:
-            result = _is_known_true_mask_node(_first_arg(node), memo)
-        elif node.target in _BITWISE_AND_TARGETS and len(node.args) >= 2:
-            result = all(_is_known_true_mask_node(arg, memo) for arg in node.args[:2])
-        elif node.target in _GE_TARGETS and len(node.args) >= 2:
-            result = _is_nonnegative_index_node(
-                node.args[0]
-            ) and _is_nonpositive_constant(node.args[1])
-    elif node.op == "call_method":
-        if node.target == "to" or node.target in _PRESERVE_VALUES_METHOD_TARGETS:
-            result = _is_known_true_mask_node(_first_arg(node), memo)
-
-    memo[node] = result
-    return result
+    dtype_max = torch.finfo(dtype).max
+    return -dtype_max <= value <= dtype_max
 
 
 def _get_sdpa_mask_node(node: Node) -> Node | None:
@@ -629,6 +183,32 @@ def _get_sdpa_mask_node(node: Node) -> Node | None:
     else:
         mask = None
     return mask if isinstance(mask, Node) else None
+
+
+def _get_sdpa_is_causal(node: Node) -> object:
+    if "is_causal" in node.kwargs:
+        return node.kwargs["is_causal"]
+    if len(node.args) >= 6:
+        return node.args[5]
+    return False
+
+
+def _sdpa_metadata_is_valid(node: Node, mask: Node) -> bool:
+    query = node.args[0] if node.args else node.kwargs.get("query")
+    if not isinstance(query, Node) or _node_meta_tensor(node) is None:
+        return False
+
+    query_meta = _node_meta_tensor(query)
+    mask_meta = _node_meta_tensor(mask)
+    if query_meta is None or mask_meta is None:
+        return False
+    if query_meta.layout is not torch.strided or mask_meta.layout is not torch.strided:
+        return False
+    if query_meta.device != mask_meta.device:
+        return False
+    if query_meta.dtype not in _SDPA_QUERY_DTYPES:
+        return False
+    return mask_meta.dtype is torch.bool or mask_meta.dtype is query_meta.dtype
 
 
 def _replace_sdpa_mask_with_none(node: Node) -> None:
@@ -642,30 +222,271 @@ def _replace_sdpa_mask_with_none(node: Node) -> None:
         node.args = tuple(args)
 
 
+def _is_full_slice_index(index: object) -> bool:
+    if not isinstance(index, tuple):
+        return False
+    for item in index:
+        if item is None or item is Ellipsis:
+            continue
+        if isinstance(item, slice) and (
+            item.start is None and item.stop is None and item.step is None
+        ):
+            continue
+        return False
+    return True
+
+
+def _strip_shape_only_ops(node: Node, matched: set[Node]) -> Node:
+    while True:
+        if node.op == "call_method" and node.target == "expand" and node.args:
+            source = node.args[0]
+        elif (
+            node.op == "call_function"
+            and node.target is operator.getitem
+            and len(node.args) >= 2
+            and _is_full_slice_index(node.args[1])
+        ):
+            source = node.args[0]
+        else:
+            return node
+
+        if not isinstance(source, Node):
+            return node
+        matched.add(node)
+        node = source
+
+
+def _arange_start_end_step(node: Node) -> tuple[object, object, object] | None:
+    if node.target not in _ARANGE_TARGETS:
+        return None
+
+    if node.target is torch.arange:
+        if "end" in node.kwargs:
+            start = node.args[0] if node.args else node.kwargs.get("start", 0)
+            end = node.kwargs["end"]
+            step = node.args[1] if len(node.args) > 1 else node.kwargs.get("step", 1)
+            return start, end, step
+        if len(node.args) == 1:
+            return 0, node.args[0], node.kwargs.get("step", 1)
+        if len(node.args) >= 2:
+            step = node.args[2] if len(node.args) > 2 else node.kwargs.get("step", 1)
+            return node.args[0], node.args[1], step
+        return None
+
+    return None
+
+
+def _match_default_arange(node: Node, matched: set[Node]) -> bool:
+    values = _arange_start_end_step(node)
+    if values is None or _node_dtype(node) is not torch.int64:
+        return False
+    start, _, step = values
+    if not (_is_exact_number(start, 0) and _is_exact_number(step, 1)):
+        return False
+    matched.add(node)
+    return True
+
+
+def _strip_identity_add(node: Node, matched: set[Node]) -> Node:
+    if node.op != "call_function" or node.target not in _ADD_TARGETS:
+        return node
+    if len(node.args) < 2 or not _is_exact_number(node.kwargs.get("alpha", 1), 1):
+        return node
+
+    lhs, rhs = node.args[:2]
+    if isinstance(lhs, Node) and _is_exact_number(rhs, 0):
+        matched.add(node)
+        return lhs
+    if isinstance(rhs, Node) and _is_exact_number(lhs, 0):
+        matched.add(node)
+        return rhs
+    return node
+
+
+def _match_bidirectional_boolean_mask(mask: Node) -> set[Node] | None:
+    if _node_dtype(mask) is not torch.bool:
+        return None
+
+    matched: set[Node] = set()
+    comparison = _strip_shape_only_ops(mask, matched)
+    if (
+        comparison.op != "call_function"
+        or comparison.target not in _GE_TARGETS
+        or len(comparison.args) < 2
+        or not _is_exact_number(comparison.args[1], 0)
+    ):
+        return None
+    matched.add(comparison)
+
+    indices = comparison.args[0]
+    if not isinstance(indices, Node):
+        return None
+    indices = _strip_shape_only_ops(indices, matched)
+    indices = _strip_identity_add(indices, matched)
+    if not _match_default_arange(indices, matched):
+        return None
+    return matched
+
+
+def _requested_to_dtype(node: Node) -> torch.dtype | None:
+    dtype = node.kwargs.get("dtype")
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    for arg in node.args[1:]:
+        if isinstance(arg, torch.dtype):
+            return arg
+    return None
+
+
+def _match_to_dtype(node: Node, dtype: torch.dtype, matched: set[Node]) -> Node | None:
+    if (
+        node.op != "call_method"
+        or node.target != "to"
+        or not node.args
+        or _requested_to_dtype(node) is not dtype
+        or _node_dtype(node) is not dtype
+    ):
+        return None
+    source = node.args[0]
+    if not isinstance(source, Node):
+        return None
+    matched.add(node)
+    return source
+
+
+def _match_scalar_one(node: object, dtype: torch.dtype, matched: set[Node]) -> bool:
+    if (
+        not isinstance(node, Node)
+        or node.op != "call_function"
+        or node.target not in _SCALAR_TARGETS
+        or not node.args
+        or not _is_exact_number(node.args[0], 1)
+        or _node_dtype(node) is not dtype
+    ):
+        return False
+    matched.add(node)
+    return True
+
+
+def _match_expanded_ones(node: Node, dtype: torch.dtype, matched: set[Node]) -> bool:
+    if node.op == "call_method" and node.target == "to":
+        source = _match_to_dtype(node, dtype, matched)
+        if source is None:
+            return False
+        node = source
+    elif _node_dtype(node) is not dtype:
+        return False
+
+    node = _strip_shape_only_ops(node, matched)
+    node_meta = _node_meta_tensor(node)
+    if (
+        node.op != "call_function"
+        or node.target not in _ONES_TARGETS
+        or node_meta is None
+        or not node_meta.dtype.is_floating_point
+    ):
+        return False
+    matched.add(node)
+    return True
+
+
+def _match_transformers_additive_mask(mask: Node) -> set[Node] | None:
+    mask_meta = _node_meta_tensor(mask)
+    if (
+        mask_meta is None
+        or not mask_meta.dtype.is_floating_point
+        or mask_meta.requires_grad
+        or mask.op != "call_method"
+        or mask.target != "masked_fill"
+        or len(mask.args) < 3
+    ):
+        return None
+
+    inverted, condition, fill_value = mask.args[:3]
+    if not isinstance(inverted, Node) or not isinstance(condition, Node):
+        return None
+    if not _is_finite_scalar_in_dtype(fill_value, mask_meta.dtype):
+        return None
+
+    matched = {mask}
+    condition_source = _match_to_dtype(condition, torch.bool, matched)
+    if condition_source is not inverted:
+        return None
+
+    if (
+        inverted.op != "call_function"
+        or inverted.target not in _SUB_TARGETS
+        or len(inverted.args) < 2
+        or not _is_exact_number(inverted.kwargs.get("alpha", 1), 1)
+        or _node_dtype(inverted) is not mask_meta.dtype
+    ):
+        return None
+    matched.add(inverted)
+
+    one, expanded_ones = inverted.args[:2]
+    if not _match_scalar_one(one, mask_meta.dtype, matched):
+        return None
+    if not isinstance(expanded_ones, Node) or not _match_expanded_ones(
+        expanded_ones, mask_meta.dtype, matched
+    ):
+        return None
+    return matched
+
+
+def _matched_nodes_are_safe(matched: set[Node]) -> bool:
+    for node in matched:
+        value = _node_meta_tensor(node)
+        if value is None or value.requires_grad or node.is_impure():
+            return False
+        if "out" in node.kwargs and node.kwargs["out"] is not None:
+            return False
+        for user in node.users:
+            if user in matched:
+                continue
+            if user.op == "call_function" and user.target in _SDPA_TARGETS:
+                continue
+            return False
+    return True
+
+
 def remove_noop_sdpa_masks(gm: torch.fx.GraphModule) -> bool:
     """
-    Remove SDPA masks that are provably no-ops from their FX producers.
+    Remove the two structurally no-op SDPA masks emitted by Transformers.
 
-    Some libraries avoid data-dependent ``mask.all()`` checks while tracing and
-    materialize a full-attention boolean mask or zero additive mask instead. A
-    non-null SDPA mask prevents CUDA flash attention dispatch even when the mask
-    has no effect. This pass only handles masks proven no-op from graph
-    structure, such as the bidirectional ``arange(...) >= 0`` mask used by
-    Transformers.
+    Bidirectional attention can materialize ``arange(...) >= 0`` as an all-true
+    boolean mask. Its additive-mask helper materializes ``1 - ones`` followed by
+    ``masked_fill`` as an all-zero mask. Both prevent CUDA flash attention
+    dispatch. This pass deliberately matches only those exact producer graphs,
+    after successful fake execution, and only when their producers are pure and
+    used exclusively by the matched mask and SDPA calls.
     """
     changed = False
+    dead_candidates: set[Node] = set()
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in _SDPA_TARGETS:
             continue
         mask = _get_sdpa_mask_node(node)
-        if mask is not None and (
-            _is_known_true_mask_node(mask) or _is_known_zero_additive_mask_node(mask)
+        if (
+            mask is None
+            or _get_sdpa_is_causal(node) is not False
+            or not _sdpa_metadata_is_valid(node, mask)
         ):
-            _replace_sdpa_mask_with_none(node)
-            changed = True
+            continue
+
+        matched = _match_bidirectional_boolean_mask(mask)
+        if matched is None:
+            matched = _match_transformers_additive_mask(mask)
+        if matched is None or not _matched_nodes_are_safe(matched):
+            continue
+
+        _replace_sdpa_mask_with_none(node)
+        dead_candidates.update(matched)
+        changed = True
 
     if changed:
-        gm.graph.eliminate_dead_code()
+        for node in reversed(gm.graph.nodes):
+            if node in dead_candidates and not node.users:
+                gm.graph.erase_node(node)
         gm.graph.lint()
         gm.recompile()
 
