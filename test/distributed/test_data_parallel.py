@@ -59,12 +59,12 @@ class TestDataParallel(TestCase):
                 return x * self.t_rg + self.t_not_rg
 
         m = TestModule(
-            torch.randn(100, device=DEVICE_TYPE, requires_grad=True, dtype=torch.float)
+            torch.randn(100, device=DEVICE_TYPE, requires_grad=True, dtype=torch.double)
         )
         self.assertTrue(m.t_rg.requires_grad)
 
         dpm = nn.DataParallel(m, [0, 1])
-        inp = torch.randn(2, 100, device=DEVICE_TYPE, dtype=torch.float)
+        inp = torch.randn(2, 100, device=DEVICE_TYPE, dtype=torch.double)
 
         def fn(t):
             return dpm(inp)
@@ -541,7 +541,7 @@ class TestDataParallel(TestCase):
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR or DEVICE_TYPE == "npu", "gradcheck with float32 not reliable on NPU")
     def test_scatter_cpu(self):
-        self._test_scatter(torch.randn((4, 4), dtype=torch.float))
+        self._test_scatter(torch.randn((4, 4), dtype=torch.double))
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR or DEVICE_TYPE == "npu", "gradcheck with float32 not reliable on NPU")
     def test_scatter_gpu(self):
@@ -699,8 +699,8 @@ class TestDataParallel(TestCase):
 
     def _test_gather(self, output_device):
         inputs = (
-            torch.randn(2, 4, device=f"{DEVICE_TYPE}:0", requires_grad=True, dtype=torch.float),
-            torch.randn(2, 4, device=f"{DEVICE_TYPE}:1", requires_grad=True, dtype=torch.float),
+            torch.randn(2, 4, device=f"{DEVICE_TYPE}:0", requires_grad=True, dtype=torch.double),
+            torch.randn(2, 4, device=f"{DEVICE_TYPE}:1", requires_grad=True, dtype=torch.double),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -710,7 +710,7 @@ class TestDataParallel(TestCase):
             self.assertEqual(result.get_device(), output_device)
         else:
             self.assertEqual(result.device.type, "cpu")
-        grad = torch.randn((4, 4), dtype=torch.float)
+        grad = torch.randn((4, 4), dtype=torch.double)
         if output_device != -1:
             grad = grad.to(f"{DEVICE_TYPE}:{output_device}")
         result.backward(grad)
@@ -722,8 +722,8 @@ class TestDataParallel(TestCase):
 
         # test scalar inputs, should stack into a vector in this case
         inputs = (
-            torch.randn((), device=f"{DEVICE_TYPE}:0", requires_grad=True, dtype=torch.float),
-            torch.randn((), device=f"{DEVICE_TYPE}:1", requires_grad=True, dtype=torch.float),
+            torch.randn((), device=f"{DEVICE_TYPE}:0", requires_grad=True, dtype=torch.double),
+            torch.randn((), device=f"{DEVICE_TYPE}:1", requires_grad=True, dtype=torch.double),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([2]))
@@ -733,7 +733,7 @@ class TestDataParallel(TestCase):
             self.assertEqual(result.get_device(), output_device)
         else:
             self.assertEqual(result.device.type, "cpu")
-        grad = torch.randn(2, dtype=torch.float)
+        grad = torch.randn(2, dtype=torch.double)
         if output_device != -1:
             grad = grad.to(f"{DEVICE_TYPE}:{output_device}")
         result.backward(grad)
