@@ -94,11 +94,9 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
                 self.assertEqual(self.rank >= len(tensor_chunks), True)
 
 
+instantiate_device_type_tests(TestShardUtilsDistributed, globals(), except_for="cpu")
 instantiate_device_type_tests(
-    TestShardUtilsDistributed, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestShardUtilsDistributedDTensor, globals(), except_for="cpu", allow_xpu=True
+    TestShardUtilsDistributedDTensor, globals(), except_for="cpu"
 )
 if __name__ == "__main__":
     run_tests()
