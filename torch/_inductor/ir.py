@@ -1859,7 +1859,9 @@ class Reduction(Loops):
 
         if strict_reduction_multirow:
             if strict_reduction_rblock is None:
-                raise AssertionError("strict multirow sum requires a reduction block")
+                raise AssertionError(
+                    "strict multirow reduction requires a reduction block"
+                )
             actual_reduction_numel = reduction_numel
             original_inner_fn = inner_fn
             default = cls.default_value(reduction_type, dst_dtype)
