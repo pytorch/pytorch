@@ -6,11 +6,11 @@ skip:
     - BlenderbotForConditionalGeneration
     - GPTNeoForCausalLM
     - GPTNeoForSequenceClassification
+    # Fails importing transformers.modeling_deberta_v2 with current TorchScript.
+    - DebertaV2ForMaskedLM
     # Fails with even batch size = 1
     - GPTJForCausalLM
     - GPTJForQuestionAnswering
-    # Fails to import under the current Transformers stack.
-    - DebertaV2ForMaskedLM
     # Model too big
     - google/gemma-3-4b-it
     - openai/gpt-oss-20b

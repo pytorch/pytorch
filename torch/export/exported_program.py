@@ -8,7 +8,7 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any, final, NamedTuple, TYPE_CHECKING
 
@@ -192,7 +192,7 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
-    # ALL composite ops but today's C++ functinalization relies on
+    # ALL composite ops but today's C++ functionalization relies on
     # the fact that it is working with the opset after decomp is run.
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
@@ -328,6 +328,19 @@ def default_decompositions() -> "CustomDecompTable":
     return CustomDecompTable()
 
 
+def _raise_joint_parameter_mutation_error(
+    mutated_parameters: Iterable[str | None],
+) -> None:
+    names = [repr(name) for name in mutated_parameters]
+    parameter_word = "parameter" if len(names) == 1 else "parameters"
+    raise RuntimeError(
+        "Mutating module parameters while exporting a joint forward/backward "
+        "graph is not supported. Only buffers can be mutated as module state. "
+        "If this state does not need gradients, register it as a buffer "
+        f"instead. Found mutation on {parameter_word}: {', '.join(names)}."
+    )
+
+
 def _decompose_and_get_gm_with_new_signature_constants(
     ep: "ExportedProgram",
     *,
@@ -355,14 +368,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         )
 
     if joint_loss_index is not None and ep.graph_signature.parameters_to_mutate:
-        mutated_parameters = ", ".join(
-            repr(name) for name in ep.graph_signature.parameters_to_mutate.values()
-        )
-        raise RuntimeError(
-            "Mutating module parameters while exporting a joint forward/backward "
-            "graph is not supported. Only buffers can be mutated as module state. "
-            "If this state does not need gradients, register it as a buffer "
-            f"instead. Found mutation on parameter(s): {mutated_parameters}."
+        _raise_joint_parameter_mutation_error(
+            ep.graph_signature.parameters_to_mutate.values()
         )
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
@@ -516,7 +523,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 new_graph_signature = aten_export_artifact.sig
 
                 # In the previous step, we assume constants as buffers for AOTDispatcher to
-                # functianalize properly, so undo that here
+                # functionalize properly, so undo that here
                 new_graph_signature = (
                     _override_graph_signature_for_temp_registered_constants(
                         new_graph_signature, temp_registered_constants
@@ -532,8 +539,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     ep.graph_signature, new_graph_signature
                 )
 
-                constants = _materialize_and_lift_constants(
-                    gm, new_graph_signature, new_fake_constant_attrs
+                constants = {
+                    **ep.constants,
+                    **aten_export_artifact.constants,
+                }
+                constants.update(
+                    _materialize_and_lift_constants(
+                        gm, new_graph_signature, new_fake_constant_attrs
+                    )
                 )
 
                 placeholder_naming_pass(
@@ -582,7 +595,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if name not in unwrapped_params_buffers:
                     new_state_dict.pop(name)
 
-        return gm, new_graph_signature, new_state_dict
+        return gm, new_graph_signature, new_state_dict, constants
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -617,7 +630,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 joint_loss_index if joint_loss_index is not None else None
             ),
         )
-        assert isinstance(gm, torch.fx.GraphModule)  # noqa: S101
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
         gm.graph.eliminate_dead_code()
 
     # Update the signatures with the new placeholder names in case they
@@ -733,13 +747,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         i = user_inputs_index[input_name]
         input_spec = ep.graph_signature.input_specs[i]
         if input_spec.kind == InputKind.PARAMETER:
-            raise RuntimeError(
-                "Mutating module parameters while exporting a joint "
-                "forward/backward graph is not supported. Only buffers can be "
-                "mutated as module state. If this state does not need gradients, "
-                "register it as a buffer instead. Found mutation on parameter "
-                f"{input_spec.target!r}."
-            )
+            _raise_joint_parameter_mutation_error([input_spec.target])
         if input_spec.kind not in (InputKind.USER_INPUT, InputKind.BUFFER):
             raise AssertionError(
                 f"expected input_spec.kind to be USER_INPUT or BUFFER, got {input_spec.kind}"
@@ -819,17 +827,19 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # values; since these become specialized, we replace such metadata with
     # the original values.
     # Also, set the param/buffer metadata back to the placeholders.
+    inputs_to_parameters = new_graph_signature.inputs_to_parameters
+    inputs_to_buffers = new_graph_signature.inputs_to_buffers
     for old_node, new_node in zip(old_placeholders, new_placeholders):
         if not isinstance(old_node.meta["val"], torch.Tensor):
             new_node.meta["val"] = old_node.meta["val"]
 
         if (
-            new_node.target in new_graph_signature.inputs_to_parameters
-            or new_node.target in new_graph_signature.inputs_to_buffers
+            new_node.target in inputs_to_parameters
+            or new_node.target in inputs_to_buffers
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature, ep.state_dict
+    return gm, new_graph_signature, ep.state_dict, ep.constants
 
 
 def _remove_unnecessary_copy_op_pass(
@@ -838,14 +848,16 @@ def _remove_unnecessary_copy_op_pass(
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
+    buffers_to_mutate = new_graph_signature.buffers_to_mutate
+    parameters_to_mutate = new_graph_signature.parameters_to_mutate
     with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
         for node in gm.graph.nodes:
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
                     if isinstance(out, torch.fx.Node) and (
-                        out.name in new_graph_signature.buffers_to_mutate
-                        or out.name in new_graph_signature.parameters_to_mutate
+                        out.name in buffers_to_mutate
+                        or out.name in parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
@@ -1031,6 +1043,7 @@ def _decompose_exported_program(
         gm,
         new_graph_signature,
         state_dict,
+        constants,
     ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
@@ -1069,7 +1082,7 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
-        constants=ep.constants,
+        constants=constants,
     )
     return exported_program
 
@@ -1473,10 +1486,12 @@ class ExportedProgram:
             print_output=False, colored=False
         ).replace("\n", "\n    ")
         graph_signature = str(self.graph_signature).replace("\n", "\n    ")
+        # No space after "Graph signature:" — graph_signature starts with
+        # a newline; trailing whitespace breaks expecttest snapshots.
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {graph_signature}\n"
+            f"Graph signature:{graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string
