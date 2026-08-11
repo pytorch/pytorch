@@ -1094,6 +1094,7 @@ elseif(USE_CUDA)
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available
@@ -1558,6 +1559,7 @@ if(USE_ROCM)
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
         )
         set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
