@@ -40,7 +40,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6) -> bool:
         a: The node that may have a dependency on b.
         b: The node that a may have a dependency on.
         search_depth: In the case of an indirect dependency, this function
-                        searches upto this many nodes away in search of a
+                        searches up to this many nodes away in search of a
                         data dependency. If none is found, the function
                         makes the conservative assumption that there is a
                         dependency.
@@ -124,7 +124,7 @@ def merge_matmul(in_mod: torch.nn.Module) -> torch.fx.GraphModule:
         rhs_users.setdefault(rhs, []).append(node)
 
     for rhs, mms in rhs_users.items():
-        # There must be at least matmuls for a merge to make sense.
+        # There must be at least two matmuls for a merge to make sense.
         if len(mms) < 2:
             continue
 

@@ -28,6 +28,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
     sm_is_or_higher_than,
 )
 from torch.testing._internal.common_fsdp import get_devtype
@@ -197,6 +198,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
@@ -233,6 +235,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_compile_fp16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
@@ -253,6 +256,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
     def test_ddp_optimizer_splits_graph(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
@@ -320,6 +325,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         pattern_matcher=False,
     )
     def test_bucketing_coalesced_op(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -362,6 +369,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         pattern_matcher=False,
     )
     def test_bucketing_concat_op(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)

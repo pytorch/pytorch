@@ -983,7 +983,7 @@ class MKLDNNSubgraphSlicer {
       return norm_shape.has_value() && norm_shape->size() == 1;
     }
 
-    // unary ops we dont need to prove anything else than
+    // unary ops we don't need to prove anything else than
     // the input is mkldnn supported
     switch (n->kind()) {
       case aten::relu:
