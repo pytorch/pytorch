@@ -245,6 +245,10 @@ class LazyBackend : public Backend {
   void eagerConnectSingleDevice(at::Device device) override {
     primary_->eagerConnectSingleDevice(device);
   }
+  void setBoundDeviceId(std::optional<at::Device> device) override {
+    primary_->setBoundDeviceId(device);
+    Backend::setBoundDeviceId(primary_->getBoundDeviceId());
+  }
   void setTimeout(std::chrono::milliseconds timeout) override {
     primary_->setTimeout(timeout);
     std::lock_guard<std::mutex> lk(pair_mu_);
