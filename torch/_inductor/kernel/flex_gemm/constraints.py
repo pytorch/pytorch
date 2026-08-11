@@ -5,6 +5,10 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    FlexGemmOutputStorageLayout,
+    output_layout_supports_config,
+)
 from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
@@ -114,6 +118,9 @@ LOCAL_REDUCE_MIXED_MATCH_ERROR = (
 LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
     "FlexGEMM local-reduce broadcast values must share one grouped layout"
 )
+FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR = (
+    "FlexGEMM output layout transforms must be returned directly as a validated output"
+)
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
@@ -123,12 +130,15 @@ LOCAL_REDUCE_RUNTIME_DENSE_MM_ERROR = (
     "FlexGEMM local reductions currently support only 2-D aten.mm"
 )
 LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {actual}"
+LOCAL_REDUCE_BLOCKED_AXIS_ERROR = (
+    "FlexGEMM blocked local-reduce outputs currently support only axis 1"
+)
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
-    "FlexGEMM output contractions do not compose with aux outputs, local "
-    "reductions, C, alpha/beta, or batched GEMMs yet"
+    "FlexGEMM output contractions do not compose with full-shape aux outputs, "
+    "C, alpha/beta, or batched GEMMs yet"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR = (
     "FlexGEMM output contractions currently support only numeric [1, 1] and "
@@ -505,6 +515,32 @@ def output_contraction_config_supported(config: Any, n: Any) -> bool:
 
 
 FlexGemmLocalReduceGeometry = GemmReductionGeometry
+
+
+def flex_gemm_output_config_supported(
+    config: Any,
+    n: Any,
+    local_reduce_geometries: Sequence[FlexGemmLocalReduceGeometry],
+    output_contraction: FlexGemmOutputContraction | None,
+    output_layout: FlexGemmOutputStorageLayout | None,
+    output_layout_geometry: FlexGemmLocalReduceGeometry | None,
+    *,
+    allow_local_reduce_swap_ab: bool = False,
+) -> bool:
+    """Return whether one config satisfies the complete output-plan contract."""
+    return (
+        (output_contraction is None or output_contraction_config_supported(config, n))
+        and all(
+            validate_flex_gemm_local_reduce_config(
+                config,
+                geometry.group,
+                geometry.axis,
+                allow_swap_ab=allow_local_reduce_swap_ab,
+            )
+            for geometry in local_reduce_geometries
+        )
+        and output_layout_supports_config(output_layout, config, output_layout_geometry)
+    )
 
 
 @dataclasses.dataclass(frozen=True)

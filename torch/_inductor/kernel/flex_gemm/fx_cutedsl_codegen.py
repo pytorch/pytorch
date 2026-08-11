@@ -27,20 +27,25 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
+    FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
     LOCAL_REDUCE_AUX_TENSORSSA_ERROR,
+    LOCAL_REDUCE_BLOCKED_AXIS_ERROR,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
+    local_reduce_compressed_shape,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_SCALAR_ONLY_ERROR,
     LOCAL_REDUCE_MIXED_MATCH_ERROR,
     LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR,
+    LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR,
     LOCAL_REDUCE_POST_POINTWISE_FINALIZE_ERROR,
     LOCAL_REDUCE_SINGLE_PHYSICAL_FINALIZE_ERROR,
     local_reduce_unsupported_tensorssa_error,
 )
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
     _cute_call,
@@ -70,6 +75,7 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedSelect,
     NormalizedSplit,
     NormalizedSqueeze,
+    NormalizedToBlocked,
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
@@ -89,8 +95,20 @@ from torch.utils._sympy.value_ranges import ValueRanges
 FlexGemmEpilogueGraph = _epilogue_analysis.GemmEpilogueGraph
 FlexGemmLocalReduceAnalysis = _epilogue_analysis.GemmLocalReduceAnalysis
 FlexGemmLocalReduceMatch = _epilogue_analysis.GemmLocalReduceMatch
-FlexGemmLocalReduceStore = _epilogue_analysis.GemmLocalReduceStore
 FlexGemmOutputLocalReducePlan = _epilogue_analysis.GemmOutputLocalReducePlan
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmLocalReduceStore(_epilogue_analysis.GemmLocalReduceStore):
+    """Extend a shared reduction store with FlexGEMM physical storage metadata."""
+
+    value_node: torch.fx.Node
+    output_layout: FlexGemmOutputStorageLayout | None = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not isinstance(self.value_node, torch.fx.Node):
+            raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,7 +116,25 @@ class FlexGemmOutputPlan(_epilogue_analysis.GemmOutputPlan):
     """Extend output planning with contraction and terminal storage metadata."""
 
     output_contraction: FlexGemmOutputContraction | None = None
-    output_storage: torch.fx.Node | None = None
+    output_dtype_view: torch.fx.Node | None = None
+
+    @property
+    def output_storage(self) -> torch.fx.Node | None:
+        """Return the physical source beneath the terminal dtype view."""
+        if self.output_dtype_view is None:
+            return None
+        source = self.output_dtype_view.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise RuntimeError("FlexGEMM terminal dtype view has no tensor source")
+        return source
+
+    @property
+    def local_reduce_store(self) -> FlexGemmLocalReduceStore | None:
+        """Return the validated FlexGEMM store attached to the reduction plan."""
+        store = None if self.local_reduce is None else self.local_reduce.store
+        if store is not None and not isinstance(store, FlexGemmLocalReduceStore):
+            raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
+        return store
 
 
 FlexGemmCuteDSLKernel = GemmEpilogueCuteDSLKernel
@@ -135,10 +171,48 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
         )
 
 
+def flex_gemm_compressed_aux_plan(
+    analysis: FlexGemmLocalReduceAnalysis,
+    physical_output_shape: tuple[Any, ...],
+    aux: torch.fx.Node,
+    aux_index: int,
+) -> FlexGemmOutputLocalReducePlan | None:
+    """Plan a compressed reduction relative to the physical accumulator shape."""
+    normalized = analysis.graph.normalized_nodes.get(aux)
+    if isinstance(normalized, NormalizedToBlocked):
+        source = normalized.source
+        output_layout = FlexGemmOutputStorageLayout.BLOCKED_128X4
+    else:
+        source = aux
+        output_layout = None
+    match = analysis.matches.get(source)
+    source_meta = source.meta.get("val")
+    aux_meta = aux.meta.get("val")
+    if match is None or source_meta is None or aux_meta is None:
+        return None
+    expected_aux_shape = local_reduce_compressed_shape(
+        physical_output_shape, match.geometry.group, match.geometry.axis
+    )
+    if not statically_known_shape_equal(expected_aux_shape, source_meta.shape):
+        return None
+    if output_layout is not None and match.geometry.axis != 1:
+        raise NotImplementedError(LOCAL_REDUCE_BLOCKED_AXIS_ERROR)
+    return match.to_plan(
+        store=FlexGemmLocalReduceStore(
+            node=aux,
+            aux_index=aux_index,
+            value_node=source,
+            output_layout=output_layout,
+        ),
+        feeds_main=False,
+    )
+
+
 def tuple_output_plan(
     output: Any,
     aux_outputs: tuple[Any, ...],
     analysis: FlexGemmLocalReduceAnalysis,
+    physical_output_shape: tuple[Any, ...],
 ) -> FlexGemmOutputPlan:
     """Classify multi-output epilogues after checking local-reduce consumers."""
     if not isinstance(output, torch.fx.Node) or not all(
@@ -147,24 +221,27 @@ def tuple_output_plan(
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
     feed_match = analysis.common_feed_main_match((output, *aux_outputs))
     compressed_aux_plans = tuple(
-        (index, match, plan)
+        (index, plan)
         for index, aux_output in enumerate(aux_outputs)
-        if (match := analysis.matches.get(aux_output)) is not None
-        if (plan := analysis.compressed_aux_plan(output, aux_output, index)) is not None
+        if (
+            plan := flex_gemm_compressed_aux_plan(
+                analysis, physical_output_shape, aux_output, index
+            )
+        )
+        is not None
     )
     if len(compressed_aux_plans) > 1:
         raise NotImplementedError(LOCAL_REDUCE_MIXED_MATCH_ERROR)
     if compressed_aux_plans:
-        local_reduce_index, compressed_match, compressed_aux_plan = (
-            compressed_aux_plans[0]
-        )
+        local_reduce_index, compressed_aux_plan = compressed_aux_plans[0]
+        compressed_store = compressed_aux_plan.store
+        if compressed_store is None:
+            raise AssertionError("compressed aux plans require an output store")
         if feed_match is not None:
-            if feed_match.value_node is not compressed_match.value_node:
+            if feed_match.value_node is not compressed_aux_plan.match.value_node:
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             compressed_aux_plan = feed_match.to_plan(
-                store=FlexGemmLocalReduceStore(
-                    aux_outputs[local_reduce_index], local_reduce_index
-                ),
+                store=compressed_store,
                 feeds_main=True,
             )
         return FlexGemmOutputPlan(
@@ -186,9 +263,24 @@ def tuple_output_plan(
     return FlexGemmOutputPlan(output, aux_outputs)
 
 
+def validate_output_layout_transforms(
+    graph: FlexGemmEpilogueGraph,
+    plan: FlexGemmOutputPlan,
+) -> None:
+    """Require every layout transform to be the output validated by the plan."""
+    store = plan.local_reduce_store
+    selected_node = store.node if store is not None and store.output_layout else None
+    if any(
+        isinstance(normalized, NormalizedToBlocked) and node is not selected_node
+        for node, normalized in graph.normalized_nodes.items()
+    ):
+        raise NotImplementedError(FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR)
+
+
 def output_plan(
     graph_module: torch.fx.GraphModule,
     local_reduce: FlexGemmLocalReduceAnalysis,
+    gemm: torch.fx.Node,
 ) -> FlexGemmOutputPlan:
     """Classify output consumers from one shared local-reduce analysis."""
     output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
@@ -200,7 +292,17 @@ def output_plan(
             output_value = output_value[0]
         else:
             output, *aux_outputs = output_value
-            return tuple_output_plan(output, tuple(aux_outputs), local_reduce)
+            physical_output_shape = tensor_meta_shape(gemm)
+            if physical_output_shape is None:
+                raise NotImplementedError(
+                    "FlexGEMM generated epilogues require GEMM output metadata"
+                )
+            return tuple_output_plan(
+                output,
+                tuple(aux_outputs),
+                local_reduce,
+                physical_output_shape,
+            )
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
@@ -217,7 +319,13 @@ def bind_terminal_output_storage(
     graph: FlexGemmEpilogueGraph, outputs: FlexGemmOutputPlan
 ) -> FlexGemmOutputPlan:
     """Record the physical value beneath a terminal same-width dtype view."""
-    normalized = graph.normalized_nodes.get(outputs.output)
+    dtype_view = outputs.output
+    while dtype_view.target is torch.ops.aten.alias.default:
+        source = dtype_view.args[0]
+        if not isinstance(source, torch.fx.Node):
+            return outputs
+        dtype_view = source
+    normalized = graph.normalized_nodes.get(dtype_view)
     if not isinstance(normalized, NormalizedDtypeView):
         return outputs
     source_meta = normalized.source.meta.get("val")
@@ -233,7 +341,7 @@ def bind_terminal_output_storage(
         raise NotImplementedError(
             "FlexGEMM terminal dtype views must preserve shape, stride, and element size"
         )
-    return dataclasses.replace(outputs, output_storage=normalized.source)
+    return dataclasses.replace(outputs, output_dtype_view=dtype_view)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -261,11 +369,14 @@ class OutputContractionPlan:
         local_reduce: FlexGemmLocalReduceAnalysis,
     ) -> FlexGemmOutputPlan:
         """Validate composition and install this output contraction."""
-        if outputs.aux_outputs or outputs.local_reduce is not None:
+        if outputs.aux_outputs:
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
-        if self.contraction.chunked and any(
-            local_reduce.graph.depends_on(outputs.output, reduced)
-            for reduced in local_reduce.matches
+        if self.contraction.chunked and (
+            outputs.local_reduce is not None
+            or any(
+                local_reduce.graph.depends_on(outputs.output, reduced)
+                for reduced in local_reduce.matches
+            )
         ):
             raise NotImplementedError(FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR)
         local_reduce.grouped_tensors.update(self.grouped_tensors)
@@ -355,12 +466,11 @@ def match_output_contraction_use(
         chunked = True
         layout_node = view
     elif dim == len(shape) - 1:
-        grouped_layout = local_reduce.grouped_tensors.get(view)
-        if grouped_layout is None or grouped_layout.axis != 1:
+        group = guarded_int(shape[-1])
+        if group is None or group <= 1:
             return None
-        group = grouped_layout.group
         chunked = False
-        layout_node = None
+        layout_node = view
     else:
         return None
     return OutputContractionUse(
@@ -499,8 +609,9 @@ class FlexGemmEpilogueAnalysis:
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
         outputs = bind_terminal_output_storage(
-            local_reduce.graph, output_plan(graph_module, local_reduce)
+            local_reduce.graph, output_plan(graph_module, local_reduce, gemm)
         )
+        validate_output_layout_transforms(local_reduce.graph, outputs)
         contraction_plan = build_output_contraction_plan(
             outputs.output, gemm, local_reduce
         )
@@ -648,12 +759,13 @@ class FlexGemmEpilogueEmitter:
         self.store_sources: dict[torch.fx.Node, Any] = {}
         self.physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction] = {}
         self.local_reduce = self.outputs.local_reduce
+        store = self.outputs.local_reduce_store
         self.feed_main: torch.fx.Node | None = None
         self.aux: torch.fx.Node | None = None
         self.feed_main_input: torch.fx.Node | None = None
         match self.local_reduce:
             case FlexGemmOutputLocalReducePlan(
-                match=local_reduce_match, store=store, feeds_main=True
+                match=local_reduce_match, feeds_main=True
             ):
                 self.feed_main = local_reduce_match.value_node
                 reduction = self.graph.normalized_nodes.get(
@@ -662,11 +774,11 @@ class FlexGemmEpilogueEmitter:
                 if not isinstance(reduction, NormalizedReduction):
                     raise AssertionError("feed-main plans require a matched reduction")
                 self.feed_main_input = reduction.source
-                self.aux = None if store is None else store.node
-            case FlexGemmOutputLocalReducePlan(
-                store=FlexGemmLocalReduceStore(node=store_node)
-            ):
-                self.aux = store_node
+                self.aux = None if store is None else store.value_node
+            case FlexGemmOutputLocalReducePlan():
+                if store is None:
+                    raise AssertionError("returned local reductions require a store")
+                self.aux = store.value_node
             case None:
                 pass
 
@@ -827,22 +939,22 @@ class FlexGemmEpilogueEmitter:
 
     def lower_call_function(self, node: torch.fx.Node) -> None:
         """Lower one call_function node using the ordered FlexGEMM handlers."""
+        normalized = self.graph.normalized_nodes.get(node)
+        if isinstance(normalized, NormalizedDtypeView):
+            if node is not self.outputs.output_dtype_view:
+                raise NotImplementedError(
+                    "FlexGEMM supports dtype views only as terminal same-width main outputs"
+                )
+            self.env[node] = _cute_arg(normalized.source, self.env)
+            return
+        if isinstance(normalized, NormalizedToBlocked):
+            self.env[node] = _cute_arg(normalized.source, self.env)
+            return
         lowered = lower_full_scalar(node)
         if lowered is not None:
             self.env[node] = lowered
             return
-        normalized = self.graph.normalized_nodes.get(node)
         match normalized:
-            case NormalizedDtypeView():
-                if (
-                    node is not self.outputs.output
-                    or normalized.source is not self.outputs.output_storage
-                ):
-                    raise NotImplementedError(
-                        "FlexGEMM supports dtype views only as terminal same-width main outputs"
-                    )
-                self.env[node] = _cute_arg(normalized.source, self.env)
-                return
             case NormalizedSqueeze():
                 lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
                 if lowered is not None:
