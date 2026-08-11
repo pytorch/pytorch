@@ -44,6 +44,7 @@ ReductionType = Literal[
     "welford_reduce",
     "welford_combine",
     "any",
+    "fmax",
     "max",
     "min",
     "prod",
@@ -359,6 +360,9 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def maximum(self, x0: T, x1: T) -> T:
+        raise NotImplementedError
+
+    def fmaximum(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
     def cos(self, x0: T) -> T:
@@ -836,7 +840,10 @@ class DefaultHandler(OpsHandler[Any]):
                 for p in sig.parameters.values()
             ):
                 self_arg, *args = sig.parameters.keys()
-                assert self_arg == "self"
+                if self_arg != "self":
+                    raise AssertionError(
+                        f"expected first parameter 'self', got {self_arg!r}"
+                    )
                 code.write(
                     f"""
                     def {target}(self, {", ".join(args)}):

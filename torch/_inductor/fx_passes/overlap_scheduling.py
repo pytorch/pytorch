@@ -120,7 +120,8 @@ def get_group_name(n: fx.Node) -> str:
         kwargs=n.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    assert opt_args_kwargs is not None
+    if opt_args_kwargs is None:
+        raise AssertionError("failed to normalize args/kwargs for node")
     _, kwargs = opt_args_kwargs
     return _resolve_group_name(kwargs["group_name"])
 
@@ -231,7 +232,7 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
             flop_key, args, kwargs, out, compute_dtypes, node_meta=node.meta
         )
         if isinstance(compute_ns, (torch.SymInt, torch.SymFloat)):
-            compute_ns = compute_ns.node.hint if compute_ns.node.has_hint() else 0.0
+            compute_ns = hint if (hint := compute_ns.hint) is not None else 0.0
 
     # Transfer time (memory bandwidth-based, uses size_hint internally)
     transfer_ns = get_transfer_time(flat_args_kwargs, flat_outs)
@@ -243,10 +244,7 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
 def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
-    assert isinstance(x, torch.SymInt)
-    if not x.node.has_hint():
-        return None
-    return x.node.hint
+    return x.hint
 
 
 def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
@@ -264,7 +262,8 @@ def benchmark_node_with_cache_key(
     | None = None,
 ) -> tuple[float, str | None]:
     """Benchmark a compute node and return (runtime, cache_key)."""
-    assert is_compute_node(n)
+    if not is_compute_node(n):
+        raise AssertionError(f"expected a compute node, got {n}")
 
     # HOPs can't be benchmarked standalone (args include subgraphs) — use analytical
     from torch._ops import HigherOrderOperator
@@ -697,11 +696,13 @@ class OverlapScheduler:
         for node in self.nodes:
             if _schedulable_wait_node(node):
                 start = _get_collective_node_from_wait(node)
-                assert start is not None
-                assert start in self.node_estimations, (
-                    f"Missing estimation for collective {start.name}. "
-                    f"Ensure custom_runtime_estimation returns a value for this node."
-                )
+                if start is None:
+                    raise AssertionError("wait node has no associated collective")
+                if start not in self.node_estimations:
+                    raise AssertionError(
+                        f"Missing estimation for collective {start.name}. "
+                        f"Ensure custom_runtime_estimation returns a value for this node."
+                    )
                 self.wait_to_start[node] = start
                 # For coalesced collectives, multiple waits share the same
                 # start node. Only register the first wait as the representative.
@@ -1107,7 +1108,8 @@ class OverlapScheduler:
         # TODO: we could consider skipping overlapping for overlapable, unary chains to collectives.
         # using these nodes for overlap prevents bucketing. potentially if chain time < latency
         if runtime_estimate is None:
-            assert not is_compute_node(node), "should have estimate for compute nodes"
+            if is_compute_node(node):
+                raise AssertionError("should have estimate for compute nodes")
             self._schedule(node)
             return
         if runtime_estimate == 0 and not is_compute_node(node):
@@ -1129,8 +1131,10 @@ class OverlapScheduler:
 
     def _schedule(self, node: fx.Node) -> None:
         """Schedule a node."""
-        assert node not in self.scheduled
-        assert all(n in self.scheduled for n in node.all_input_nodes)
+        if node in self.scheduled:
+            raise AssertionError(f"node {node} already scheduled")
+        if not all(n in self.scheduled for n in node.all_input_nodes):
+            raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
         self.memory_tracker.schedule_node(node)
@@ -1231,7 +1235,8 @@ class OverlapScheduler:
 
     def _handle_wait(self, node: fx.Node) -> None:
         """Handle scheduling a wait."""
-        assert node in self.wait_to_start
+        if node not in self.wait_to_start:
+            raise AssertionError(f"wait node {node} has no associated start")
         coll_start = self.wait_to_start[node]
         # For coalesced collectives, multiple waits share the same start node.
         # The first wait completes the collective; subsequent waits just schedule.
@@ -1482,7 +1487,7 @@ class OverlapScheduler:
 
             # if we schedule a wait tensor whose start collective is hidden by the
             # current compute node we are scheduling, then we are effectively exposing it.
-            # similarly, dont schedule a wait of a collective that could be otherwise hidden,
+            # similarly, don't schedule a wait of a collective that could be otherwise hidden,
             # thus forcing it to be exposed.
             # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):
@@ -1536,7 +1541,8 @@ class OverlapScheduler:
     def _wait_is_hidden(
         self, wait_node: fx.Node, overlap_node: fx.Node | None = None
     ) -> bool:
-        assert is_wait_tensor(wait_node)
+        if not is_wait_tensor(wait_node):
+            raise AssertionError(f"expected a wait tensor node, got {wait_node}")
         info = self.collective_info[self.wait_to_start[wait_node]]
         return not info.is_exposed and overlap_node not in info.hiding_nodes
 
@@ -1545,9 +1551,13 @@ class OverlapScheduler:
     ) -> None:
         """Schedule all nodes needed to reach a collective."""
 
-        assert all(n not in self.scheduled for n in path)
+        if not all(n not in self.scheduled for n in path):
+            raise AssertionError("path contains already-scheduled nodes")
         for node in sorted(path, key=lambda n: self.node_idx[n]):
-            assert not (is_compute_node(node) or node in self.unscheduled_collectives)
+            if is_compute_node(node) or node in self.unscheduled_collectives:
+                raise AssertionError(
+                    f"unexpected compute or unscheduled collective node {node} in path"
+                )
             if _schedulable_wait_node(node):
                 # When we schedule wait tensors, we also force realization of all
                 # collectives enqueued prior to their corresponding collective.
@@ -1557,7 +1567,10 @@ class OverlapScheduler:
                     continue
 
                 info = self.collective_info[self.wait_to_start[node]]
-                assert curr_overlap_node not in info.hiding_nodes
+                if curr_overlap_node in info.hiding_nodes:
+                    raise AssertionError(
+                        "overlap node unexpectedly in collective hiding_nodes"
+                    )
                 self._handle_wait(node)
                 continue
 
@@ -1718,7 +1731,8 @@ def gather_node_runtime_estimations(
     for node in nodes:
         if _schedulable_wait_node(node):
             start = _get_collective_node_from_wait(node)
-            assert start is not None
+            if start is None:
+                raise AssertionError("wait node has no associated collective")
             if start in estimations:
                 continue
             estimations[start] = estimate_collective_time(
