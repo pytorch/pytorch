@@ -316,7 +316,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     else None
                 ),
                 reduction_tensors.feed_output,
-                reduction_config.primary_constexprs(),
+                reduction_config.blockscaled_primary_constexprs(),
                 target_sm=target_sm,
             )
         return self.cute_compile(
@@ -387,8 +387,10 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 reduction_tensors.feed_output,
             )
             if local_reduce_out is not logical_reduce_out:
-                assert local_reduce_out is not None  # noqa: S101
-                assert logical_reduce_out is not None  # noqa: S101
+                if local_reduce_out is None:
+                    raise AssertionError("expected padded local-reduction output")
+                if logical_reduce_out is None:
+                    raise AssertionError("expected logical local-reduction output")
                 with torch.cuda.stream(stream):
                     compact = (
                         local_reduce_out.runtime_tensor[..., 0]
