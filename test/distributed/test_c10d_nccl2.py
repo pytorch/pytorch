@@ -175,6 +175,43 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
 
 
+class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        os.environ["LOCAL_RANK"] = str(rank)
+        store = dist.FileStore(rdvz_file, world_size)
+        dist.init_process_group(
+            backend=cls.backend_str(),
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            pg_options=cls.opts(),
+            timeout=cls.timeout,
+            device_id=torch.device("cuda", rank),
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_with_nonmembers(self) -> None:
+        ranks = [0]
+        group = dist.new_group(ranks=ranks)
+        if self.rank in ranks:
+            tensor = torch.tensor([self.rank + 1], device=self.device)
+            dist.all_reduce(tensor, group=group)
+            self.assertEqual(tensor, torch.ones_like(tensor))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+
+        store = dist.distributed_c10d._get_default_store()
+        store.set(f"eager_new_group/{self.rank}", b"1")
+        store.wait([f"eager_new_group/{rank}" for rank in range(self.world_size)])
+        self._check_all_reduce()
+
+
 class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
@@ -245,6 +282,80 @@ class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
         )
         dist.scatter(output, scatter_list, src=0)
         self.assertEqual(output, tensor)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_split_with_nonblocking_communicator(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        opts = self.opts()
+        child = backend.split(dist.distributed_c10d._get_default_store(), [0], opts)
+        if self.rank == 0:
+            tensor = torch.ones(1, device=self.device)
+            child.allreduce([tensor]).wait()
+            self.assertEqual(tensor, torch.ones_like(tensor))
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        group = dist.new_group(pg_options=self.opts(), device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
+
+
+class ProcessGroupNCCL2EnvironmentConfigTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_HIGH_PRIORITY"] = "1"
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "1"
+        os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        return dist.ProcessGroupNCCL2.Options()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_environment_config(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertEqual(backend.options.config.blocking, 0)
+
+        tensor = torch.ones(1024, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        work.wait()
+        torch.cuda.synchronize(self.device)
+        self.assertGreater(work._get_duration(), 0)
+
+
+class ProcessGroupNCCL2NonblockingOptionPrecedenceTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.config.blocking = 1
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_explicit_option_takes_precedence(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertEqual(backend.options.config.blocking, 1)
+        self._check_all_reduce()
 
 
 class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
@@ -374,6 +485,54 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             # silently proceeding on a dead communicator.
             with self.assertRaises(RuntimeError):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+        else:
+            time.sleep(30)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_timeout_with_communicator_cleanup(self) -> None:
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "2"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            deadline = time.time() + 60
+            while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
+                time.sleep(0.5)
+            self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
+            with self.assertRaises(RuntimeError):
+                dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+        else:
+            time.sleep(30)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_times_out_and_process_survives(self) -> None:
+        pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            work = dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                work.wait()
         else:
             time.sleep(30)
 
@@ -577,6 +736,9 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-lazy"
+
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        self.skipTest("nccl-lazy does not support communicator shrink")
 
 
 def _live_env(name: str) -> str | None:
