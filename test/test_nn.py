@@ -15492,6 +15492,34 @@ if __name__ == '__main__':
             self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
 
     @skipMPS
+    @parametrize_test("loss_name", ["mse_loss", "smooth_l1_loss"])
+    @parametrize_test("target_dtype", [torch.int64, torch.bool])
+    @parametrize_test("reduction", ["mean", "sum", "none"])
+    def test_loss_forward_ad_integer_or_bool_target(self, device, loss_name, target_dtype, reduction):
+        loss_fn = getattr(F, loss_name)
+        x = torch.tensor([0.5, 1.5, 0.25, 2.0, 1.0], device=device)
+        if target_dtype == torch.bool:
+            target = torch.tensor([True, False, True, False, True], device=device)
+        else:
+            target = torch.tensor([1, 0, 2, 0, 1], dtype=target_dtype, device=device)
+        v = torch.tensor([1.0, 0.0, 0.0, 0.0, 0.0], device=device)
+
+        xb = x.clone().requires_grad_()
+        reverse_out = loss_fn(xb, target, reduction=reduction)
+        reverse_out.backward(torch.ones_like(reverse_out))
+        expected_tangent = xb.grad * v if reduction == "none" else (xb.grad * v).sum()
+
+        with fwAD.dual_level():
+            _, int_target_tangent = fwAD.unpack_dual(loss_fn(fwAD.make_dual(x, v), target, reduction=reduction))
+        self.assertEqual(int_target_tangent, expected_tangent)
+
+        with fwAD.dual_level():
+            _, float_target_tangent = fwAD.unpack_dual(
+                loss_fn(fwAD.make_dual(x, v), target.to(dtype=x.dtype), reduction=reduction)
+            )
+        self.assertEqual(int_target_tangent, float_target_tangent)
+
+    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_lengthchecks(self, device):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
