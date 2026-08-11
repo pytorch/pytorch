@@ -817,14 +817,8 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 pass
 
 
-instantiate_device_type_tests(
-    TestUnshardParams, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestUnshardParamsNoShard, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestUnshardParamsErrors, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestUnshardParams, globals(), except_for="cpu")
+instantiate_device_type_tests(TestUnshardParamsNoShard, globals(), except_for="cpu")
+instantiate_device_type_tests(TestUnshardParamsErrors, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
