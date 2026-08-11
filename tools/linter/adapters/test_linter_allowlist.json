@@ -148,7 +148,6 @@
   "test/distributed/tensor/experimental/test_tp_transform.py",
   "test/distributed/tensor/parallel/test_micro_pipeline_tp.py",
   "test/distributed/tensor/parallel/test_parallelize_api.py",
-  "test/distributed/tensor/parallel/test_tp_examples.py",
   "test/distributed/tensor/parallel/test_tp_random_state.py",
   "test/distributed/tensor/parallel/test_tp_style.py",
   "test/distributed/tensor/test_api.py",
