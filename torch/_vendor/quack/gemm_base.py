@@ -219,13 +219,24 @@ class GemmBase:
                 else:
                     copy_utils.cvt_copy(tiled_copy_r2s, tRS_rD, tRS_sD_cur)
             if const_expr(aux_out_ctx is not None):
-                tiled_copy_aux_out_r2s, tRS_sAuxOut, copy_aux_out = aux_out_ctx
-                cute.copy(
-                    tiled_copy_aux_out_r2s,
-                    # Need contiguous for Sm80 and Sm120 where acc layout is ((2, 2), MMA_M, MMA_N)
-                    copy_utils.contiguous(tiled_copy_aux_out_r2s.retile(tRS_rAuxOut_out)),
-                    tRS_sAuxOut[None, None, None, epi_buffer],
-                )
+                if const_expr(isinstance(tRS_rAuxOut_out, tuple)):
+                    for i, aux_ctx in enumerate(aux_out_ctx):
+                        tiled_copy_aux_out_r2s, tRS_sAuxOut, _ = aux_ctx
+                        cute.copy(
+                            tiled_copy_aux_out_r2s,
+                            copy_utils.contiguous(
+                                tiled_copy_aux_out_r2s.retile(tRS_rAuxOut_out[i])
+                            ),
+                            tRS_sAuxOut[None, None, None, epi_buffer],
+                        )
+                else:
+                    tiled_copy_aux_out_r2s, tRS_sAuxOut, _ = aux_out_ctx[0]
+                    cute.copy(
+                        tiled_copy_aux_out_r2s,
+                        # Need contiguous for Sm80 and Sm120 where acc layout is ((2, 2), MMA_M, MMA_N)
+                        copy_utils.contiguous(tiled_copy_aux_out_r2s.retile(tRS_rAuxOut_out)),
+                        tRS_sAuxOut[None, None, None, epi_buffer],
+                    )
             if const_expr(use_tma_epi):
                 cute.arch.fence_view_async_shared()
                 epilogue_barrier.arrive_and_wait()
@@ -233,14 +244,16 @@ class GemmBase:
                     if const_expr(has_D):
                         copy_D(src_idx=epi_buffer, dst_idx=epi_coord)
                     if const_expr(aux_out_ctx is not None):
-                        copy_aux_out(src_idx=epi_buffer, dst_idx=epi_coord)
+                        for _, _, copy_aux_out in aux_out_ctx:
+                            copy_aux_out(src_idx=epi_buffer, dst_idx=epi_coord)
                     epi_store_pipeline.producer_commit()
             else:
                 epilogue_barrier.arrive_and_wait()
                 if const_expr(has_D):
                     copy_D(src_idx=epi_buffer, dst_idx=epi_coord)
                 if const_expr(aux_out_ctx is not None):
-                    copy_aux_out(src_idx=epi_buffer, dst_idx=epi_coord)
+                    for _, _, copy_aux_out in aux_out_ctx:
+                        copy_aux_out(src_idx=epi_buffer, dst_idx=epi_coord)
                 epilogue_barrier.arrive_and_wait()
 
         self.epi_end(

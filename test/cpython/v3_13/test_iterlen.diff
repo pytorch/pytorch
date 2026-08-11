@@ -1,0 +1,169 @@
+diff --git a/test/cpython/v3_13/test_iterlen.py b/test/cpython/v3_13/test_iterlen.py
+index 41c9752e557..44605a9b00a 100644
+--- a/test/cpython/v3_13/test_iterlen.py
++++ b/test/cpython/v3_13/test_iterlen.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_iterlen.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """ Test Iterator Length Transparency
+ 
+ Some functions or methods which accept general iterable arguments have
+@@ -49,7 +67,7 @@ from operator import length_hint
+ n = 10
+ 
+ 
+-class TestInvariantWithoutMutations:
++class __TestInvariantWithoutMutations:
+ 
+     def test_invariant(self):
+         it = self.it
+@@ -60,7 +78,7 @@ class TestInvariantWithoutMutations:
+         self.assertRaises(StopIteration, next, it)
+         self.assertEqual(length_hint(it), 0)
+ 
+-class TestTemporarilyImmutable(TestInvariantWithoutMutations):
++class __TestTemporarilyImmutable(__TestInvariantWithoutMutations):
+ 
+     def test_immutable_during_iteration(self):
+         # objects such as deques, sets, and dictionaries enforce
+@@ -76,75 +94,86 @@ class TestTemporarilyImmutable(TestInvariantWithoutMutations):
+ 
+ ## ------- Concrete Type Tests -------
+ 
+-class TestRepeat(TestInvariantWithoutMutations, unittest.TestCase):
++class TestRepeat(__TestInvariantWithoutMutations, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.it = repeat(None, n)
+ 
+-class TestXrange(TestInvariantWithoutMutations, unittest.TestCase):
++class TestXrange(__TestInvariantWithoutMutations, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.it = iter(range(n))
+ 
+-class TestXrangeCustomReversed(TestInvariantWithoutMutations, unittest.TestCase):
++class TestXrangeCustomReversed(__TestInvariantWithoutMutations, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.it = reversed(range(n))
+ 
+-class TestTuple(TestInvariantWithoutMutations, unittest.TestCase):
++class TestTuple(__TestInvariantWithoutMutations, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.it = iter(tuple(range(n)))
+ 
+ ## ------- Types that should not be mutated during iteration -------
+ 
+-class TestDeque(TestTemporarilyImmutable, unittest.TestCase):
++class TestDeque(__TestTemporarilyImmutable, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         d = deque(range(n))
+         self.it = iter(d)
+         self.mutate = d.pop
+ 
+-class TestDequeReversed(TestTemporarilyImmutable, unittest.TestCase):
++class TestDequeReversed(__TestTemporarilyImmutable, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         d = deque(range(n))
+         self.it = reversed(d)
+         self.mutate = d.pop
+ 
+-class TestDictKeys(TestTemporarilyImmutable, unittest.TestCase):
++class TestDictKeys(__TestTemporarilyImmutable, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         d = dict.fromkeys(range(n))
+         self.it = iter(d)
+         self.mutate = d.popitem
+ 
+-class TestDictItems(TestTemporarilyImmutable, unittest.TestCase):
++class TestDictItems(__TestTemporarilyImmutable, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         d = dict.fromkeys(range(n))
+         self.it = iter(d.items())
+         self.mutate = d.popitem
+ 
+-class TestDictValues(TestTemporarilyImmutable, unittest.TestCase):
++class TestDictValues(__TestTemporarilyImmutable, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         d = dict.fromkeys(range(n))
+         self.it = iter(d.values())
+         self.mutate = d.popitem
+ 
+-class TestSet(TestTemporarilyImmutable, unittest.TestCase):
++class TestSet(__TestTemporarilyImmutable, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         d = set(range(n))
+         self.it = iter(d)
+         self.mutate = d.pop
+ 
+ ## ------- Types that can mutate during iteration -------
+ 
+-class TestList(TestInvariantWithoutMutations, unittest.TestCase):
++class TestList(__TestInvariantWithoutMutations, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.it = iter(range(n))
+ 
+     def test_mutation(self):
+@@ -162,9 +191,10 @@ class TestList(TestInvariantWithoutMutations, unittest.TestCase):
+         self.assertEqual(length_hint(it), 0)
+ 
+ 
+-class TestListReversed(TestInvariantWithoutMutations, unittest.TestCase):
++class TestListReversed(__TestInvariantWithoutMutations, CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.it = reversed(range(n))
+ 
+     def test_mutation(self):
+@@ -208,7 +238,7 @@ class NoneLengthHint(object):
+         return NotImplemented
+ 
+ 
+-class TestLengthHintExceptions(unittest.TestCase):
++class TestLengthHintExceptions(CPythonTestCase):
+ 
+     def test_issue1242657(self):
+         self.assertRaises(RuntimeError, list, BadLen())
+@@ -225,4 +255,4 @@ class TestLengthHintExceptions(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
