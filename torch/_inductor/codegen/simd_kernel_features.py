@@ -167,7 +167,7 @@ class SIMDKernelFeatures:
             return None
         if len(rblocks) != 1:
             raise AssertionError(
-                f"strict sums require one reduction block size, got {rblocks}"
+                f"strict reductions require one reduction block size, got {rblocks}"
             )
         return next(iter(rblocks))
 

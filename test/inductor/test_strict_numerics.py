@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-"""Tests for strict inner-contiguous sum ordering."""
+"""Tests for strict inner-contiguous reduction ordering."""
 
 import os
 import unittest

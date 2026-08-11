@@ -4746,7 +4746,7 @@ def reduction(
         triton_config.kwargs.get("R0_BLOCK", strict_rblock) != strict_rblock
         for triton_config in configs
     ):
-        raise AssertionError("strict sum requires its planned R0_BLOCK")
+        raise AssertionError("strict reduction requires its planned R0_BLOCK")
 
     if return_configs:
         return configs
