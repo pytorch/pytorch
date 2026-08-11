@@ -8,8 +8,8 @@ $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
-CUDA_VERSION_SHORT       ?= 12.1
-CUDA_VERSION             ?= 12.1.1
+CUDA_VERSION_SHORT       ?= 12.6
+CUDA_VERSION             ?= 12.6.3
 CUDNN_VERSION            ?= 9
 BASE_RUNTIME              = ubuntu:24.04
 BASE_DEVEL                = ubuntu:24.04

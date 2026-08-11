@@ -28,6 +28,17 @@ if(NOT SYSTEM_PROTOBUF)
     content
     "${content}")
 
+  # Stripping PROTOBUF_CONSTEXPR above makes the ConstantInitialized
+  # constructors non-constexpr, so the default-instance globals can no longer
+  # be constinit. Drop PROTOBUF_CONSTINIT (protobuf 3.21+) so they fall back to
+  # dynamic initialization instead of failing to compile.
+  string(
+    REPLACE
+    "PROTOBUF_CONSTINIT"
+    ""
+    content
+    "${content}")
+
   # https://github.com/protocolbuffers/protobuf/commit/0400cca3236de1ca303af38bf81eab332d042b7c
   # changes PROTOBUF_CONSTEXPR to constexpr, which breaks windows
   # build.

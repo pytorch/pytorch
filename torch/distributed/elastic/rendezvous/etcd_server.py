@@ -32,13 +32,13 @@ def find_free_port():
     Find a free port and binds a temporary socket to it so that the port can be "reserved" until used.
 
     .. note:: the returned socket must be closed before using the port,
-              otherwise a ``address already in use`` error will happen.
+              otherwise an ``address already in use`` error will happen.
               The socket should be held and closed as close to the
               consumer of the port as possible since otherwise, there
               is a greater chance of race-condition where a different
               process may see the port as being free and take it.
 
-    Returns: a socket binded to the reserved free port
+    Returns: a socket bound to the reserved free port
 
     Usage::
 
@@ -152,7 +152,7 @@ class EtcdServer:
         stderr: int | TextIO | None = None,
     ) -> None:
         """
-        Start the server, and waits for it to be ready. When this function returns the sever is ready to take requests.
+        Start the server, and waits for it to be ready. When this function returns the server is ready to take requests.
 
         Args:
             timeout: time (in seconds) to wait for the server to be ready
