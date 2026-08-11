@@ -3,6 +3,7 @@
 import sys
 import tempfile
 from typing import Any, IO
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -15,6 +16,7 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.checkpoint import (
+    DefaultLoadPlanner,
     FileSystemReader,
     FileSystemWriter,
     load,
@@ -128,6 +130,48 @@ class BlobState:
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
+    def test_read_data_sorts_items_by_storage_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            expected = {
+                "first": torch.arange(8),
+                "second": torch.arange(4),
+            }
+            save(
+                expected,
+                storage_writer=FileSystemWriter(path),
+            )
+
+            actual = {key: torch.empty_like(value) for key, value in expected.items()}
+            reader = FileSystemReader(path)
+            metadata = reader.read_metadata()
+            planner = DefaultLoadPlanner()
+            planner.set_up_planner(actual, metadata, is_coordinator=True)
+            reader.set_up_storage_reader(metadata, is_coordinator=True)
+            plan = planner.create_local_plan()
+
+            relative_paths = {
+                reader.storage_data[item.storage_index].relative_path
+                for item in plan.items
+            }
+            self.assertEqual(len(relative_paths), 1)
+            plan.items.sort(
+                key=lambda item: reader.storage_data[item.storage_index].offset,
+                reverse=True,
+            )
+            planned_offsets = [
+                reader.storage_data[item.storage_index].offset for item in plan.items
+            ]
+            self.assertGreater(planned_offsets[0], planned_offsets[-1])
+
+            with patch.object(
+                reader, "_slice_file", wraps=reader._slice_file
+            ) as slice_file:
+                reader.read_data(plan, planner).wait()
+
+            read_offsets = [call.args[1].offset for call in slice_file.call_args_list]
+            self.assertEqual(read_offsets, sorted(planned_offsets))
+            self.assertEqual(actual, expected)
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
