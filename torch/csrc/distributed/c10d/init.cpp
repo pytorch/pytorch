@@ -1253,6 +1253,17 @@ Example:
       .value("GATHER", ::c10d::HookOpName::GATHER)
       .value("SPLIT", ::c10d::HookOpName::SPLIT)
       .value("NEW_WINDOW", ::c10d::HookOpName::NEW_WINDOW)
+      .value("ALLREDUCE_COALESCED", ::c10d::HookOpName::ALLREDUCE_COALESCED)
+      .value("ALLGATHER_BASE", ::c10d::HookOpName::ALLGATHER_BASE)
+      .value("ALLGATHER_COALESCED", ::c10d::HookOpName::ALLGATHER_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::HookOpName::ALLGATHER_INTO_TENSOR_COALESCED)
+      .value("REDUCE_SCATTER_BASE", ::c10d::HookOpName::REDUCE_SCATTER_BASE)
+      .value(
+          "REDUCE_SCATTER_TENSOR_COALESCED",
+          ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(module, "PreHookArgs")
@@ -2942,6 +2953,10 @@ Arguments:
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
               "Collectively create a one-sided communication window; all ranks must call in the same order")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::ProcessGroup::supportsAbortHooks,
+              "(test whether the process group supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -2952,6 +2967,10 @@ Arguments:
               "unregister_abort_hook",
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::ProcessGroup::supportsCompletionHooks,
+              "(test whether the process group supports completion hooks)")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3100,6 +3119,10 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
               "Collectively create a one-sided communication window; all ranks must call in the same order")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::Backend::supportsAbortHooks,
+              "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
@@ -3110,6 +3133,10 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "unregister_abort_hook",
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::Backend::supportsCompletionHooks,
+              "(test whether the backend supports completion hooks)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -4855,12 +4882,19 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "attach",
           &::c10d::FlightRecorderHook::attach,
           py::arg("pg"),
+          py::arg("global_ranks") = std::vector<uint64_t>{},
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.)")
+is called or the returned handle is garbage collected.
+
+global_ranks maps the group's ranks to world ranks; it names the per-rank
+dump file and is published as the group's membership. Leave it empty only
+for a backend that fills in Options::global_ranks_in_group itself -- a
+group with no mapping from either source publishes none rather than
+fabricating 0..size-1, which would collide the dump files of a subgroup.)")
       .def("remove", &::c10d::FlightRecorderHook::remove);
 
   py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
@@ -4882,16 +4916,21 @@ be removed again via remove().)")
   module.def(
       "_dump_fr_trace_json",
       [](std::optional<bool> includeCollectives,
-         std::optional<bool> onlyActive) {
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
         return py::bytes(::c10d::dump_fr_trace_json(
-            includeCollectives.value_or(true), onlyActive.value_or(false)));
+            includeCollectives.value_or(true),
+            onlyActive.value_or(false),
+            backend));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
       R"(
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -4900,23 +4939,71 @@ be removed again via remove().)")
       "_dump_fr_trace",
       [](std::optional<bool> includeCollectives,
          std::optional<bool> includeStackTraces,
-         std::optional<bool> onlyActive) {
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
         return py::bytes(::c10d::dump_fr_trace(
             includeCollectives.value_or(true),
             includeStackTraces.value_or(true),
-            onlyActive.value_or(false)));
+            onlyActive.value_or(false),
+            backend));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("includeStackTraces") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
       R"(
             Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
+        )");
+  module.def(
+      "_dump_fr_trace_file",
+      [](int rank,
+         std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
+        ::c10d::dump_fr_trace_file(
+            rank,
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(false),
+            onlyActive.value_or(false),
+            backend);
+      },
+      py::arg("rank"),
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
+      py::call_guard<py::gil_scoped_release>(),
+      R"(
+            Dumps the pickled work traces to the file the registered
+            DebugInfoWriter points at, which defaults to
+            <TORCH_FR_DUMP_TEMP_FILE><rank>.
+
+            Arguments:
+                rank(int): Rank used to name the per-rank output file.
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
+        )");
+  module.def(
+      "_reset_fr_trace",
+      [](const std::string& backend) { ::c10d::reset_fr_trace(backend); },
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
+      R"(
+            Drops every work trace recorded so far, so a subsequent dump only
+            contains collectives issued after this call. Backend-agnostic
+            counterpart of _reset_fr_recording_nccl.
+
+            Arguments:
+                backend (str, optional): Name of the backend whose recorder instance to reset. Default is "gloo".
         )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
