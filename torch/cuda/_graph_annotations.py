@@ -47,7 +47,7 @@ import importlib.metadata
 from collections import defaultdict
 from contextlib import contextmanager
 from logging import getLogger
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -283,6 +283,65 @@ def _get_annotatable_types() -> set[Any]:
 _pending_scopes: list[tuple[Any, list[int]]] = []
 
 
+class _KernelScope(NamedTuple):
+    """Capture-frontier snapshot taken at scope entry, consumed at scope exit."""
+
+    graph: Any
+    frontier: list[Any]
+    entry_root_keys: set[int] | None
+    entry_direct_dependents: _ExistingDirectDependents
+
+
+def _begin_kernel_scope() -> _KernelScope | None:
+    """Snapshot the current stream's capture frontier; ``None`` if not capturing."""
+    stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
+        init_value=torch.cuda.current_stream().cuda_stream
+    )
+    capture_state = _get_capture_state(stream)
+    if capture_state is None:
+        return None
+    graph, frontier = capture_state
+
+    entry_root_keys: set[int] | None = None
+    entry_direct_dependents = {
+        int(node): {int(dep) for dep in _get_dependent_nodes(node)} for node in frontier
+    }
+    if not frontier:
+        entry_root_keys = {int(node) for node in _get_root_nodes(graph)}
+    return _KernelScope(graph, frontier, entry_root_keys, entry_direct_dependents)
+
+
+def _end_kernel_scope(scope: _KernelScope) -> list[int]:
+    """Walk nodes captured since ``scope`` was begun; return their toolsIds."""
+    if scope.frontier:
+        scope_nodes = _collect_descendants(
+            scope.frontier,
+            existing_direct_dependents=scope.entry_direct_dependents,
+        )
+    else:
+        new_roots = [
+            node
+            for node in _get_root_nodes(scope.graph)
+            if int(node) not in (scope.entry_root_keys or set())
+        ]
+        scope_nodes = _collect_descendants(new_roots, include_start_nodes=True)
+
+    annotatable = _get_annotatable_types()
+    tools_ids: list[int] = []
+    for node in scope_nodes.values():
+        node_type = _get_node_type(node)
+        if node_type not in annotatable:
+            continue
+        tools_ids.append(
+            _check_cuda_bindings(
+                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
+                    node
+                )
+            )
+        )
+    return tools_ids
+
+
 @contextmanager  # type: ignore[arg-type]
 def mark_kernels(annotation: str | dict[str, Any]):
     r"""mark_kernels(annotation)
@@ -335,54 +394,14 @@ def mark_kernels(annotation: str | dict[str, Any]):
     if isinstance(annotation, str):
         annotation = {"name": annotation}
 
-    stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=torch.cuda.current_stream().cuda_stream
-    )
-    capture_state = _get_capture_state(stream)
-    if capture_state is None:
+    scope = _begin_kernel_scope()
+    if scope is None:
         yield
         return
-    graph, frontier = capture_state
-
-    entry_root_keys: set[int] | None = None
-    entry_direct_dependents = {
-        int(node): {int(dep) for dep in _get_dependent_nodes(node)} for node in frontier
-    }
-    if not frontier:
-        entry_root_keys = {int(node) for node in _get_root_nodes(graph)}
 
     yield
 
-    if frontier:
-        scope_nodes = _collect_descendants(
-            frontier,
-            existing_direct_dependents=entry_direct_dependents,
-        )
-    else:
-        new_roots = [
-            node
-            for node in _get_root_nodes(graph)
-            if int(node) not in (entry_root_keys or set())
-        ]
-        scope_nodes = _collect_descendants(new_roots, include_start_nodes=True)
-
-    if not scope_nodes:
-        return
-
-    annotatable = _get_annotatable_types()
-    tools_ids: list[int] = []
-    for node in scope_nodes.values():
-        node_type = _get_node_type(node)
-        if node_type not in annotatable:
-            continue
-        tools_ids.append(
-            _check_cuda_bindings(
-                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
-                    node
-                )
-            )
-        )
-
+    tools_ids = _end_kernel_scope(scope)
     if tools_ids:
         _pending_scopes.append((annotation, tools_ids))
 
