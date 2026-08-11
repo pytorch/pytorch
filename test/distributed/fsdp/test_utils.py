@@ -236,6 +236,6 @@ class TestUtils(TestCase):
         self.assertIsNot(model1.lin._wrap_overrides, model2.lin._wrap_overrides)
 
 
-instantiate_device_type_tests(TestUtils, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestUtils, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
