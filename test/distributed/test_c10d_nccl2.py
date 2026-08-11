@@ -405,6 +405,7 @@ class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+@unittest.skipIf(torch.cuda.device_count() < 3, "requires at least 3 GPUs")
 class ProcessGroupNCCL2UnevenScalableInitTest(ProcessGroupNCCL2ScalableInitTest):
     world_size = 3
     ranks_per_root = 2
