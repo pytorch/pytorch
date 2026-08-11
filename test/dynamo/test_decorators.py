@@ -14,6 +14,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -29,6 +30,8 @@ def my_custom_function(x):
 
 
 class DecoratorTests(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1445,8 +1448,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         if compile_outer:
 
             class Foo:
-                @compile_decorator
                 @staticmethod
+                @compile_decorator
                 def bar(x):
                     return x.sin()
 
@@ -1473,8 +1476,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         class Foo:
-            @torch.compile(backend=cnt)
             @staticmethod
+            @torch.compile(backend=cnt)
             def bar(x):
                 return x.sin()
 
