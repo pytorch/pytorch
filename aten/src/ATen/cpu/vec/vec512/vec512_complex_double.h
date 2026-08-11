@@ -7,6 +7,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Exception.h>
 #if defined(CPU_CAPABILITY_AVX512)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -169,14 +170,8 @@ class Vectorized<c10::complex<double>> {
     if (count == size())
       return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-    __at_align__ double tmp_values[2 * size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(2 * size())) {
-      tmp_values[i] = 0.0;
-    }
+    // Zero tail past `count`.
+    __at_align__ double tmp_values[2 * size()] = {};
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
@@ -456,19 +451,19 @@ class Vectorized<c10::complex<double>> {
   }
   Vectorized<c10::complex<double>> operator<(
       const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator<=(
       const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>(
       const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>=(
       const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<c10::complex<double>> eq(

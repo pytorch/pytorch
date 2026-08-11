@@ -2,6 +2,7 @@
 
 
 import enum
+import gc
 import itertools
 import operator
 import types
@@ -16,6 +17,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
+import torch.fx as fx
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
@@ -28,6 +30,23 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+
+
+_test_global_dict: dict[str, Any] = {}
+
+
+class _BadCmpExc(Exception):
+    pass
+
+
+class _BadCmp:
+    # Hashable (so it can be a dict value compared via PyObject_RichCompareBool)
+    # but its __eq__ raises.
+    def __eq__(self, other: object) -> bool:
+        raise _BadCmpExc
+
+    def __hash__(self) -> int:
+        return 1
 
 
 class SimpleDict(dict):
@@ -757,6 +776,69 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_update_no_args(self):
+        def fn(x):
+            d = {"a": x}
+            result = d.update()
+            return d["a"], result is None, len(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_like(self):
+        class MappingLike:
+            def __init__(self, x):
+                self.d = {"a": x, "b": x + 1}
+
+            def keys(self):
+                return self.d.keys()
+
+            def __getitem__(self, key):
+                return self.d[key]
+
+        def fn(x):
+            d = {"a": x - 1}
+            result = d.update(MappingLike(x))
+            return d["a"], d["b"], result is None
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_proxy(self):
+        def fn(x):
+            source = {"a": x, "b": x + 1}
+            d = {"a": x - 1}
+            d.update(types.MappingProxyType(source))
+            return d["a"], d["b"]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_rejects_bad_sequence_element_length(self):
+        def fn():
+            try:
+                {}.update([(1, 2, 3)])
+            except ValueError as exc:
+                return "length 3; 2 is required" in str(exc)
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_update_rejects_too_many_args(self):
+        def fn():
+            try:
+                {}.update({}, {})
+            except TypeError:
+                return True
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
     def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             OrderedDict,
@@ -877,6 +959,354 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(d), d["obs"] * 2)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_setitem_replay_rejects_callback_capable_key(self):
+        class Counter:
+            value = 0
+
+        class Key:
+            def __init__(self, counter):
+                self.counter = counter
+
+            def __hash__(self):
+                return hash("c")
+
+            def __eq__(self, other):
+                self.counter.value += 1
+                return False
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        counter = Counter()
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d = {Key(counter): x}
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertIn("c", d)
+
+    def test_setitem_replay_rejects_python_finalizer(self):
+        class Value:
+            def __del__(self):
+                pass
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d = {"c": Value()}
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(d["c"], x + 1)
+
+    def test_setitem_replay_rejects_tensor_attrs_finalizer(self):
+        class Counter:
+            value = 0
+
+        counter = Counter()
+
+        class Attrs(dict):
+            def __del__(self):
+                counter.value += 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        displaced = torch.ones(2)
+        displaced.__dict__ = Attrs()
+        d = {"c": displaced}
+        del displaced
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        gc.collect()
+        self.assertEqual(counter.value, 1)
+
+    def test_setitem_replay_rejects_storage_weakref(self):
+        class Counter:
+            value = 0
+
+        counter = Counter()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        displaced = torch.ones(2)
+        storage = displaced.untyped_storage()
+        storage_ref = weakref.ref(
+            storage, lambda _: setattr(counter, "value", counter.value + 1)
+        )
+        del storage
+        gc.collect()
+        self.assertIsNotNone(storage_ref())
+
+        d = {"c": displaced}
+        del displaced
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        gc.collect()
+        self.assertIsNone(storage_ref())
+        self.assertEqual(counter.value, 1)
+
+    def test_setitem_replay_rejects_tensor_weakref(self):
+        class Counter:
+            value = 0
+
+        counter = Counter()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        displaced = torch.ones(2)
+        displaced_ref = weakref.ref(
+            displaced, lambda _: setattr(counter, "value", counter.value + 1)
+        )
+        d = {"c": displaced}
+        del displaced
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        gc.collect()
+        self.assertIsNone(displaced_ref())
+        self.assertEqual(counter.value, 1)
+
+    def test_setitem_tensor_standard_ownership_guard(self):
+        from torch._C._dynamo.guards import tensor_has_standard_ownership
+
+        plain = torch.ones(2)
+        dict_ids_before = [id(x) for x in gc.get_referents(plain) if type(x) is dict]
+        self.assertTrue(tensor_has_standard_ownership(plain))
+        self.assertEqual(
+            [id(x) for x in gc.get_referents(plain) if type(x) is dict],
+            dict_ids_before,
+        )
+
+        external = torch.frombuffer(bytearray(8), dtype=torch.uint8)
+        self.assertFalse(tensor_has_standard_ownership(external))
+
+        hooked = torch.ones(2, requires_grad=True)
+        hooked.register_hook(lambda grad: grad)
+        hooked.requires_grad_(False)
+        self.assertFalse(tensor_has_standard_ownership(hooked))
+
+        with_weakref = torch.ones(2)
+        tensor_ref = weakref.ref(with_weakref)
+        with unittest.mock.patch("weakref.getweakrefs", return_value=[]):
+            self.assertFalse(tensor_has_standard_ownership(with_weakref))
+        self.assertIs(tensor_ref(), with_weakref)
+
+        with_storage_wrapper = torch.ones(2)
+        storage = with_storage_wrapper.untyped_storage()
+        storage_ref = weakref.ref(storage)
+        self.assertFalse(tensor_has_standard_ownership(with_storage_wrapper))
+        del storage
+        gc.collect()
+        self.assertIsNotNone(storage_ref())
+        self.assertFalse(tensor_has_standard_ownership(with_storage_wrapper))
+
+    def test_setitem_replay_guard_does_not_materialize_tensor_dict(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        d = {}
+        self.assertEqual(fn(d, x), x + 2)
+        displaced = d["c"]
+        dict_ids_before = [
+            id(x) for x in gc.get_referents(displaced) if type(x) is dict
+        ]
+
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(
+            [id(x) for x in gc.get_referents(displaced) if type(x) is dict],
+            dict_ids_before,
+        )
+
+    def test_setitem_existing_equal_key_keeps_full_guard(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d[True] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        d1 = {}
+        self.assertEqual(fn(d1, x), x + 2)
+        self.assertEqual(list(d1), [True])
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = {1: x}
+        self.assertEqual(fn(d2, x), x + 2)
+        self.assertEqual(list(d2), [1])
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("consumer", ["set", "frozenset", "fromkeys", "list_extend"])
+    def test_setitem_then_key_consumer_guards_keys(self, consumer):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = x
+            if consumer == "set":
+                keys = set(d)
+            elif consumer == "frozenset":
+                keys = frozenset(d)
+            elif consumer == "fromkeys":
+                keys = dict.fromkeys(d)
+            else:
+                keys = []
+                keys.extend(d)
+            return x + len(keys)
+
+        x = torch.ones(2)
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_multiple_setitems_keep_full_guard_for_order(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["a"] = x + 1
+            d["b"] = x + 2
+            return x + 3
+
+        x = torch.ones(2)
+        d1 = {"z": x}
+        self.assertEqual(fn(d1, x), x + 3)
+        self.assertEqual(list(d1), ["z", "a", "b"])
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = {}
+        self.assertEqual(fn(d2, x), x + 3)
+        self.assertEqual(list(d2), ["a", "b"])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_defaultdict_setitem_guards_reconstruct_all_replay(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        d1 = defaultdict(list, {"a": x})
+        self.assertEqual(fn(d1, x), x + 2)
+        self.assertEqual(list(d1), ["a", "c"])
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = defaultdict(list, {"a": x, "b": x})
+        self.assertEqual(fn(d2, x), x + 2)
+        self.assertEqual(list(d2), ["a", "b", "c"])
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("first_has_key", [False, True])
+    def test_setitem_then_discarded_getitem_guards_membership(self, first_has_key):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = x
+            try:
+                d["b"]
+            except KeyError:
+                return x + 10
+            return x + 1
+
+        x = torch.ones(2)
+        d1 = {"b": x} if first_has_key else {}
+        d2 = {} if first_has_key else {"b": x}
+        self.assertEqual(fn(d1, x), x + (1 if first_has_key else 10))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d2, x), x + (10 if first_has_key else 1))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("ordered", [False, True])
+    def test_setitem_then_repr_guards_keys_and_order(self, ordered):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = 3
+            return x + len(repr(d))
+
+        make_dict = OrderedDict if ordered else dict
+        x = torch.ones(2)
+        d1 = make_dict([("a", 1)])
+        self.assertEqual(fn(d1, x), x + len(repr(d1)))
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = make_dict([("b", 2), ("a", 1)])
+        self.assertEqual(fn(d2, x), x + len(repr(d2)))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("ordered", [False, True])
+    def test_empty_popitem_guards_keys(self, ordered):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            try:
+                d.popitem()
+            except KeyError:
+                return x + 1
+            return x + 2
+
+        make_dict = OrderedDict if ordered else dict
+        x = torch.ones(2)
+        self.assertEqual(fn(make_dict(), x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d = make_dict([("a", x)])
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(d, make_dict())
+
     def test_setitem_then_contains_assigned_key_no_recompile(self):
         cnts = torch._dynamo.testing.CompileCounter()
         x = torch.ones(2)
@@ -929,6 +1359,175 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(d, x), x + 2)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_clear_then_contains_no_recompile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.clear()
+            if "b" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d2, {})
+
+    def test_clear_then_setitem_no_recompile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.clear()
+            d["c"] = x + 1
+            return d["c"]
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d1), {"c"})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d2), {"c"})
+
+    def test_dict_init_tracks_assigned_keys(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            dict.__init__(d, {"b": x})
+            if "b" not in d:
+                return x + 100
+            if "c" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d1), {"a", "b"})
+
+        d2 = {"a": x, "c": x}
+        self.assertEqual(fn(d2, x), x + 10)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"a", "b", "c"})
+
+    def test_setitem_provenance_does_not_repeat_user_hash(self):
+        class Key:
+            def __init__(self):
+                self.hash_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return 0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, key, x):
+            d[key] = x
+            present = key in d
+            return x + key.hash_count + (10 if present else 0)
+
+        key = Key()
+        x = torch.ones(2)
+        self.assertEqual(fn({}, key, x), x + 12)
+        self.assertEqual(key.hash_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_setitem_provenance_does_not_repeat_user_eq(self):
+        class Key:
+            def __init__(self):
+                self.eq_count = 0
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                self.eq_count += 1
+                return False
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, key1, key2, x):
+            d[key1] = x
+            d[key2] = x
+            return x + key1.eq_count
+
+        key1 = Key()
+        key2 = Key()
+        x = torch.ones(2)
+        self.assertEqual(fn({}, key1, key2, x), x + 1)
+        self.assertEqual(key1.eq_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+    @parametrize("op", ["setitem", "init"])
+    def test_global_assignment_reconstruct_all_guards_keys_and_order(self, op):
+        global _test_global_dict
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        _test_global_dict.clear()
+        _test_global_dict["a"] = x
+        _test_global_dict["c"] = x
+        self.addCleanup(_test_global_dict.clear)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            if op == "setitem":
+                _test_global_dict["c"] = x + 1
+            else:
+                dict.__init__(_test_global_dict, {"c": x + 1})
+            return x + 1
+
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(list(_test_global_dict), ["a", "c"])
+
+        _test_global_dict.clear()
+        _test_global_dict.update([("c", x), ("a", x)])
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(list(_test_global_dict), ["c", "a"])
+
+        _test_global_dict["z"] = x
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(list(_test_global_dict), ["c", "a", "z"])
+
+    def test_delitem_then_contains_unrelated_key_recompiles(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            del d["a"]
+            if "b" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 10)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+
     def test_pop_then_contains_unrelated_key_recompiles(self):
         cnts = torch._dynamo.testing.CompileCounter()
         x = torch.ones(2)
@@ -970,6 +1569,29 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(set(d2), {"b"})
 
+    @parametrize("op", ["pop", "delitem"])
+    def test_reconstruct_all_preserves_runtime_key_order(self, op):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            if op == "pop":
+                d.pop("remove")
+            else:
+                del d["remove"]
+            return x + 1
+
+        d1 = {"remove": x, "a": x, "b": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(list(d1), ["a", "b"])
+
+        d2 = {"remove": x, "b": x, "a": x}
+        self.assertEqual(fn(d2, x), x + 1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(list(d2), ["b", "a"])
+
     def test_popitem_reconstruct_all_guards_keys_and_order(self):
         cnts = torch._dynamo.testing.CompileCounter()
         x = torch.ones(2)
@@ -988,6 +1610,26 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(d2, x), x * 2)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(set(d2), {"b"})
+
+    @parametrize("last", [True, False])
+    def test_ordered_dict_popitem_guards_keys_and_order(self, last):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            _, value = d.popitem(last=last)
+            return value + x
+
+        d1 = OrderedDict([("a", x), ("b", x + 2)])
+        self.assertEqual(fn(d1, x), x * 2 + (2 if last else 0))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(list(d1), ["a" if last else "b"])
+
+        d2 = OrderedDict([("b", x + 2), ("a", x)])
+        self.assertEqual(fn(d2, x), x * 2 + (0 if last else 2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(list(d2), ["b" if last else "a"])
 
     def test_udf_dict_reconstruction(self):
         class MyDict(dict):
@@ -1163,6 +1805,49 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d.keys(), mp.keys())
 
+    def test_dict_view_mapping(self):
+        # dict_keys/values/items expose a read-only mappingproxy via .mapping
+        mappingproxy = type(type.__dict__)
+
+        def fn(x):
+            d = {"a": 1, "b": 2}
+            m_keys = d.keys().mapping
+            m_values = d.values().mapping
+            m_items = d.items().mapping
+            y = torch.sin(x)
+            for m in (m_keys, m_values, m_items):
+                if isinstance(m, mappingproxy) and m == d:
+                    y = y + 1
+            return y, m_keys, m_values, m_items
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        for m in res[1:]:
+            self.assertTrue(type(m) is mappingproxy)
+            self.assertEqual(m, {"a": 1, "b": 2})
+
+    def test_dict_view_mapping_reflects_mutation(self):
+        # The mappingproxy returned by .mapping proxies the live dict, so a
+        # later mutation must be visible through it.
+        mappingproxy = type(type.__dict__)
+
+        def fn(x):
+            d = {}
+            m = d.keys().mapping
+            d["foo"] = "bar"
+            return torch.sin(x), isinstance(m, mappingproxy), dict(m)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(res[2], {"foo": "bar"})
+
     def test_move_to_end(self):
         def fn(x):
             d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
@@ -1270,6 +1955,50 @@ class DictTests(torch._dynamo.test_case.TestCase):
             b = {"two": torch.ones(2)}
             a |= b
             return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_inplace_union_preserves_factory(self):
+        def f():
+            d = defaultdict(int, {1: 1, 2: 2})
+            d |= [(0, "zero"), (1, "one")]
+            result = d.__ior__({3: "three"})
+            return (
+                result is d,
+                d.default_factory is int,
+                type(d) is defaultdict,
+                dict(d),
+                list(d),
+                d[4],
+            )
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_shallow_copy_preserves_factory(self):
+        # defaultdict.copy(), dd.__copy__(), and copy.copy(dd) all produce a
+        # new defaultdict with the same default_factory and a shallow copy of
+        # the contents. The copies are consumed in-graph because reconstructing
+        # an escaping sourceless defaultdict is a separate unsupported case.
+        import copy
+
+        def f():
+            d = defaultdict(list, {1: 1, 2: 2})
+            c1 = d.copy()
+            c2 = d.__copy__()
+            c3 = copy.copy(d)
+            return (
+                c1.default_factory is list,
+                c2.default_factory is list,
+                c3.default_factory is list,
+                dict(c1),
+                dict(c2),
+                dict(c3),
+                c1 == d,
+                c3 == d,
+                c1[5],
+            )
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
@@ -2039,6 +2768,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         return backend1.fw_graphs[0].graph, backend2.fw_graphs[0].graph
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_name_based_hash_diverges_on_dict_order(self):
         # Demonstrates the original bug: the name-based hash used in
         # has_same_nodes diverges when different ranks trace with different
@@ -2110,6 +2840,377 @@ class DictTests(torch._dynamo.test_case.TestCase):
         }
         self.assertNotEqual(structure1, structure2)
 
+    def test_stable_target_str(self):
+        # A call_function whose target is a plain Python function (e.g.
+        # torch.sym_not) must stringify to its qualified name, not its repr,
+        # which bakes in the per-process memory address and so differs across
+        # ranks (poisoning the cross-rank node_str hash).
+        from torch._functorch.partitioners import _stable_target_str
+
+        # Plain Python function: qualified name, no memory address.
+        self.assertEqual(_stable_target_str(torch.sym_not), "torch.sym_not")
+        self.assertNotIn("0x", _stable_target_str(torch.sym_not))
+        self.assertIn("0x", str(torch.sym_not))  # the behavior being fixed
+
+        # OpOverload targets: stable qualified name (matches the FX printer),
+        # never an address.
+        from torch.fx.node import _get_qualified_name
+
+        add = torch.ops.aten.add.Tensor
+        self.assertEqual(_stable_target_str(add), _get_qualified_name(add))
+        self.assertNotIn("0x", _stable_target_str(add))
+
+        # Non-callable targets (e.g. get_attr names) fall through to str().
+        self.assertEqual(_stable_target_str("_param_constant0"), "_param_constant0")
+
+        # Callables _get_qualified_name cannot resolve fall back to str().
+        class NoName:
+            def __call__(self):
+                return None
+
+        obj = NoName()
+        self.assertEqual(_stable_target_str(obj), str(obj))
+
+    def test_canonical_node_str_invariant_to_function_target_address(self):
+        # Regression test: two ranks tracing the same graph reference the same
+        # torch.sym_not function, but the function object lives at a different
+        # memory address in each process. The old code stringified the target
+        # with str(), baking that address into the cross-rank hash, so
+        # structurally identical graphs looked different and the sync was
+        # skipped. Simulate two ranks with two distinct function objects that
+        # share a qualified name but differ in repr (address).
+        import hashlib
+
+        from torch._functorch.partitioners import (
+            _canonical_node_names,
+            _stable_target_str,
+        )
+
+        def _make_sym_not():
+            def sym_not(x):
+                return not x
+
+            return sym_not
+
+        fn_rank0 = _make_sym_not()
+        fn_rank1 = _make_sym_not()
+        # Same qualified name, different repr (mimics differing addresses).
+        self.assertNotEqual(str(fn_rank0), str(fn_rank1))
+        self.assertEqual(_stable_target_str(fn_rank0), _stable_target_str(fn_rank1))
+
+        def build_graph(fn):
+            g = torch.fx.Graph()
+            p = g.placeholder("x")
+            p.meta["val"] = torch.tensor(True)
+            n = g.create_node("call_function", fn, (p,))
+            n.meta["val"] = torch.tensor(False)
+            g.output((n,))
+            return g
+
+        graph0 = build_graph(fn_rank0)
+        graph1 = build_graph(fn_rank1)
+
+        # Reconstruct the node_str hash the way _sync_decision_cross_ranks does.
+        def node_str(graph, stringify):
+            canonical = _canonical_node_names(graph)
+
+            def hash_str(n):
+                if n.op == "placeholder":
+                    return f"{canonical[n]}:{n.op}"
+                return f"{canonical[n]}:{n.op}:{stringify(n.target)}"
+
+            joined = "/".join(
+                hash_str(n) for n in sorted(graph.nodes, key=lambda n: canonical[n])
+            )
+            return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+        # Old behavior: str(target) bakes in the address -> hashes diverge.
+        self.assertNotEqual(node_str(graph0, str), node_str(graph1, str))
+        # Fixed behavior: _stable_target_str -> identical hashes.
+        self.assertEqual(
+            node_str(graph0, _stable_target_str),
+            node_str(graph1, _stable_target_str),
+        )
+
+    def _get_graph_node_names(self, model, inp):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(model, backend=backend)(inp)
+        return [n.name for n in backend.graphs[0].graph.nodes]
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_dict_order_canonical_graph(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.deep(val))
+                    else:
+                        results.append(self.shallow(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
+
+        names1 = self._get_graph_node_names(model, d1)
+        torch._dynamo.reset()
+        names2 = self._get_graph_node_names(model, d2)
+        self.assertEqual(names1, names2)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_dict_order_canonical_graph_correctness(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_a = torch.nn.Linear(8, 16)
+                self.linear_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                return self.linear_a(d["a"]) + self.linear_b(d["b"])
+
+        model = Model()
+
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        eager_result = model(d1)
+        compiled_result1 = torch.compile(model, backend="eager")(d1)
+        torch._dynamo.reset()
+        compiled_result2 = torch.compile(model, backend="eager")(d2)
+
+        self.assertEqual(eager_result, compiled_result1)
+        self.assertEqual(eager_result, compiled_result2)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_dict_order_canonical_graph_aot_eager(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_a = torch.nn.Linear(8, 16)
+                self.proj_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.proj_a(val))
+                    else:
+                        results.append(self.proj_b(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        backend1 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        loss1 = torch.compile(model, backend=backend1)(d1)
+        loss1.backward()
+
+        torch._dynamo.reset()
+        model.zero_grad()
+
+        backend2 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        loss2 = torch.compile(model, backend=backend2)(d2)
+        loss2.backward()
+
+        self.assertEqual(loss1, loss2)
+
+        fw_names1 = [n.name for n in backend1.fw_graphs[0].graph.nodes]
+        fw_names2 = [n.name for n in backend2.fw_graphs[0].graph.nodes]
+        self.assertEqual(fw_names1, fw_names2)
+        bw_names1 = [n.name for n in backend1.bw_graphs[0].graph.nodes]
+        bw_names2 = [n.name for n in backend2.bw_graphs[0].graph.nodes]
+        self.assertEqual(bw_names1, bw_names2)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_dict_order_canonical_graph_idempotent(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                return self.linear(d["a"]) + self.linear(d["b"])
+
+        model = Model()
+        d = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(model, backend=backend)(d)
+        graph = backend.graphs[0].graph
+
+        names_once = [n.name for n in graph.nodes]
+        _canonicalize_graph(graph)
+        names_twice = [n.name for n in graph.nodes]
+        self.assertEqual(names_once, names_twice)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_overlapping_unsqueeze_with_mutation(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        base = torch.ones(10)
+        inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+        out_eager = f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+        base = torch.ones(10)
+        inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+        out_compiled = optf(*inputs)
+
+        self.assertEqual(out_eager, out_compiled)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_barrier_preserves_order(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        # Pure ops that could be reordered
+        a = graph.call_function(torch.relu, (x,))
+        b = graph.call_function(torch.sigmoid, (x,))
+        # In-place call_method acts as barrier
+        barrier = graph.call_method("add_", (x, a))
+        # Pure op after barrier
+        c = graph.call_function(torch.neg, (x,))
+        graph.output((a, b, barrier, c))
+
+        _canonicalize_graph(graph)
+        ops = [n.name for n in graph.nodes if n.op in ("call_function", "call_method")]
+        barrier_idx = next(i for i, name in enumerate(ops) if "add_" in name)
+        neg_idx = next(i for i, name in enumerate(ops) if "neg" in name)
+        # neg must come after the barrier even though it only depends on x
+        self.assertGreater(neg_idx, barrier_idx)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_in_place_ops_are_barriers(self):
+        def f(x, y):
+            a = y * 2
+            x.add_(1)
+            b = y * 3
+            return a + b + x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend)(torch.randn(4), torch.randn(4))
+        out_eager = f(torch.randn(4), torch.randn(4))
+        self.assertEqual(out.shape, out_eager.shape)
+
+        graph = backend.graphs[0].graph
+        ops = [
+            (n.name, n.op)
+            for n in graph.nodes
+            if n.op in ("call_function", "call_method")
+        ]
+        barrier_idx = next(
+            i
+            for i, (name, op) in enumerate(ops)
+            if op == "call_method" and "add_" in name
+        )
+        mul_before = [
+            i
+            for i, (name, _) in enumerate(ops)
+            if name.startswith("mul") and i < barrier_idx
+        ]
+        mul_after = [
+            i
+            for i, (name, _) in enumerate(ops)
+            if name.startswith("mul") and i > barrier_idx
+        ]
+        self.assertTrue(len(mul_before) >= 1)
+        self.assertTrue(len(mul_after) >= 1)
+
+    def test_canonical_graph_config_gating(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_a = torch.nn.Linear(8, 16)
+                self.linear_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.linear_a(val))
+                    else:
+                        results.append(self.linear_b(val))
+                return torch.cat(results, dim=-1)
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
+
+        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=False):
+            names1 = self._get_graph_node_names(model, d1)
+            torch._dynamo.reset()
+            names2 = self._get_graph_node_names(model, d2)
+        self.assertNotEqual(names1, names2)
+
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=True):
+            names3 = self._get_graph_node_names(model, d1)
+            torch._dynamo.reset()
+            names4 = self._get_graph_node_names(model, d2)
+        self.assertEqual(names3, names4)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_is_safe_to_reorder(self):
+        import operator
+
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+
+        pure_call = graph.call_function(torch.relu, (x,))
+        self.assertTrue(_is_safe_to_reorder(pure_call))
+
+        inplace_method = graph.call_method("add_", (x, x))
+        self.assertFalse(_is_safe_to_reorder(inplace_method))
+
+        safe_method = graph.call_method("add", (x, x))
+        self.assertTrue(_is_safe_to_reorder(safe_method))
+
+        iadd_node = graph.call_function(operator.iadd, (x, x))
+        self.assertFalse(_is_safe_to_reorder(iadd_node))
+
+        # operator.invert is pure despite starting with "i"
+        invert_node = graph.call_function(operator.invert, (x,))
+        self.assertTrue(_is_safe_to_reorder(invert_node))
+
+        index_node = graph.call_function(operator.index, (x,))
+        self.assertTrue(_is_safe_to_reorder(index_node))
+
+        # out= kwarg makes a node unsafe
+        out_node = graph.call_function(torch.add, (x, x), {"out": x})
+        self.assertFalse(_is_safe_to_reorder(out_node))
+
+        # Functions with no FX Node arguments are treated as barriers
+        def _fake_state_fn():
+            pass
+
+        no_input_node = graph.call_function(_fake_state_fn, ())
+        self.assertFalse(_is_safe_to_reorder(no_input_node))
+
+        # _add_batch_dim / _remove_batch_dim are barriers
+        add_batch = graph.call_function(torch._add_batch_dim, (x, x, x))
+        self.assertFalse(_is_safe_to_reorder(add_batch))
+
+        remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
+        self.assertFalse(_is_safe_to_reorder(remove_batch))
+
 
 instantiate_parametrized_tests(DictTests)
 
@@ -2167,7 +3268,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2192,7 +3293,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2279,10 +3380,53 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, x, y):
-        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+        self.assertTrue(x == y, lambda msg: f"{msg}\nExpected {x} to be equal to {y}")
 
     def assertNotEqual(self, x, y):
-        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+        self.assertFalse(
+            x == y, lambda msg: f"{msg}\nExpected {x} to not be equal to {y}"
+        )
+
+    @make_dynamo_test
+    def test_dict_items_cmp_value_eq_raises(self):
+        # dictitems_contains calls PyObject_RichCompareBool(found, value, Py_EQ)
+        # on the stored value, so a value whose __eq__ raises must propagate that
+        # exception. Equal-length views push the comparison past
+        # dictview_richcompare's length short-circuit for eq/ne/le/ge.
+        d1 = self.thetype({1: _BadCmp()})
+        d2 = self.thetype({1: _BadCmp()})
+        for op in (operator.eq, operator.ne, operator.le, operator.ge):
+            with self.assertRaises(_BadCmpExc):
+                op(d1.items(), d2.items())
+        # lt/gt reach the value comparison only on a proper-subset length match.
+        d3 = self.thetype({1: _BadCmp(), 2: _BadCmp()})
+        with self.assertRaises(_BadCmpExc):
+            d1.items() < d3.items()  # noqa: B015
+        with self.assertRaises(_BadCmpExc):
+            d3.items() > d1.items()  # noqa: B015
+
+    @make_dynamo_test
+    def test_dict_items_cmp_value_present_absent(self):
+        # Normal value comparison: matching/non-matching stored values resolve
+        # membership without raising, matching eager dict_items semantics.
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"a": 1, "b": 2, "c": 3})
+        d3 = self.thetype({"a": 1, "b": 99})
+        self.assertEqual(d1.items() == d2.items(), False)
+        self.assertEqual(d1.items() <= d2.items(), True)
+        self.assertEqual(d1.items() < d2.items(), True)
+        self.assertEqual(d1.items() == d3.items(), False)
+        self.assertEqual(d1.items() <= d3.items(), False)
+        self.assertEqual(d2.items() >= d1.items(), True)
+
+    @make_dynamo_test
+    def test_cmp_eq_key_raises(self):
+        # A key whose __eq__ raises must propagate that exception during dict
+        # comparison, mirroring CPython's PyObject_RichCompareBool lookup.
+        d1 = self.thetype({_BadCmp(): 1})
+        d2 = self.thetype({1: 1})
+        with self.assertRaises(_BadCmpExc):
+            d1 == d2  # noqa: B015
 
     @make_dynamo_test
     def test_cmp_eq(self):
@@ -2356,9 +3500,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
         self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
 
-        # Test with an iterable
-        d3, d4 = d1.copy(), d2.copy()
-
         # Test the __ior__ method
         d3, d4 = d1.copy(), d2.copy()
         d3.__ior__(d2)
@@ -2429,7 +3570,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
@@ -2646,7 +3786,10 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             if self.thetype == other:
                 continue
             self.assertNotEqual(self.thetype, other)
-            self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
+            self.assertTrue(
+                self.thetype is not other,
+                lambda msg: f"{msg}\n{self.thetype=}, {other=}",
+            )
 
     @make_dynamo_test
     def test_dict___iter__(self):
@@ -2760,9 +3903,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
-    def test_binop_or(self):
-        super().test_binop_or()
-
 
 class OrderedDictMethodsTests(DictMethodsTests):
     thetype = OrderedDict
@@ -2844,10 +3984,12 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, x, y):
-        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+        self.assertTrue(x == y, lambda msg: f"{msg}\nExpected {x} to be equal to {y}")
 
     def assertNotEqual(self, x, y):
-        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+        self.assertFalse(
+            x == y, lambda msg: f"{msg}\nExpected {x} to not be equal to {y}"
+        )
 
     class OrderedDictSubclass(OrderedDict):
         def get(self, key, default=None, /):
@@ -2985,6 +4127,82 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(items, {"x": 1, "y": 20, "z": 3})
         self.assertEqual(keys, {"x", "y", "z"})
 
+    def test_dunder_dict_pop_reinsert_order(self):
+        # CPython appends a re-inserted key at the end of the dict rather than
+        # reusing its old slot. obj.__dict__ ordering is observable, so popping
+        # then re-adding a key must move it to the end (mirrors
+        # test_dict.DictTest.test_splittable_pop).
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.x, obj.y, obj.z = 1, 2, 3
+            d = obj.__dict__
+            d.pop("y")
+            d["y"] = 42
+            return list(d), d["y"]
+
+        keys, value = fn()
+        self.assertEqual(keys, ["x", "z", "y"])
+        self.assertEqual(value, 42)
+
+    def test_dunder_dict_pop_reinsert_order_with_other_mutations(self):
+        # Mutating other keys after a pop must not disturb their relative order;
+        # only the re-inserted popped key moves to the end. Updating an existing
+        # key keeps its slot, a brand-new key appends, and the reinserted key
+        # lands last.
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.a, obj.b, obj.c = 1, 2, 3
+            d = obj.__dict__
+            d.pop("b")  # a, c
+            d["c"] = 30  # update existing -> stays in place: a, c
+            d["e"] = 5  # new key -> appended: a, c, e
+            d["b"] = 20  # reinsert popped -> end: a, c, e, b
+            return list(d), dict(d)
+
+        keys, value = fn()
+        self.assertEqual(keys, ["a", "c", "e", "b"])
+        self.assertEqual(value, {"a": 1, "c": 30, "e": 5, "b": 20})
+
+    def test_dunder_dict_pop_missing_raises_keyerror(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.x = 1
+            d = obj.__dict__
+            d.pop("x")
+            try:
+                d.pop("x")
+                raised = False
+            except KeyError:
+                raised = True
+            return list(d), raised
+
+        self.assertEqual(fn(), ([], True))
+
+    def test_dunder_dict_pop_default(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.x = 1
+            d = obj.__dict__
+            return d.pop("missing", "fallback"), d.pop("x"), list(d)
+
+        self.assertEqual(fn(), ("fallback", 1, []))
+
     def test_dunder_dict_items_iteration(self):
         """Test iterating over __dict__.items() with mutations"""
 
@@ -3025,6 +4243,68 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
 
         # This should not raise Unsupported
         fn()
+
+    def test_dunder_dict_non_str_key_setitem(self):
+        # CPython's instance __dict__ accepts arbitrary hashable keys when set
+        # via the mapping API; only attribute access via setattr requires str.
+        # Mirrors test_dict.DictTest.test_object_set_item_single_instance_non_str_key.
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            f = Foo()
+            f.__dict__[1] = 1
+            f.a = "a"
+            return dict(f.__dict__), list(f.__dict__)
+
+        d, keys = fn()
+        self.assertEqual(d, {1: 1, "a": "a"})
+        self.assertEqual(keys, [1, "a"])
+
+    def test_dunder_dict_non_str_key_roundtrip(self):
+        # Non-str instance-dict keys must read back and delete correctly.
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            f = Foo()
+            d = f.__dict__
+            d[1] = 10
+            d[2.5] = 20
+            d[(3, 4)] = 30
+            got = (d[1], d[2.5], d[(3, 4)])
+            del d[2.5]
+            return got, dict(d)
+
+        got, d = fn()
+        self.assertEqual(got, (10, 20, 30))
+        self.assertEqual(d, {1: 10, (3, 4): 30})
+
+    def test_dunder_dict_iteration_guards_keys(self):
+        class Foo:
+            pass
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(obj, x):
+            for _ in obj.__dict__:
+                x = x + 1
+            return x
+
+        x = torch.ones(2)
+        obj1 = Foo()
+        obj1.a = 1
+        self.assertEqual(fn(obj1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        obj2 = Foo()
+        obj2.a = 1
+        obj2.b = 2
+        self.assertEqual(fn(obj2, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":
