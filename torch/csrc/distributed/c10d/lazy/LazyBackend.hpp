@@ -113,6 +113,16 @@ class LazyBackend : public Backend {
     return primary_->endCoalescing();
   }
 
+  bool supportsTimeEstimation() const override {
+    return primary_->supportsTimeEstimation();
+  }
+  void startTimeEstimate() override {
+    primary_->startTimeEstimate();
+  }
+  float endTimeEstimate() override {
+    return primary_->endTimeEstimate();
+  }
+
   // ---- Collectives: forwarded to the primary comm ----
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,

@@ -598,6 +598,14 @@ bool ProcessGroupWrapper::supportsTimeEstimation() const {
   return backend_->supportsTimeEstimation();
 }
 
+void ProcessGroupWrapper::startTimeEstimate() {
+  backend_->startTimeEstimate();
+}
+
+float ProcessGroupWrapper::endTimeEstimate() {
+  return backend_->endTimeEstimate();
+}
+
 bool ProcessGroupWrapper::supportsShrinking() const {
   return backend_->supportsShrinking();
 }

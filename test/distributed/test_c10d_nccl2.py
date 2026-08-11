@@ -77,6 +77,21 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(opts.config.max_ctas, 4)
 
     @requires_nccl()
+    @requires_nccl_version((2, 22), "Need NCCL 2.22+ for collective time estimation")
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate(self) -> None:
+        torch.cuda.set_device(self.device)
+        process_group = dist.distributed_c10d._get_default_group()
+        warmup = torch.ones(1, device=self.device)
+        dist.all_reduce(warmup)
+        tensor = torch.full((1024,), self.rank, device=self.device)
+        with dist._time_estimator(group=process_group, device=self.device) as context:
+            dist.all_reduce(tensor)
+        if context.estimated_time is None:
+            self.fail("NCCL time estimator did not produce a result")
+        self.assertGreater(context.estimated_time, 0)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_reduction_semantics(self) -> None:
         tensor = torch.ones(4, dtype=torch.bool, device=self.device)
