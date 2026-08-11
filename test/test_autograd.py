@@ -13773,6 +13773,18 @@ class TestAutogradDeviceType(TestCase):
                 gradgradcheck(fn, (input, 0, idx, src, "prod"))
 
     @skipIfMPS  # the test doesn't work on MPS as double types are not supported
+    @skipMeta
+    def test_exp2_backward_no_spurious_overflow(self, device):
+        # 2 ** 1024 overflows float64, but ln(2) ** k * 2 ** 1024 does not, so
+        # the derivatives must not be recovered from the (infinite) result.
+        x = torch.tensor(1024.0, device=device, dtype=torch.float64, requires_grad=True)
+        (g1,) = torch.autograd.grad(torch.exp2(x), x, create_graph=True)
+        (g2,) = torch.autograd.grad(g1, x)
+        ln2 = math.log(2.0)
+        self.assertEqual(g1, math.ldexp(ln2, 1024))
+        self.assertEqual(g2, math.ldexp(ln2 * ln2, 1024))
+
+    @skipIfMPS  # the test doesn't work on MPS as double types are not supported
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, dtype=torch.double, device=device))
 

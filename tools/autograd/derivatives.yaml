@@ -655,7 +655,7 @@
   result: auto_element_wise
 
 - name: exp2(Tensor self) -> Tensor
-  self: grad * result.conj() * M_LN2
+  self: grad * exp2(self - 1).conj() * (2 * M_LN2)
   result: auto_element_wise
 
 - name: expm1(Tensor self) -> Tensor
