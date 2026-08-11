@@ -13,6 +13,7 @@
 import contextlib
 import os
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import (
@@ -383,6 +384,38 @@ class TestSumCuteDSLOverride(TestCase):
         with self._inner_tree_flag():
             got = x.prod(dim=1)
         self.assertFalse(torch.equal(got, ref))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_prod_low_precision_matches_aten(self, dtype):
+        # 0.75 and 1.25 are exactly representable in fp16/bf16; a sparse set of
+        # them keeps the length-n product bounded and non-1.0 (a near-1 input
+        # collapses to 1.0 at low precision, giving a vacuous test). fp16/bf16
+        # are functionally supported but not part of the bitwise contract, so
+        # compare to ATen with a low-precision tolerance. Covers the multirow,
+        # looped, and two-kernel paths.
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+            with self.subTest(m=m, n=n):
+                x = torch.ones(m, n, device="cuda", dtype=dtype)
+                idx = torch.linspace(0, n - 1, 8, dtype=torch.long)
+                x[:, idx[0::2]] = 0.75
+                x[:, idx[1::2]] = 1.25
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = x.prod(dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_prod_into",
+                        wraps=inner_tree_kernel.inner_tree_prod_into,
+                    ) as prod_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = x.prod(dim=1)
+                # Proves fp16/bf16 route through the CuTeDSL override, not a
+                # silent ATen fall-through (which a tolerance compare misses).
+                self.assertEqual(prod_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
 
     def test_prod_override_out_variant(self):
         x = self._make_prod_input(128, 8192, torch.float32)
