@@ -336,9 +336,12 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() const {
-  if (init_state_ != InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL not initialized");
-  }
+  TORCH_CHECK(
+      init_state_ == InitializationState::INITIALIZED,
+      options_c10d_->enable_reconfigure
+          ? "ProcessGroupNCCL has not been initialized. Call reconfigure() "
+            "before issuing operations when enable_reconfigure=True."
+          : "ProcessGroupNCCL not initialized");
 }
 
 void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
