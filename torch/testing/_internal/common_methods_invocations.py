@@ -22407,6 +22407,10 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
+        generate_args_kwargs=lambda t, dim=None, keepdim=False: (
+            (yield ((), {})) or
+            (t.dtype.is_floating_point and (yield ((), {"dtype": torch.complex128 if t.dtype == torch.float64 else torch.complex64})))
+        ),
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
