@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 
+#include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -204,7 +205,10 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 //  2. remembering the "leaf streams" (streams each backward leaf node ran on)
 //  3. during exec_post_processing, for each leaf stream, sync the remembered
 //     current streams (on the leaf stream's device) with that
-//     leaf stream.
+//     leaf stream. If exactly one of the two streams is capturing a CUDA
+//     graph, this sync would cross the capture boundary; it is skipped under
+//     torch.autograd.graph.set_override_stale_capture_stream(True) and is an
+//     error otherwise.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
@@ -238,7 +242,7 @@ auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
       TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!");
       ++graph_task->outstanding_tasks_;
     }
-    heap_.push(std::move(item));
+    heap_.push(NodeTaskWithOrder{std::move(item), next_enqueue_order_++});
   }
   not_empty_.notify_one();
 }
@@ -246,7 +250,8 @@ auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
 auto ReadyQueue::pushShutdownTask() -> void {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    heap_.push(NodeTask({}, nullptr, InputBuffer(0), true));
+    heap_.push(NodeTaskWithOrder{
+        NodeTask({}, nullptr, InputBuffer(0), true), next_enqueue_order_++});
   }
   not_empty_.notify_one();
 }
@@ -261,7 +266,7 @@ auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this] { return !heap_.empty(); });
-  auto task = std::move(const_cast<NodeTask&>(heap_.top()));
+  auto task = std::move(const_cast<NodeTaskWithOrder&>(heap_.top()).task);
   heap_.pop();
   return task;
 }
@@ -442,14 +447,24 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   // Do a copy since we mutate it later
   std::unordered_map<Node*, int> dependencies = task->dependencies_;
 
-  auto compare_seq_nr = [](Node* n1, Node* n2) {
-    return n1->sequence_nr() < n2->sequence_nr();
+  using NodeWithOrder = std::pair<Node*, uint64_t>;
+  auto compare_seq_nr = [](const NodeWithOrder& n1, const NodeWithOrder& n2) {
+    const auto sequence_nr1 = n1.first->sequence_nr();
+    const auto sequence_nr2 = n2.first->sequence_nr();
+    if (sequence_nr1 == sequence_nr2) {
+      return n1.second > n2.second;
+    }
+    return sequence_nr1 < sequence_nr2;
   };
-  std::priority_queue<Node*, std::vector<Node*>, decltype(compare_seq_nr)> heap(
-      compare_seq_nr);
+  std::priority_queue<
+      NodeWithOrder,
+      std::vector<NodeWithOrder>,
+      decltype(compare_seq_nr)>
+      heap(compare_seq_nr);
+  uint64_t next_enqueue_order = 0;
 
   for (Node* ptr : task->graph_roots_) {
-    heap.push(ptr);
+    heap.emplace(ptr, next_enqueue_order++);
   }
 
   // Implementation notes:
@@ -458,7 +473,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   //   sequence_nr than the inputs
   // - Don't need to check topological_nr because we have exec_info
   while (!heap.empty()) {
-    Node* fn = heap.top();
+    Node* fn = heap.top().first;
     heap.pop();
 
     out.push_back(fn);
@@ -479,7 +494,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
       TORCH_INTERNAL_ASSERT(it != dependencies.end());
       if (--it->second == 0) {
         dependencies.erase(it);
-        heap.push(next_ptr);
+        heap.emplace(next_ptr, next_enqueue_order++);
       }
     };
     if (output_order.empty()) {
@@ -515,7 +530,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
 // thread_main is used by:
 // 1). autograd threads for devices (i.e. CUDA, XLA)
 // 2). the caller/owning thread of the backward call on CPU (sync mode)
-// 3). Renetrant backward that invoked by either 1) or 2)
+// 3). Reentrant backward that invoked by either 1) or 2)
 // The exit conditions are different for the above three cases.
 // For 1), we are spinning on running the thread_main on device autograd
 //         threads throughout the Engine lifetime, thread_main will get
@@ -736,7 +751,9 @@ void GraphTask::exec_post_processing() {
 
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
-  // any grad on its device's current stream.
+  // any grad on its device's current stream. (Under
+  // set_override_stale_capture_stream(True), syncs that would cross a CUDA
+  // graph capture boundary are skipped; see below.)
   if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_cuda/privateuse1_streams() stashed streams for all device
@@ -751,6 +768,45 @@ void GraphTask::exec_post_processing() {
 
       if (caller_current_stream.has_value() &&
           caller_current_stream != leaf_stream) {
+        // If exactly one of the two streams is capturing, this sync would
+        // cross the CUDA graph capture boundary and invalidate the capture
+        // (cudaErrorStreamCaptureIsolation). The common case is a leaf that
+        // ran on a stale non-capturing stream during capture: when all of a
+        // leaf's incoming grads are undefined, InputBuffer::add returns
+        // before its stream reconciliation, so the stale-capture-stream
+        // override never reconciles the leaf's stream. Work on a
+        // non-capturing stream is not part of the capture (and captured work
+        // produces no eager-visible results), so this ordering edge is
+        // meaningless in either direction: skip it under the override,
+        // otherwise raise an actionable error instead of the CUDA error.
+        if (caller_current_stream->is_capturing() !=
+            leaf_stream.is_capturing()) {
+          if (at::globalContext().overrideStaleCaptureStream()) {
+            TORCH_WARN_ONCE(
+                "Skipping the end-of-backward sync between a leaf stream and "
+                "the caller's current stream because exactly one of them is "
+                "capturing a CUDA graph (see "
+                "torch.autograd.graph.set_override_stale_capture_stream).");
+            continue;
+          }
+          TORCH_CHECK(
+              false,
+              "During CUDA graph capture, autograd tried to synchronize "
+              "streams across the capture boundary (leaf stream ",
+              leaf_stream.id(),
+              " on device ",
+              static_cast<int>(leaf_stream.device_index()),
+              leaf_stream.is_capturing() ? " is capturing but the caller's "
+                                           "stream is not"
+                                         : " is not capturing but the "
+                                           "caller's stream is",
+              "), which would invalidate the capture. A common cause is an "
+              "autograd leaf from warmup holding a stale stream. Either run "
+              "warmup on the capture stream, delete references to the "
+              "autograd graph (e.g. `del loss`) before capture, call "
+              "backward() with the capturing stream current, or call "
+              "torch.autograd.graph.set_override_stale_capture_stream(True).");
+        }
         auto event = c10::Event{leaf_stream.device_type()};
         event.record(leaf_stream);
         caller_current_stream->wait(event);
@@ -769,9 +825,9 @@ void GraphTask::exec_post_processing() {
     // final_callbacks run on the per-device caller_current_streams (the ambient
     // streams surrounding the user's call to backward()). This has two
     // benefits:
-    //  1. caller_current_streams have been synced with leaf_streams, so
-    //  callbacks may
-    //     safely access any grad.
+    //  1. caller_current_streams have been synced with leaf_streams (except
+    //     for syncs skipped under set_override_stale_capture_stream during
+    //     CUDA graph capture), so callbacks may safely access any grad.
     //  2. The callback's results can safely be used on (user-facing)
     //  caller_current_streams
     //     after backward().
@@ -1286,6 +1342,20 @@ auto Engine::compute_dependencies(
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
+  // Log (once per process each) backward passes by the devices they span, to
+  // assess reliance on multithreaded autograd before changing its default.
+  // The two cases are independent and may both fire for the same pass: one
+  // for a second distinct non-CPU device (multi-device), one for a non-CPU
+  // device alongside CPU nodes (GPU + CPU).
+  static std::atomic<bool> multidevice_logged{false};
+  static std::atomic<bool> gpu_cpu_logged{false};
+  // Skip the per-node device inspection entirely once both cases have already
+  // been logged for this process; the logs fire at most once anyway.
+  const bool inspect_devices =
+      !multidevice_logged.load(std::memory_order_relaxed) ||
+      !gpu_cpu_logged.load(std::memory_order_relaxed);
+  std::optional<at::Device> first_noncpu_device;
+  bool saw_cpu = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -1298,6 +1368,22 @@ auto Engine::compute_dependencies(
     }
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
+    }
+    if (inspect_devices) {
+      auto device = fn->device();
+      if (should_run_in_cpu_ready_queue(device.type())) {
+        saw_cpu = true;
+      } else if (!first_noncpu_device.has_value()) {
+        first_noncpu_device = device;
+      } else if (
+          first_noncpu_device.value() != device &&
+          !multidevice_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.multidevice_backward");
+      }
+      if (saw_cpu && first_noncpu_device.has_value() &&
+          !gpu_cpu_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.gpu_cpu_backward");
+      }
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -1656,7 +1742,7 @@ auto Engine::start_device_threads() -> void {
   }
 }
 
-void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
+void Engine::add_thread_pool_task(std::weak_ptr<GraphTask> graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
   // threads but not enough workers to get to the new task that will be
@@ -1664,7 +1750,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   bool create_thread =
       (thread_pool_shared_->num_workers_ <=
        thread_pool_shared_->graphtasks_queue_.size());
-  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  thread_pool_shared_->graphtasks_queue_.push(std::move(graph_task));
   // Don't need to be holding the lock while actually creating the thread
   lck.unlock();
   if (create_thread) {

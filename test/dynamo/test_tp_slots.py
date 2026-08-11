@@ -10,7 +10,10 @@ import collections
 import collections.abc
 import dataclasses
 import enum
+import gc
+import weakref
 
+import torch
 from torch._C._dynamo import (
     get_type_slots,
     has_slot,
@@ -277,7 +280,7 @@ class TestTypeSlots(TestCase):
         self.assertTrue(has_slot(num_slots, PyNumberSlots.NB_MULTIPLY))
 
     def test_deque_sq_item_only(self):
-        """deque has sq_item but NOT mp_subscript — vt_getitem dispatches to Branch 2."""
+        """deque has sq_item but NOT mp_subscript — generic_getitem dispatches to Branch 2."""
         seq_slots, map_slots, _, _ = self._get_slot_info(collections.deque)
         self.assertFalse(has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT))
         self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_ITEM))
@@ -288,7 +291,7 @@ class TestTypeSlots(TestCase):
             _, _, num_slots, _ = self._get_slot_info(t)
             self.assertTrue(
                 has_slot(num_slots, PyNumberSlots.NB_INDEX),
-                f"{t.__name__} should have nb_index",
+                lambda msg: f"{msg}\n{t.__name__} should have nb_index",
             )
 
     def test_nb_index_absent(self):
@@ -297,7 +300,7 @@ class TestTypeSlots(TestCase):
             _, _, num_slots, _ = self._get_slot_info(t)
             self.assertFalse(
                 has_slot(num_slots, PyNumberSlots.NB_INDEX),
-                f"{t.__name__} should NOT have nb_index",
+                lambda msg: f"{msg}\n{t.__name__} should NOT have nb_index",
             )
 
     def test_mp_subscript_on_subscriptable_types(self):
@@ -319,8 +322,55 @@ class TestTypeSlots(TestCase):
             _, map_slots, _, _ = self._get_slot_info(t)
             self.assertTrue(
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
-                f"{t.__name__} should have mp_subscript",
+                lambda msg: f"{msg}\n{t.__name__} should have mp_subscript",
             )
+
+
+class TestTypeCacheRetention(TestCase):
+    """A type-keyed helper must not memoize on the type object: a strong-ref
+    cache keeps every locally-defined class it sees -- and everything that
+    class's methods close over (tensors, modules, parameters) -- alive for the
+    process lifetime. Each helper below is exercised with a throwaway local
+    class whose method closes over a tensor; after dropping the class a weakref
+    must clear."""
+
+    def _assert_no_retention(self, use):
+        def make():
+            payload = torch.randn(8)
+
+            class Local:
+                def __len__(self):
+                    return payload.numel()
+
+                def __iter__(self):
+                    return iter([payload])
+
+            return Local, weakref.ref(payload)
+
+        Local, payload_ref = make()
+        cls_ref = weakref.ref(Local)
+        use(Local)
+
+        del Local
+        gc.collect()
+
+        self.assertIsNone(cls_ref(), "helper retained the type")
+        self.assertIsNone(payload_ref(), "helper retained the type's closure")
+
+    def test_tp_type_no_retention(self):
+        from torch._dynamo.variables.base import _tp_type
+
+        self._assert_no_retention(_tp_type)
+
+    def test_flags_from_ml_flags_no_retention(self):
+        from torch._dynamo.variables.base import _flags_from_ml_flags
+
+        self._assert_no_retention(lambda t: _flags_from_ml_flags(t, "__len__"))
+
+    def test_type_implements_slot_no_retention(self):
+        from torch._dynamo.variables.object_protocol import type_implements_tp_iter
+
+        self._assert_no_retention(type_implements_tp_iter)
 
 
 if __name__ == "__main__":

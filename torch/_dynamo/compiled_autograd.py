@@ -716,7 +716,35 @@ class AutogradCompilerInstance:
         else:
             results = bw_epilogue_fn(outputs)
 
-        presults = pytree.tree_map(self.to_proxy, results)
+        presults = list(pytree.tree_map(self.to_proxy, results))
+
+        # An AOT backward is one autograd Node: eager finishes that Node's
+        # computation before visiting its output edges. Keep the same boundary
+        # after inlining the backward graph. Distinct tuple-getitem nodes,
+        # inserted in edge visitation order, give the accumulate-grad
+        # reordering pass stable anchors when outputs reuse a gradient proxy.
+        # Unlike a Tensor identity operator, tuple-getitem returns the exact
+        # object and works for every Tensor layout and subclass.
+        backward_output_order = metadata.backward_output_order
+        if backward_output_order is None:
+            backward_output_order = list(range(len(presults)))
+        if len(backward_output_order) != len(presults):
+            raise AssertionError(
+                "expected backward output order to have one entry per result, "
+                f"got {len(backward_output_order)} entries for "
+                f"{len(presults)} results"
+            )
+        for idx in backward_output_order:
+            result = presults[idx]
+            if result is not None:
+                anchor = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=operator.getitem,
+                    args=((result,), 0),
+                    kwargs={},
+                )
+                anchor.node.meta["aot_backward_output_anchor"] = True
+                presults[idx] = anchor
         return presults
 
     def proxy_call_backward(
@@ -1300,7 +1328,8 @@ class AutogradCompilerInstance:
         if node.op == "placeholder" or (
             node.op == "call_function"
             and node.target is operator.getitem
-            and node.args[0].op == "placeholder"  # type: ignore[union-attr, arg-type]
+            and isinstance(node.args[0], torch.fx.Node)
+            and node.args[0].op == "placeholder"
         ):
             return True
         return False
@@ -1311,9 +1340,12 @@ class AutogradCompilerInstance:
         the graph.  This differs from eager mode, which schedules them as soon as possible. This
         pass attempts to reorder the graph to mimic eager behavior.
         """
-        for node in self.fx_tracer.graph.find_nodes(
+        accumulate_grad_nodes = self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_accumulate_grad
-        ):
+        )
+        # append() inserts immediately after its anchor. Visit in reverse so
+        # nodes with the same anchor retain the engine's scheduling order.
+        for node in reversed(accumulate_grad_nodes):
             param_node, variable_grad_node, grad_node = (
                 node.args[0],
                 node.args[1],
@@ -1323,6 +1355,7 @@ class AutogradCompilerInstance:
             if (
                 isinstance(grad_node, torch.fx.Node)
                 and grad_node.target is operator.getitem
+                and not grad_node.meta.get("aot_backward_output_anchor", False)
             ):
                 getitem_node = grad_node
                 grad_node = getitem_node.args[0]

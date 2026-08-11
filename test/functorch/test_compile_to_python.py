@@ -609,30 +609,43 @@ class TestAOTCompileToPython(TestCase):
         # graphs run one-at-a-time and must each still produce their own correct module.
         # This exercises the lock end-to-end (no deadlock, both succeed); the thread-local
         # sink isolation it relies on is pinned by test_capture_sink_is_thread_local.
+        #
+        # Only compile_to_python runs concurrently. The graphs are captured SERIALLY up
+        # front because make_fx (fx symbolic tracing) is NOT thread-safe: it mutates
+        # process-global tracing state -- the CURRENT_PATCHER global in
+        # torch.fx._symbolic_trace and the fx.traceback node-meta globals. Capturing inside
+        # the worker threads would race that state against the make_fx run nested inside the
+        # OTHER thread's compile_to_python (which _COMPILE_LOCK covers, but capture is not
+        # the serialized entry point), intermittently raising "CURRENT_PATCHER is None in
+        # finally block" -- a make_fx concurrency artifact unrelated to the lock under test.
         import threading
+        import traceback
 
         specs = [
             (_Pointwise().eval(), torch.randn(8, 4)),
             (_SumDim1().eval(), torch.randn(6, 7)),
         ]
+        captured = [(_capture(m, x), m, x) for m, x in specs]
         results: dict = {}
         errors: dict = {}
 
-        def run(i, m, x):
+        def run(i, gm, m, x):
             try:
-                results[i] = (_compose(m, x)[0], m, x)
-            except Exception as e:
-                errors[i] = e
+                results[i] = (compile_to_python(gm, _flat_inputs(m, x))[0], m, x)
+            except Exception:
+                # Surface the full traceback so a future failure is diagnosable from CI
+                # logs; the bare {1: <Exception>} the swallow used to leave hid the cause.
+                errors[i] = traceback.format_exc()
 
         threads = [
-            threading.Thread(target=run, args=(i, m, x))
-            for i, (m, x) in enumerate(specs)
+            threading.Thread(target=run, args=(i, gm, m, x))
+            for i, (gm, m, x) in enumerate(captured)
         ]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        self.assertEqual(errors, {})
+        self.assertEqual(errors, {}, "\n".join(errors.values()))
         for src, m, x in results.values():
             _assert_composed(self, src)
             with torch.no_grad():

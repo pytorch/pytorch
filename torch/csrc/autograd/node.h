@@ -60,6 +60,18 @@ class NodeGuard {
 // executed.
 TORCH_API c10::intrusive_ptr<Node> get_current_node();
 
+// Runs torch.autograd.graph.node_creation_hook callbacks on `node` if any are
+// registered in this thread and they haven't run for this node yet. Called
+// from the sites that attach a grad_fn to output tensors rather than the Node
+// constructor: at construction the node has no owning intrusive_ptr yet, so
+// it cannot be safely wrapped in a PyObject, and next_edges aren't wired.
+//
+// Each attachment path fires only after the node is fully populated: all
+// outputs' input_metadata are bound and, for output-saving ops, saved
+// variables have been stored. A hook that inspects the node therefore sees
+// its complete state.
+TORCH_API void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node);
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -190,7 +202,7 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // Marker for expected undefined input
   struct undefined_input {};
 
-  /// Adds the type and shape metadata for a new input. Returns the index of
+  /// Adds the type and shape metadata for a new input. Returns the index
   /// of the new input.
   uint32_t add_input_metadata(
       const at::TensorOptions& options,
@@ -327,9 +339,17 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     return next_edges_.size();
   }
 
-  // Some nodes need to prioritize a subset of outputs when scheduling their
-  // next edges. When present, the engine visits outputs in this order while
-  // preserving the underlying output-to-edge mapping.
+  // A Node's output index has two roles: outputs[i] is accumulated along
+  // next_edge(i), and the engine normally visits next edges in that same index
+  // order when scheduling them. The first role cannot be reordered. For
+  // example, autograd.Function backward result i is the gradient for forward
+  // input i, so swapping results would send gradients to the wrong inputs.
+  //
+  // Some composite Nodes collapse a graph whose next edges had a different
+  // eager scheduling priority. Such Nodes can override this method to change
+  // only the engine's visitation order while preserving output-to-edge
+  // mapping. A nonempty result must be a permutation of next_edges() indices;
+  // an empty result selects the natural index order.
   virtual c10::ArrayRef<uint32_t> next_edges_order() const noexcept {
     return c10::ArrayRef<uint32_t>();
   }
@@ -407,6 +427,16 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   /// Id of the thread that created Node
   uint64_t thread_id() const noexcept {
     return thread_id_;
+  }
+
+  // Used by fire_node_creation_hooks to assert that each node fires exactly
+  // once; every creation path guarantees single-firing by construction.
+  bool node_creation_hooks_fired() const noexcept {
+    return node_creation_hooks_fired_;
+  }
+
+  void set_node_creation_hooks_fired() noexcept {
+    node_creation_hooks_fired_ = true;
   }
 
   /// Returns the name of the dynamic type of the function, for debugging.
@@ -638,6 +668,10 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // via set_next_edge(s), which always calls topological_nr() of all its
   // children See NOTE [ Topological Number ] for why we need this.
   mutable bool has_parent_ = false;
+
+  // See node_creation_hooks_fired() above. Placed next to has_parent_ so it
+  // packs into the padding before thread_id_.
+  bool node_creation_hooks_fired_ = false;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

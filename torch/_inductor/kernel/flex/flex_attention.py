@@ -906,16 +906,9 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-
-        # TODO: Implement dLSE support in flash-attention backward by folding
-        # grad_logsumexp into the dPsum preprocess step.
         if grad_logsumexp is not None:
-            raise NotImplementedError(
-                "FLASH backend backward does not support differentiating through "
-                "logsumexp (dLSE). This happens when the loss depends on the LSE "
-                "output of flex_attention. "
-                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
-            )
+            (grad_logsumexp,) = maybe_realize([grad_logsumexp])
+
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -924,6 +917,7 @@ def flex_attention_backward(*args, **kwargs):
             out,
             logsumexp,
             grad_out,
+            grad_logsumexp,
             scale,
             kernel_options,
             SPARSE_Q_BLOCK_SIZE,

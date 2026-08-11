@@ -259,7 +259,7 @@ class WorkerServerTest(TestCase):
             self.assertIn(
                 counter_name,
                 data,
-                f"Counter '{counter_name}' not found in response. Available counters: {list(data.keys())}",
+                lambda msg: f"{msg}\nCounter '{counter_name}' not found in response. Available counters: {list(data.keys())}",
             )
 
             # Verify the counter has expected metrics

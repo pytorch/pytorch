@@ -6,8 +6,11 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <cstdint>
+#include <queue>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 /*
@@ -78,24 +81,8 @@ void for_each_next_edge_index(const Node& node, Fn fn) {
   }
   TORCH_INTERNAL_ASSERT(output_order.size() == node.next_edges().size());
   for (const auto i : output_order) {
+    TORCH_INTERNAL_ASSERT(i < node.next_edges().size());
     fn(i);
-  }
-}
-
-template <typename Fn>
-void for_each_next_edge_index_for_worklist(const Node& node, Fn fn) {
-  const auto output_order = node.next_edges_order();
-  if (output_order.empty()) {
-    for (const auto i : c10::irange(node.next_edges().size())) {
-      fn(i);
-    }
-    return;
-  }
-  TORCH_INTERNAL_ASSERT(output_order.size() == node.next_edges().size());
-  // Nodes are popped from the back of the worklist, so reverse the push order
-  // to preserve the requested next-edge execution order.
-  for (auto it = output_order.rbegin(); it != output_order.rend(); ++it) {
-    fn(*it);
   }
 }
 
@@ -922,7 +909,24 @@ static CacheNode* _compiled_autograd_impl(
   std::unordered_map<Node*, int> visited_dependencies;
   visited_dependencies.reserve(dependencies.size());
 
-  std::vector<c10::intrusive_ptr<Node>> worklist{graph_root};
+  // Mirror ReadyQueue ordering within this GraphTask: higher sequence numbers
+  // run first, and next-edge visitation order breaks exact ties.
+  using NodeWithOrder = std::pair<c10::intrusive_ptr<Node>, uint64_t>;
+  auto compare_seq_nr = [](const NodeWithOrder& n1, const NodeWithOrder& n2) {
+    const auto sequence_nr1 = n1.first->sequence_nr();
+    const auto sequence_nr2 = n2.first->sequence_nr();
+    if (sequence_nr1 == sequence_nr2) {
+      return n1.second > n2.second;
+    }
+    return sequence_nr1 < sequence_nr2;
+  };
+  std::priority_queue<
+      NodeWithOrder,
+      std::vector<NodeWithOrder>,
+      decltype(compare_seq_nr)>
+      worklist(compare_seq_nr);
+  uint64_t next_enqueue_order = 0;
+  worklist.emplace(graph_root, next_enqueue_order++);
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
   for (const auto i : c10::irange(output_edges.size())) {
@@ -941,8 +945,8 @@ static CacheNode* _compiled_autograd_impl(
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   std::optional<std::string> compile_reason;
   while (!worklist.empty()) {
-    c10::intrusive_ptr<Node> fn = std::move(worklist.back());
-    worklist.pop_back();
+    c10::intrusive_ptr<Node> fn = worklist.top().first;
+    worklist.pop();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     ordered_calls.emplace_back(&call);
 
@@ -975,7 +979,7 @@ static CacheNode* _compiled_autograd_impl(
       cache = cache->lookup(key);
     }
 
-    for_each_next_edge_index_for_worklist(*fn, [&](size_t i) {
+    for_each_next_edge_index(*fn, [&](size_t i) {
       const auto& edge = fn->next_edge(i);
       if (!edge.is_valid()) {
         return;
@@ -993,7 +997,7 @@ static CacheNode* _compiled_autograd_impl(
       int count{++visited_dependencies[it->first]};
       TORCH_INTERNAL_ASSERT(count <= it->second);
       if (count == it->second) {
-        worklist.emplace_back(edge.function);
+        worklist.emplace(edge.function, next_enqueue_order++);
       }
     });
     i++;

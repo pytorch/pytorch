@@ -121,11 +121,13 @@ def _create_graph(
             export=aot_config.is_export,
             # Allow token discovery for joint fn tracing as tokens can be used in backward.
             _allow_token_discovery=True,
+            _keep_input_mutations=aot_config.keep_inference_input_mutations,
         )
 
     with (
         enable_python_dispatcher(),
         ctx,
+        torch._dynamo.eval_frame._use_eager_on_nested_compile(),
     ):
         fx_g = make_fx(
             inner_f,
@@ -533,6 +535,19 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+    backward_input_order = joint_fn_handle.backward_input_order
+    if backward_input_order is not None:
+        if len(backward_input_order) != len(fw_metadata.input_info):
+            raise AssertionError(
+                "expected backward input order to have one entry per input, "
+                f"got {len(backward_input_order)} entries for "
+                f"{len(fw_metadata.input_info)} inputs"
+            )
+        fw_metadata.backward_output_order = (
+            None
+            if backward_input_order == list(range(len(backward_input_order)))
+            else backward_input_order
+        )
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

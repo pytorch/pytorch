@@ -229,6 +229,16 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
+def _recurse_add_to_result(result, prefix, obj, format_key):
+    if isinstance(obj, dict):
+        if prefix:
+            prefix += "."
+        for key, value in obj.items():
+            _recurse_add_to_result(result, prefix + format_key(key), value, format_key)
+    else:
+        result.append((prefix, obj))
+
+
 def memory_stats(device: "Device" = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
@@ -333,18 +343,8 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
             return "_".join(str(part) for part in key)
         return str(key)
 
-    def _recurse_add_to_result(prefix, obj):
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                key = _format_key(k)
-                _recurse_add_to_result(prefix + key, v)
-        else:
-            result.append((prefix, obj))
-
     stats = memory_stats_as_nested_dict(device=device)
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats, _format_key)
     result.sort()
 
     return collections.OrderedDict(result)
@@ -436,17 +436,8 @@ def host_memory_stats() -> dict[str, Any]:
     """
     result = []
 
-    def _recurse_add_to_result(prefix, obj):
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
-        else:
-            result.append((prefix, obj))
-
     stats = host_memory_stats_as_nested_dict()
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats, str)
     result.sort()
 
     return collections.OrderedDict(result)
@@ -601,6 +592,15 @@ def max_memory_reserved(device: "Device" = None) -> int:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        Under ``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``, the peak is
+        computed by summing the high-water marks of the default mempool and the
+        device graph-memory pool (CUDA graph captures reserve backing in the
+        latter). Because those two high-water marks need not occur at the same
+        instant, the reported peak is a conservative *upper bound* on the true
+        simultaneous peak. The current value
+        (:func:`~torch.cuda.memory_reserved`) is exact.
     """
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
@@ -1118,6 +1118,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
                 "snapshot",  # the allocator generated a memory snapshot
                 # useful to correlate a previously taken
                 # snapshot with this trace
+                "annotate",  # metadata was attached to a live allocation
+                # via _annotate_tensor. 'addr' is the allocation's base
+                # address and 'user_metadata' holds the annotation
             ]
             addr: int  # not present for OOM
             frames: List[Frame]
@@ -1165,6 +1168,21 @@ def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False
         pickle.dump(s, f)
 
 
+def _memory_metadata_supported() -> bool:
+    """
+    Return whether the active CUDA allocator backend records memory metadata.
+
+    Only the native caching allocator supports :func:`_set_memory_metadata`.
+    With other backends (e.g. ``cudaMallocAsync`` or a pluggable allocator),
+    :func:`_set_memory_metadata` is a no-op and :func:`_get_memory_metadata`
+    always returns the empty string. Callers doing best-effort labeling can
+    check this before setting metadata to avoid the one-time warning emitted on
+    unsupported backends.
+    """
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_memoryMetadataSupported()
+
+
 def _set_memory_metadata(metadata: str):
     """
     Set custom metadata to be recorded on memory history trace entries.
@@ -1207,6 +1225,42 @@ def _get_memory_metadata() -> str:
     """
     # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
+
+
+def _annotate_tensor(tensor: torch.Tensor, metadata: str):
+    """
+    Attach metadata to the allocation backing ``tensor``, post facto.
+
+    Unlike :func:`_set_memory_metadata`, which stamps metadata onto trace
+    events as they are generated, this records a dedicated ``annotate`` trace
+    event for an allocation that already exists. This is useful when the
+    information only becomes available after the allocation happened, e.g.
+    noting that a tensor was packed into the autograd graph. Metadata recorded
+    at allocation time is not modified; annotations accumulate as separate
+    trace entries keyed to the allocation's address, each carrying the
+    annotation string as its ``user_metadata`` and a stack trace of the
+    annotation site (subject to the ``context`` setting of
+    :func:`_record_memory_history`). The pytorch.org/memory_viz visualizer
+    shows annotations alongside the allocation's own metadata.
+
+    The annotation is keyed to the base address of the tensor's untyped
+    storage, so it works for views and tensors with a nonzero
+    ``storage_offset``.
+
+    If memory history recording is not enabled (see
+    :func:`_record_memory_history`), this has no observable effect. It is only
+    supported by the native caching allocator; with other backends (e.g.
+    ``cudaMallocAsync`` or a pluggable allocator) it is silently ignored.
+
+    Args:
+        tensor (torch.Tensor): CUDA tensor whose backing allocation to
+                               annotate.
+        metadata (str): Annotation string to record.
+    """
+    if not tensor.is_cuda:
+        raise ValueError(f"expected a CUDA tensor, got device {tensor.device}")
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_annotateMemory(tensor.untyped_storage().data_ptr(), metadata)
 
 
 def _save_segment_usage(filename="output.svg", snapshot=None):

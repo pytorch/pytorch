@@ -11,6 +11,11 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils.hooks import RemovableHandle
 
 
@@ -1041,6 +1046,11 @@ def forward(self, L_x_ : torch.Tensor):
         def linear_with_bias():
             return torch.nn.Linear(10, 10, bias=True)
 
+        def many_layers():
+            return torch.nn.Sequential(
+                *(torch.nn.Linear(10, 10, bias=False) for _ in range(5))
+            )
+
         def reordered_layers_with_scale():
             class ReorderedLayersWithScale(torch.nn.Module):
                 def __init__(self):
@@ -1060,6 +1070,7 @@ def forward(self, L_x_ : torch.Tensor):
         for module_factory, args in (
             (reordered_layers, ()),
             (linear_with_bias, ()),
+            (many_layers, ()),
             (reordered_layers_with_scale, (2.0,)),
         ):
             eager_order = get_order(module_factory, args=args)
@@ -1075,6 +1086,209 @@ def forward(self, L_x_ : torch.Tensor):
                 ),
                 eager_order,
             )
+
+    def test_post_acc_grad_hook_order_preserves_eager_graph_scheduling(self):
+        def get_order(fn, compiled_bwd=False):
+            leaves = [torch.randn(4, requires_grad=True) for _ in range(3)]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                compiled_fn(*leaves).sum().backward()
+            return hook_order
+
+        def cat(a, b, c):
+            return torch.cat((a, b, c))
+
+        def stack(a, b, c):
+            return torch.stack((a, b, c))
+
+        def nested_add(a, b, c):
+            return a + b + c
+
+        def unused_input(a, b, c):
+            return b * c
+
+        for fn in (cat, stack, nested_add, unused_input):
+            with self.subTest(fn=fn.__name__):
+                eager_order = []
+                leaves = [torch.randn(4, requires_grad=True) for _ in range(3)]
+                for idx, leaf in enumerate(leaves):
+                    leaf.register_post_accumulate_grad_hook(
+                        lambda _param, idx=idx: eager_order.append(idx)
+                    )
+                fn(*leaves).sum().backward()
+
+                self.assertEqual(get_order(fn), eager_order)
+                self.assertEqual(get_order(fn, compiled_bwd=True), eager_order)
+
+    def test_post_acc_grad_hook_order_multiple_aot_regions(self):
+        def get_order(compiled_bwd):
+            leaves = [torch.randn(4, requires_grad=True) for _ in range(4)]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            region = torch.compile(
+                lambda a, b: (a * b).sin(), backend="aot_eager", fullgraph=True
+            )
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                (
+                    region(leaves[0], leaves[1]) + region(leaves[2], leaves[3])
+                ).sum().backward()
+            return hook_order
+
+        self.assertEqual(get_order(compiled_bwd=True), get_order(compiled_bwd=False))
+
+    def test_post_acc_grad_hook_order_tensor_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def fn(a, b, c):
+            return a + b + c
+
+        def get_order(backend=None, compiled_bwd=False):
+            leaves = [
+                TwoTensor(
+                    torch.randn(4, requires_grad=True),
+                    torch.randn(4, requires_grad=True),
+                )
+                for _ in range(3)
+            ]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            compiled_fn = (
+                torch.compile(fn, backend=backend, fullgraph=True)
+                if backend is not None
+                else fn
+            )
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                compiled_fn(*leaves).sum().backward()
+            return hook_order
+
+        eager_order = get_order()
+        self.assertEqual(get_order("aot_eager"), eager_order)
+        self.assertEqual(get_order("aot_eager", compiled_bwd=True), eager_order)
+
+    def test_post_acc_grad_hook_explicit_order(self):
+        class DistinctOrderedFunction(torch.autograd.Function):
+            _backward_next_edges_order = [2, 1, 0]
+
+            @staticmethod
+            def forward(a, b, c):
+                return a + b + c
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad, grad
+
+        class OrderedFunction(torch.autograd.Function):
+            _backward_next_edges_order = [4, 0, 1, 3, 2]
+
+            @staticmethod
+            def forward(a, b, a_again, c, d):
+                return a + b + a_again + c + d
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad, grad, grad, grad
+
+        def get_order(function, input_indices, compiled_bwd):
+            leaves = [torch.randn((), requires_grad=True) for _ in range(4)]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                function.apply(*(leaves[i] for i in input_indices)).backward()
+            return hook_order
+
+        for function, input_indices, expected in (
+            (DistinctOrderedFunction, (0, 1, 2), [2, 1, 0]),
+            (OrderedFunction, (0, 1, 0, 2, 3), [3, 1, 2, 0]),
+        ):
+            with self.subTest(function=function.__name__):
+                self.assertEqual(
+                    get_order(function, input_indices, compiled_bwd=False), expected
+                )
+                self.assertEqual(
+                    get_order(function, input_indices, compiled_bwd=True), expected
+                )
+
+    def test_aot_compiled_autograd_preserves_tensor_hook_gradient(self):
+        def get_hook_observation(compiled):
+            def fn(x):
+                return x * 2
+
+            leaf = torch.randn(4, requires_grad=True)
+            observations = []
+            leaf.register_hook(
+                lambda grad: observations.append(grad._base is None) or grad
+            )
+            compiled_fn = (
+                torch.compile(fn, backend="aot_eager", fullgraph=True)
+                if compiled
+                else fn
+            )
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                compiled_fn(leaf).sum().backward()
+            return observations
+
+        self.assertEqual(get_hook_observation(True), get_hook_observation(False))
 
     def test_recompile(self):
         def hook(param):
@@ -1236,8 +1450,11 @@ def forward(self, L_x_ : torch.Tensor):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_on_intermediate_autograd_cache(self):
+
+class HooksTestsDevice(torch._dynamo.test_case.TestCase):
+    @skipIfRocm(msg="pytorch/pytorch/issues/190414")
+    @onlyAccelerator
+    def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters
 
         def fn(x):
@@ -1250,21 +1467,21 @@ def forward(self, L_x_ : torch.Tensor):
             # First compile
             torch._dynamo.reset()
             counters.clear()
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x).backward()
+            x = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Second compile (force recompile to test cache)
             torch._dynamo.reset()
-            x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x2).backward()
+            x2 = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             aot_counters = counters["aot_autograd"]
             self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self):
+    @onlyAccelerator
+    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self, device):
         from torch._dynamo.utils import counters
 
         def fn_a(x):
@@ -1283,21 +1500,23 @@ def forward(self, L_x_ : torch.Tensor):
             counters.clear()
 
             # Compile fn_a
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_a, fullgraph=True)(x).backward()
+            x = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn_a, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Compile fn_b (different hook — must NOT cache hit from fn_a)
-            x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_b, fullgraph=True)(x2).backward()
+            x2 = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn_b, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # fn_b should give grad = 2 * 3.0 = 6.0, not 2 * 0.5 = 1.0
-            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device="cuda"))
+            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device=device))
             self.assertEqual(
                 counters["aot_autograd"].get("autograd_cache_bypass", 0), 0
             )
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
+
+instantiate_device_type_tests(HooksTestsDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

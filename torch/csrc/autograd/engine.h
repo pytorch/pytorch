@@ -12,9 +12,11 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/node_creation_hook.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -85,21 +87,35 @@ class CheckpointValidGuard {
 
 struct ReadyQueue {
  private:
+  struct NodeTaskWithOrder {
+    NodeTask task;
+    uint64_t enqueue_order{0};
+  };
+
   // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-  // Shutdown tasks are first and then empty NodeTask are next.
+  // Shutdown tasks are first and then empty NodeTask are next. For normal
+  // tasks, prefer higher reentrant depths and sequence numbers, then preserve
+  // FIFO order for exact ties.
   struct CompareNodeTaskTime {
-    bool operator()(NodeTask const& t1, NodeTask const& t2) {
+    bool operator()(NodeTaskWithOrder const& t1, NodeTaskWithOrder const& t2) {
+      const auto& task1 = t1.task;
+      const auto& task2 = t2.task;
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (t2.isShutdownTask_) {
+      if (task2.isShutdownTask_) {
         return true;
-      } else if (!t1.fn_ || t1.isShutdownTask_) {
+      } else if (!task1.fn_ || task1.isShutdownTask_) {
         return false;
-      } else if (!t2.fn_) {
+      } else if (!task2.fn_) {
         return true;
-      } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
-        return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
+      } else if (task1.getReentrantDepth() == task2.getReentrantDepth()) {
+        const auto sequence_nr1 = task1.fn_->sequence_nr();
+        const auto sequence_nr2 = task2.fn_->sequence_nr();
+        if (sequence_nr1 == sequence_nr2) {
+          return t1.enqueue_order > t2.enqueue_order;
+        }
+        return sequence_nr1 < sequence_nr2;
       } else {
-        return t1.getReentrantDepth() < t2.getReentrantDepth();
+        return task1.getReentrantDepth() < task2.getReentrantDepth();
       }
     }
   };
@@ -109,8 +125,12 @@ struct ReadyQueue {
   // To protect read and writes to heap_
   mutable std::mutex mutex_;
 
-  std::priority_queue<NodeTask, std::vector<NodeTask>, CompareNodeTaskTime>
+  std::priority_queue<
+      NodeTaskWithOrder,
+      std::vector<NodeTaskWithOrder>,
+      CompareNodeTaskTime>
       heap_;
+  uint64_t next_enqueue_order_{0};
 
  public:
   // incrementOutstandingTasks indicates whether or not we should increment
@@ -161,7 +181,7 @@ struct TORCH_API Engine {
   // for the graph.
   //
   // NB: This API should only be used by internal autograd specific
-  // machinery and shouldn't be exposed to users in anyway.
+  // machinery and shouldn't be exposed to users in any way.
   virtual c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       c10::intrusive_ptr<Node> graph_root,
@@ -173,6 +193,15 @@ struct TORCH_API Engine {
 
   virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
     return nullptr;
+  }
+
+  // Wraps the currently registered torch.autograd.graph.node_creation_hook
+  // callbacks (a Python-only feature) into callable objects, outermost first.
+  // Returns empty when none are registered; only the Python engine can produce
+  // non-empty results.
+  virtual std::vector<std::unique_ptr<NodeCreationHook>>
+  get_node_creation_hooks() {
+    return {};
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows
@@ -228,7 +257,7 @@ struct TORCH_API Engine {
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
-  void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
+  void add_thread_pool_task(std::weak_ptr<GraphTask> graph_task);
 
   // Safe to read device_ready_queues_ without synchronization after
   // initialization

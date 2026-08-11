@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
@@ -315,6 +316,11 @@ class DeviceCodegen:
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
 
+# Device index to emit into generated code: either a literal compile-time index, or a
+# code expression evaluated at run time (e.g. current_device_idx_expr() under
+# compile-on-one-rank).
+DeviceIdx = int | str
+
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
@@ -322,14 +328,27 @@ class DeviceOpOverrides:
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
 
     def synchronize(self) -> str:
         raise NotImplementedError
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
+
+    def current_device_idx_expr(self) -> str:
+        # Runtime expression evaluating to the current device index. Used under
+        # compile-on-one-rank so the wrapper resolves its device at run time
+        # (rank-agnostic) instead of baking the compile-time index. Only CUDA/ROCm
+        # implements this today; raise something actionable rather than a bare
+        # NotImplementedError from deep inside device-context codegen.
+        raise RuntimeError(
+            f"compile-on-one-rank (device-as-parameter) is not supported on "
+            f"{type(self).__name__}: it has no current_device_idx_expr(), so the "
+            f"generated wrapper would bake the compile-time device index and not be "
+            f"rank-portable."
+        )
 
     def current_stream(self) -> str:
         raise NotImplementedError
@@ -380,6 +399,8 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
 
+# Thread-safe lazy initialization for device op overrides
+device_op_overrides_lock = threading.RLock()
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 _device_op_overrides_initialized = False
 custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
@@ -488,7 +509,17 @@ def get_wrapper_codegen_for_device(
         if fx_wrapper:
             return wrapper_codegen_obj.fx_wrapper_codegen
         elif cpp_wrapper:
-            return wrapper_codegen_obj.cpp_wrapper_codegen
+            cpp_wrapper_codegen = wrapper_codegen_obj.cpp_wrapper_codegen
+            # allow_stack_allocation is a per-compile config, so the arrayref CPU
+            # wrapper must follow the current config value rather than whatever it
+            # happened to be at first registration (see init_backend_registration).
+            if device == "cpu" and config.aot_inductor.allow_stack_allocation:
+                from .cpp_wrapper_cpu import CppWrapperCpu
+                from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
+
+                if cpp_wrapper_codegen is CppWrapperCpu:
+                    return CppWrapperCpuArrayRef
+            return cpp_wrapper_codegen
         else:
             return wrapper_codegen_obj.wrapper_codegen
     return None
@@ -510,7 +541,6 @@ def init_backend_registration() -> None:
     """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
@@ -534,9 +564,11 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef
-            if config.aot_inductor.allow_stack_allocation
-            else CppWrapperCpu,
+            # allow_stack_allocation selects CppWrapperCpuArrayRef, but that is a
+            # per-compile config; the choice is made dynamically in
+            # get_wrapper_codegen_for_device rather than frozen here at the
+            # process's first registration.
+            CppWrapperCpu,
             WrapperFxCodegen,
         )
 
@@ -639,7 +671,8 @@ def index_prevent_reordering(
 def register_device_op_overrides(
     device: str, device_op_overrides: DeviceOpOverrides
 ) -> None:
-    device_op_overrides_dict[device] = device_op_overrides
+    with device_op_overrides_lock:
+        device_op_overrides_dict[device] = device_op_overrides
 
 
 def _initialize_device_op_overrides():
@@ -649,16 +682,20 @@ def _initialize_device_op_overrides():
     if _device_op_overrides_initialized:
         return
 
-    from . import mps_device_op_overrides  # noqa: F401
-    from .cpu_device_op_overrides import CpuDeviceOpOverrides
-    from .cuda import device_op_overrides  # noqa: F401
-    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+    with device_op_overrides_lock:
+        if _device_op_overrides_initialized:
+            return
 
-    # TPU uses Pallas for codegen and only needs no-op overrides
-    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        from . import mps_device_op_overrides  # noqa: F401
+        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+        from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    _device_op_overrides_initialized = True
+        # TPU uses Pallas for codegen and only needs no-op overrides
+        register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+
+        _device_op_overrides_initialized = True
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
@@ -1273,6 +1310,17 @@ class OverridesData:
     mps: Callable[..., str] | None = None
 
 
+def _triton_bessel(order: int, kind: str, x: str) -> str:
+    # PyTorch eager returns NaN for +/-inf, while libdevice returns
+    # the mathematical limit. x - x yields NaN in x's dtype
+    # (avoids fp32 literal promotion under tl.where for float64 inputs)
+    return (
+        f"tl.where(tl_math.abs({x}) == float('inf'), "
+        f"{x} - {x}, "
+        f"libdevice.{kind}{order}({x}))"
+    )
+
+
 def _triton_cyl_bessel_i(order: int, x: str) -> str:
     # PyTorch's Cephes-derived kernels return NaN for infinities; libdevice
     # returns signed infinities, so synthesize a same-dtype NaN with x - x.
@@ -1294,25 +1342,25 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j0_forward({x})",
-        triton=lambda x: f"libdevice.j0({x})",
+        triton=lambda x: _triton_bessel(0, "j", x),
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j1_forward({x})",
-        triton=lambda x: f"libdevice.j1({x})",
+        triton=lambda x: _triton_bessel(1, "j", x),
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y0_forward({x})",
-        triton=lambda x: f"libdevice.y0({x})",
+        triton=lambda x: _triton_bessel(0, "y", x),
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y1_forward({x})",
-        triton=lambda x: f"libdevice.y1({x})",
+        triton=lambda x: _triton_bessel(1, "y", x),
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
@@ -1720,7 +1768,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
@@ -1757,13 +1805,19 @@ class KernelArgs:
         Returns:
             name of the semaphores buffer
         """
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
         current_device = V.graph.get_current_device_or_throw()
+        # This name is emitted into the wrapper, so under compile-on-one-rank it cannot
+        # carry the rank's device index (the graph is single-device there, so the type
+        # alone still distinguishes buffers).
+        suffix = "" if _coor_enabled() else f"_{current_device.index}"
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
             dtype=torch.uint32,
             inner_name="sem_ptr",
-            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            outer_name=f"semaphores_{current_device.type}{suffix}",
             device=current_device,
         )
         for existing_arg in self.workspace_args:
@@ -2168,7 +2222,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        )
         self.varname_map[var_name] = var
         return var
 
@@ -2182,7 +2238,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(name, bounds, dtype, shape)
+        )
         self.varname_map[name] = var
         return var
 
@@ -2305,7 +2363,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        """A load the depends on an index we have read"""
+        """A load that depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
@@ -2787,6 +2845,7 @@ class CSEProxy(DefaultHandler):
                 V.kernel.compute,
                 v,
                 bounds=bounds,
+                # pyrefly: ignore[bad-argument-type]
                 dtype=output_dtype,
                 shape=output_shape,
             )

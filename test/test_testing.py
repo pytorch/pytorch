@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import collections
+import dataclasses
 import doctest
 import functools
 import importlib
@@ -385,7 +386,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
@@ -432,7 +433,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
@@ -1224,6 +1225,123 @@ class TestAssertCloseContainer(TestCase):
         with self.assertRaisesRegex(AssertionError, re.escape("item ['b']")):
             torch.testing.assert_close(actual, expected)
 
+    def test_dataclass_with_tensor_fields(self):
+        # Python 3.13+ removed the same-object shortcut in dataclass __eq__, so
+        # Foo(t, 1) == Foo(t, 1) raises when t is a multi-element tensor. assertEqual
+        # / assert_close should still succeed by comparing fields directly.
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            i: int
+
+        t = torch.zeros(2)
+        actual = Foo(t, 1)
+        expected = Foo(t, 1)
+
+        self.assertEqual(actual, expected)
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+        # Distinct equal tensor values should also compare equal.
+        self.assertEqual(Foo(torch.zeros(2), 1), Foo(torch.zeros(2), 1))
+
+    def test_dataclass_compare_false_fields_ignored(self):
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            ignored: int = dataclasses.field(compare=False, default=0)
+
+        self.assertEqual(Foo(torch.zeros(2), 1), Foo(torch.zeros(2), 2))
+
+    def test_dataclass_mismatching_tensor_field_msg(self):
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            i: int
+
+        # Multi-element tensors force the field-recursion path (scalar tensors
+        # can make dataclass __eq__ return a bool and fall through to ObjectPair).
+        actual = Foo(torch.zeros(2), 0)
+        expected = Foo(torch.ones(2), 0)
+
+        with self.assertRaisesRegex(AssertionError, re.escape("item ['t']")):
+            torch.testing.assert_close(actual, expected)
+
+    def test_nested_dataclass_with_tensor_fields(self):
+        @dataclasses.dataclass
+        class Inner:
+            t: torch.Tensor
+
+        @dataclasses.dataclass
+        class Outer:
+            inner: Inner
+            i: int
+
+        t = torch.ones(3)
+        self.assertEqual(Outer(Inner(t), 1), Outer(Inner(t), 1))
+
+    def test_dataclass_custom_eq_respected(self):
+        # eq=False dataclasses with custom __eq__ must not be forced through
+        # field-by-field comparison (which would ignore their semantics).
+        @dataclasses.dataclass(eq=False)
+        class ByShape:
+            t: torch.Tensor
+            tag: str
+
+            def __eq__(self, other: object) -> bool:
+                if not isinstance(other, ByShape):
+                    return NotImplemented
+                return self.t.shape == other.t.shape and self.tag == other.tag
+
+        # Values differ but shape/tag match: custom __eq__ says equal.
+        self.assertEqual(
+            ByShape(torch.zeros(2), "a"),
+            ByShape(torch.ones(2), "a"),
+        )
+        with self.assertRaises(AssertionError):
+            self.assertEqual(
+                ByShape(torch.zeros(2), "a"),
+                ByShape(torch.zeros(3), "a"),
+            )
+
+    def test_dataclass_union_like_getattr_raises(self):
+        # Mimics torch._export.serde.union._Union: unset fields raise on access,
+        # and equality is defined by an active variant only.
+        @dataclasses.dataclass(eq=False, repr=False)
+        class UnionLike:
+            as_int: int | None = None
+            as_tensor: torch.Tensor | None = None
+            _type: str = dataclasses.field(default="", repr=False, compare=False)
+
+            def __post_init__(self) -> None:
+                if self.as_int is not None:
+                    self._type = "as_int"
+                elif self.as_tensor is not None:
+                    self._type = "as_tensor"
+
+            def __getattribute__(self, name: str) -> object:
+                attr = super().__getattribute__(name)
+                field_names = {"as_int", "as_tensor"}
+                if attr is None and name in field_names and name != self._type:
+                    raise AttributeError(f"Field {name} is not set.")
+                return attr
+
+            def __eq__(self, other: object) -> bool:
+                if not isinstance(other, UnionLike):
+                    return False
+                return self._type == other._type and getattr(self, self._type) == getattr(
+                    other, other._type
+                )
+
+            def __repr__(self) -> str:
+                return f"UnionLike({self._type}={getattr(self, self._type)})"
+
+        actual = UnionLike(as_int=1)
+        expected = UnionLike(as_int=1)
+        self.assertEqual(actual, expected)
+        with self.assertRaises(AssertionError):
+            self.assertEqual(UnionLike(as_int=1), UnionLike(as_int=2))
+
 
 class TestAssertCloseSparseCOO(TestCase):
     def test_matching_coalesced(self):
@@ -1859,6 +1977,26 @@ class TestTestParametrization(TestCase):
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_name_fn_with_dot_raises(self):
+        # Dots in test names break unittest.TestLoader.loadTestsFromName, so
+        # instantiation should fail loudly rather than produce an unloadable test.
+        class TestParametrized(TestCase):
+            @parametrize("dtype", [torch.bfloat16], name_fn=str)
+            def test_bad_name(self, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'contains a "." character'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_subtest_name_with_dot_raises(self):
+        class TestParametrized(TestCase):
+            @parametrize("x", [subtest(1, name="a.b")])
+            def test_bad_name(self, x):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'contains a "." character'):
+            instantiate_parametrized_tests(TestParametrized)
+
     def test_reparametrize(self):
 
         def include_is_even_arg(test_name, param_kwargs):
@@ -2039,6 +2177,18 @@ class TestTestParametrizationDeviceType(TestCase):
         ]
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
+
+    def test_name_fn_with_dot_raises(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("dtype", [torch.bfloat16], name_fn=str)
+            def test_bad_name(self, device, dtype):
+                pass
+
+        locals_dict = dict(locals())
+        with self.assertRaisesRegex(RuntimeError, 'contains a "." character'):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
     def test_empty_param_names(self, device):
         # If no param names are passed, ensure things still work without parametrization.
@@ -2504,6 +2654,7 @@ class TestImports(TestCase):
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.scatter_add",  # depends on cutlass
+                           "torch._native.ops.sum.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
@@ -2685,6 +2836,149 @@ class TestOpInfoSampleFunctions(TestCase):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
+
+# Tests test classification.
+class TestHardwareClassifications(TestCase):
+    def setUp(self):
+        super().setUp()
+        import torch.testing._internal.common_utils as _cu
+
+        self._cu = _cu
+
+    def _suite_test_names(self, suite) -> set[str]:
+        return {test_case.id().split(".")[-1] for test_case in self._cu.HardwareClassificationTestLoader.iter_test_cases_recursively(suite)}
+
+    def test_filter_suite(self):
+        requirement = self._cu.HardwareClassification
+
+        class GenericTest(TestCase):
+            hw_classification = requirement.GENERIC
+
+            def test_generic(self):
+                pass
+
+        class CudaTest(TestCase):
+            hw_classification = requirement.CUDA
+
+            def test_cuda(self):
+                pass
+
+        class MissingClassificationTest(TestCase):
+            def test_missing_classification(self):
+                pass
+
+        suite = unittest.TestSuite(
+            [
+                unittest.defaultTestLoader.loadTestsFromTestCase(GenericTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(CudaTest),
+                unittest.defaultTestLoader.loadTestsFromTestCase(MissingClassificationTest),
+            ]
+        )
+
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.GENERIC})
+        filtered_suite = loader.get_filtered_suite(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_generic"},
+        )
+
+    def test_filter_suite_uses_inherited_metadata(self):
+        requirement = self._cu.HardwareClassification
+
+        class AcceleratorBase(TestCase):
+            hw_classification = requirement.ACCELERATOR
+
+        class AcceleratorChild(AcceleratorBase):
+            def test_inherited_classification(self):
+                pass
+
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(AcceleratorChild)
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.ACCELERATOR})
+        filtered_suite = loader.get_filtered_suite(suite)
+
+        self.assertEqual(
+            self._suite_test_names(filtered_suite),
+            {"test_inherited_classification"},
+        )
+
+    def test_hw_classification_test_loader(self):
+        requirement = self._cu.HardwareClassification
+        import types
+
+        # Build a mock module with test classes
+        class GenericA(TestCase):
+            hw_classification = requirement.GENERIC
+
+            def test_a1(self):
+                pass
+
+            def test_a2(self):
+                pass
+
+        class GenericB(TestCase):
+            hw_classification = requirement.GENERIC
+
+            def test_b1(self):
+                pass
+
+        class Cuda(TestCase):
+            hw_classification = requirement.CUDA
+
+            def test_c1(self):
+                pass
+
+        mod = types.ModuleType("_test_hc_module")
+        mod.GenericA = GenericA
+        mod.GenericB = GenericB
+        mod.Cuda = Cuda
+
+        loader = self._cu.HardwareClassificationTestLoader({requirement.GENERIC})
+
+        with self.subTest(method="loadTestsFromModule"):
+            suite = loader.loadTestsFromModule(mod)
+            self.assertEqual(
+                self._suite_test_names(suite),
+                {"test_a1", "test_a2", "test_b1"},
+            )
+
+        with self.subTest(method="loadTestsFromNames"):
+            suite = loader.loadTestsFromNames(
+                ["GenericA.test_a1", "Cuda.test_c1"],
+                module=mod,
+            )
+            self.assertEqual(self._suite_test_names(suite), {"test_a1"})
+
+        with self.subTest(method="loadTestsFromName"):
+            suite = loader.loadTestsFromName(
+                "Cuda.test_c1",
+                module=mod,
+            )
+            self.assertEqual(self._suite_test_names(suite), set())
+
+    def test_hw_classification_test_loader_no_filter(self):
+        import types
+
+        class GenericA(TestCase):
+            hw_classification = self._cu.HardwareClassification.GENERIC
+
+            def test_a(self):
+                pass
+
+        class Cuda(TestCase):
+            hw_classification = self._cu.HardwareClassification.CUDA
+
+            def test_b(self):
+                pass
+
+        mod = types.ModuleType("_test_hc_module_none")
+        mod.GenericA = GenericA
+        mod.Cuda = Cuda
+
+        loader = self._cu.HardwareClassificationTestLoader(None)
+        suite = loader.loadTestsFromModule(mod)
+
+        self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
