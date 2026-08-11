@@ -1333,10 +1333,11 @@ class aten_distributed_optimizations:
     # Chrome Trace JSON path for profile-guided runtime estimation.
     profile_guided_estimations_profile_path: str | None = None
 
-    # Maximum memory increase above baseline for prefetch operations
-    # Uses minimum of absolute cap and ratio of baseline
-    max_memory_increase_gb: float | None = None  # Absolute cap in GB
-    max_memory_increase_ratio: float | None = None  # Ratio of baseline peak memory
+    # Maximum memory increase above baseline for prefetch operations.
+    # Uses minimum of absolute cap and ratio of baseline. None disables a
+    # cap; both None means uncapped.
+    max_memory_increase_gb: float | None = 1.0  # Absolute cap in GB
+    max_memory_increase_ratio: float | None = 0.05  # Ratio of baseline peak memory
 
     # Maximum GB of concurrent collective data in flight. Too much in flight memory
     # can cause memory fragmentation within the CUDA Caching Allocator.

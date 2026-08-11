@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -1580,7 +1581,6 @@ class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
             return all_gather @ w
 
         gm = make_fx(func, tracing_mode="fake")(torch.randn(8, 16), torch.randn(16, 16))
-        counters.clear()
 
         with (
             patch(
@@ -1602,9 +1602,7 @@ class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
     def test_no_memory_limit_prefetches_across_compute_gap(self):
-        from torch._inductor.fx_passes.overlap_scheduling import (
-            schedule_overlap_bucketing,
-        )
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
 
         group_name = dist.distributed_c10d._get_default_group().group_name
 
@@ -1630,14 +1628,78 @@ class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
                 return_value=lambda fn, *args, **kwargs: 0.01,
             ),
         ):
-            schedule_overlap_bucketing(
+            scheduler = OverlapScheduler(
                 gm,
+                max_in_flight_gb=5.0,
+                max_compute_pre_fetch=200,
+                collective_bucketing=False,
+                insert_overlap_deps=False,
+                compute_overlap_multipler=1.0,
+                max_coll_distance=200,
+                custom_runtime_estimation=None,
+                collective_estimator="analytical",
                 max_memory_increase_gb=None,
                 max_memory_increase_ratio=None,
             )
-        FileCheck().check("%all_gather_into_tensor").check("%mm").check("%mm_1").run(
-            str(gm.graph)
+            scheduler.run()
+
+        (ag,) = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
         )
+        # A finite domination index is the precondition for the budget loop
+        # that used to raise IndexError when uncapped.
+        self.assertNotEqual(scheduler.compute_index_domination[ag], sys.maxsize)
+        # The collective is actually prefetched across the compute gap.
+        self.assertTrue(scheduler.collective_info[ag].hiding_nodes)
+
+    def test_no_memory_limit_reachable_via_config(self):
+        from torch._inductor import config as inductor_config
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing_from_inductor_configs,
+        )
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(a, b, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, 4, group_name
+            )
+            first = b @ w
+            second = first @ w
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return second.sum() + (all_gather @ w).sum()
+
+        def run_with_caps(max_gb, max_ratio):
+            counters.clear()
+            gm = make_fx(func, tracing_mode="fake")(
+                torch.randn(8, 16), torch.randn(8, 16), torch.randn(16, 16)
+            )
+            with (
+                inductor_config.patch(
+                    {
+                        "aten_distributed_optimizations.max_memory_increase_gb": max_gb,
+                        "aten_distributed_optimizations.max_memory_increase_ratio": max_ratio,
+                    }
+                ),
+                patch(
+                    "torch.utils._runtime_estimation.get_transfer_time",
+                    return_value=0.0,
+                ),
+                patch(
+                    "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                    return_value=lambda fn, *args, **kwargs: 0.01,
+                ),
+            ):
+                schedule_overlap_bucketing_from_inductor_configs(gm)
+
+        # Caps None via config must reach the uncapped path: no tracker, no counter.
+        run_with_caps(None, None)
+        self.assertNotIn("overlap_original_mem", counters["inductor"])
+
+        # An explicit cap via config builds the tracker and writes the counter.
+        run_with_caps(1.0, 0.05)
+        self.assertIn("overlap_original_mem", counters["inductor"])
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
