@@ -1276,7 +1276,11 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 
 
 @wrapper_noop_set_seed_decorator
-class TestInductorOpInfo(TestCase):
+# Keep the OpInfo test body in a reusable template so other Inductor backend
+# test modules can instantiate backend-specific subclasses. Classes passed to
+# instantiate_device_type_tests must define their test methods directly, so
+# subclasses should rebind test_comprehensive from this template.
+class InductorOpInfoTemplate(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -1590,6 +1594,10 @@ class TestInductorOpInfo(TestCase):
 
         # with open("test_output.txt", "a") as f:
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+
+
+class TestInductorOpInfo(InductorOpInfoTemplate):
+    test_comprehensive = InductorOpInfoTemplate.test_comprehensive
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
