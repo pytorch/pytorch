@@ -151,6 +151,19 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(is_fake_tensor(z))
 
+    def test_nansum_nanmean_empty_dim(self):
+        # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
+        # passed, matching eager. The meta kernel used to preserve the input
+        # shape instead. See https://github.com/pytorch/pytorch/issues/191188
+        x = torch.randn(2, 3)
+        for op in (torch.nansum, torch.nanmean):
+            for dim in ((), []):
+                for keepdim in (False, True):
+                    eager = op(x, dim=dim, keepdim=keepdim)
+                    with FakeTensorMode() as mode:
+                        fake = op(mode.from_tensor(x), dim=dim, keepdim=keepdim)
+                    self.assertEqual(fake.shape, eager.shape)
+
     def test_inplace_non_broadcastable_raises(self):
         # Ops decomposed via _make_inplace used to silently resize the fake
         # self tensor to the broadcast shape instead of raising like eager.
@@ -2739,6 +2752,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()

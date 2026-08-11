@@ -392,6 +392,10 @@ add_custom_target(
 # is present -- otherwise it skips and clears any stale output. It parses the header with the
 # clang python bindings from the libclang wheel (a build dep; bundles libclang.so, loaded
 # automatically). We run it at configure time and gate on whether the stub file was produced.
+# CUPTI_STUBS_GENERATED records that success so the native .pftrace encoder's build deps
+# (perfetto SDK + zlib, below) are only pulled in when the CUPTI monitor is actually usable --
+# without the stubs it is unavailable at runtime, so the encoder would be dead weight.
+set(CUPTI_STUBS_GENERATED FALSE)
 if(USE_CUDA AND BUILD_PYTHON)
   set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
   # Re-run configure (which re-runs codegen below) when the codegen or the header resolver
@@ -411,6 +415,15 @@ if(USE_CUDA AND BUILD_PYTHON)
     message(WARNING "CUPTI stub codegen failed; the CUPTI monitor will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
   elseif(EXISTS "${CUPTI_STUBS_PY}")
     message(STATUS "Generated CUPTI stub module: ${CUPTI_STUBS_PY}")
+    set(CUPTI_STUBS_GENERATED TRUE)
+    # The generated module is gitignored, so scikit-build-core's package walk
+    # drops it from the wheel (gitignore semantics; torch/version.py has an
+    # explicit install rule in torch/CMakeLists.txt for the same reason).
+    # Without this the wheel ships torch/profiler/_cupti/ WITHOUT the stubs
+    # and importing the CUPTI monitor dies with ModuleNotFoundError; editable
+    # installs mask it (redirect mode reads the source tree). DESTINATION is
+    # relative to the install prefix, which the wheel maps to torch/.
+    install(FILES "${CUPTI_STUBS_PY}" DESTINATION "profiler/_cupti")
     # Regenerate when the resolved header (or its version header) changes: adding them to
     # CMAKE_CONFIGURE_DEPENDS makes a later build auto-reconfigure and re-run the codegen.
     string(REGEX MATCH "CUPTI_MONITOR_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
@@ -942,12 +955,14 @@ endif(USE_LLVM AND LLVM_FOUND)
 set(DUMMY_EMPTY_FILE ${CMAKE_BINARY_DIR}/empty.cpp)
 
 if(MSVC)
-  set(DUMMY_FILE_CONTENT "__declspec(dllexport) int ignore_this_library_placeholder(){return 0\\;}")
+  set(DUMMY_FILE_CONTENT "__declspec(dllexport) int ignore_this_library_placeholder(){return 0;}")
 else()
   set(DUMMY_FILE_CONTENT "")
 endif()
 
-file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
+# file(GENERATE) is copy-if-different, so re-configuring does not bump the
+# mtime and force a torch_cpu/torch relink.
+file(GENERATE OUTPUT ${DUMMY_EMPTY_FILE} CONTENT "${DUMMY_FILE_CONTENT}")
 
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
@@ -1373,6 +1388,29 @@ target_include_directories(torch_cpu PRIVATE
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/nlohmann/include)
+
+# The native .pftrace encoder's only extra build dep (perfetto) is pulled in
+# just when the CUPTI stubs were generated above (CUPTI_STUBS_GENERATED): the
+# encoder is useless without the CUPTI monitor, which is unavailable at runtime
+# absent the stubs. TORCH_CUPTI_PFTRACE selects the real encoder in
+# monitor_pftrace.cpp; without it that TU compiles a dependency-free stub that
+# raises, so perfetto is not required. (Compression uses the in-tree miniz,
+# already on torch_cpu's include path above, so it needs no gating.)
+if(CUPTI_STUBS_GENERATED)
+  target_compile_definitions(torch_cpu PRIVATE TORCH_CUPTI_PFTRACE)
+  # Perfetto SDK amalgamation: the CUPTI monitor's native .pftrace encoder
+  # (monitor_pftrace.cpp) builds traces via protozero. perfetto.cc is one
+  # self-contained TU; --gc-sections drops the unused tracing SDK so only the
+  # protozero runtime (~15KB) survives in the final binary. Warnings are
+  # suppressed for the vendored source (torch_cpu builds with -Werror).
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/perfetto/sdk)
+  target_sources(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc)
+  set_source_files_properties(
+    ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc
+    PROPERTIES COMPILE_FLAGS "-w")
+endif()
 
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
