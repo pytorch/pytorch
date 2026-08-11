@@ -174,16 +174,22 @@ c10::intrusive_ptr<Backend::Options> tryGetOptions(
 }
 
 // Whether a CUDA graph capture (or the equivalent on another accelerator) is
-// active on the stream this op will be issued on. Asked through the device
-// guard impl so the hook stays device agnostic; a device type with no impl
-// registered simply has no capture concept.
-bool streamIsCapturing(std::optional<c10::Device> device) {
-  if (!device || device->is_cpu()) {
+// active on the stream an op on this device would be issued on. Asked through
+// the device guard impl so the hook stays device agnostic.
+//
+// Both ways of answering false here are positive facts, not guesses: a device
+// type with no guard impl registered has no capture mechanism at all, and a
+// device whose current stream cannot even be obtained -- CUDA linked in but no
+// visible GPU, say -- has no stream for a capture to be running on. "I do not
+// know which device to ask" is a different answer and is not expressed here;
+// see captureActive.
+bool streamIsCapturing(c10::Device device) {
+  if (device.is_cpu() || !c10::impl::hasDeviceGuardImpl(device.type())) {
     return false;
   }
   try {
-    auto* guard_impl = c10::impl::getDeviceGuardImpl(device->type());
-    return guard_impl->getStream(*device).is_capturing();
+    auto* guard_impl = c10::impl::getDeviceGuardImpl(device.type());
+    return guard_impl->getStream(device).is_capturing();
   } catch (const std::exception&) {
     return false;
   }
@@ -336,6 +342,35 @@ const FlightRecorderHook::BackendTarget& FlightRecorderHook::targetFor(
   return default_target_;
 }
 
+std::optional<bool> FlightRecorderHook::captureActive(
+    std::optional<c10::Device> device) const {
+  if (device) {
+    return streamIsCapturing(*device);
+  }
+  // barrier() is the one op that reaches the hook with no tensors: Ops.cpp
+  // binds a dummy tensor to pick the dispatch key and does not forward it, so
+  // the device it was dispatched on is invisible here. It did go to one of the
+  // group's own backends though, and that is enough to answer this question --
+  // if none of the devices the group serves is on a capturing stream, then
+  // neither is this op, whichever of them it went to. For the usual
+  // single-device group that is one query, on CUDA for a CUDA group.
+  //
+  // Not getBoundDeviceId(): it is only set when init_process_group was given a
+  // device_id, so it answers nothing for the groups that hit this, and its
+  // index names the bound device rather than the one the calling thread is
+  // capturing on. The unset index used here resolves to the current device,
+  // which is where the capture is.
+  if (targets_.empty()) {
+    return std::nullopt;
+  }
+  for (const auto& [type, target] : targets_) {
+    if (streamIsCapturing(c10::Device(type))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 FlightRecorderHook::~FlightRecorderHook() {
   remove();
 }
@@ -441,15 +476,21 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   if (!recorder->enabled_) {
     return;
   }
-  if (streamIsCapturing(device)) {
-    // Nothing is recorded under an active graph capture. The collective does
-    // not run here, it runs at replay, and its Work cannot be polled: querying
-    // a CUDA event recorded on a capturing stream does not merely fail, it
-    // invalidates the capture, which then surfaces from cudaStreamEndCapture
-    // nowhere near this code. An entry we could never observe would read as a
-    // collective that never finished, i.e. as a hang. Stock ProcessGroupNCCL
-    // skips recording under capture too (initWork's record flag follows
-    // whether the work can be enqueued for the watchdog).
+  // Not recorded under an active graph capture, nor when the hook cannot
+  // establish that there is none. The collective does not run here, it runs at
+  // replay, and its Work cannot be polled: querying a CUDA event recorded on a
+  // capturing stream does not merely fail, it invalidates the capture, which
+  // then surfaces from cudaStreamEndCapture nowhere near this code. An entry we
+  // could never observe would also read as a collective that never finished,
+  // i.e. as a hang. Stock ProcessGroupNCCL skips recording under capture too
+  // (initWork's record flag follows whether the work can be enqueued for the
+  // watchdog).
+  //
+  // So "unknown" defaults to "capturing": recording costs the user's graph,
+  // while not recording costs one entry in the trace. That default only bites a
+  // group that reports no device types at all, which cannot serve a collective
+  // through the c10d ops in the first place.
+  if (captureActive(device).value_or(true)) {
     return;
   }
   InflightOp op;

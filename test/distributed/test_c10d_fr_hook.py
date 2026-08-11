@@ -1052,6 +1052,43 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(entries[0]["state"], "completed", msg=str(entries[0]))
         hook.remove()
 
+    def test_no_recording_of_tensorless_op_during_capture(self):
+        # barrier() is the one op that reaches the hook with no tensors at all:
+        # Ops.cpp binds a dummy tensor to pick the dispatch key and does not
+        # forward it. The capture guard therefore has no device from the op
+        # itself and has to take one from the group. Reading "no device" as "not
+        # capturing" recorded the barrier, and the post-hook then asked its Work
+        # whether it had already completed -- a cudaEventQuery on a capturing
+        # stream, which invalidates the capture and surfaces from
+        # cudaStreamEndCapture as an unrelated cudaErrorStreamCaptureInvalidated.
+        if self.device_type != "cuda":
+            self.skipTest("capture test is CUDA only")
+        pg = self._init_pg()
+        hook = self._fr_hook(pg)
+
+        t = torch.ones(4, device=self.device)
+        # Warm up so comm initialization does not happen inside the capture.
+        dist.all_reduce(t)
+        dist.barrier(device_ids=[self.rank])
+        torch.cuda.synchronize()
+        before = len(self._hook_entries())
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            dist.barrier(device_ids=[self.rank])
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(self._hook_entries()[before:], [])
+        # ... and a tensorless op outside a capture is still recorded, so the
+        # guard is not simply refusing every op it cannot get a device from.
+        dist.barrier(device_ids=[self.rank])
+        torch.cuda.synchronize()
+        entries = self._await_retired(before + 1)[before:]
+        self.assertEqual(len(entries), 1, msg=str(entries))
+        self.assertEqual(entries[0]["profiling_name"], self._name("barrier"))
+        hook.remove()
+
     def test_buffer_size_zero_attaches_nothing(self):
         # The gate is read when the group is created, so flip it before init.
         saved = os.environ["TORCH_FR_BUFFER_SIZE"]

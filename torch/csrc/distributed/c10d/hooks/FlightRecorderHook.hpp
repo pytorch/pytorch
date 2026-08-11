@@ -133,6 +133,12 @@ class TORCH_API FlightRecorderHook
   // The target serving an op, or the group's default backend for ops the
   // dispatcher gives us no tensors for (barrier).
   const BackendTarget& targetFor(std::optional<c10::Device> device) const;
+  // Whether a graph capture is active on the stream the op would be issued on.
+  // nullopt when that cannot be established, which onPre reads as "capturing":
+  // recording an op under capture and then querying its Work is what
+  // invalidates the capture. An op with no device of its own falls back to the
+  // devices the group serves.
+  std::optional<bool> captureActive(std::optional<c10::Device> device) const;
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args);
   // Retires the entry of an op whose Work completed successfully, unless it is
