@@ -523,7 +523,9 @@ kernel void conv3d_mpp(
       decltype(mW0),
       float>();
   for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
-    cT[i] = 0.0f;
+    if (cT.is_valid_element(i)) {
+      cT[i] = 0.0f;
+    }
   }
 
   for (int kd = 0; kd < KD; ++kd) {
@@ -539,6 +541,9 @@ kernel void conv3d_mpp(
 
   if constexpr (GROUPED || OUT_NCDHW) {
     for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
+      if (!cT.is_valid_element(i)) {
+        continue;
+      }
       auto idx = cT.get_multidimensional_index(i);
       const int o = o_off + (int)idx[0];
       const int x = wo_off + (int)idx[1];
@@ -573,6 +578,9 @@ kernel void conv3d_mpp(
         decltype(mW0),
         T>();
     for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
+      if (!cT.is_valid_element(i)) {
+        continue;
+      }
       float v = cT[i];
       if constexpr (HAS_BIAS) {
         // clamp: lanes past O are masked by the bounds-aware store below
@@ -926,8 +934,6 @@ kernel void conv3d_mpp(
   INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false)
 // clang-format on
 
-// Deduplicated direct conv1d specs from surveyed speech, audio codec,
-// vocoder, EEG, and temporal convolution model shapes.
 INSTANTIATE_CONV1D_MPP(2, 2, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 2, dyn, -1)
