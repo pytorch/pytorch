@@ -124,11 +124,7 @@ def _set_triton_libdevice_path_impl() -> None:
         )
 
 
-_WORKER_CACHE_ENV_VARS = (
-    "TORCHINDUCTOR_CACHE_DIR",
-    "TRITON_CACHE_DIR",
-    "FLYDSL_RUNTIME_CACHE_DIR",
-)
+_WORKER_CACHE_ENV_VARS = ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR")
 _last_applied_cache_env: dict[str, str | None] | None = None
 
 
@@ -159,7 +155,7 @@ def _worker_compile_pycodecache_kernel(
     _precompile entry point. Compiled artifacts are persisted to disk cache so
     the parent process can load them without recompilation.
 
-    Used by CuteDSL, FlyDSL, and NV Universal GEMM backends.
+    Used by both CuteDSL and NV Universal GEMM backends.
     """
     _apply_subprocess_env_and_clear_caches(extra_env)
 
