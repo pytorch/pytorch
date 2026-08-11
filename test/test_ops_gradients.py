@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TestCase,
     TestGradients,
@@ -52,6 +53,8 @@ _bwd_grad_all = {
 
 @unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Tests that gradients are computed correctly
     @skipOps(
         _bwd_grad_all
