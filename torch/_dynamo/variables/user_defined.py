@@ -5093,7 +5093,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
             no_keywords(tx, "list", kwargs)
         # The actual init delegates to the underlying list VT via
         # UserDefinedObjectVariable.call_method's _base_methods dispatch.
-        return super().call_method(tx, "__init__", args, kwargs)
+        return super().call_method(tx, "__init__", args, {})
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
