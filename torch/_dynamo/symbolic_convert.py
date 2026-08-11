@@ -3392,7 +3392,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self.symbolic_locals[inst.argval]
+        cell = self._cellvar(inst.argval)
         self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:

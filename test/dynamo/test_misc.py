@@ -5933,6 +5933,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_delete_deref_name_collision(self):
+        # An inlined comprehension's iteration variable shadows the `nonlocal`
+        # cell, so `x` occupies both a fast-local and a freevar slot. The
+        # DELETE_DEREF target is the cell, which lives in symbolic_cellvars.
+        x = 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            nonlocal x
+            x = [x for x in range(3)]
+            del x
+
+        f()
+
     def test_closure_with_mutation_and_graph_break(self):
         def fn():
             x = torch.zeros(1)
