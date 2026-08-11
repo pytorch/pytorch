@@ -97,7 +97,7 @@ class TestScanSource(unittest.TestCase):
         self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
 
     def test_slashes_inside_a_string_do_not_start_a_comment(self) -> None:
-        source = 'auto url = "http://x";\nthrow Foo();\n'
+        source = 'auto sep = "a // b";\nthrow Foo();\n'
         self.assertEqual([t.line for t in find_throws(code_of(source))], [2])
 
     def test_unterminated_block_comment_swallows_the_rest(self) -> None:
