@@ -5704,12 +5704,6 @@ class GraphModule(torch.nn.Module):
             )
         ),
     )
-    # Skipping the autograd=True because
-    # associative_scan does currently not support gradients for lifted parameters
-    @decorateIf(
-        unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise" and params["autograd"]),
-    )
     def test_associative_scan_downstream_scan_scan_different_dim(
         self,
         combine_mode,
@@ -5746,8 +5740,8 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    # TODO: Does not work because of the usage of vmap within associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
+    # TODO: NestedFn does not accept the kwargs passed here (dim, reverse, ...),
+    # so this fails at model construction. Fix NestedFn's signature to re-enable.
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @unittest.expectedFailure
@@ -6639,8 +6633,12 @@ class GraphModule(torch.nn.Module):
         H1 = torch.rand(2, device=device, requires_grad=False)
         H2 = torch.rand(2, device=device, requires_grad=False)
 
+        # Multiplicative body so bwys is non-unit: this is what exercises the
+        # bwys-alignment (torch.cat([bwys[1:], ones])) in the reversed backward scan.
+        # A purely additive body degenerates bwys to all-ones and hides alignment bugs.
+        # Multiplication by the constant freevars keeps combine_fn associative.
         def combine_fn(x, y):
-            return x + y + H1 + H2
+            return x * y * H1 * H2
 
         xs = torch.randn(4, 2, device=device, requires_grad=True)
         result = associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
