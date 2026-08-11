@@ -710,6 +710,20 @@ class MatmulTest(TestCaseMPS):
         tensor_2 = torch.rand((100, ), device="mps")
         self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
 
+    # #177116: K > 2^15 silently wrong on M1/M2 (1st shape triggers fwd, 2nd triggers bwd)
+    @parametrize("shape,in_f,out_f", [((122, 40000), 40000, 128), ((32800, 128), 128, 16)])
+    def test_linear_large_K(self, shape, in_f, out_f):
+        torch.manual_seed(0)
+        x_cpu = torch.randn(*shape, requires_grad=True)
+        lin_cpu = nn.Linear(in_f, out_f, bias=False)
+        lin_mps = copy.deepcopy(lin_cpu).to("mps")
+        x_mps = x_cpu.detach().to("mps").requires_grad_(True)
+        lin_cpu(x_cpu).sum().backward()
+        lin_mps(x_mps).sum().backward()
+        self.assertEqual(lin_cpu(x_cpu), lin_mps(x_mps).cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(lin_cpu.weight.grad, lin_mps.weight.grad.cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
+
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
@@ -11906,16 +11920,29 @@ class TestNNMPS(NNTestCase):
 
     def test_conv2d_discontiguous_weight(self):
         # Test for https://github.com/pytorch/pytorch/issues/55781
-        x = torch.ones(64, 16, 16, 16)
-        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
+        x = torch.ones(64, 16, 16, 16, device="mps")
+        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10, device="mps").reshape(32, 16, 1, 2)[:, :, :, ::2]
         self.assertFalse(weight.is_contiguous())
         y = torch.nn.functional.conv2d(x, weight, None)
-        if torch.backends.mkldnn.is_available():
-            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-            with torch.backends.mkldnn.flags(enabled=False):
-                y_ = torch.nn.functional.conv2d(x, weight, None)
-                self.assertEqual(y, y_)
         self.assertEqual(y.sum(), 4186112.)
+
+        # Non-dense weight view (channel slice of a 5D weight) must match CPU for
+        # forward and backward. MPSGraph conv mishandles such strided weights, so
+        # they need to be gathered before being fed to the graph.
+        xc = torch.randn(2, 8, 16, 16)
+        wc = torch.randn(6, 8, 3, 3, 3)
+
+        def conv(dev):
+            xi = xc.detach().to(dev).requires_grad_(True)
+            wi = wc.detach().to(dev).requires_grad_(True)
+            out = torch.nn.functional.conv2d(xi, wi[:, :, 1])
+            out.sum().backward()
+            return out, xi.grad, wi.grad
+
+        ref = conv("cpu")
+        res = conv("mps")
+        for r, e in zip(res, ref):
+            self.assertEqual(r.cpu(), e)
 
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -16286,7 +16313,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
-        'arange', 'linspace',
+        'arange', 'linspace', 'logspace',
         'special.xlog1py',
 
         # CPU accumulates sequantially, but GPU does in parallel
@@ -17554,6 +17581,7 @@ instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
+instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
