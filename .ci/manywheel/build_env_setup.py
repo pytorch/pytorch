@@ -82,6 +82,10 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
+    "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 # Architectures we additionally emit PTX for on nightly/dev builds
