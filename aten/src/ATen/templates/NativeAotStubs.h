@@ -10,9 +10,10 @@
 // impl. The stub signature is the op's structured impl signature.
 //
 // No kernel is registered here (REGISTER_NO_CPU_DISPATCH in the .cpp).
-// The AOT kernel library -- built separately from the same manifests via
-// tools/native_aot; needs the DSL toolchain but not this build --
-// registers its kernels with set_<device>_dispatch_ptr() when loaded.
+// The AOT kernels -- built separately from the same declarations via
+// tools/native_aot; needs the DSL toolchain but not this build -- are
+// linked into libtorch_cuda and register with set_<device>_dispatch_ptr()
+// from static initializers.
 // The whole path is gated on at::globalContext().allowNativeAot().
 
 #include <ATen/core/Tensor.h>
