@@ -20,6 +20,36 @@ def same_pp_one(x, y):
     return x[y + 1, y + 1]
 
 
+def gather(x, y):
+    index_shape = [x.shape[0]] + [1] * (x.dim() - 1)
+    index = (y[: x.shape[0]] - 1).view(index_shape).expand_as(x)
+    return torch.gather(x, 0, index)
+
+
+def gather_generated_index(x, y):
+    index_shape = [x.shape[0]] + [1] * (x.dim() - 1)
+    index = (
+        (torch.arange(x.shape[0], device=x.device) - 1).view(index_shape).expand_as(x)
+    )
+    return torch.gather(x, 0, index)
+
+
+def cross_entropy_loss(x, y):
+    target = y[: x.shape[0]] - 1
+    if x.dim() > 2:
+        target = target.view(x.shape[0], *[1] * (x.dim() - 2))
+        target = target.expand(x.shape[0], *x.shape[2:])
+    return torch.nn.functional.cross_entropy(x, target)
+
+
+def cross_entropy_loss_generated_target(x, y):
+    target = torch.arange(x.shape[0], device=x.device) - 1
+    if x.dim() > 2:
+        target = target.view(x.shape[0], *[1] * (x.dim() - 2))
+        target = target.expand(x.shape[0], *x.shape[2:])
+    return torch.nn.functional.cross_entropy(x, target)
+
+
 def store(x, y, z):
     x[y + 1, y + 1] = z
 

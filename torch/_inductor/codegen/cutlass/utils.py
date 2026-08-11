@@ -135,12 +135,16 @@ def try_import_cutlass() -> bool:
 
             def link_and_append(dst_link, src_path, parent_dir):
                 if os.path.lexists(dst_link):
-                    assert os.path.islink(dst_link), (
-                        f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
-                    )
-                    assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
+                    if not os.path.islink(dst_link):
+                        raise AssertionError(
+                            f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                        )
+                    if os.path.realpath(os.readlink(dst_link)) != os.path.realpath(
                         src_path,
-                    ), f"Symlink at {dst_link} does not point to {src_path}"
+                    ):
+                        raise AssertionError(
+                            f"Symlink at {dst_link} does not point to {src_path}"
+                        )
                 else:
                     os.makedirs(parent_dir, exist_ok=True)
                     os.symlink(src_path, dst_link)
@@ -203,9 +207,11 @@ def _normalize_cuda_arch(arch: str) -> str:
     else:
         arch_num = int(arch)
 
-    if arch_num > 103:
-        log.warning("Detected CUDA architecture > 103: %s. Please file an issue.", arch)
+    if arch_num > 107:
+        log.warning("Detected CUDA architecture > 107: %s. Please file an issue.", arch)
         return str(arch_num)
+    if arch_num >= 107:
+        return "107"
     if arch_num >= 103:
         return "103"
     if arch_num >= 100:
@@ -237,6 +243,15 @@ def toolkit_version(device_type: str) -> str:
         return get_xpu_version()
     else:
         return get_cuda_version()
+
+
+def get_device_cutlass_config(device_type: str):
+    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+    if device_type == "xpu":
+        return config.xpu
+    from ...config import cutlass as inductor_cutlass_config
+
+    return inductor_cutlass_config
 
 
 @dataclass
@@ -277,7 +292,8 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
-    assert try_import_cutlass()
+    if not try_import_cutlass():
+        raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library.generator as cutlass_generator
     import cutlass_library.manifest as cutlass_manifest
 
@@ -291,18 +307,27 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         )
         return {}
 
-    gen_arch = (
-        "100" if arch == "103" else arch
-    )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
+    # SM103 and SM107 reuse the SM100 generator, but the CUTLASS manifest must keep
+    # their architecture-specific baseline rather than treating them as SM100.
+    if arch in ("103", "107"):
+        gen_arch = "100"
+        manifest_arch = f"{arch}a"
+    else:
+        gen_arch = manifest_arch = arch
+
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
-        architectures=gen_arch,
+        architectures=manifest_arch,
         toolkit_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
         device_type=device_type,
     )
     manifest = cutlass_manifest.Manifest(args)
+    if arch == "107":
+        # CUTLASS uses 103a as the SM100-family feature marker for architectures
+        # without INT8 UMMA. Keep the SM107 baseline while sharing that feature.
+        manifest.compute_capabilities_feature_set.append("103a")
 
     start_time = time.time()
     if device_type == "xpu":
@@ -372,7 +397,8 @@ def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
     # Import cutlass python scripts.
-    assert try_import_cutlass()
+    if not try_import_cutlass():
+        raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library  # type: ignore[import]
 
     if torch_dtype == torch.float:
@@ -395,7 +421,8 @@ def dtype_match(
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
-    assert try_import_cutlass()
+    if not try_import_cutlass():
+        raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library
 
     if torch_dtype == torch.float:
@@ -428,9 +455,8 @@ def get_accumulator_dtype(
     Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
 
-    assert OrderedSet(input_torch_dtypes) <= XW_DTYPES, (
-        f"{input_torch_dtypes=} is not supported"
-    )
+    if not (OrderedSet(input_torch_dtypes) <= XW_DTYPES):
+        raise AssertionError(f"{input_torch_dtypes=} is not supported")
 
     if len(input_torch_dtypes) != 2:
         return None
@@ -469,9 +495,8 @@ def get_accumulator_dtype(
     else:
         raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
-    assert accumulator_dtype in ACCUMULATOR_DTYPES, (
-        f"{accumulator_dtype=} is not supported"
-    )
+    if accumulator_dtype not in ACCUMULATOR_DTYPES:
+        raise AssertionError(f"{accumulator_dtype=} is not supported")
     return accumulator_dtype
 
 

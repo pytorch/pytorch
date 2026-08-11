@@ -4,7 +4,7 @@ from __future__ import annotations
 """
 This file does three things:
 - Contains the definition of SymNode
-- Installs all the magic methods into SymBool, SymFloat, SymFloat at import time
+- Installs all the magic methods into SymBool, SymFloat, SymInt at import time
 - Does not depend on sympy at import time
 
 As this file is imported from within torch/__init__.py we do not want it to depend on SymPy
@@ -198,7 +198,7 @@ class SymNode:
     def _value_eq(self, other: SymNode) -> bool:
         # Purposely don't include the shape_env in the eq.
         return (
-            self._expr == other._expr
+            self._expr == other._expr  # type: ignore[bad-return]
             and self.pytype == other.pytype
             and self._hint == other._hint
             and self.constant == other.constant
@@ -211,9 +211,15 @@ class SymNode:
 
     @property
     def expr(self) -> sympy.Basic:
+        # is_Number is a class attribute, equivalent to isinstance of
+        # sympy.Number without needing sympy imported here. Deliberately not
+        # is_number, which walks the whole expression tree uncached: _expr is
+        # not expected to be an unsimplified non-symbolic expression, and one
+        # that slipped through would just take the general path below, where
+        # replace() is a no-op on it anyway.
         if (
             isinstance(self._expr, int)
-            or self._expr.is_number  # pyrefly: ignore[missing-attribute]
+            or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
         ):
             return self._expr
         if self.shape_env is None:
@@ -371,6 +377,9 @@ class SymNode:
 
     def or_(self, other: SymNode) -> SymNode:
         return self._or_(other)  # type: ignore[attr-defined]
+
+    def xor(self, other: SymNode) -> SymNode:
+        return self._xor(other)  # type: ignore[attr-defined]
 
     def float_truediv(self, other: SymNode) -> SymNode:
         return self._float_truediv(other)  # type: ignore[attr-defined]
@@ -751,6 +760,7 @@ METHOD_TO_OPERATOR = {
     "sym_not": sym_not,
     "float_truediv": operator.truediv,
     "int_truediv": operator.truediv,
+    "xor": operator.xor,
 }
 
 unary_magic_methods = {
@@ -805,12 +815,14 @@ unary_nonmagic_methods = {
 unary_methods = unary_magic_methods | unary_nonmagic_methods
 
 # Most methods are only registered on SymInt and SymFloat
-# Some methods are only be registered on SymBool
-only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
+# Some methods are only registered on SymBool
+only_bool_magic_methods = {"and", "or", "xor", "sym_not", "sym_ite"}
 # Methods that implicitly convert SymBool into SymInt
 bool_becomes_int_magic_methods = {"add", "sub", "mul"}
-# Methods that are also on SymBool, in addition to on SymInt and SymFloat
-also_bool_magic_methods = {"eq"}
+# Methods that are also on SymBool, in addition to on SymInt and SymFloat.
+# Only equality (eq/ne) is included: ordering comparisons (ge/gt/le/lt) can't be
+# evaluated on sympy Booleans, and SymBool ordering isn't supported.
+also_bool_magic_methods = {"eq", "ne"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 # Methods that are only for float
@@ -839,6 +851,7 @@ always_bool_magic_methods = {
     "ge",
     "and",
     "or",
+    "xor",
     "sym_not",
     "is_non_overlapping_and_dense",
     "is_integer",
@@ -896,6 +909,12 @@ def _sympy_or(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
     import sympy
 
     return sympy.Or(a, b)
+
+
+def _sympy_xor(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+    import sympy
+
+    return sympy.Xor(a, b)
 
 
 def _sympy_lshift(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
@@ -1045,6 +1064,7 @@ reflectable_magic_methods = {
     "and": _sympy_and,
     "bitwise_and": _bitwise_and,
     "or": _sympy_or,
+    "xor": _sympy_xor,
     "bitwise_or": _bitwise_or,
     "bitwise_xor": _bitwise_xor,
     "float_truediv": _sympy_float_truediv,

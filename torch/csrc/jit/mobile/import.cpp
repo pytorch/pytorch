@@ -389,7 +389,7 @@ void BytecodeDeserializer::parseMethods(
         debug_handles_m_tuple,
         function.get());
 
-    // 3. If upgrader is needed, change change the OP instruction to CALL
+    // 3. If upgrader is needed, change the OP instruction to CALL
     // instruction (In next PR, use_upgrader will be parsed to parseInstruction
     // function and do the actual change)
     if (use_upgrader) {
@@ -525,7 +525,7 @@ mobile::Module _load_for_mobile_impl(
     // https://www.internalfb.com/code/fbsource/[9996fcb7a6fb]/fbcode/caffe2/torch/csrc/jit/mobile/import.cpp?lines=427-434
     std::vector<std::string> all_files = reader->getAllRecords();
     for (auto& file_name : all_files) {
-      if (file_name.find("extra/") == 0) {
+      if (file_name.starts_with("extra/")) {
         extra_files[file_name.substr(6)] = "";
       }
     }

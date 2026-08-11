@@ -146,7 +146,7 @@ def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
             raise AssertionError(
                 f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
             )
-        return B_t._mm(A, should_transpose_dense=True).t()
+        return B_t._mm(A, should_transpose_dense=True)
 
 
 def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
@@ -171,7 +171,7 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
             f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
         )
     row, _col = A.shape
-    return B_t._mm(A, bias=bias, should_transpose_dense=True).t()
+    return B_t._mm(A, bias=bias, should_transpose_dense=True)
 
 
 def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
@@ -219,7 +219,7 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
         )
 
     # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
-    # Note that this limits us to per-tensor scalig only.
+    # Note that this limits us to per-tensor scaling only.
     sparse_result = torch._cslt_sparse_mm(
         A.packed,
         B,

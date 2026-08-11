@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 __TestCase = CPythonTestCase
 
@@ -276,6 +276,10 @@ class ListTest(list_tests.CommonTest):
         with self.assertRaises(TypeError):
             (3,) + L([1,2])
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_equal_operator_modifying_operand(self):
         # test fix for seg fault reported in bpo-38588 part 2.
         class X:
@@ -301,6 +305,10 @@ class ListTest(list_tests.CommonTest):
         list4 = [1]
         self.assertFalse(list3 == list4)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_lt_operator_modifying_operand(self):
         # See gh-120298
         class evil:
@@ -334,6 +342,10 @@ class ListTest(list_tests.CommonTest):
         self.assertEqual(iter_size, sys.getsizeof(list([0] * 10)))
         self.assertEqual(iter_size, sys.getsizeof(list(range(10))))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_count_index_remove_crashes(self):
         # bpo-38610: The count(), index(), and remove() methods were not
         # holding strong references to list elements while calling

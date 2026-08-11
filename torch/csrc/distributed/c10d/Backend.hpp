@@ -8,12 +8,31 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Macros.h>
 
+#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Window.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
+
+// Feature macro: when defined, c10d::Backend (and ProcessGroup) expose the
+// fault-tolerance reconfigure APIs (supportsReconfigure /
+// get_reconfigure_handle / reconfigure). Downstream backends can guard their
+// overrides with #ifdef so they build against both old and new c10d headers.
+#define C10D_BACKEND_HAS_RECONFIGURE 1
+
+// Feature macro: when defined, c10d::Backend (and ProcessGroup) expose the
+// one-sided window APIs (supportsWindow / new_window) and the c10d::Window
+// interface. Downstream backends can guard their overrides with #ifdef.
+#define C10D_BACKEND_HAS_WINDOW 1
+
+// Feature macro: when defined, c10d::Backend exposes abort-hook registration
+// and c10d::ProcessGroup additionally exposes pre/post collective hooks (see
+// Hooks.hpp). Downstream backends can guard their overrides with #ifdef.
+#define C10D_BACKEND_HAS_HOOKS 1
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -30,6 +49,37 @@ enum class ErrorType {
   REMOTE_ERROR = 3
 };
 
+namespace {
+// RAII helper for C10D_BACKEND_FORWARDING_GUARD (below): sets the re-entry flag
+// while a canonical `_single` collective forwards to its deprecated alias, and
+// clears it on scope exit (including exceptions).
+struct ForwardingGuard {
+  bool& flag_;
+  explicit ForwardingGuard(bool& flag) : flag_(flag) {
+    flag_ = true;
+  }
+  ~ForwardingGuard() {
+    flag_ = false;
+  }
+};
+} // namespace
+
+// Guards a canonical `_single` collective method against infinite recursion.
+// Each `_single` method and its deprecated alias forward to each other so that
+// a Backend subclass may override (and a caller may call) either name. Placed
+// at the top of each canonical method, this macro declares a thread-local
+// re-entry flag and -- if neither name is overridden -- reports "Backend <name>
+// does not support <method>" (using __func__) instead of looping forever.
+#define C10D_BACKEND_FORWARDING_GUARD()                 \
+  static thread_local bool forwardingGuardFlag = false; \
+  TORCH_CHECK(                                          \
+      !forwardingGuardFlag,                             \
+      "Backend ",                                       \
+      getBackendName(),                                 \
+      " does not support ",                             \
+      __func__);                                        \
+  ForwardingGuard forwardingGuard(forwardingGuardFlag)
+
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
   // Backend Options is a base struct that defines the basic options
@@ -43,6 +93,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         : timeout(timeout), backend(std::move(backend)) {}
     ~Options() override = default;
     Options(const Options&) = default;
+
+    // Returns an independent copy, preserving the concrete type.
+    // ProcessGroup::splitGroup()/mergeRemoteGroup() clone the options they
+    // hand to a child backend: getBackendOptions() returns the parent's live
+    // options_, and split()/merge() implementations mutate what they are given
+    // (group_name, timeout, global_ranks_in_group, split_color, ...), so
+    // sharing one object corrupts the parent. A subclass that adds fields must
+    // override this or it would be sliced; ProcessGroup detects a sliced clone
+    // and falls back to sharing rather than handing a backend the wrong type.
+    virtual c10::intrusive_ptr<Options> clone() const {
+      return c10::make_intrusive<Options>(*this);
+    }
 
     std::chrono::milliseconds timeout;
 
@@ -60,6 +122,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // (no regular collectives), consider calling abort() after rendezvous
     // to release the communicator.
     bool use_pg_for_symm_mem_rendezvous = false;
+
+    // When true, the communicator is created in the reconfigure regime: it is
+    // not initialized until reconfigure() is called. Backends that support
+    // fault tolerance honor this; others ignore it.
+    bool enable_reconfigure = false;
   };
 
   explicit Backend(int rank, int size);
@@ -73,7 +140,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return size_;
   }
 
-  // Returns an unique opaque ID of this backend that can be used to correlate
+  // Returns a unique opaque ID of this backend that can be used to correlate
   // with its collectives.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
@@ -116,11 +183,126 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support shrink"));
   }
 
-  virtual void setTimeout(std::chrono::milliseconds timeout) {
+  virtual void setTimeout(std::chrono::milliseconds /*timeout*/) {
+    TORCH_WARN(
+        "Backend ",
+        getBackendName(),
+        " does not support setting timeout; the new value is ignored");
+  }
+
+  // Experimental. Adds `timeout` to the timeout assigned to work created after
+  // this call. Work already created retains its assigned timeout. The extension
+  // remains active for all later work until the first work created after this
+  // call completes. Multiple calls accumulate; each extension expires
+  // independently when its first subsequent work completes. Unsupported
+  // backends intentionally ignore temporary timeout extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
+
+  // Fault Tolerance / Reconfigure API
+  //
+  // Backends that support dynamic membership override these.
+  // supportsReconfigure advertises support; get_reconfigure_handle returns an
+  // opaque handle that peers exchange out-of-band; reconfigure (re)initializes
+  // the communicator with a new set of peers.
+  virtual bool supportsReconfigure() const {
+    return false;
+  }
+
+  virtual ReconfigureHandle get_reconfigure_handle() const {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), " does not support setting timeout"));
+            "Backend ",
+            getBackendName(),
+            " does not support get_reconfigure_handle"));
+  }
+
+  virtual c10::intrusive_ptr<Work> reconfigure(
+      const ReconfigureOptions& /* opts */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support reconfigure"));
+  }
+
+  // Window & One-sided (RMA) API
+  //
+  // Backends that support one-sided operations advertise it via supportsWindow
+  // and return a concrete c10d::Window from new_window. The optional tensor, if
+  // provided, is registered with the new window. new_window is collective: all
+  // ranks in the backend must call it in the same order.
+  virtual bool supportsWindow() const {
+    return false;
+  }
+
+  virtual c10::intrusive_ptr<Window> new_window(
+      const std::optional<at::Tensor>& /* tensor */ = std::nullopt) {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support new_window"));
+  }
+
+  // Abort Hook API
+  //
+  // Abort hooks are invoked before the backend aborts on a timeout or error,
+  // letting users capture debug information. Hooks are keyed by an opaque
+  // hook_id so they can be individually unregistered. Backends that implement
+  // them must advertise it via supportsAbortHooks, so a caller can tell "this
+  // backend has no abort hooks" from a registration that genuinely failed.
+  virtual bool supportsAbortHooks() const {
+    return false;
+  }
+
+  virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support registerAbortHook"));
+  }
+
+  virtual void unregisterAbortHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support unregisterAbortHook"));
+  }
+
+  // Completion Hook API
+  //
+  // Completion hooks are invoked when the backend establishes that an operation
+  // has completed, which a backend with a watchdog already does to garbage
+  // collect its work queue. Same hook_id keying and same capability query as
+  // the abort hooks above; see Hooks.hpp for what is reported and the threading
+  // contract. A backend without them leaves its consumers to poll, so
+  // supportsCompletionHooks is what lets a caller choose a fallback rather than
+  // catch a throw.
+  virtual bool supportsCompletionHooks() const {
+    return false;
+  }
+
+  virtual void registerCompletionHook(
+      int64_t /* hook_id */,
+      CompletionHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support registerCompletionHook"));
+  }
+
+  virtual void unregisterCompletionHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support unregisterCompletionHook"));
   }
 
   virtual void startCoalescing() {
@@ -213,15 +395,23 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contiguous collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  // Note: this function will be deprecated in near future.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    C10D_BACKEND_FORWARDING_GUARD();
+    return _allgather_base(outputBuffer, inputBuffer, opts);
+  }
+
+  // Deprecated: use all_gather_single instead. Kept as an overridable,
+  // forwarding alias for backward compatibility with existing backends and
+  // callers.
   virtual c10::intrusive_ptr<Work> _allgather_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support _allgather_base"));
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single(outputBuffer, inputBuffer, opts);
   }
 
   // This function is deprecated and will be moved out of Backend to comms:
@@ -240,19 +430,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support allgather_coalesced"));
   }
 
-  // This function is a coalesced version of `allgather_into_tensor` (currently
-  // still named as `_allgather_base`). Each tensor in the vector corresponds to
-  // an input/output of one `allgather_into_tensor` operation.
+  // This function is a coalesced version of `all_gather_single`. Each tensor in
+  // the vector corresponds to an input/output of one `all_gather_single`
+  // operation. Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    C10D_BACKEND_FORWARDING_GUARD();
+    return allgather_into_tensor_coalesced(outputs, inputs, opts);
+  }
+
+  // Deprecated: use all_gather_single_coalesced instead. Kept as an
+  // overridable, forwarding alias for backward compatibility with existing
+  // backends and callers.
   virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
-      std::vector<at::Tensor>& /* outputs */,
-      std::vector<at::Tensor>& /* inputs */,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            getBackendName(),
-            " does not support allgather_into_tensor_coalesced"));
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single_coalesced(outputs, inputs, opts);
   }
 
   virtual c10::intrusive_ptr<Work> gather(
@@ -262,6 +458,28 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support gather"));
+  }
+
+  // Gathers a single tensor inputBuffer from every rank into a single flat
+  // outputBuffer on the root rank, interpreted as a contiguous collection of
+  // size inputBuffer * WORLD_SIZE. This is the single-tensor analog of gather
+  // that avoids materializing a per-rank output tensor list.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    C10D_BACKEND_FORWARDING_GUARD();
+    return gather_into_tensor(outputBuffer, inputBuffer, opts);
+  }
+
+  // Deprecated: use gather_single instead. Kept as an overridable, forwarding
+  // alias for backward compatibility with existing backends and callers.
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    return gather_single(outputBuffer, inputBuffer, opts);
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
@@ -283,43 +501,70 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support reduce_scatter"));
   }
 
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    C10D_BACKEND_FORWARDING_GUARD();
+    return _reduce_scatter_base(outputBuffer, inputBuffer, opts);
+  }
+
+  // Deprecated: use reduce_scatter_single instead. Kept as an overridable,
+  // forwarding alias for backward compatibility with existing backends and
+  // callers.
   virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            getBackendName(),
-            " does not support _reduce_scatter_base"));
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single(outputBuffer, inputBuffer, opts);
   }
 
-  // This function is a coalesced version of `reduce_scatter_tensor` (currently
-  // still named as `_reduce_scatter_base`). Each tensor in the vector
-  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
+  // This function is a coalesced version of `reduce_scatter_single`. Each
+  // tensor in the vector corresponds to an input/output of one
+  // `reduce_scatter_single` operation. Named after the torchcomms backend
+  // naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    C10D_BACKEND_FORWARDING_GUARD();
+    return reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+  }
+
+  // Deprecated: use reduce_scatter_single_coalesced instead. Kept as an
+  // overridable, forwarding alias for backward compatibility with existing
+  // backends and callers.
   virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
-      std::vector<at::Tensor>& /* outputs */,
-      std::vector<at::Tensor>& /* inputs */,
-      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            getBackendName(),
-            " does not support reduce_scatter_tensor_coalesced"));
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single_coalesced(outputs, inputs, opts);
   }
 
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_to_all_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    C10D_BACKEND_FORWARDING_GUARD();
+    return alltoall_base(
+        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+  }
+
+  // Deprecated: use all_to_all_single instead. Kept as an overridable,
+  // forwarding alias for backward compatibility with existing backends and
+  // callers.
   virtual c10::intrusive_ptr<Work> alltoall_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      std::vector<int64_t>& /* outputSplitSizes */,
-      std::vector<int64_t>& /* inputSplitSizes */,
-      const AllToAllOptions& /* opts */ = AllToAllOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support alltoall_base"));
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    return all_to_all_single(
+        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
   }
 
   virtual c10::intrusive_ptr<Work> alltoall(
@@ -343,17 +588,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
+  // Deprecated no-op: sequence numbers now always start at 0 on every rank, so
+  // there is no initial value to agree on. Kept for backward compatibility with
+  // existing callers; it warns and does nothing.
   virtual void setSequenceNumberForGroup() {
-    auto backendName = getBackendName();
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            backendName,
-            " does not yet support sequence numbers."));
+    TORCH_WARN_ONCE(
+        "setSequenceNumberForGroup() is deprecated and is now a no-op; "
+        "sequence numbers always start at 0 on every rank. Remove calls to "
+        "_set_sequence_number_for_group().");
   }
 
   // Retrieves the current sequence number for the whole group, which should be
@@ -473,7 +715,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  std::optional<at::Device> getBoundDeviceId() const {
+  virtual std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -484,7 +726,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(std::optional<at::Device> device) {
+  virtual void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
@@ -492,9 +734,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual ErrorType getError() {
-    TORCH_CHECK(
-        false,
-        c10::str("Backend ", getBackendName(), " does not support getError"));
+    return ErrorType::SUCCESS;
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
@@ -547,15 +787,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
+  c10::impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const c10::impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int rank_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int size_;
+  int rank_;
+  int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
@@ -567,6 +817,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   bool use_pg_for_symm_mem_rendezvous_ = false;
+
+  c10::impl::PyObjectSlot pyobj_slot_;
 };
 
 } // namespace c10d
+
+namespace c10::detail {
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+} // namespace c10::detail
+
+#undef C10D_BACKEND_FORWARDING_GUARD

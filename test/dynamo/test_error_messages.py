@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import asyncio
 import logging
 import re
 import sys
@@ -44,7 +45,40 @@ class GenericCtxMgr:
         pass
 
 
+class WarningOnceLogger(logging.Logger):
+    def warning_once(self, msg):
+        self.warning(msg)
+
+
+warning_once_logger = WarningOnceLogger("warning_once_logger")
+
+
 class ErrorMessagesTest(LoggingTestCase):
+    def test_inplace_view_on_graph_input_hint(self):
+        def fn(x):
+            x.transpose_(1, 2)
+            return x
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(2, 3, 4)
+            ),
+            """\
+Unsupported function call (delayed)
+  Explanation: Dynamo determined that a graph break should occur when calling `L['x'].transpose_`. Reason: Getting an inplace view on a graph input is not supported
+  Hint: Avoid mutating a graph input's tensor metadata with in-place view ops. If the mutation is only needed inside the compiled region, replace the in-place call with an out-of-place view, for example `x = x.transpose(1, 2)` instead of `x.transpose_(1, 2)`.
+  Hint: If you need to mutate the input tensor's metadata, move the in-place view call outside `torch.compile`.
+
+  Developer debug context: source: AttrSource(base=LocalSource(local_name='x', is_input=True, dynamism=None, is_derefed_cell_contents=False), member='transpose_')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0148.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    x.transpose_(1, 2)""",
+        )
+
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
             return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
@@ -107,8 +141,9 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(lst),
             """\
 sort with non-constant keys
-  Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
+  Explanation: Cannot perform sort whose key comparison is not a compile-time constant. Key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
   Hint: Use something else as the key.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: LazyVariableTracker(realized: TensorVariable())
 
@@ -129,13 +164,13 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-missing tp_iter
-  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(zip)`.
+C-implemented special method without VariableTracker model
+  Explanation: 'zip' implements '__iter__' in C and Dynamo has no model for it.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: tp_iter_impl not implemented for zip
+  Developer debug context: name=__iter__, type=zip, attr=<slot wrapper '__iter__' of 'zip' objects>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9493.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -154,13 +189,13 @@ from user code:
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, dct.items()),
             """\
-missing tp_iter
-  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(dict_items)`.
+C-implemented special method without VariableTracker model
+  Explanation: 'dict_items' implements '__iter__' in C and Dynamo has no model for it.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: tp_iter_impl not implemented for dict_items
+  Developer debug context: name=__iter__, type=dict_items, attr=<slot wrapper '__iter__' of 'dict_items' objects>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9493.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -177,14 +212,14 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-Unsupported function call
-  Explanation: Dynamo does not know how to trace the function `UserDefinedObjectVariable(zip)`
-  Hint: Avoid calling `UserDefinedObjectVariable(zip)` in your code.
-  Hint: Please report an issue to PyTorch.
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: call_function UserDefinedObjectVariable(zip) [] {}
+  Developer debug context: raised exception TypeError("'zip' object is not callable")
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0147.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -296,28 +331,73 @@ from user code:
         def fn():
             torch._dynamo.disable()
 
-        def post_munge(s):
-            return re.sub(
-                r"file matches MOD_SKIPLIST \(.*?\)",
-                "file matches MOD_SKIPLIST (<path>)",
-                s,
-            )
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Call to `torch._dynamo.disable()`
+  Explanation: `torch._dynamo.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.
+  Hint: Move the `torch._dynamo.disable()` call outside the compiled function and apply it to the function that should run eagerly.
+  Hint: Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.
+
+  Developer debug context: Called `torch._dynamo.disable()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0376.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    torch._dynamo.disable()""",
+        )
+
+    def test_skipfile_compiler_disable_call(self):
+        def fn():
+            torch.compiler.disable()
 
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo developers have intentionally marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
-  Hint: Avoid calling the function `disable`.
+Call to `torch.compiler.disable()`
+  Explanation: `torch.compiler.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.
+  Hint: Move the `torch.compiler.disable()` call outside the compiled function and apply it to the function that should run eagerly.
+  Hint: Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: file matches MOD_SKIPLIST (<path>)
+  Developer debug context: Called `torch.compiler.disable()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0377.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    torch._dynamo.disable()""",
+    torch.compiler.disable()""",
+        )
+
+    def test_skipfile_dynamo_disable_wrapped_method(self):
+        class Scheduler:
+            @torch._dynamo.disable
+            def index_for_timestep(self, x):
+                return x + 1
+
+        def fn(x):
+            return Scheduler().index_for_timestep(x)
+
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
+            """\
+Skip inlining `torch.compiler.disable()`d function
+  Explanation: Skip inlining function <function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+  Hint: Remove the `torch.compiler.disable` call
+
+  Developer debug context: <function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr>
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return Scheduler().index_for_timestep(x)""",
             post_munge=post_munge,
         )
 
@@ -415,6 +495,45 @@ from user code:
     warnings.warn("test")""",
         )
 
+    def test_logger_method_message(self):
+        def fn():
+            warning_once_logger.warning_once("test")
+
+        def post_munge(s):
+            s = re.sub(
+                r"method: <WarningOnceLogger .*?>\.warning_once",
+                "method: <WarningOnceLogger>.warning_once",
+                s,
+            )
+            logger_method_name = (
+                f"{WarningOnceLogger.__module__}."
+                f"{WarningOnceLogger.__qualname__}.warning_once"
+            )
+            return s.replace(
+                f"`{logger_method_name}`", "`WarningOnceLogger.warning_once`"
+            )
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+logging.Logger method not supported for non-export cases
+  Explanation: For non-export cases, logging.Logger methods are only supported if the logger has a source and the method is registered as reorderable.
+  Hint: If you do not need this logging side effect, add the exact method being called to `torch._dynamo.config.ignore_logging_functions`. Dynamo will skip the call and return `None`.
+  Hint: For example, for `logger.warning_once(...)`, use `torch._dynamo.config.ignore_logging_functions.add(logger.warning_once)`. If `warning_once` is defined on the logger class, add the class method `WarningOnceLogger.warning_once` to ignore this method for all instances of that class.
+  Hint: Dynamo does not trace into logging.Logger method bodies, so only the method you call directly (`warning_once`) is checked against the ignore set. Ignoring a method that `warning_once` calls internally has no effect.
+  Hint: If you need the log side effect to run, then you can try one of (1) create the logger outside the compiled region and add the method to `torch._dynamo.config.reorderable_logging_functions` (e.g. `torch._dynamo.config.reorderable_logging_functions.add(logger.warning_once)`) so that it runs after the compiled region, as long as it is called without kwargs and its arguments are tensors, constants, or string formatters, (2) `torch._higher_order_ops.print(...)`, (3) wrap the logging call in a custom op (marked as mutable), or (4) preserve the logging contents and move the logging call outside the compiled region.
+
+  Developer debug context: method: <WarningOnceLogger>.warning_once, args: [ConstantVariable(str: 'test')], kwargs: {}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0291.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    warning_once_logger.warning_once("test")""",
+            post_munge=post_munge,
+        )
+
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
     def test_optree_graph_break_message(self):
         import optree
@@ -457,6 +576,83 @@ Attempted to call function marked as skipped
   Developer debug context: module: optree._C, qualname: <path>.make_from_collection, skip reason: cannot determine source file for optree._C (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
+        )
+
+    def test_unpack_sequence_with_wrong_length(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            a, b = [1]  # noqa: F841
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(
+                torch.randn(
+                    2,
+                )
+            ),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: raised exception ValueError('not enough values to unpack (expected 2, got 1)')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    a, b = [1]  # noqa: F841""",
+        )
+
+    def test_unpack_sequence_with_non_iterable(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            a, b = 1  # noqa: RUF100
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(
+                torch.randn(
+                    2,
+                )
+            ),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: raised exception TypeError("'int' object is not iterable")
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    a, b = 1  # noqa: RUF100""",
+        )
+
+    def test_unpack_ex_failure(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            a, *b = []  # noqa: F841
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: fn(torch.randn(2)),
+            """\
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: raised exception ValueError('not enough values to unpack (expected at least 1, got 0)')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    a, *b = []  # noqa: F841""",
         )
 
     def test_observed_exception(self):
@@ -599,6 +795,15 @@ Invalid call to __build_class__
 from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:""",
+        )
+
+    @skipIfNotPy312
+    def test_async_return_bytecode_exception_table(self):
+        async def fn():
+            return 1
+
+        self.assertEqual(
+            asyncio.run(torch.compile(fn, backend="eager", fullgraph=True)()), 1
         )
 
     @skipIfNotPy312
@@ -789,6 +994,24 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return x + y""",
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_fx_node_error_cross_device(self):
+        linear = torch.nn.Linear(10, 20, device="cuda").eval()
+
+        def fn(x):
+            return linear(x)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
+
+        msg = str(cm.exception)
+        self.assertIn("Tensor device mismatch", msg)
+        self.assertIn("Expected all tensors to be on the same device", msg)
+        self.assertIn("cpu", msg)
+        self.assertIn("cuda", msg)
+        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
+        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
@@ -1235,8 +1458,8 @@ User code traceback:
         self.assertExpectedInline(
             msg,
             """\
-Received signal to skip frame (without graph break): No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.
-Frame info: empty_fn (test_error_messages.py line N) empty_fn                 test_error_messages.py N""",
+skipping: empty_fn (reason: Dynamo decided to skip the frame while tracing: No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.
+Frame info: empty_fn (test_error_messages.py line N), file: test_error_messages.py)""",
         )
 
     @make_logging_test(graph_breaks=True)
@@ -1359,6 +1582,8 @@ TRACE STORE_FAST 'z' [TensorVariable()]
 TRACE LOAD_GLOBAL 'torch' []
 TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker(unrealized: <class 'module'>)]
 TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker(unrealized: <class 'module'>)]
+TRACE PUSH_NULL <class 'torch._dynamo.bytecode_transformation._NotProvided'> [LazyVariableTracker(unrealized: <class 'function'>)]
+TRACE SWAP <class 'torch._dynamo.bytecode_transformation._NotProvided'> [LazyVariableTracker(unrealized: <class 'function'>), NullVariable]
 TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
 """,
         )
@@ -1382,9 +1607,6 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
         self.assertEqual((len(matches) <= 20), True)
         self.assertIn("Most recent bytecode instructions traced (max 20):", s)
 
-    # TODO this test is broken with nested_graph_breaks because we need to update
-    # the resume collapse function for nested graph breaks
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
@@ -1438,7 +1660,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
             post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -1462,6 +1684,71 @@ User code traceback:
     Foo().attr = x
   File "test_error_messages.py", line N, in __setattr__
     torch._dynamo.graph_break()
+
+NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
+
+Most recent bytecode instructions traced (max 20):
+""",
+        )
+
+    @torch._dynamo.config.patch(verbose=True)
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_traceback_inlined_data_dependent_branch(self, records):
+        # Tests that data-dependent branches in inlined functions show correct
+        # source lines in the verbose traceback (from the call site, not the
+        # inlined function's source).
+        def helper(x):
+            if x.sum() > 0:  # 0
+                x = x + 1
+            if x.sum() > 0:  # 1
+                x = x + 1
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return helper(x) + 1  # call site
+
+        f(torch.ones(3))
+
+        def post_munge(s):
+            s = re.sub(
+                r"torch_dynamo_resume_in_(\w+)_at_(\d+)",
+                r"torch_dynamo_resume_in_\1_at_N",
+                s,
+            )
+            return re.sub(r"TRACE.*$", "", s, flags=re.DOTALL)
+
+        self.assertExpectedInline(
+            post_munge(munge_exc(records[-1].getMessage(), skip=0)),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in torch_dynamo_resume_in_helper_at_N, code: if x.sum() > 0:  # 1
+        gt = gt(sum_1, 0)
+
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+
+User code traceback:
+  File "test_error_messages.py", line N, in test_graph_break_traceback_inlined_data_dependent_branch
+    f(torch.ones(3))
+  File "test_error_messages.py", line N, in f
+    return helper(x) + 1  # call site
+
+========== most recent `torch.compile` tracing attempt started here ==========
+
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f_at_N
+    return helper(x) + 1  # call site
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_helper_at_N
+    if x.sum() > 0:  # 1
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
 
@@ -2371,7 +2658,7 @@ User code traceback:
         def outer(x):
             return middle_with_try(x)
 
-        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+        with torch._dynamo.config.patch(verbose=False):
             torch.compile(outer, backend="eager")(torch.ones(3))
 
         full_messages = [
@@ -2386,12 +2673,12 @@ User code traceback:
         self.assertEqual(
             len(full_messages),
             1,
-            f"Expected 1 full graph break message, got {len(full_messages)}",
+            lambda msg: f"{msg}\nExpected 1 full graph break message, got {len(full_messages)}",
         )
         self.assertEqual(
             len(suppressed_messages),
             2,
-            f"Expected 2 suppressed messages, got {len(suppressed_messages)}",
+            lambda msg: f"{msg}\nExpected 2 suppressed messages, got {len(suppressed_messages)}",
         )
 
         self.assertExpectedInline(
@@ -2470,13 +2757,13 @@ Call to `torch._dynamo.graph_break()`
             x = inner(x + 4) + 8
             return inner(x) + 16
 
-        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+        with torch._dynamo.config.patch(verbose=False):
             outer(torch.ones(3))
 
         self.assertEqual(
             len(records),
             2,
-            f"Expected 2 graph break messages (one per call site), got {len(records)}",
+            lambda msg: f"{msg}\nExpected 2 graph break messages (one per call site), got {len(records)}",
         )
 
         self.assertExpectedInline(

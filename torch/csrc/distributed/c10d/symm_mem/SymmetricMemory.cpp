@@ -384,10 +384,7 @@ static at::Tensor get_buffer_at_byte_offset(
     c10::IntArrayRef sizes,
     c10::ScalarType dtype,
     size_t offset_bytes) {
-  TORCH_CHECK(
-      peer >= 0 && peer < handle->get_world_size(),
-      "Invalid peer rank: ",
-      peer);
+  check_rank(peer, handle->get_world_size());
   auto peer_ptr = handle->get_buffer_ptrs()[peer];
   TORCH_CHECK(
       peer_ptr != nullptr,
@@ -442,6 +439,8 @@ at::Tensor SymmetricMemory::get_signal_pad(
     c10::IntArrayRef sizes,
     std::optional<c10::ScalarType> dtype,
     int64_t storage_offset) {
+  check_rank(rank, get_world_size());
+
   // If the dtype is unspecified, default it to UInt32, as it
   // is the most common type for signaling purposes.
   if (!dtype.has_value()) {
@@ -547,9 +546,13 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+  m.def(
+      "memcpy_to_multicast_(Tensor(a!) symm_mem_out, Tensor src, int byte_offset, str group_name) -> Tensor(a!)");
 
   m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nvshmem_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def(
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
@@ -557,10 +560,14 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nccl_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
+  m.def(
+      "nccl_all_to_all_nd(Tensor input, Tensor(a!) out, int scatter_dim, int gather_dim, str group_name) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
@@ -593,7 +600,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
 c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
     const at::Tensor& tensor,
-    std::optional<std::string> group_name) {
+    const std::optional<std::string>& group_name) {
   return c10d::symmetric_memory::rendezvous(tensor, group_name);
 }
 
