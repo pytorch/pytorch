@@ -99,7 +99,6 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
-    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -18101,10 +18100,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
-    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
-    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
-    # a TrackedFake) past torch._dynamo.reset(). See #190093.
-    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
