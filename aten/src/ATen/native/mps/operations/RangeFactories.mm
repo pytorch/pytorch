@@ -272,10 +272,8 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   // truncated output; MPS is limited to float32, which gives off-by-one results
   // on exact integer powers (10**3 -> 999.9994 -> 999). Rather than return
   // silently-wrong values, we don't claim integer support. See #137635.
-  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
-              "logspace: integer dtypes are not supported on the MPS backend "
-              "(float32 cannot reproduce the reference truncation for integer outputs). "
-              "Use a floating dtype and cast, or run on CPU.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+                              "logspace is not implemented for integral dtypes on MPS");
 
   if (isComplexType(result.scalar_type())) {
     linspace_out_mps(start, end, steps, result);
