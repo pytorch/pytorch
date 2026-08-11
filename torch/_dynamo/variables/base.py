@@ -21,6 +21,7 @@ import functools
 import inspect
 import logging
 import textwrap
+import weakref
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum, IntFlag
@@ -336,13 +337,29 @@ def _check_method_arity(
 _METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
 
 
-# Not memoized: a type-keyed cache keeps locally-defined classes (and whatever
-# their methods close over) alive, leaking memory. Recompute instead.
+# Weak-keyed so the cache does not keep locally-defined classes (and whatever
+# their methods close over) alive. Values carry no reference back to the type.
+_ml_flags_cache: weakref.WeakKeyDictionary[type, dict[str, MethodFlags]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
     """Arity convention for `python_type.name`, read from its CPython
     PyMethodDef.ml_flags. Falls back to VARARGS|KEYWORDS when python_type has no
     such attribute or it carries no ml_flags (slot wrappers, pure-Python
     functions)."""
+    per_type: dict[str, MethodFlags] | None = _ml_flags_cache.get(python_type)
+    if per_type is None:
+        per_type = {}
+        _ml_flags_cache[python_type] = per_type
+    elif name in per_type:
+        return per_type[name]
+    per_type[name] = flags = _flags_from_ml_flags_uncached(python_type, name)
+    return flags
+
+
+def _flags_from_ml_flags_uncached(python_type: type, name: str) -> MethodFlags:
     import torch
 
     default = MethodFlags.VARARGS | MethodFlags.KEYWORDS
@@ -991,18 +1008,26 @@ def _fill(group: SlotGroup, masks: tuple[int, int, int, int]) -> dict[str, Any]:
     }
 
 
-# Not memoized (see _flags_from_ml_flags): avoids retaining types.
+# Weak-keyed cache (see _ml_flags_cache): avoids retaining types.
+_tp_type_cache: weakref.WeakKeyDictionary[type, PyTypeObject] = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def _tp_type(obj_type: type) -> PyTypeObject:
     # obj_type's whole slot table (PyTypeObject-like).  Independent of _tp_dict's
     # cross-group collapse, so a type with both sq_length and mp_length shows up in
     # both the sequence and mapping views (as CPython's separate sub-structs do).
-    masks = get_type_slots(obj_type)
-    return PyTypeObject(
-        tp_as_number=PyNumberMethods(**_fill(SlotGroup.NUMBER, masks)),
-        tp_as_sequence=PySequenceMethods(**_fill(SlotGroup.SEQUENCE, masks)),
-        tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
-        **_fill(SlotGroup.TYPE, masks),
-    )
+    tp = _tp_type_cache.get(obj_type)
+    if tp is None:
+        masks = get_type_slots(obj_type)
+        tp = _tp_type_cache[obj_type] = PyTypeObject(
+            tp_as_number=PyNumberMethods(**_fill(SlotGroup.NUMBER, masks)),
+            tp_as_sequence=PySequenceMethods(**_fill(SlotGroup.SEQUENCE, masks)),
+            tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
+            **_fill(SlotGroup.TYPE, masks),
+        )
+    return tp
 
 
 WrapperType: TypeAlias = Callable[
