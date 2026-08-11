@@ -40,6 +40,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     MI350_ARCH,
@@ -112,6 +113,8 @@ device_type = (
 
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = device_type
     common = check_model_gpu
 
