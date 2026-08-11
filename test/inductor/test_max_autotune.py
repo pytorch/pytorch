@@ -404,13 +404,11 @@ class TestMaxAutotune(TestCase):
                 statically_known_true.assert_not_called()
 
     def test_tma_descriptor_max_offset_fits_in_int32(self):
-        from torch._inductor.kernel.mm_grouped import (
-            _tma_descriptor_max_offset_fits_in_int32,
-        )
+        from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
 
-        # G=128, N=16384, K=5120: reported to overflow when selecting the TMA
-        # grouped-mm path -- (G - 1) * (N * K) exceeds int32 even though G, N,
-        # and K each individually fit.
+        # G=128, N=16384, K=5120: reported to overflow when selecting
+        # the TMA grouped-mm path -- (G - 1) * (N * K) exceeds int32
+        # even though G, N, and K each individually fit.
         mat = mock.Mock()
         mat.get_size.return_value = [128, 16384, 5120]
         mat.get_stride.return_value = [16384 * 5120, 5120, 1]
@@ -421,9 +419,7 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(_tma_descriptor_max_offset_fits_in_int32(mat))
 
     def test_tma_descriptor_max_offset_fits_in_int32_uses_expected_guarding(self):
-        from torch._inductor.kernel.mm_grouped import (
-            _tma_descriptor_max_offset_fits_in_int32,
-        )
+        from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
 
         gm = make_fx(lambda: torch.zeros(2, 3))()
         graph = GraphLowering(gm)
@@ -3268,15 +3264,47 @@ class TestMaxAutotune(TestCase):
         def grouped_mm(a, b, offs):
             return torch._grouped_mm(a, b.transpose(-2, -1), offs=offs)
 
+        # G*N*K == 2**31: smallest size triggering int64 INDEX_DTYPE
+        # while max_offset (== numel - 1) still fits int32, so TMA
+        # stays enabled.
         G, M, N, K = 8, 128, 16384, 16384
         a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
         offs = torch.arange(M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32)
 
-        self.assertTrue(
-            b.numel() > 2**31 - 1,
-            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
-        )
+        self.assertEqual(b.numel(), 2**31)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
+            }
+        ):
+            result = torch.compile(grouped_mm)(a, b, offs)
+
+        torch.testing.assert_close(result, grouped_mm(a, b, offs), rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
+    )
+    @largeTensorTest("6 GB", device=GPU_TYPE)
+    def test_max_autotune_grouped_mm_large_input_tensor_tma_disabled(self):
+        # Grouped mm whose TMA descriptor max offset exceeds
+        # int32_max; USE_TMA_LOAD must be disabled and the non-TMA
+        # fallback still correct.
+        def grouped_mm(a, b, offs):
+            return torch._grouped_mm(a, b.transpose(-2, -1), offs=offs)
+
+        G, M, N, K = 8, 128, 16384, 16512
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        offs = torch.arange(M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32)
+
+        self.assertGreater(b.numel(), 2**31)
 
         with config.patch(
             {
@@ -5827,7 +5855,15 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
+        # grouped_mm's input_gen_fns forces
+        # return_multi_template=False, so do_autotuning() takes its
+        # pipelined-only branch and returns None instead of timings,
+        # crashing min(timings, ...). Pre-existing bug, not test-
+        # specific -- hits any input_gen_fns op under
+        # pipeline_max_autotune_gemm=True.
         "test_max_autotune_grouped_mm_large_input_tensor_int64_indexing": "grouped_mm's input_gen_fns forces return_multi_template=False, "
+        "which do_autotuning's pipelined branch does not handle",
+        "test_max_autotune_grouped_mm_large_input_tensor_tma_disabled": "grouped_mm's input_gen_fns forces return_multi_template=False, "
         "which do_autotuning's pipelined branch does not handle",
     }
 

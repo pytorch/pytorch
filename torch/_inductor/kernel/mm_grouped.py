@@ -3,8 +3,6 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any
 
-import sympy
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
@@ -23,6 +21,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _descriptor_shape_fits_in_int32,
+    _tma_descriptor_max_offset_fits_in_int32,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
@@ -261,26 +260,6 @@ aten__scaled_grouped_mm = ExternKernelChoice(
 )
 
 
-def _tma_descriptor_max_offset_fits_in_int32(
-    mat: TensorBox, add_guards: bool = False
-) -> bool:
-    int32_max = torch.iinfo(torch.int32).max
-    max_offset = sum(
-        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
-    )
-    if isinstance(max_offset, (int, sympy.Integer)):
-        if max_offset > int32_max:
-            return False
-        return True
-
-    condition = sympy.Le(max_offset, int32_max)
-    return (
-        V.graph.sizevars.guard_or_false(condition)
-        if add_guards
-        else V.graph.sizevars.statically_known_true(condition)
-    )
-
-
 def can_use_triton_kernel(
     mat_a: TensorBox,
     mat_b: TensorBox,
@@ -452,10 +431,10 @@ def _tuned_grouped_mm_common(
                 triton_has_make_tensor_descriptor
                 or triton_has_experimental_make_tensor_descriptor
             )
-            and _descriptor_shape_fits_in_int32(mat_a.get_size())
-            and _descriptor_shape_fits_in_int32(mat_b.get_size())
-            and _tma_descriptor_max_offset_fits_in_int32(mat_a)
-            and _tma_descriptor_max_offset_fits_in_int32(mat_b)
+            and _descriptor_shape_fits_in_int32(mat_a.get_size(), add_guards=True)
+            and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_a, add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_b, add_guards=True)
         )
         kwargs = {
             "SCALED": scaled,
