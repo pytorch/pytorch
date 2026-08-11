@@ -2704,8 +2704,19 @@ add_docstr_all(
     r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
 
-Returns True if :attr:`self` tensor is contiguous in memory in the order specified
-by memory format.
+Returns ``True`` if :attr:`self` tensor's elements are stored in a non-overlapping,
+dense layout in the order specified by the memory format. For the default
+``torch.contiguous_format``, this is the standard row-major (C-contiguous) order.
+
+Expanding a dimension to a size greater than one gives that dimension a stride of
+zero, so multiple logical elements refer to the same memory location. Such an
+expanded tensor is not contiguous::
+
+    >>> x = torch.tensor(1).expand(2, 2)
+    >>> x.stride()
+    (0, 0)
+    >>> x.is_contiguous()
+    False
 
 Args:
     memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation
