@@ -1830,11 +1830,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn in (set, frozenset, list, tuple):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
-                if args[0]._base_vt is None:
-                    raise AssertionError(
-                        "UserDefinedObjectVariable._base_vt must not be None"
-                    )
-                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+                return args[0].call_base_method(tx, name, args[1:], kwargs)
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
@@ -1891,11 +1887,8 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if name == "__hash__" and len(args) == 1 and not kwargs:
             arg = args[0]
-            if (
-                isinstance(arg, variables.UserDefinedConstantVariable)
-                and arg._base_vt is not None
-            ):
-                return generic_hash(tx, arg._base_vt)
+            if isinstance(arg, variables.UserDefinedConstantVariable):
+                return generic_hash(tx, arg.as_base_vt())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -3169,11 +3162,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             if isinstance(args[0], variables.UserDefinedDictVariable):
-                if args[0]._base_vt is None:
-                    raise AssertionError(
-                        "UserDefinedDictVariable._base_vt must not be None for dict method dispatch"
-                    )
-                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+                return args[0].call_base_method(tx, name, args[1:], kwargs)
             elif isinstance(args[0], ConstDictVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
@@ -3265,9 +3254,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     raise AssertionError(
                         f"Expected DefaultDictVariable, got {type(result)}"
                     )
-                result._base_vt = ConstDictVariable(
-                    items, mutation_type=ValueMutationNew()
-                )
+                result.items = ConstDictVariable(items).items
                 return result
             else:
                 return ConstDictVariable(items, mutation_type=ValueMutationNew())

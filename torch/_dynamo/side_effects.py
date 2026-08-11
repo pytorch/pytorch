@@ -180,6 +180,12 @@ def _manual_dict_setitem(
         dict_class.__setitem__(dict_to, k, v)  # type: ignore[index]
 
 
+def _manual_set_update(set_from: set[Any], set_to: set[Any]) -> None:
+    # Call the set methods directly, not any overridden subclass methods.
+    set.clear(set_to)
+    set.update(set_to, set_from)
+
+
 def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.clear(list_to)
     list.extend(list_to, list_from)
@@ -803,12 +809,14 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
+        elif issubclass(user_cls, collections.OrderedDict):
+            variable_cls = variables.UserDefinedOrderedDictVariable
         elif issubclass(user_cls, dict):
-            # Includes collections.OrderedDict and its subclasses; the
-            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
-        elif issubclass(user_cls, (set, frozenset)):
+        elif issubclass(user_cls, set):
             variable_cls = variables.UserDefinedSetVariable
+        elif issubclass(user_cls, frozenset):
+            variable_cls = variables.UserDefinedFrozensetVariable
         elif issubclass(user_cls, tuple):
             if is_namedtuple_cls(user_cls):
                 variable_cls = variables.UserDefinedTupleVariable.get_vt_cls(user_cls)
@@ -1109,6 +1117,13 @@ class SideEffects:
 
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        elif (
+            isinstance(var, variables.UserDefinedObjectVariable)
+            and var._base_methods is not None
+        ):
+            # A subclass that inherits its base VT uses mutation_type for
+            # attribute mutations, so content mutations get their own flag.
+            var._base_contents_modified = True
         if var.source is not None:
             self.mutated_sources.add(var.source)
         if var.source and isinstance(var, variables.ConstDictVariable):
@@ -1538,7 +1553,8 @@ class SideEffects:
 
 @register_side_effect_replay_handler(
     name="list_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable)
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=90,
 )
 def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1562,7 +1578,8 @@ def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="deque_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable)
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=80,
 )
 def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1609,7 +1626,8 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
     name="const_dict_or_set_mutation",
     matcher=lambda ctx: isinstance(
         ctx.var, (variables.ConstDictVariable, variables.SetVariable)
-    ),
+    )
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=70,
 )
 def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1731,8 +1749,9 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
 
     # Reconstruct all items - _manual_dict_setitem clears dict_to first, so we
     # need every key/value, not just the ones that differ from original_items.
-    var._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
-    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    base_vt = var.as_base_vt()
+    base_vt.should_reconstruct_all = True  # type: ignore[missing-attribute]
+    cg(base_vt, allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["dict_from"]),
@@ -1749,9 +1768,45 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
             create_instruction("POP_TOP"),
         ]
     )
-    ctx.log(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    ctx.log(var.as_base_vt())
+
+
+def _codegen_user_defined_set_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.UserDefinedSetVariable):
+        raise AssertionError(type(var))
+    # Update the set to the updated items, calling the set methods rather than
+    # any overridden subclass methods.
+    varname_map = {}
+    for name in _manual_set_update.__code__.co_varnames:
+        varname_map[name] = cg.tx.output.new_var()
+
+    cg(var.source)  # type: ignore[attr-defined]
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["set_to"]),
+        ]
     )
+
+    cg(var.as_base_vt(), allow_cache=False)  # Don't codegen via source
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["set_from"]),
+        ]
+    )
+
+    set_update_insts = bytecode_from_template(
+        _manual_set_update, varname_map=varname_map
+    )
+
+    ctx.suffixes.append(
+        [
+            *set_update_insts,
+            create_instruction("POP_TOP"),
+        ]
+    )
+    ctx.log(var.as_base_vt())
 
 
 def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1772,7 +1827,7 @@ def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
         ]
     )
 
-    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg(var.as_base_vt(), allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["list_from"]),
@@ -1789,9 +1844,7 @@ def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
             create_instruction("POP_TOP"),
         ]
     )
-    ctx.log(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    )
+    ctx.log(var.as_base_vt())
 
 
 def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1812,7 +1865,7 @@ def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
         ]
     )
 
-    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg(var.as_base_vt(), allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["deque_from"]),
@@ -1829,9 +1882,7 @@ def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
             create_instruction("POP_TOP"),
         ]
     )
-    ctx.log(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    )
+    ctx.log(var.as_base_vt())
 
 
 def _skip_attribute_mutation_replay(var: VariableTracker) -> bool:
@@ -1876,24 +1927,22 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
 
     if (
         isinstance(var, variables.UserDefinedDictVariable)
-        and side_effects.is_modified(
-            var._base_vt  # pyrefly: ignore[bad-argument-type]
-        )
-        and var._base_vt.has_new_items()  # type: ignore[union-attr]
+        and var.is_base_vt_modified(side_effects)
+        and var.as_base_vt().has_new_items()  # type: ignore[missing-attribute]
     ):
         _codegen_user_defined_dict_mutation(ctx)
     elif isinstance(
         var, variables.UserDefinedListVariable
-    ) and side_effects.is_modified(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    ):
+    ) and var.is_base_vt_modified(side_effects):
         _codegen_user_defined_list_mutation(ctx)
     elif isinstance(
         var, variables.UserDefinedDequeVariable
-    ) and side_effects.is_modified(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    ):
+    ) and var.is_base_vt_modified(side_effects):
         _codegen_user_defined_deque_mutation(ctx)
+    elif isinstance(
+        var, variables.UserDefinedSetVariable
+    ) and var.is_base_vt_modified(side_effects):
+        _codegen_user_defined_set_mutation(ctx)
 
     # Applying mutations involves two steps: 1) Push all reconstructed objects
     # onto the stack. 2) Call STORE_ATTR to apply the mutations.

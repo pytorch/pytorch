@@ -69,14 +69,32 @@ def set_copy(obj: VariableTracker) -> VariableTracker:
     for exact frozenset (`frozenset_copy`).  Use this for binary-op scratch
     storage so mutations don't bleed into the input.
     """
-    base = obj._base_vt if isinstance(obj, variables.UserDefinedSetVariable) else obj
-    if base is None:
-        raise AssertionError("_base_vt must not be None")
-    return base.clone(
-        items=base.items.copy(),  # type: ignore[missing-attribute]
+    cls = result_set_cls(obj)
+    if cls is not type(obj):
+        return cls(
+            list(obj.items),  # type: ignore[missing-attribute]
+            mutation_type=ValueMutationNew(),
+        )
+    return obj.clone(
+        items=obj.items.copy(),  # type: ignore[missing-attribute]
         mutation_type=ValueMutationNew(),
         source=None,
     )
+
+
+def result_set_cls(obj: VariableTracker) -> type["SetVariable"]:
+    """The set VT class to build for the result of a set operation on `obj`.
+
+    Operations on a set subclass return the base type, so a user-defined set
+    yields a plain SetVariable/FrozensetVariable rather than its own class.
+    """
+    if isinstance(obj, variables.UserDefinedObjectVariable):
+        return (
+            FrozensetVariable
+            if issubclass(obj.python_type(), frozenset)
+            else SetVariable
+        )
+    return type(obj)  # type: ignore[return-value]
 
 
 class SetVariable(VariableTracker):
@@ -90,7 +108,7 @@ class SetVariable(VariableTracker):
 
     def __init__(
         self,
-        items: Iterable[VariableTracker | HashableTracker],
+        items: Iterable[VariableTracker | HashableTracker] = (),
         **kwargs: Any,
     ) -> None:
         # .clone() passes these arguments in kwargs but they're recreated below
@@ -299,7 +317,7 @@ class SetVariable(VariableTracker):
         # Build a fresh set of the same concrete type (set / frozenset /
         # OrderedSet). list() preserves insertion order, which matters for
         # OrderedSet.
-        return type(self)(list(items), mutation_type=ValueMutationNew())
+        return result_set_cls(self)(list(items), mutation_type=ValueMutationNew())
 
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
