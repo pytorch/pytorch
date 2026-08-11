@@ -118,7 +118,7 @@ class TestFindThrows(unittest.TestCase):
         throws = find_throws(code_of(source))
         self.assertEqual(len(throws), 1)
         self.assertEqual(throws[0].line, 1)
-        self.assertEqual(throws[0].expression, "( ErrorReport(loc) << what)")
+        self.assertEqual(throws[0].expression, "ErrorReport(loc) << what")
 
     def test_bare_rethrow(self) -> None:
         throws = find_throws(code_of("throw;\n"))
@@ -132,24 +132,72 @@ class TestFindThrows(unittest.TestCase):
 
 
 class TestBuckets(unittest.TestCase):
-    """Every kind of throw is flagged at this stage; the allow-by-rule policy
-    for typed exceptions is a separate change."""
-
-    def test_all_shapes_are_flagged(self) -> None:
+    def test_flagged(self) -> None:
         for expression in (
             "std::runtime_error(x)",
             "std::invalid_argument(x)",
             "std::out_of_range(x)",
+            "std::logic_error(x)",
+            # python_error is typed, but TORCH_CHECK_PYTHON replaces it.
             "python_error()",
-            "py::value_error(x)",
+            # A torch error type is not automatically allowed either.
             "c10::Error(x, y)",
+            # Not in ALLOWED_EXCEPTION_TYPES, so it must be justified first.
             "ErrorReport(loc) << x",
+            "TypeError(x)",
+            # Throws a sliced copy rather than re-raising.
+            "e",
+            # Reads like a rethrow, but the operand is a fresh exception.
             "std::move(e)",
-            "",
+            # Not a rethrow either, and neither name is allowed.
+            "MyError<int>(x)",
+            "factory.make()",
         ):
             source = f"throw {expression};\n"
             with self.subTest(expression=expression):
                 self.assertEqual(names(source), ["raw throw statement"])
+
+    def test_allowed(self) -> None:
+        for expression in (
+            "",  # bare `throw;`
+            "py::value_error(x)",
+            "pybind11::index_error(x)",
+            "::py::key_error(x)",
+            "PythonError()",
+            "WorkerException(e)",
+            "c10::AcceleratorError(x, y, z)",
+            "c10::AcceleratorError{x}",
+        ):
+            source = f"throw {expression};\n"
+            with self.subTest(expression=expression):
+                self.assertEqual(names(source), [])
+
+    def test_a_variable_named_like_an_allowed_type_is_still_flagged(self) -> None:
+        self.assertEqual(names("throw PythonError;\n"), ["raw throw statement"])
+
+    def test_a_namespace_ending_in_py_is_not_pybind(self) -> None:
+        for expression in ("foo::py::value_error(x)", "pyxx::value_error(x)"):
+            with self.subTest(expression=expression):
+                self.assertEqual(
+                    names(f"throw {expression};\n"), ["raw throw statement"]
+                )
+
+    def test_sliced_rethrow_is_told_to_use_bare_throw(self) -> None:
+        (message,) = check_source(PATH, "throw e;\n")
+        self.assertIn("throw;", message.description or "")
+        self.assertNotIn("TORCH_CHECK", message.description or "")
+
+    def test_only_a_bare_variable_gets_the_slicing_advice(self) -> None:
+        for expression in ("MyError<int>(x)", "factory.make()", "Foo()"):
+            with self.subTest(expression=expression):
+                (message,) = check_source(PATH, f"throw {expression};\n")
+                self.assertNotIn("sliced", message.description or "")
+
+    def test_arguments_are_elided_from_the_diagnostic(self) -> None:
+        # By this point string literals have been blanked, so printing them back
+        # would show `throw Foo( )`.
+        (message,) = check_source(PATH, 'throw Foo("some message", x);\n')
+        self.assertIn("`throw Foo(...)`", message.description or "")
 
     def test_word_throw_in_comment_or_string_is_not_flagged(self) -> None:
         source = (
@@ -163,16 +211,24 @@ class TestBuckets(unittest.TestCase):
 
 class TestAllowMarker(unittest.TestCase):
     def test_marker_on_preceding_line_allows_the_throw(self) -> None:
-        source = "// @allow-raw-throw: rethrow keeps the original error\nthrow;\n"
+        source = "// @allow-raw-throw: PyErr is already set here\nthrow Foo();\n"
         self.assertEqual(names(source), [])
 
     def test_marker_without_reason_is_rejected(self) -> None:
-        source = "// @allow-raw-throw\nthrow;\n"
+        source = "// @allow-raw-throw\nthrow Foo();\n"
         self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
 
     def test_marker_with_empty_reason_is_rejected(self) -> None:
-        source = "// @allow-raw-throw:   \nthrow;\n"
+        source = "// @allow-raw-throw:   \nthrow Foo();\n"
         self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
+
+    def test_marker_above_an_allowed_throw_is_redundant(self) -> None:
+        source = "// @allow-raw-throw: reason\nthrow py::value_error(x);\n"
+        self.assertEqual(names(source), ["redundant-allow-raw-throw"])
+
+    def test_redundant_marker_is_not_also_reported_as_reasonless(self) -> None:
+        source = "// @allow-raw-throw\nthrow py::value_error(x);\n"
+        self.assertEqual(names(source), ["redundant-allow-raw-throw"])
 
     def test_trailing_marker_does_not_allow_the_throw(self) -> None:
         source = "throw Foo(); // @allow-raw-throw: nope\n"
@@ -212,6 +268,10 @@ class TestAllowMarker(unittest.TestCase):
         source = "\f\n// @allow-raw-throw: reason\nthrow Foo();\n"
         self.assertEqual(names(source), [])
 
+    def test_marker_licenses_the_flagged_throw_not_the_allowed_one(self) -> None:
+        allowed, marker = "throw py::value_error(x);", "// @allow-raw-throw: reason"
+        self.assertEqual(names(f"{allowed}\n{marker}\nthrow Foo();\n"), [])
+
     def test_marker_above_a_wrapped_throw(self) -> None:
         source = "// @allow-raw-throw: reason\nthrow(\n    Foo());\n"
         self.assertEqual(names(source), [])
@@ -230,10 +290,6 @@ class TestReplacementMacro(unittest.TestCase):
         for path, macro in cases.items():
             with self.subTest(path=path):
                 self.assertEqual(replacement_macro(path), macro)
-
-    def test_bare_rethrow_is_not_told_to_use_a_check_macro(self) -> None:
-        (message,) = check_source(PATH, "throw;\n")
-        self.assertNotIn("TORCH_CHECK", message.description or "")
 
     def test_description_names_the_macro(self) -> None:
         (message,) = check_source("torch/headeronly/util/Foo.h", "throw Foo();\n")
