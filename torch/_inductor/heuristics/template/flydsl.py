@@ -18,6 +18,11 @@ class FlyDSLMXFP8Config:
     BLOCK_M_WARPS: int = 2
     BLOCK_N_WARPS: int = 2
     GROUP_M: int = 0
+    # 1 reads the tile's LDS fragments before issuing the next tile's
+    # direct-to-LDS DMA, which stops the compiler from draining vmcnt between
+    # them. Worth 11-27% on 2x2 wave grids and -21% on 1- and 2-wave ones, so
+    # it is a search dimension rather than a fixed choice.
+    FRAG_FIRST: int = 1
 
 
 class FlyDSLMXFP8ConfigDict(TypedDict):
@@ -28,9 +33,10 @@ class FlyDSLMXFP8ConfigDict(TypedDict):
     BLOCK_M_WARPS: int
     BLOCK_N_WARPS: int
     GROUP_M: int
+    FRAG_FIRST: int
 
 
-FlyDSLMXFP8ConfigArgs = tuple[int, int, int, int, int, int, int]
+FlyDSLMXFP8ConfigArgs = tuple[int, int, int, int, int, int, int, int]
 
 
 def _check_gemm_config(gemm_config: dict[str, int]) -> None:
@@ -78,6 +84,7 @@ def get_exhaustive_mxfp8_gemm_configs() -> list[FlyDSLMXFP8Config]:
         "BLOCK_M_WARPS": [1, 2, 4],
         "BLOCK_N_WARPS": [1, 2, 4],
         "GROUP_M": [0, 4],
+        "FRAG_FIRST": [0, 1],
     }
     keys = selections.keys()
     values = selections.values()
@@ -99,7 +106,7 @@ def get_default_mxfp8_gemm_configs() -> list[FlyDSLMXFP8Config]:
     """
     Returns the default configuration set for the gfx950 FlyDSL MXFP8 kernel.
     """
-    config_tuples: list[FlyDSLMXFP8ConfigArgs] = [
+    tile_tuples: list[tuple[int, int, int, int, int, int, int]] = [
         # Deep register blocking (8x8 / 8x4 repeats): fewer, fatter waves so
         # each LDS read feeds four MFMAs instead of two. These win every shape
         # from M=2048 up -- 256x256 with a 2x2 wave grid is the large-GEMM
@@ -141,7 +148,13 @@ def get_default_mxfp8_gemm_configs() -> list[FlyDSLMXFP8Config]:
         (16, 16, 128, 2, 1, 1, 0),
     ]
     # Tuple order must match the FlyDSLMXFP8Config field declaration order.
-    configs = [FlyDSLMXFP8Config(*args) for args in config_tuples]
+    # Which FRAG_FIRST wins depends on how many waves a workgroup has, and the
+    # measured spread is 20-30% either way, so both are searched for every tile.
+    configs = [
+        FlyDSLMXFP8Config(*args, frag_first)
+        for args in tile_tuples
+        for frag_first in (1, 0)
+    ]
     valid_configs: list[FlyDSLMXFP8Config] = []
     for gemm_config in configs:
         try:

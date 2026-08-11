@@ -318,7 +318,10 @@ class TestFlyDSLMXFP8Device(TestCase):
             ),  # rectangular 8x8
         ],
     )
-    def test_mxfp8_tile_configs_match_reference(self, device, shape, tile, out_dtype):
+    @parametrize("frag_first", [0, 1])
+    def test_mxfp8_tile_configs_match_reference(
+        self, device, shape, tile, out_dtype, frag_first
+    ):
         if torch.version.hip is None:
             self.skipTest("requires ROCm")
         arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
@@ -352,6 +355,7 @@ class TestFlyDSLMXFP8Device(TestCase):
             m_waves=m_waves,
             n_waves=n_waves,
             group_m=group_m,
+            frag_first=frag_first,
         )
         runtime_args = (a, b, scale_a_u8, scale_b_u8, out, 0)
         compiled = flyc.compile(
