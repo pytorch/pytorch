@@ -3047,9 +3047,11 @@ Arguments:
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
-              "supports_time_estimate",
+              "_supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
-              "(test whether the backend supports collective time estimation)")
+              R"(Test whether the backend supports collective time estimation.
+
+This API is experimental and subject to change.)")
           .def(
               "_start_time_estimate",
               &::c10d::Backend::startTimeEstimate,

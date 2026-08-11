@@ -72,7 +72,7 @@ class RecordingBackend(C10DBackend):
         return True
 
     @property
-    def supports_time_estimate(self):
+    def _supports_time_estimate(self):
         return True
 
     @property
@@ -321,7 +321,7 @@ class TestPyBackend(TestCase):
         for attr in (
             "supports_splitting",
             "supports_coalescing",
-            "supports_time_estimate",
+            "_supports_time_estimate",
             "supports_shrinking",
             "supports_reconfigure",
             "supports_window",
