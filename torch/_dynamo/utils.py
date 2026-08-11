@@ -1316,12 +1316,33 @@ def _unpack_fast_types() -> tuple[type, ...]:
     return _unpack_fast_types_cache
 
 
+_unpack_slow_types_cache: tuple[type, ...] | None = None
+
+
+def _unpack_slow_types() -> tuple[type, ...]:
+    # Subclasses of the fast types above that must still go through the
+    # iter/getiter/iternext protocol, because a user __iter__ override can
+    # yield something other than the object's contents.
+    global _unpack_slow_types_cache
+    if _unpack_slow_types_cache is None:
+        from . import variables
+
+        _unpack_slow_types_cache = (variables.UserDefinedObjectVariable,)
+    return _unpack_slow_types_cache
+
+
 def unpack_iterable(
     tx: InstructionTranslatorBase, iterable: VariableTracker
 ) -> list[VariableTracker]:
-    if isinstance(iterable, _unpack_fast_types()):
+    if isinstance(iterable, _unpack_fast_types()) and not isinstance(
+        iterable, _unpack_slow_types()
+    ):
         # unpack_var_sequence returns a fresh list, so hand it back directly:
         # no generator, no per-element callback, single allocation.
+        # User-defined subclasses are excluded: they may override __iter__ and
+        # yield something other than their contents, so they go through the
+        # iterator protocol below. UserDefinedObjectVariable.unpack_var_sequence
+        # still takes the fast path when __iter__ is not overridden.
         return iterable.unpack_var_sequence(tx)
     return list(lazily_unpack(tx, iterable))
 
@@ -1342,7 +1363,9 @@ def lazily_unpack(
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
-    if isinstance(iterable, _unpack_fast_types()):
+    if isinstance(iterable, _unpack_fast_types()) and not isinstance(
+        iterable, _unpack_slow_types()
+    ):
         yield from iterable.unpack_var_sequence(tx)
         return
 

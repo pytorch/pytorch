@@ -98,9 +98,29 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
+def result_dict_cls(obj: VariableTracker) -> type["ConstDictVariable"]:
+    """The dict VT class to build for the result of a dict operation on `obj`.
+
+    Operations like copy() on a dict subclass return the base type, so a
+    user-defined dict yields a plain ConstDict/OrderedDictVariable.
+    """
+    if isinstance(obj, variables.UserDefinedObjectVariable):
+        return (
+            OrderedDictVariable
+            if issubclass(obj.python_type(), collections.OrderedDict)
+            else ConstDictVariable
+        )
+    return type(obj)  # type: ignore[return-value]
+
+
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
+
+    # Container backing `items`. Distinct from _cpython_type: a subclass can
+    # report a different Python type (e.g. defaultdict) while still storing
+    # plain dict entries.
+    _items_cls: type = dict
 
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
@@ -112,9 +132,11 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self,
-        items: dict[VariableTracker, VariableTracker],
+        items: dict[VariableTracker, VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
+        if items is None:
+            items = {}
         # .clone() pass these arguments in kwargs but they're recreated a few
         # lines below
         if "original_items" in kwargs:
@@ -144,7 +166,7 @@ class ConstDictVariable(VariableTracker):
         ) -> "HashableTracker":
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        items_cls = cast(type, self._cpython_type)
+        items_cls = self._items_cls
         self.items = items_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
@@ -154,7 +176,7 @@ class ConstDictVariable(VariableTracker):
         self.original_items = items.copy()
         # Re-entrancy guard for is_python_constant against self-referential
         # dicts (d[k] = d, directly or via an OrderedDict/defaultdict wrapper
-        # whose _base_vt is this instance). Both forms re-enter this same
+        # whose storage this instance holds). Both forms re-enter this same
         # instance's is_python_constant, so a per-instance flag suffices.
         self._checking_python_constant = False
 
@@ -174,7 +196,7 @@ class ConstDictVariable(VariableTracker):
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
         # Re-entrancy guard: a self-referential dict (d[k] = d, directly or via
-        # an OrderedDict/defaultdict wrapper delegating to this _base_vt) would
+        # an OrderedDict/defaultdict wrapper sharing this storage) would
         # otherwise recurse forever. A cyclic dict is not a flat python
         # constant; return False so reconstruct handles the cycle.
         if self._checking_python_constant:
@@ -578,6 +600,10 @@ class ConstDictVariable(VariableTracker):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            cls = result_dict_cls(self)
+            if cls is not type(self):
+                # copy() on a subclass returns the base type.
+                return cls(self.items.copy(), mutation_type=ValueMutationNew())
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
@@ -740,7 +766,9 @@ class ConstDictVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
-        self.call_method(tx, "update", [other], {})
+        # Concrete base call: dict_ior runs dict_update directly and never goes
+        # through a subclass's update/__setitem__ override.
+        ConstDictVariable.call_method(self, tx, "update", [other], {})
         return self
 
     def mp_ass_subscript_impl(
@@ -821,19 +849,18 @@ class ConstDictVariable(VariableTracker):
         if op not in ("__eq__", "__ne__"):
             return ConstantVariable.create(NotImplemented)
         if not isinstance(other, ConstDictVariable):
-            # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
-            # This is correct because CPython's dict_equal operates on the
-            # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
-            # -- it never calls __getitem__ or __len__ on dict subclasses.
-            # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-            if isinstance(other, UserDefinedDictVariable):
-                if other._base_vt is None:
-                    raise AssertionError("expected _base_vt to be set")
-                other = other._base_vt
-            else:
-                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable.create(NotImplemented)
+        # Compare the underlying storage, not the subclass VTs. CPython's
+        # dict_equal operates on the internal C struct directly (ma_used,
+        # dk_entries, _Py_dict_lookup) and never calls __getitem__ or __len__
+        # on dict subclasses.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+        left = self.as_base_vt() if isinstance(self, UserDefinedDictVariable) else self
+        right = (
+            other.as_base_vt() if isinstance(other, UserDefinedDictVariable) else other
+        )
         eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-            tx, [self, other], {}
+            tx, [left, right], {}
         )
         if op == "__ne__":
             return VariableTracker.build(tx, not eq_result.as_python_constant())
@@ -854,6 +881,7 @@ class ConstDictVariable(VariableTracker):
 
 class OrderedDictVariable(ConstDictVariable):
     _cpython_type = collections.OrderedDict
+    _items_cls = collections.OrderedDict
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).

@@ -60,7 +60,6 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
     generic_richcompare_bool,
@@ -78,9 +77,28 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
+    from .functions import UserFunctionVariable
+
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
     return obj.python_type() is tuple
+
+
+def result_list_cls(obj: VariableTracker) -> type["BaseListVariable"]:
+    """The list VT class to build for the result of a sequence operation.
+
+    Operations on a list/tuple/deque subclass return the base type, so a
+    user-defined sequence yields a plain List/Tuple/DequeVariable rather than
+    its own class.
+    """
+    if isinstance(obj, variables.UserDefinedObjectVariable):
+        python_type = obj.python_type()
+        if issubclass(python_type, list):
+            return ListVariable
+        if issubclass(python_type, collections.deque):
+            return DequeVariable
+        return TupleVariable
+    return type(obj)  # type: ignore[return-value]
 
 
 def pytuple_check(obj: VariableTracker) -> bool:
@@ -140,10 +158,12 @@ class BaseListVariable(VariableTracker):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        if items is None:
+            items = []
         if not isinstance(items, list):
             raise AssertionError(f"items must be a list, got {type(items).__name__}")
         if not all(isinstance(x, VariableTracker) for x in items):
@@ -156,7 +176,7 @@ class BaseListVariable(VariableTracker):
     def modified(
         self, items: list[VariableTracker], **kwargs: Any
     ) -> "BaseListVariable":
-        return type(self)(items, **kwargs)
+        return result_list_cls(self)(items, **kwargs)
 
     @property
     def value(self) -> Any:
@@ -197,11 +217,17 @@ class BaseListVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
+            mutation_type = ValueMutationNew() if self.mutation_type else None
+            cls = result_list_cls(self)
+            if cls is not type(self):
+                # Slicing a subclass yields the base type, and cloning a
+                # UserDefined* VT would try to rebuild the subclass wrapper.
+                return cls(self.items[index], mutation_type=mutation_type)
             # Set source to None because slicing a list gives a new local
             return self.clone(
                 items=self.items[index],
                 source=None,
-                mutation_type=ValueMutationNew() if self.mutation_type else None,
+                mutation_type=mutation_type,
             )
         else:
             raise_type_error(
@@ -233,7 +259,7 @@ class BaseListVariable(VariableTracker):
     def call_tree_map_branch(
         self,
         tx: "InstructionTranslatorBase",
-        tree_map_fn: UserFunctionVariable,
+        tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -277,7 +303,7 @@ class BaseListVariable(VariableTracker):
     def call_tree_map_with_path_branch(
         self,
         tx: "InstructionTranslatorBase",
-        tree_map_fn: UserFunctionVariable,
+        tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -364,7 +390,7 @@ class BaseListVariable(VariableTracker):
         kwargs: dict[str, Any] = {}
         if issubclass(self.python_type(), list):
             kwargs["mutation_type"] = ValueMutationNew()
-        return type(self)(new_items, **kwargs)
+        return result_list_cls(self)(new_items, **kwargs)
 
     def _seq_richcompare(
         self,
@@ -392,10 +418,7 @@ class BaseListVariable(VariableTracker):
 
         left = self.items
         # CPython uses ob_item (the C array) directly, bypassing __iter__.
-        # For user-defined subclasses (UserDefinedListVariable etc.),
-        # the items live on the _base_vt.
-        other_vt = getattr(other, "_base_vt", None) or other
-        right = other_vt.items  # pyrefly: ignore[missing-attribute]
+        right = other.items  # pyrefly: ignore[missing-attribute]
 
         cmp_op = cmp_name_to_op_mapping[op]
 
@@ -935,10 +958,14 @@ class CommonListMethodsVariable(BaseListVariable):
             from .user_defined import UserDefinedObjectVariable
 
             sz = len(self.items)
-            if isinstance(args[0], (ListVariable, TupleVariable)):
-                self.items.extend(args[0].items)
-            elif isinstance(args[0], UserDefinedObjectVariable):
+            if isinstance(args[0], UserDefinedObjectVariable):
+                # Checked before the list/tuple fast paths below: CPython uses
+                # PyList_CheckExact/PyTuple_CheckExact there and falls back to
+                # the iterator protocol for subclasses, which may override
+                # __iter__ to yield something other than their contents.
                 self.items.extend(unpack_iterable(tx, args[0]))
+            elif isinstance(args[0], (ListVariable, TupleVariable)):
+                self.items.extend(args[0].items)
             elif isinstance(args[0], (ConstDictVariable, SetVariable)):
                 items = [item.vt for item in args[0].items]
                 self.items.extend(items)
@@ -1217,7 +1244,9 @@ class ListVariable(CommonListMethodsVariable):
         tx.output.side_effects.mutation(self)
         self.items.clear()
         if len(args) == 1:
-            self.call_method(tx, "extend", args, {})
+            # Concrete base call: list.__init__ fills the C array directly and
+            # never goes through a subclass's extend/append override.
+            ListVariable.call_method(self, tx, "extend", args, {})
         return ConstantVariable.create(None)
 
     def getattro_impl(
@@ -1278,7 +1307,10 @@ class ListVariable(CommonListMethodsVariable):
             i = key.nb_index_impl(tx).as_python_constant()
             if i < 0:
                 i += len(self.items)
-            return self.sq_ass_item_impl(tx, ConstantVariable(i), value)
+            # Call the concrete impl, mirroring list_ass_subscript ->
+            # list_ass_item in CPython. Going through self would re-dispatch to
+            # a subclass __setitem__ override and recurse.
+            return ListVariable.sq_ass_item_impl(self, tx, ConstantVariable(i), value)
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
             # step==0 before the iterable check.
@@ -1449,10 +1481,12 @@ class DequeVariable(CommonListMethodsVariable):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: list[VariableTracker] | None = None,
         maxlen: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
+        if items is None:
+            items = []
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
         if not maxlen.is_python_constant():

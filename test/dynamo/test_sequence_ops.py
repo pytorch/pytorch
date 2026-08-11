@@ -200,7 +200,6 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = UserDefinedList([1]) + UserDefinedList([2])
         self.assertIs(type(result), list)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_list_inplace_concat(self):
         # in-place C sq_inplace_concat mutates and returns self: subclass

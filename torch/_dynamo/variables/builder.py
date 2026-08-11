@@ -339,6 +339,8 @@ from .user_defined import (
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedFrozensetVariable,
+    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
@@ -2168,10 +2170,10 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            dict_vt_cls = (
-                OrderedDictVariable
-                if isinstance(value, collections.OrderedDict)
-                else ConstDictVariable
+            is_ordered = isinstance(value, collections.OrderedDict)
+            dict_vt_cls = OrderedDictVariable if is_ordered else ConstDictVariable
+            result_cls = (
+                UserDefinedOrderedDictVariable if is_ordered else UserDefinedDictVariable
             )
             dict_vt = dict_vt_cls(
                 result,
@@ -2182,7 +2184,7 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            result = result_cls(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -2271,16 +2273,16 @@ class VariableBuilder:
                 for i in range(list.__len__(L))
             ]
             if isinstance(value, set):
-                set_vt_cls = SetVariable
+                set_vt_cls, result_cls = SetVariable, UserDefinedSetVariable
             else:
                 if not isinstance(value, frozenset):
                     raise AssertionError(f"Expected frozenset, got {type(value)}")
-                set_vt_cls = FrozensetVariable
+                set_vt_cls, result_cls = FrozensetVariable, UserDefinedFrozensetVariable
 
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
-            result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
+            result = result_cls(value, set_vt=set_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
