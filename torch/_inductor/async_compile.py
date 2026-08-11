@@ -91,6 +91,7 @@ def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
         "TORCHINDUCTOR_CACHE_DIR",
         "TRITON_CACHE_DIR",
         "TORCHINDUCTOR_CUTLASS_DIR",
+        "FLYDSL_RUNTIME_CACHE_DIR",
     ]
     return {v: os.environ.get(v) for v in env_vars}
 
@@ -764,9 +765,6 @@ class AsyncCompile:
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
-            extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ.get(
-                "FLYDSL_RUNTIME_CACHE_DIR"
-            )
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,

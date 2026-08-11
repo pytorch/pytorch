@@ -1,9 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
 from torch._inductor.ir import (
@@ -59,19 +57,6 @@ class FlyDSLTemplateKernel(Kernel):
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
         self._template_signature_defined = False
-
-    @contextlib.contextmanager
-    def _patch_get_dtype_for_args(self):
-        original_get_dtype = V.graph.get_dtype
-
-        def get_dtype(name: str):
-            for arg_name, input_node in self._template_input_args:
-                if name == arg_name:
-                    return input_node.get_dtype()
-            return original_get_dtype(name)
-
-        with patch.object(V.graph, "get_dtype", get_dtype):
-            yield
 
     @staticmethod
     def _get_reinterpret_view(node) -> ReinterpretView | None:
@@ -139,8 +124,7 @@ class FlyDSLTemplateKernel(Kernel):
         def hook():
             code = IndentedBuffer()
             params = [arg_name for arg_name, _ in self._template_input_args]
-            with self._patch_get_dtype_for_args():
-                arg_defs, _, _, _ = self.args.python_argdefs()
+            arg_defs, _, _, _ = self.args.python_argdefs()
             for arg_def in arg_defs:
                 if arg_def.full_name() not in self._seen_input_args:
                     params.append(arg_def.full_name())
@@ -179,10 +163,7 @@ class FlyDSLTemplateKernel(Kernel):
             )
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
-        with self._patch_get_dtype_for_args():
-            orig_arg_defs, orig_call_args, _, orig_arg_types = (
-                self.args.python_argdefs()
-            )
+        orig_arg_defs, orig_call_args, _, orig_arg_types = self.args.python_argdefs()
         for arg_def, call_arg, arg_type in zip(
             orig_arg_defs, orig_call_args, orig_arg_types
         ):
