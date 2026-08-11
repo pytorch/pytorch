@@ -1380,6 +1380,26 @@ class _NestedReductionBase:
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
+    def test_producer_consumer_sub_parent_source_mutated_later(self):
+        B, D, G = 8, 1024, 16
+
+        def f(x):
+            norm = (x.square().mean(-1) + 1e-5).rsqrt()
+            xg = x.view(B, D // G, G)
+            scale = (xg.abs() * norm[:, None, None]).amax(-1).clamp_min(1e-12)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            packed = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            x.add_(3.0)
+            return packed, scale, x
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        ref_x = x.clone()
+        expected = f(ref_x)
+        actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, ref_x)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+
     def test_producer_consumer_rejects_sub_parent_grouped_axis_x(self):
         import torch.nn.functional as F
 
@@ -1510,6 +1530,26 @@ class _NestedReductionBase:
         x = torch.randn(B, D, device=GPU_TYPE)
         weight = torch.randn(D, device=GPU_TYPE)
         self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_producer_consumer_rejects_shifted_reduced_source(self):
+        B, D, G = 4, 1024, 16
+
+        def f(x):
+            y = F.rms_norm(x, (D,))
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            shifted_scale = torch.roll(scale, 1, dims=-1).unsqueeze(-1)
+            return (
+                pairs[..., 0] / shifted_scale,
+                pairs[..., 1] / shifted_scale,
+                scale,
+            )
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x,))
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertGreater(metrics.generated_kernel_count, 1)
 
