@@ -31,13 +31,17 @@ from torch._dynamo.symbolic_convert import (
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -319,6 +323,8 @@ torch._library.opaque_object.register_custom_class(CustomConstantType, typ="cons
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._fx_magic_methods_snapshot = fx_graph.magic_methods.copy()
@@ -574,10 +580,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "HINT: type",
                         verbose_str,
                         (
-                            lambda msg: f"{msg}\n"
-                            + (
-                                "TYPE_MATCH guard should include 'HINT: type' "
-                                f"annotation.\nGuard: {verbose_str}"
+                            lambda msg: (
+                                f"{msg}\n"
+                                + (
+                                    "TYPE_MATCH guard should include 'HINT: type' "
+                                    f"annotation.\nGuard: {verbose_str}"
+                                )
                             )
                         ),
                     )
@@ -585,10 +593,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "GlobalModule",
                         verbose_str,
                         (
-                            lambda msg: f"{msg}\n"
-                            + (
-                                "TYPE_MATCH guard should include type name "
-                                f"'GlobalModule'.\nGuard: {verbose_str}"
+                            lambda msg: (
+                                f"{msg}\n"
+                                + (
+                                    "TYPE_MATCH guard should include type name "
+                                    f"'GlobalModule'.\nGuard: {verbose_str}"
+                                )
                             )
                         ),
                     )
@@ -993,42 +1003,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
-    def test_supported_nodes_dict_keys_match(self):
+    def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
-        ref, loaded = self._test_serialization(
-            "DICT_KEYS_MATCH", fn, {"t": torch.randn(3)}
-        )
-        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
-        self._test_check_fn(ref, loaded, {"x": {}}, False)
-
-        # Sticky flag must survive pickling so load keeps keys-match instead of
-        # re-promoting SUPPORTED_NODES to DICT_VERSION.
-        guards_state = torch._dynamo.package.load_guards_state(
-            self._cached_guards_state
-        )
-        self.assertTrue(
-            any(g._force_dict_keys_match for g in guards_state.output_graph.guards)
-        )
-
-        # Loaded keys-match guard must observe SUPPORTED_NODES key changes, not
-        # only changes to the user input dict.
-        class _TmpPytreeNode:
-            def __init__(self, x):
-                self.x = x
-
-        inputs = {"x": {"t": torch.randn(3)}}
-        self.assertTrue(loaded.check(inputs))
-        try:
-            pytree.register_pytree_node(
-                _TmpPytreeNode,
-                lambda n: ([n.x], None),
-                lambda xs, _: _TmpPytreeNode(xs[0]),
-            )
-            self.assertFalse(loaded.check(inputs))
-        finally:
-            pytree._deregister_pytree_node(_TmpPytreeNode)
+        with self.assertRaisesRegex(
+            PackageError, "DICT_VERSION guard cannot be serialized."
+        ):
+            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
 
     def test_dict_contains(self):
         def fn(x):
@@ -1417,7 +1399,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             with LocalTorchFunctionMode():
                 ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_training_state(self):
         from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
         from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
@@ -1738,19 +1719,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
 
-    def test_unused_stream(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
-        def foo(inputs):
-            return inputs.x + 1
-
-        x = torch.randn(3, 2)
-        ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
-        )
-        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
-
     def test_unused_process_group(self):
         import torch.distributed as dist
 
@@ -1942,6 +1910,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+
+class TestGuardSerializationAccelerator(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_unused_stream(self, device):
+        def foo(inputs):
+            return inputs.x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream(device=device))
+        )
+        self._test_check_fn(
+            ref, loaded, {"inputs": Inputs(x, torch.Stream(device=device))}, True
+        )
+
+
+instantiate_device_type_tests(TestGuardSerializationAccelerator, globals())
 
 
 class SimpleModule(torch.nn.Module):
