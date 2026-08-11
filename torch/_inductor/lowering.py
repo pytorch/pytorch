@@ -4996,7 +4996,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     if (
         accumulate
         and device is not None
-        and is_gpu(device.type)
+        and is_triton(self)
         and needs_fallback_due_to_atomic_add_limitations(self.get_dtype())
     ):
         # self is an scalar Tensor
