@@ -43,7 +43,7 @@
 // building a ncclDevComm. The LEs only exist if the communicator was created
 // with `ncclConfig_t::hostCftMode` enabled (see NCCL_HAS_HOST_CFT_MODE).
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0)
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 0)
 #define NCCL_HAS_HOST_CFT
 #endif
 #endif // USE_NCCL

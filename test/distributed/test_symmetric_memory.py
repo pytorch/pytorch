@@ -1551,7 +1551,7 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
         return symm_mem.rendezvous(t, group=dist.group.WORLD.group_name)
 
     @requires_nccl()
-    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for host-side CFT")
+    @requires_nccl_version((2, 32), "Need NCCL 2.32+ for host-side CFT")
     @skip_if_lt_x_gpu(2)
     def test_get_cft_handle(self) -> None:
         hdl = self._init_process()
@@ -1583,7 +1583,7 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
             pass
 
     @requires_nccl()
-    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for host-side CFT")
+    @requires_nccl_version((2, 32), "Need NCCL 2.32+ for host-side CFT")
     @skip_if_lt_x_gpu(2)
     def test_get_cft_handle_wrong_backend(self) -> None:
         hdl = self._init_process()

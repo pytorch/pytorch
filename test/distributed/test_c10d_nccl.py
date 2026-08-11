@@ -4886,7 +4886,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(
-        (2, 31), "Need NCCL 2.31+ for testing host_cft_mode in ncclConfig_t"
+        (2, 32), "Need NCCL 2.32+ for testing host_cft_mode in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_config_host_cft_mode(self):

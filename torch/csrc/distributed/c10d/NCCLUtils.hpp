@@ -67,7 +67,7 @@ static_assert(
 // `ncclCommWindowRegister`, which is what makes the host-side LE queries
 // (`ncclGetPeerDeviceLeInfo` and friends) usable without first building a
 // `ncclDevComm`. See NCCLSymmetricMemory::get_peer_cft_handle.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 0)
 #define NCCL_HAS_HOST_CFT_MODE
 #endif
 
