@@ -2,7 +2,6 @@
 
 
 import copy
-import unittest
 
 import torch
 import torch._dynamo.compiled_autograd as compiled_autograd
@@ -21,10 +20,14 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 device_type = torch.device(get_devtype())
@@ -45,7 +48,9 @@ class Mod(torch.nn.Module):
 
 
 class TestFullyShardCompileCompute(FSDPTest):
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
         """Verify that dynamo never traces into FSDP hooks in forward or backward."""
@@ -74,7 +79,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         torch._dynamo.trace_rules.check = orig_trace_rules_check
         self.assertEqual(trace_rules_check_count, 0)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(2)
     def test_compiled_autograd_fsdp2_backward(self):
         """
@@ -123,7 +128,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         #   graph break 2: post_backward (from RegisterPostBackwardFunction)
         self.assertEqual(backend_count, 2)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(2)
     def test_compile_optimizer_uneven_shard(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/176667
@@ -157,7 +162,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         model(x).sum().backward()
         torch.compile(opt.step)()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(4)
     def test_tp_mixed_precision_dtensor_spec_dtype(self):
         torch._dynamo.reset()
@@ -221,8 +226,10 @@ class TestFullyShardCompileCompute(FSDPTest):
             dist.barrier()
 
 
-@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFullyShardCompile(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
@@ -260,6 +267,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_trace_fsdp_copy_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
@@ -278,6 +286,7 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_dynamo_recompiles_on_fsdp_layers(self):
         m = Mod()
         for name, child in m.encoder.named_children():
@@ -287,6 +296,21 @@ class TestFullyShardCompile(FSDPTest):
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
         inp = torch.randn(32, 784, device=device_type)
         m(inp)
+
+
+instantiate_device_type_tests(
+    TestFullyShardCompileCompute,
+    globals(),
+    except_for=["cpu", "hpu", "privateuse1"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardCompile,
+    globals(),
+    except_for=["cpu", "hpu", "privateuse1"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
