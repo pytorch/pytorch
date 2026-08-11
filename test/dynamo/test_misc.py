@@ -14072,6 +14072,19 @@ def ___make_guard_fn():
             replayed = replay_shape_env_events(shape_env.events)
             shape_env.check_equal(replayed)
 
+    def test_shape_env_replay_preserves_cross_env_suppression(self):
+        main = ShapeEnv(should_record_events=True)
+        sizes = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )[0]
+
+        suppressing_shape_env = ShapeEnv()
+        with suppressing_shape_env.suppress_guards():
+            bool(sizes[0] == 3)
+
+        self.assertEqual(main.guards, [])
+        self._replay_and_check(main)
+
     def test_shape_env_equal_empty(self):
         main, other = ShapeEnv(), ShapeEnv()
         main.check_equal(other)

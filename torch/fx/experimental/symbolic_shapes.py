@@ -33,7 +33,7 @@ import threading
 import traceback
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
-from contextlib import _GeneratorContextManager, contextmanager
+from contextlib import _GeneratorContextManager, contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import (
@@ -2716,9 +2716,10 @@ def cast_symbool_to_symint_guardless(
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     if symbool.node.shape_env is None:
         raise AssertionError("shape_env should not be None")
+    hint = int(guarding_hint_or_throw(symbool)) if has_guarding_hint(symbool) else None
     return symbool.node.shape_env.create_symintnode(
         int_sym,
-        hint=guarding_hint_or_throw(symbool) if has_guarding_hint(symbool) else None,
+        hint=hint,
     )
 
 
@@ -8629,27 +8630,33 @@ class ShapeEnv:
         _suppress_guards_tls: bool,
         fallback_value: bool | None = None,
     ) -> sympy.Basic:
-        try:
-            return self._evaluate_expr(
-                orig_expr,
-                hint,
-                fx_node,
-                size_oblivious,
-                fallback_value,
-                forcing_spec=forcing_spec,
-            )
-        except Exception as e:
-            if isinstance(e, GuardOnDataDependentSymNode):
-                pass
-            else:
-                self.log.warning(
-                    "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+        # ShapeEnv event replay runs outside the TLS context of the original call.
+        # Restore a recorded suppression state so replay stays observational too.
+        restore_suppression = (
+            _suppress_guards_tls and not ShapeEnv._suppress_guards_tls()
+        )
+        with self.suppress_guards() if restore_suppression else nullcontext():
+            try:
+                return self._evaluate_expr(
                     orig_expr,
                     hint,
+                    fx_node,
                     size_oblivious,
-                    forcing_spec,
+                    fallback_value,
+                    forcing_spec=forcing_spec,
                 )
-            raise
+            except Exception as e:
+                if isinstance(e, GuardOnDataDependentSymNode):
+                    pass
+                else:
+                    self.log.warning(
+                        "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                        orig_expr,
+                        hint,
+                        size_oblivious,
+                        forcing_spec,
+                    )
+                raise
 
     def _log_suppressed_dde(self, a: SymBool, assumed_value: bool) -> None:
         sloc, extra = self._get_stack_summary(True)
