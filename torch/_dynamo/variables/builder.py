@@ -1229,6 +1229,9 @@ class VariableBuilder:
                     mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
+                # DefaultDictVariable replay clears and rebuilds its base dict,
+                # so its guard policy must match reconstruct-all replay.
+                dict_vt.should_reconstruct_all = True
                 result = DefaultDictVariable(
                     value,
                     default_factory=VariableBuilder(self.tx, factory_source)(

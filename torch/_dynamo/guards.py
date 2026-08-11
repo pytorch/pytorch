@@ -70,6 +70,7 @@ from torch._C._dynamo.guards import (
     profile_guard_manager,
     RelationalGuard,
     RootGuardManager,
+    tensor_has_standard_ownership,
     TupleGetItemGuardAccessor,
     TypeDictGuardAccessor,
     TypeGuardAccessor,
@@ -822,6 +823,58 @@ def uninteresting_files() -> set[str]:
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
+_DICT_SETITEM_SAFE_KEY_TYPES = (type(None), bool, int, str, bytes)
+_DICT_SETITEM_SAFE_VALUE_TYPES = (
+    type(None),
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+)
+
+
+def dict_setitem_value_safe_to_displace(value: object) -> bool:
+    if type(value) in _DICT_SETITEM_SAFE_VALUE_TYPES:
+        return True
+    if type(value) is not torch.Tensor:
+        return False
+
+    # Replacing a Tensor can transitively release arbitrary Python state. The
+    # native helper checks attrs and weakrefs without dispatching or invoking
+    # mutable Python helpers, then rejects nonstandard metadata and storage.
+    return tensor_has_standard_ownership(value)
+
+
+def _dict_keys_same(actual: tuple[object, ...], expected: tuple[object, ...]) -> bool:
+    return len(actual) == len(expected) and all(
+        type(a) is type(e) and a == e for a, e in zip(actual, expected)
+    )
+
+
+def dict_setitem_replay_safe(
+    value: object, target_key: object, expected_keys: tuple[object, ...]
+) -> bool:
+    """Whether ``value`` is the trace state plus an optional replayed key."""
+    if type(value) is not dict:
+        return False
+    actual_keys = tuple(dict.keys(value))
+    if any(type(k) not in _DICT_SETITEM_SAFE_KEY_TYPES for k in actual_keys):
+        return False
+    if _dict_keys_same(actual_keys, expected_keys):
+        return True
+    if (
+        len(actual_keys) == len(expected_keys) + 1
+        and _dict_keys_same(actual_keys[:-1], expected_keys)
+        and actual_keys[-1] is target_key
+    ):
+        return dict_setitem_value_safe_to_displace(
+            dict.__getitem__(value, actual_keys[-1])
+        )
+    return False
+
+
 def _get_closure_vars() -> dict[str, object]:
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
@@ -832,6 +885,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___dict_setitem_replay_safe": dict_setitem_replay_safe,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
@@ -3304,6 +3358,46 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_on_dict_keys_and_ignore_order(value, guard)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "target_key"),
+            _guard_create_fn_keyword(guard, "expected_keys"),
+        ),
+        eval_fn=lambda value, metadata: dict_setitem_replay_safe(
+            value, metadata[0], metadata[1]
+        ),
+    )
+    def DICT_SETITEM_REPLAY_SAFE(
+        self,
+        guard: Guard,
+        target_key: object,
+        expected_keys: tuple[object, ...],
+    ) -> None:
+        """Allow only the key state produced by this setitem's prior replay."""
+        value = self.get(guard)
+        if not dict_setitem_replay_safe(value, target_key, expected_keys):
+            # A guard must accept its example input. Fall back to the original
+            # key-set guard when tracing a callback-capable dict state.
+            self.DICT_KEYS_MATCH(guard)
+            return
+
+        ref = self.arg_ref(guard)
+        code = f"___dict_setitem_replay_safe({ref}, ___dict_setitem_target_key, {expected_keys!r})"
+        self._set_guard_export_info(guard, [code])
+
+        # DictGuardManager only permits ID_MATCH leaves. Put this predicate on
+        # the root so it also works when another observation requires ordered
+        # dict-key managers.
+        self.add_python_lambda_leaf_guard_to_root(
+            [code],
+            get_verbose_code_parts(code, guard),
+            closure_vars={
+                **_get_closure_vars(),
+                "___dict_setitem_target_key": target_key,
+            },
+            is_epilogue=False,
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: len(value) == 0,
     )
@@ -4790,6 +4884,7 @@ class CheckFunctionManager:
         "MODULE_MATCH",
         "CLOSURE_MATCH",
         "WEAKREF_ALIVE",
+        "DICT_SETITEM_REPLAY_SAFE",
     )
 
     def serialize_guards(

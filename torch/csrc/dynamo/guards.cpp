@@ -6,6 +6,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
@@ -25,6 +26,7 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
+#include <typeinfo>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -32,6 +34,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
 #ifdef USE_XPU
@@ -951,6 +954,71 @@ static PyObject* dict_version(PyObject* dummy, PyObject* obj) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* tensor_has_standard_ownership(PyObject* dummy, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  if (!THPVariable_CheckExact(obj)) {
+    Py_RETURN_FALSE;
+  }
+
+  // Avoid obj.__dict__, which lazily materializes a managed dict. An empty
+  // exact dict is callback-free; a subclass can run Python when destroyed.
+  PyObject** dict_ptr = _PyObject_GetDictPtr(obj);
+  if (dict_ptr != nullptr && *dict_ptr != nullptr &&
+      (!PyDict_CheckExact(*dict_ptr) || PyDict_GET_SIZE(*dict_ptr) != 0)) {
+    Py_RETURN_FALSE;
+  }
+  PyObject** weakrefs_ptr = PyObject_GET_WEAKREFS_LISTPTR(obj);
+  if (weakrefs_ptr != nullptr && *weakrefs_ptr != nullptr) {
+    Py_RETURN_FALSE;
+  }
+
+  const at::Tensor tensor = THPVariable_Unpack(obj);
+  const c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  // Autograd metadata can retain Python hooks and forward gradients even when
+  // requires_grad is currently false. Releasing either at replay time can run
+  // Python or an external storage deleter after the compiled graph.
+  if (typeid(*tensor_impl) != typeid(c10::TensorImpl) ||
+      tensor_impl->autograd_meta() != nullptr ||
+      tensor_impl->get_backend_meta_intrusive_ptr() ||
+      tensor_impl->fake_tensor_mode() ||
+      tensor_impl->has_symbolic_sizes_strides() ||
+      tensor_impl->is_python_dispatch() || !tensor_impl->has_storage()) {
+    Py_RETURN_FALSE;
+  }
+
+  // Use the non-dispatching accessors below. TensorImpl's public storage and
+  // device policies are mutable even for the base implementation.
+  const c10::Storage& storage = tensor_impl->unsafe_storage();
+  const c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
+  if (typeid(*storage_impl) != typeid(c10::StorageImpl) ||
+      storage_impl->pyobj_slot()->load_pyobj() != nullptr ||
+      storage_impl->throw_on_immutable_data_ptr() ||
+      storage_impl->sym_nbytes().is_heap_allocated()) {
+    Py_RETURN_FALSE;
+  }
+  at::Allocator* expected_allocator = nullptr;
+  if (tensor_impl->device_type() == c10::DeviceType::CPU) {
+    expected_allocator = c10::GetDefaultCPUAllocator();
+  }
+#ifdef USE_CUDA
+  else if (tensor_impl->device_type() == c10::DeviceType::CUDA) {
+    auto* cuda_allocator = c10::cuda::CUDACachingAllocator::get();
+    const std::string allocator_name = cuda_allocator->name();
+    if (allocator_name == "native" || allocator_name == "cudaMallocAsync") {
+      expected_allocator = cuda_allocator;
+    }
+  }
+#endif
+  if (expected_allocator == nullptr ||
+      storage_impl->allocator() != expected_allocator ||
+      storage_impl->data_ptr().get_deleter() !=
+          expected_allocator->raw_deleter()) {
+    Py_RETURN_FALSE;
+  }
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS
+}
+
 static bool check_size_stride(
     PyObject* item,
     PyObject* size,
@@ -1332,6 +1400,10 @@ static PyMethodDef _methods[] = {
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
     {"dict_version", dict_version, METH_O, nullptr},
+    {"tensor_has_standard_ownership",
+     tensor_has_standard_ownership,
+     METH_O,
+     nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cpu_pinned",
      _empty_strided_cpu_pinned,

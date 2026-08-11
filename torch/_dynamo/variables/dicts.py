@@ -40,6 +40,7 @@ from ..source import (
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    LocalSource,
 )
 from ..utils import (
     _item_debug_repr,
@@ -104,9 +105,25 @@ class ConstDictVariable(VariableTracker):
 
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
+    _MISSING_SAFE_KEY = object()
 
+    # Note [Dict mutation guard bookkeeping]
+    # Membership checks after a mutation cannot assume that every mutation
+    # installed a full key-set guard. A targeted assignment is allowed only for
+    # one callback-free key that was absent before this trace's mutations. It
+    # also installs DICT_SETITEM_REPLAY_SAFE, because deferred replay can
+    # otherwise invoke an existing runtime key's __eq__ or release a value with
+    # a Python finalizer at the wrong point in the program. Targeted
+    # assignments record keys whose presence is guaranteed by replay, while
+    # clear determines the whole post-mutation key set. Provenance checks must
+    # not invoke user __hash__ or __eq__, so they use VT identity and exact
+    # builtin constants only.
     _nonvar_fields = {
         "_checking_python_constant",
+        "_dict_keys_match_guarded",
+        "_setitem_mutation_key_vts",
+        "_setitem_mutation_const_keys",
+        "_cleared",
         *VariableTracker._nonvar_fields,
     }
 
@@ -123,6 +140,10 @@ class ConstDictVariable(VariableTracker):
             kwargs.pop("should_reconstruct_all")
         if "_checking_python_constant" in kwargs:
             kwargs.pop("_checking_python_constant")
+        dict_keys_match_guarded = kwargs.pop("_dict_keys_match_guarded", False)
+        setitem_mutation_key_vts = kwargs.pop("_setitem_mutation_key_vts", None)
+        setitem_mutation_const_keys = kwargs.pop("_setitem_mutation_const_keys", None)
+        cleared = kwargs.pop("_cleared", False)
 
         super().__init__(**kwargs)
 
@@ -157,6 +178,16 @@ class ConstDictVariable(VariableTracker):
         # whose _base_vt is this instance). Both forms re-enter this same
         # instance's is_python_constant, so a per-instance flag suffices.
         self._checking_python_constant = False
+        self._dict_keys_match_guarded = dict_keys_match_guarded
+        self._setitem_mutation_key_vts = (
+            [] if setitem_mutation_key_vts is None else list(setitem_mutation_key_vts)
+        )
+        self._setitem_mutation_const_keys = (
+            set()
+            if setitem_mutation_const_keys is None
+            else set(setitem_mutation_const_keys)
+        )
+        self._cleared = cleared
 
     def as_proxy(self) -> dict[Any, Any]:
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -195,6 +226,9 @@ class ConstDictVariable(VariableTracker):
         }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self.install_dict_keys_match_guard()
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
         items = [
             f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
             for key, value in self.items.items()
@@ -379,6 +413,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
+        self.install_dict_contains_guard(tx, [arg])
         key = HashableTracker(arg)
         if key not in self.items:
             raise_observed_exception(KeyError, tx, args=[arg])
@@ -419,14 +454,71 @@ class ConstDictVariable(VariableTracker):
 
     def install_dict_keys_match_guard(self) -> None:
         if self.source:
+            self._dict_keys_match_guarded = True
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+
+    def install_dict_setitem_replay_safe_guard(
+        self, key: object, expected_keys: tuple[object, ...]
+    ) -> None:
+        if self.source:
+            install_guard(
+                self.make_guard(
+                    functools.partial(
+                        GuardBuilder.DICT_SETITEM_REPLAY_SAFE,
+                        target_key=key,
+                        expected_keys=expected_keys,
+                    )
+                )
+            )
+
+    @classmethod
+    def _side_effect_free_key(cls, key: VariableTracker) -> object:
+        if isinstance(key, variables.LazyVariableTracker):
+            return cls._MISSING_SAFE_KEY
+        if isinstance(key, ConstantVariable):
+            value = key.as_python_constant()
+            if type(value) in (type(None), bool, int, str, bytes):
+                return value
+        return cls._MISSING_SAFE_KEY
+
+    def _record_setitem_mutation_key(self, key: VariableTracker) -> None:
+        constant_key = self._side_effect_free_key(key)
+        if constant_key is self._MISSING_SAFE_KEY:
+            if all(key is not existing for existing in self._setitem_mutation_key_vts):
+                self._setitem_mutation_key_vts.append(key)
+        else:
+            self._setitem_mutation_const_keys.add(constant_key)
+
+    def _matches_setitem_mutation_key(self, key: VariableTracker) -> bool | None:
+        if any(key is existing for existing in self._setitem_mutation_key_vts):
+            return True
+
+        constant_key = self._side_effect_free_key(key)
+        if constant_key is self._MISSING_SAFE_KEY:
+            return None
+        if constant_key in self._setitem_mutation_const_keys:
+            return True
+
+        # If every assigned key is a side-effect-free constant, a failed lookup
+        # proves this key was not established by a preceding assignment.
+        if not self._setitem_mutation_key_vts:
+            return False
+        return None
+
+    def _all_keys_safe_for_setitem_replay(self) -> bool:
+        return all(
+            self._side_effect_free_key(key.vt) is not self._MISSING_SAFE_KEY
+            for key in self.items
+        )
 
     def install_dict_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         # Key guarding - These are the cases to consider
-        # 1) The dict has been mutated. In this case, we would have already
-        # inserted a DICT_KEYS_MATCH guard, so we can skip.
+        # 1) The dict has been mutated. If a previous mutation installed a
+        # DICT_KEYS_MATCH guard, or if the mutation itself determines the
+        # queried key's membership, we can skip. Otherwise, fall through and
+        # install a per-key guard.
         #
         # 2) args[0].source is None. This happens for const keys. Here, we
         # have to insert the DICT_CONTAINS guard.
@@ -442,7 +534,15 @@ class ConstDictVariable(VariableTracker):
             return
 
         if tx.output.side_effects.is_modified(self):
-            return
+            if self._dict_keys_match_guarded or self._cleared:
+                return
+
+            mutation_key_match = self._matches_setitem_mutation_key(args[0])
+            if mutation_key_match is True:
+                return
+            if mutation_key_match is None:
+                self.install_dict_keys_match_guard()
+                return
 
         contains = args[0] in self
         if args[0].source is None and args[0].is_python_constant():
@@ -486,6 +586,7 @@ class ConstDictVariable(VariableTracker):
         from .iter import DictIterator
 
         if self.source and not is_constant_source(self.source):
+            self._dict_keys_match_guarded = True
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items.keys())
@@ -499,8 +600,13 @@ class ConstDictVariable(VariableTracker):
         from . import DictBuiltinVariable
 
         temp_dict_vt = DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        self.install_dict_keys_match_guard()
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
         tx.output.side_effects.mutation(self)
         self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
+        for key in temp_dict_vt.items:  # type: ignore[attr-defined]
+            self._record_setitem_mutation_key(key.vt)
         return ConstantVariable.create(None)
 
     def call_method(
@@ -585,8 +691,8 @@ class ConstDictVariable(VariableTracker):
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
+            self.install_dict_contains_guard(tx, args)
             if args[0] not in self:
-                self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
                     # if default is not given, return None
                     return ConstantVariable.create(None)
@@ -605,6 +711,9 @@ class ConstDictVariable(VariableTracker):
                     raise_observed_exception(KeyError, tx)
                 return args[1]
 
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
@@ -613,6 +722,10 @@ class ConstDictVariable(VariableTracker):
             # handled by OrderedDictVariable.call_method.
             if len(args):
                 raise_args_mismatch(tx, name)
+
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
 
             if not self.items:
                 raise_observed_exception(
@@ -637,6 +750,9 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.should_reconstruct_all = True
+            self._cleared = True
+            self._setitem_mutation_key_vts.clear()
+            self._setitem_mutation_const_keys.clear()
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
@@ -756,8 +872,34 @@ class ConstDictVariable(VariableTracker):
         # value=None signals delete (CPython NULL sentinel).
         if not is_hashable(key):
             raise_unhashable(key, tx)
-        self.install_dict_keys_match_guard()
+        constant_key = self._side_effect_free_key(key)
         hkey = HashableTracker(key)
+        mutation_key_match = self._matches_setitem_mutation_key(key)
+        can_replay_without_keyset_guard = (
+            value is not None
+            and type(self) is ConstDictVariable
+            and type(self.source) is LocalSource
+            and constant_key is not self._MISSING_SAFE_KEY
+            and self._all_keys_safe_for_setitem_replay()
+            and (hkey not in self.items or mutation_key_match is True)
+            and (
+                not self._setitem_mutation_const_keys
+                or mutation_key_match is True
+                or self._cleared
+            )
+            and (not self.should_reconstruct_all or self._cleared)
+        )
+        if can_replay_without_keyset_guard:
+            if not self._cleared and mutation_key_match is not True:
+                expected_keys = tuple(
+                    self._side_effect_free_key(existing_key.vt)
+                    for existing_key in self.items
+                )
+                self.install_dict_setitem_replay_safe_guard(constant_key, expected_keys)
+        else:
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
         tx.output.side_effects.mutation(self)
         if value is None:
             if hkey not in self.items:
@@ -766,6 +908,7 @@ class ConstDictVariable(VariableTracker):
             del self.items[hkey]
         else:
             self.items[hkey] = value
+            self._record_setitem_mutation_key(key)
         return ConstantVariable.create(None)
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -886,6 +1029,10 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.install_dict_keys_match_guard()
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
+
         if not self.items:
             raise_observed_exception(
                 KeyError, tx, args=["popitem(): dictionary is empty"]
@@ -950,6 +1097,9 @@ class OrderedDictVariable(ConstDictVariable):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
+        self.install_dict_keys_match_guard()
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
         items = [
             (tracked_repr(tx, key.vt), tracked_repr(tx, value))
             for key, value in self.items.items()

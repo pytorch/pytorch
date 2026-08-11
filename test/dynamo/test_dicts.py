@@ -2,6 +2,7 @@
 
 
 import enum
+import gc
 import itertools
 import operator
 import types
@@ -29,6 +30,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+
+
+_test_global_dict: dict[str, Any] = {}
 
 
 class _BadCmpExc(Exception):
@@ -940,6 +944,692 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn({}, x), opt_fn({}, x))
         self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
+
+    def test_no_recompile_on_setitem_side_effect(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        d = {"obs": torch.randn(3)}
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            d["loss"] = d["obs"] * 2
+            return d["loss"]
+
+        self.assertEqual(fn(d), d["obs"] * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d), d["obs"] * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_setitem_replay_rejects_callback_capable_key(self):
+        class Counter:
+            value = 0
+
+        class Key:
+            def __init__(self, counter):
+                self.counter = counter
+
+            def __hash__(self):
+                return hash("c")
+
+            def __eq__(self, other):
+                self.counter.value += 1
+                return False
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        counter = Counter()
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d = {Key(counter): x}
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertIn("c", d)
+
+    def test_setitem_replay_rejects_python_finalizer(self):
+        class Value:
+            def __del__(self):
+                pass
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d = {"c": Value()}
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(d["c"], x + 1)
+
+    def test_setitem_replay_rejects_tensor_attrs_finalizer(self):
+        class Counter:
+            value = 0
+
+        counter = Counter()
+
+        class Attrs(dict):
+            def __del__(self):
+                counter.value += 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        displaced = torch.ones(2)
+        displaced.__dict__ = Attrs()
+        d = {"c": displaced}
+        del displaced
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        gc.collect()
+        self.assertEqual(counter.value, 1)
+
+    def test_setitem_replay_rejects_storage_weakref(self):
+        class Counter:
+            value = 0
+
+        counter = Counter()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        displaced = torch.ones(2)
+        storage = displaced.untyped_storage()
+        storage_ref = weakref.ref(
+            storage, lambda _: setattr(counter, "value", counter.value + 1)
+        )
+        del storage
+        gc.collect()
+        self.assertIsNotNone(storage_ref())
+
+        d = {"c": displaced}
+        del displaced
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        gc.collect()
+        self.assertIsNone(storage_ref())
+        self.assertEqual(counter.value, 1)
+
+    def test_setitem_replay_rejects_tensor_weakref(self):
+        class Counter:
+            value = 0
+
+        counter = Counter()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        self.assertEqual(fn({}, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        displaced = torch.ones(2)
+        displaced_ref = weakref.ref(
+            displaced, lambda _: setattr(counter, "value", counter.value + 1)
+        )
+        d = {"c": displaced}
+        del displaced
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        gc.collect()
+        self.assertIsNone(displaced_ref())
+        self.assertEqual(counter.value, 1)
+
+    def test_setitem_tensor_standard_ownership_guard(self):
+        from torch._C._dynamo.guards import tensor_has_standard_ownership
+
+        plain = torch.ones(2)
+        dict_ids_before = [id(x) for x in gc.get_referents(plain) if type(x) is dict]
+        self.assertTrue(tensor_has_standard_ownership(plain))
+        self.assertEqual(
+            [id(x) for x in gc.get_referents(plain) if type(x) is dict],
+            dict_ids_before,
+        )
+
+        external = torch.frombuffer(bytearray(8), dtype=torch.uint8)
+        self.assertFalse(tensor_has_standard_ownership(external))
+
+        hooked = torch.ones(2, requires_grad=True)
+        hooked.register_hook(lambda grad: grad)
+        hooked.requires_grad_(False)
+        self.assertFalse(tensor_has_standard_ownership(hooked))
+
+        with_weakref = torch.ones(2)
+        tensor_ref = weakref.ref(with_weakref)
+        with unittest.mock.patch("weakref.getweakrefs", return_value=[]):
+            self.assertFalse(tensor_has_standard_ownership(with_weakref))
+        self.assertIs(tensor_ref(), with_weakref)
+
+        with_storage_wrapper = torch.ones(2)
+        storage = with_storage_wrapper.untyped_storage()
+        storage_ref = weakref.ref(storage)
+        self.assertFalse(tensor_has_standard_ownership(with_storage_wrapper))
+        del storage
+        gc.collect()
+        self.assertIsNotNone(storage_ref())
+        self.assertFalse(tensor_has_standard_ownership(with_storage_wrapper))
+
+    def test_setitem_replay_guard_does_not_materialize_tensor_dict(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        d = {}
+        self.assertEqual(fn(d, x), x + 2)
+        displaced = d["c"]
+        dict_ids_before = [
+            id(x) for x in gc.get_referents(displaced) if type(x) is dict
+        ]
+
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(
+            [id(x) for x in gc.get_referents(displaced) if type(x) is dict],
+            dict_ids_before,
+        )
+
+    def test_setitem_existing_equal_key_keeps_full_guard(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d[True] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        d1 = {}
+        self.assertEqual(fn(d1, x), x + 2)
+        self.assertEqual(list(d1), [True])
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = {1: x}
+        self.assertEqual(fn(d2, x), x + 2)
+        self.assertEqual(list(d2), [1])
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("consumer", ["set", "frozenset", "fromkeys", "list_extend"])
+    def test_setitem_then_key_consumer_guards_keys(self, consumer):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = x
+            if consumer == "set":
+                keys = set(d)
+            elif consumer == "frozenset":
+                keys = frozenset(d)
+            elif consumer == "fromkeys":
+                keys = dict.fromkeys(d)
+            else:
+                keys = []
+                keys.extend(d)
+            return x + len(keys)
+
+        x = torch.ones(2)
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_multiple_setitems_keep_full_guard_for_order(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["a"] = x + 1
+            d["b"] = x + 2
+            return x + 3
+
+        x = torch.ones(2)
+        d1 = {"z": x}
+        self.assertEqual(fn(d1, x), x + 3)
+        self.assertEqual(list(d1), ["z", "a", "b"])
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = {}
+        self.assertEqual(fn(d2, x), x + 3)
+        self.assertEqual(list(d2), ["a", "b"])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_defaultdict_setitem_guards_reconstruct_all_replay(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + 2
+
+        x = torch.ones(2)
+        d1 = defaultdict(list, {"a": x})
+        self.assertEqual(fn(d1, x), x + 2)
+        self.assertEqual(list(d1), ["a", "c"])
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = defaultdict(list, {"a": x, "b": x})
+        self.assertEqual(fn(d2, x), x + 2)
+        self.assertEqual(list(d2), ["a", "b", "c"])
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("first_has_key", [False, True])
+    def test_setitem_then_discarded_getitem_guards_membership(self, first_has_key):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = x
+            try:
+                d["b"]
+            except KeyError:
+                return x + 10
+            return x + 1
+
+        x = torch.ones(2)
+        d1 = {"b": x} if first_has_key else {}
+        d2 = {} if first_has_key else {"b": x}
+        self.assertEqual(fn(d1, x), x + (1 if first_has_key else 10))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d2, x), x + (10 if first_has_key else 1))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("ordered", [False, True])
+    def test_setitem_then_repr_guards_keys_and_order(self, ordered):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d["c"] = 3
+            return x + len(repr(d))
+
+        make_dict = OrderedDict if ordered else dict
+        x = torch.ones(2)
+        d1 = make_dict([("a", 1)])
+        self.assertEqual(fn(d1, x), x + len(repr(d1)))
+        self.assertEqual(cnts.frame_count, 1)
+
+        d2 = make_dict([("b", 2), ("a", 1)])
+        self.assertEqual(fn(d2, x), x + len(repr(d2)))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("ordered", [False, True])
+    def test_empty_popitem_guards_keys(self, ordered):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            try:
+                d.popitem()
+            except KeyError:
+                return x + 1
+            return x + 2
+
+        make_dict = OrderedDict if ordered else dict
+        x = torch.ones(2)
+        self.assertEqual(fn(make_dict(), x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d = make_dict([("a", x)])
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(d, make_dict())
+
+    def test_setitem_then_contains_assigned_key_no_recompile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            if "c" in d:
+                return d["c"] * 2
+            return x
+
+        self.assertEqual(fn({"a": torch.ones(2)}, x), (x + 1) * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn({"a": torch.ones(2)}, x), (x + 1) * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_setitem_then_get_unrelated_key_guards_per_key(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        d = {"a": torch.ones(2)}
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return d.get("missing", x * 2)
+
+        self.assertEqual(fn(d, x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d, x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d["missing"] = x * 3
+        self.assertEqual(fn(d, x), x * 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_setitem_then_len_guards_key_set(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        d = {"a": torch.ones(2)}
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + len(d)
+
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_clear_then_contains_no_recompile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.clear()
+            if "b" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d2, {})
+
+    def test_clear_then_setitem_no_recompile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.clear()
+            d["c"] = x + 1
+            return d["c"]
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d1), {"c"})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d2), {"c"})
+
+    def test_dict_init_tracks_assigned_keys(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            dict.__init__(d, {"b": x})
+            if "b" not in d:
+                return x + 100
+            if "c" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d1), {"a", "b"})
+
+        d2 = {"a": x, "c": x}
+        self.assertEqual(fn(d2, x), x + 10)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"a", "b", "c"})
+
+    def test_setitem_provenance_does_not_repeat_user_hash(self):
+        class Key:
+            def __init__(self):
+                self.hash_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return 0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, key, x):
+            d[key] = x
+            present = key in d
+            return x + key.hash_count + (10 if present else 0)
+
+        key = Key()
+        x = torch.ones(2)
+        self.assertEqual(fn({}, key, x), x + 12)
+        self.assertEqual(key.hash_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_setitem_provenance_does_not_repeat_user_eq(self):
+        class Key:
+            def __init__(self):
+                self.eq_count = 0
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                self.eq_count += 1
+                return False
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, key1, key2, x):
+            d[key1] = x
+            d[key2] = x
+            return x + key1.eq_count
+
+        key1 = Key()
+        key2 = Key()
+        x = torch.ones(2)
+        self.assertEqual(fn({}, key1, key2, x), x + 1)
+        self.assertEqual(key1.eq_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+    @parametrize("op", ["setitem", "init"])
+    def test_global_assignment_reconstruct_all_guards_keys_and_order(self, op):
+        global _test_global_dict
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        _test_global_dict.clear()
+        _test_global_dict["a"] = x
+        _test_global_dict["c"] = x
+        self.addCleanup(_test_global_dict.clear)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            if op == "setitem":
+                _test_global_dict["c"] = x + 1
+            else:
+                dict.__init__(_test_global_dict, {"c": x + 1})
+            return x + 1
+
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(list(_test_global_dict), ["a", "c"])
+
+        _test_global_dict.clear()
+        _test_global_dict.update([("c", x), ("a", x)])
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(list(_test_global_dict), ["c", "a"])
+
+        _test_global_dict["z"] = x
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(list(_test_global_dict), ["c", "a", "z"])
+
+    def test_delitem_then_contains_unrelated_key_recompiles(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            del d["a"]
+            if "b" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 10)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+
+    def test_pop_then_contains_unrelated_key_recompiles(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.pop("a")
+            if "b" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 10)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+        self.assertIs(d2["b"], x)
+
+    def test_pop_then_get_unrelated_key_recompiles(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.pop("a")
+            return d.get("b", x + 1)
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x + 2}
+        self.assertEqual(fn(d2, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+
+    @parametrize("op", ["pop", "delitem"])
+    def test_reconstruct_all_preserves_runtime_key_order(self, op):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            if op == "pop":
+                d.pop("remove")
+            else:
+                del d["remove"]
+            return x + 1
+
+        d1 = {"remove": x, "a": x, "b": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(list(d1), ["a", "b"])
+
+        d2 = {"remove": x, "b": x, "a": x}
+        self.assertEqual(fn(d2, x), x + 1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(list(d2), ["b", "a"])
+
+    def test_popitem_reconstruct_all_guards_keys_and_order(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            _, value = d.popitem()
+            return value + x
+
+        d1 = {"a": x, "b": x + 2}
+        self.assertEqual(fn(d1, x), x * 2 + 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d1), {"a"})
+
+        d2 = {"b": x + 2, "a": x}
+        self.assertEqual(fn(d2, x), x * 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+
+    @parametrize("last", [True, False])
+    def test_ordered_dict_popitem_guards_keys_and_order(self, last):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            _, value = d.popitem(last=last)
+            return value + x
+
+        d1 = OrderedDict([("a", x), ("b", x + 2)])
+        self.assertEqual(fn(d1, x), x * 2 + (2 if last else 0))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(list(d1), ["a" if last else "b"])
+
+        d2 = OrderedDict([("b", x + 2), ("a", x)])
+        self.assertEqual(fn(d2, x), x * 2 + (0 if last else 2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(list(d2), ["b" if last else "a"])
 
     def test_udf_dict_reconstruction(self):
         class MyDict(dict):
@@ -3591,6 +4281,30 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         got, d = fn()
         self.assertEqual(got, (10, 20, 30))
         self.assertEqual(d, {1: 10, (3, 4): 30})
+
+    def test_dunder_dict_iteration_guards_keys(self):
+        class Foo:
+            pass
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(obj, x):
+            for _ in obj.__dict__:
+                x = x + 1
+            return x
+
+        x = torch.ones(2)
+        obj1 = Foo()
+        obj1.a = 1
+        self.assertEqual(fn(obj1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        obj2 = Foo()
+        obj2.a = 1
+        obj2.b = 2
+        self.assertEqual(fn(obj2, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":
