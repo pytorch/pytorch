@@ -169,7 +169,7 @@ class FlightRecorderEventTest(TestCase):
                 "all_gather_into_tensor_coalesced",
             ]:
                 output_sizes = [[math.prod(input_sizes[0]) * 2]]
-            if collective == "all_to_all":
+            if collective in ["all_to_all", "all_to_all_single"]:
                 expectedState = MatchState.UNDECIDED
             event = create_one_event(
                 collective, ("0", "default"), input_sizes, output_sizes, "scheduled", 1
@@ -213,9 +213,16 @@ class FlightRecorderOpBackendTest(TestCase):
         op = Op(self._make_event("xccl"), {"0": {0, 1}}, "0")
         self.assertEqual(op.type, "all_reduce")
 
-    def test_unsupported_backend_raises(self):
+    def test_unsupported_backend_is_not_fatal(self):
+        # The hook attaches to any backend and records under whatever name it
+        # reports, so an unknown comm library must not cost us the collective.
+        op = Op(self._make_event("unknown_backend"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_missing_colon_raises(self):
         with self.assertRaises(AssertionError):
-            Op(self._make_event("unknown_backend"), {"0": {0, 1}}, "0")
+            event = {**self._make_event("nccl"), "profiling_name": "all_reduce"}
+            Op(event, {"0": {0, 1}}, "0")
 
 
 class FlightMatchInfoTest(TestCase):
