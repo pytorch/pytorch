@@ -1801,18 +1801,24 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(result1, result3)
 
     @requires_gpu
-    def test_associative_scan_pointwise_autograd(self):
+    # Include a non-power-of-two length (9): the backward now relies on flip + scan,
+    # which misbehaves for particular lengths (see issue #131805), so exercise an
+    # odd length in addition to the power-of-two case.
+    @parametrize("scan_length", [9, 16])
+    def test_associative_scan_pointwise_autograd(self, scan_length):
         device = GPU_TYPE
 
+        # Multiplicative body so the local ys-gradient is non-unit and the reversed
+        # backward scan's alignment logic is actually exercised.
         def fct(x, y):
-            return x + y
+            return x * y
 
         torch.compiler.reset()
         compiled_scan = torch.compile(
             associative_scan, backend="inductor", fullgraph=True
         )
 
-        x = torch.randn(16, 4, device=device, requires_grad=True)
+        x = torch.randn(scan_length, 4, device=device, requires_grad=True)
 
         result = compiled_scan(fct, x, 0, combine_mode="pointwise")
         result_ref = _fake_associative_scan(fct, x, 0)
