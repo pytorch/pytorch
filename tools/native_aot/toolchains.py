@@ -19,7 +19,7 @@ The cross-toolchain contract, in order of flow:
      persist in the ``<prefix>.json`` sidecar -- the ONLY channel from
      export-time knowledge to launcher codegen.
   3. ``gen_launcher(sidecar)`` emits C++ with the toolchain-independent
-     signature every manifest ``body`` programs against:
+     signature every declaration's ``cpp_launch()`` programs against:
 
          void launch_<prefix>(const at::Tensor&..., <scalars>..., c10::Stream)
 
@@ -27,12 +27,14 @@ The cross-toolchain contract, in order of flow:
      registration) is toolchain-blind. The stream crosses that boundary
      as a device-agnostic c10::Stream, so the shared contract carries no
      CUDA type; each launcher body narrows it to the raw handle its own
-     C ABI needs (cute_dsl_*_wrapper takes a cudaStream_t). Declarations
-     pass at::cuda::getCurrentCUDAStream(), which converts implicitly.
+     C ABI needs (cute_dsl_*_wrapper, the Triton entry point and
+     cuLaunchKernel all take cudaStream_t/CUstream). Declarations pass
+     at::cuda::getCurrentCUDAStream(), which converts implicitly.
 
 Properties consumed by the driver scripts:
-  * ``artifact_exts``: extensions written next to the sidecar; the first
-    is probed for idempotency-skip.
+  * ``artifact_exts``: extensions written next to the sidecar; used to
+    spot artifacts left with no sidecar (export._check_no_orphan_artifacts).
+    The idempotency skip keys on the sidecar itself, not on these.
   * ``link_source_globs``: artifact patterns the CMake project must
     compile or link (kept in sync with the embedded-link block in
     caffe2/CMakeLists.txt, which cannot import this file; see the
@@ -45,6 +47,8 @@ the AOT lib), so torch is always importable during export.
 
 from __future__ import annotations
 
+import os
+
 
 class Toolchain:
     kind: str = ""
@@ -52,7 +56,35 @@ class Toolchain:
     link_source_globs: tuple[str, ...] = ()
     launcher_includes: tuple[str, ...] = ()
 
+    # Torch build backends this kind can emit kernels for, as the names
+    # torch reports: "cuda" or "rocm". A build whose backend is not listed
+    # never asks for this toolchain, so its runtime being absent there is
+    # EXPECTED, not a skip worth reporting -- that is what keeps a ROCm
+    # build from complaining about missing CuTeDSL/Triton wheels while a
+    # CUDA build still fails loudly if a declared kernel cannot be built.
+    # Declared per-kind rather than inferred so a future ROCm DSL (FlyDSL)
+    # is a new class with BACKENDS = ("rocm",) and no gate to rewrite.
+    BACKENDS: tuple[str, ...] = ("cuda",)
+
+    # Importable modules this kind needs to COMPILE a kernel. An env that
+    # lacks one cannot export this kind, and export.py skips those points
+    # rather than failing the build: the DSL runtimes are optional
+    # dependencies, so a partial toolchain set must still produce a working
+    # (smaller) artifact set. Nothing at RUNTIME needs these -- the
+    # exported artifacts are self-contained.
+    REQUIRED_RUNTIMES: tuple[str, ...] = ()
+
     REQUIRED_BUILD_KEYS: tuple[str, ...] = ()
+
+    @classmethod
+    def missing_runtimes(cls) -> list[str]:
+        import importlib.util
+
+        return [m for m in cls.REQUIRED_RUNTIMES if importlib.util.find_spec(m) is None]
+
+    @classmethod
+    def serves_backend(cls, backend: str) -> bool:
+        return backend in cls.BACKENDS
 
     def validate_build_result(self, b: dict) -> None:
         missing = [k for k in ("prefix", *self.REQUIRED_BUILD_KEYS) if k not in b]
@@ -88,6 +120,9 @@ class CuteDslToolchain(Toolchain):
     link_source_globs = ("*/*.o",)
     launcher_includes = ()  # per-kernel header, included by prefix below
 
+    # tvm_ffi: the JIT wrappers pass --enable-tvm-ffi, and cutlass imports
+    # it during compile even though the exported ABI does not use it.
+    REQUIRED_RUNTIMES = ("cutlass", "tvm_ffi")
     REQUIRED_BUILD_KEYS = ("fn", "fake_args", "tensor_args")
 
     LAUNCHER_TMPL = """\
@@ -198,6 +233,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         )
 
 
+
 TOOLCHAINS: dict[str, Toolchain] = {tc.kind: tc for tc in (CuteDslToolchain(),)}
 
 
@@ -207,3 +243,9 @@ def get_toolchain(kind: str) -> Toolchain:
             f"unknown toolchain kind {kind!r}; known: {sorted(TOOLCHAINS)}"
         )
     return TOOLCHAINS[kind]
+
+
+def for_backend(backend: str) -> dict[str, Toolchain]:
+    """The toolchains that can emit kernels for this torch build backend
+    ("cuda" or "rocm"), per each kind's BACKENDS."""
+    return {k: tc for k, tc in TOOLCHAINS.items() if tc.serves_backend(backend)}
