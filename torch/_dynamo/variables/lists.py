@@ -1432,7 +1432,7 @@ class DequeVariable(CommonListMethodsVariable):
     ) -> VariableTracker:
         return self._seq_richcompare(tx, other, op, collections.deque)
 
-    if sys.version_info <= (3, 12):
+    if sys.version_info <= (3, 10):
         def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
             # deque fills nb_bool (deque_bool: Py_SIZE(deque) != 0) on Python <=
             # 3.11; the 3.12 heap-type conversion dropped it, so newer versions
