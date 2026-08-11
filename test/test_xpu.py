@@ -781,6 +781,12 @@ print(torch.xpu.is_initialized())
         ):
             handle = e6.ipc_handle()
 
+    @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+    @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+    @unittest.skipIf(
+        int(torch.version.xpu) < 20260200,
+        "XPU IPC events require SYCL compiler 2026.2 or later",
+    )
     def test_event_handle_importer(self):
         e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
@@ -813,6 +819,12 @@ print(torch.xpu.is_initialized())
         p2c.put(1)  # notify child that parent is done
         p.join()
 
+    @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+    @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+    @unittest.skipIf(
+        int(torch.version.xpu) < 20260200,
+        "XPU IPC events require SYCL compiler 2026.2 or later",
+    )
     def test_event_handle_exporter(self):
         e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
 
