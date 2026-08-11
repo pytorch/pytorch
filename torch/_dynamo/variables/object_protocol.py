@@ -3,8 +3,8 @@ Dynamo implementations of CPython's PyObject_* default slot algorithms.
 
 Analogous to CPython's Objects/object.c, this module holds the general
 dispatch machinery that is independent of any specific type.
-Per-type hook implementations (bool_impl, richcompare_impl, etc.)
-live in their respective VT files.
+Per-type hook implementations (nb_bool_impl, tp_richcompare_impl, tp_getattro_impl,
+etc.) live in their respective VT files.
 """
 
 import abc
@@ -26,16 +26,24 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 
-from .. import graph_break_hints, polyfills
+from .. import graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
+    UnhandledDescriptorError,
     unimplemented,
 )
+from ..source import AttrSource, Source
 from ..utils import istype
-from .base import NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    AttrMutationKind,
+    maybe_get_python_type,
+    NO_SUCH_SUBOBJ,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 
 
@@ -91,8 +99,6 @@ def vt_identity_compare(
         pass
 
     # Different exception types are never identical.
-    from .. import variables
-
     if (
         istype(left, variables.ExceptionVariable)
         and istype(right, variables.ExceptionVariable)
@@ -173,46 +179,96 @@ type_implements_mp_length = partial(
 )
 
 
-def type_implements_nb_bool(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+    return has_slot(number_slots, slot)
 
 
-def type_implements_nb_int(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_int slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INT)
-
-
-def type_implements_nb_index(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_index slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INDEX)
-
-
-def type_implements_nb_float(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_float slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
-
-
-def type_implements_nb_negative(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_negative slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
-
-
-def type_implements_nb_positive(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_positive slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_POSITIVE)
-
-
-def type_implements_nb_absolute(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_absolute slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_ABSOLUTE)
+type_implements_nb_add = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_ADD)
+type_implements_nb_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_SUBTRACT
+)
+type_implements_nb_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MULTIPLY
+)
+type_implements_nb_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_REMAINDER
+)
+type_implements_nb_power = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_POWER)
+type_implements_nb_negative = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_NEGATIVE
+)
+type_implements_nb_positive = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_POSITIVE
+)
+type_implements_nb_absolute = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_ABSOLUTE
+)
+type_implements_nb_bool = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_BOOL)
+type_implements_nb_invert = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INVERT
+)
+type_implements_nb_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_LSHIFT
+)
+type_implements_nb_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_RSHIFT
+)
+type_implements_nb_and = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_AND)
+type_implements_nb_xor = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_XOR)
+type_implements_nb_or = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_OR)
+type_implements_nb_int = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INT)
+type_implements_nb_float = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_FLOAT)
+type_implements_nb_inplace_add = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_ADD
+)
+type_implements_nb_inplace_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_SUBTRACT
+)
+type_implements_nb_inplace_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MULTIPLY
+)
+type_implements_nb_inplace_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_REMAINDER
+)
+type_implements_nb_inplace_power = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_POWER
+)
+type_implements_nb_inplace_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_LSHIFT
+)
+type_implements_nb_inplace_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_RSHIFT
+)
+type_implements_nb_inplace_and = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_AND
+)
+type_implements_nb_inplace_xor = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_XOR
+)
+type_implements_nb_inplace_or = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_OR
+)
+type_implements_nb_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_FLOOR_DIVIDE
+)
+type_implements_nb_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_TRUE_DIVIDE
+)
+type_implements_nb_inplace_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE
+)
+type_implements_nb_inplace_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_TRUE_DIVIDE
+)
+type_implements_nb_index = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INDEX)
+type_implements_nb_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MATRIX_MULTIPLY
+)
+type_implements_nb_inplace_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY
+)
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
@@ -231,10 +287,16 @@ def type_implements_tp_repr(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
-def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
-    """Check whether obj_type implements the nb slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, slot)
+def type_implements_tp_str(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_str slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_STR)
+
+
+def type_implements_tp_call(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_call slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_CALL)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -258,59 +320,46 @@ def pyindex_check(obj_type: type) -> bool:
     return type_implements_nb_index(obj_type)
 
 
-def maybe_get_python_type(obj: VariableTracker) -> type:
-    try:
-        return obj.python_type()
-    except NotImplementedError:
-        unimplemented(
-            gb_type="Unsupported python_type() call",
-            context=f"{obj} does not implement python_type()",
-            explanation="This VariableTracker does not implement python_type(), "
-            "which is required for object protocol operations.",
-            hints=[
-                *graph_break_hints.DYNAMO_BUG,
-            ],
-        )
+def pycallable_check(obj_type: type) -> bool:
+    """Implements PyCallable_Check: type(x)->tp_call != NULL.
 
+    obj_type is the object's Python type (Py_TYPE(x)); a non-NULL tp_call
+    slot on it means instances are callable.
 
-def validate_sequence_index(
-    tx: "InstructionTranslatorBase",
-    key: VariableTracker,
-    container_name: str,
-) -> VariableTracker:
-    """_PyIndex_Check → nb_index path used by list/tuple/range/str/bytes subscript.
-
-    ref: https://github.com/python/cpython/blob/v3.13.3/Include/internal/pycore_abstract.h (_PyIndex_Check)
+    ref: https://github.com/python/cpython/blob/v3.13.0/Objects/call.c#L52-L57
     """
-    key_type = maybe_get_python_type(key)
-    if key_type not in (int, bool, slice):
-        if not type_implements_nb_index(key_type):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
-                ],
-            )
-        key = key.nb_index_impl(tx)
-    return key
+    return type_implements_tp_call(obj_type)
 
 
-def vt_mapping_size(
+def pyiter_send(
+    tx: "InstructionTranslatorBase", iter_: VariableTracker, arg: VariableTracker
+) -> VariableTracker:
+    """Implements PyIter_Send semantics for VariableTracker objects.
+
+    ref: https://github.com/python/cpython/blob/51b511d7299f91a458e40d1ea997bd7e6cd3deef/Objects/abstract.c#L2930-L2953
+    """
+
+    tp_iternext = iter_.tp_iternext
+    if arg.is_constant_none() and tp_iternext is not None:
+        return iter_.tp_iternext_impl(tx)
+    else:
+        return iter_.call_method(tx, "send", [arg], {})
+
+
+def pymapping_size(
     tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
     # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L2308-L2330
-    T = maybe_get_python_type(obj)
-    if type_implements_mp_length(T):
-        return obj.mp_length(tx)
+    if obj.tp_as_mapping.mp_length:
+        return obj.mp_length_impl(tx)
 
-    if type_implements_sq_length(T):
+    if obj.tp_as_sequence.sq_length is not None:
         raise_type_error(tx, f"{obj.python_type_name()} is not a mapping")
 
     raise_type_error(tx, f"object of type {obj.python_type_name()} has no len()")
 
 
-def generic_len(
+def generic_size(
     tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
     # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L53-L69
@@ -319,13 +368,12 @@ def generic_len(
     Dispatches to sq_length (sequences) or mp_length (mappings) depending on the VT type.
     """
 
-    T = maybe_get_python_type(obj)
-    if type_implements_sq_length(T):
-        return obj.sq_length(tx)
-    return vt_mapping_size(tx, obj)
+    if obj.tp_as_sequence.sq_length:
+        return obj.sq_length_impl(tx)
+    return pymapping_size(tx, obj)
 
 
-def generic_bool(
+def generic_is_true(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
     """Mirrors PyObject_IsTrue.
@@ -342,15 +390,13 @@ def generic_bool(
         except Exception as e:
             raise_observed_exception(type(e), tx, args=[str(e)])
 
-    obj_type = maybe_get_python_type(obj)
-
-    if type_implements_nb_bool(obj_type):
-        result = obj.bool_impl(tx)
+    if obj.tp_as_number.nb_bool:
+        result = obj.nb_bool_impl(tx)
         if result is not None:
             return result
 
     try:
-        length = generic_len(tx, obj)
+        length = generic_size(tx, obj)
         from .tensor import SymNodeVariable
 
         if isinstance(length, SymNodeVariable):
@@ -381,28 +427,64 @@ def generic_repr(
     """
     obj_type = maybe_get_python_type(obj)
 
-    if type_implements_tp_repr(obj_type):
+    tp_repr = obj.tp_repr
+    if tp_repr is not None:
         obj_id = id(obj)
         if obj_id in _repr_running:
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
             return ConstantVariable.create(sentinel.get(obj_type, "..."))
         _repr_running.add(obj_id)
         try:
-            result = obj.repr_impl(tx)
+            result = obj.tp_repr_impl(tx)
         finally:
             _repr_running.discard(obj_id)
         result_type = maybe_get_python_type(result)
         if not issubclass(result_type, str):
-            raise_type_error(
-                tx,
-                f"__repr__ returned non-string (type {result_type.__name__})",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
+            else:
+                err_str = f"__repr__ returned non-string (type {result_type.__name__})"
+            raise_type_error(tx, err_str)
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
 
 
-def vt_getitem(
+def generic_str(
+    tx: "InstructionTranslatorBase", obj: "VariableTracker"
+) -> "VariableTracker":
+    """Mirrors PyObject_Str semantics in Dynamo.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L781-L829
+
+    Resolution order: str identity check -> tp_str (tp_str_impl) -> tp_repr fallback.
+    """
+    from ..exc import TorchDynamoException
+
+    if maybe_get_python_type(obj) is str:
+        return obj
+
+    try:
+        if obj.tp_str and type(obj).tp_str_impl is not VariableTracker.tp_str_impl:
+            result = obj.tp_str_impl(tx)
+        else:
+            result = generic_repr(tx, obj)
+    except TorchDynamoException:
+        raise
+    except Exception as exc:
+        raise_observed_exception(type(exc), tx, args=list(exc.args))
+
+    result_type = maybe_get_python_type(result)
+    if not issubclass(result_type, str):
+        if sys.version_info >= (3, 15):
+            err_str = f"{obj.python_qualified_name()}.__str__() must return a str, not {result.python_qualified_name()}"
+        else:
+            err_str = f"__str__ returned non-string (type {result_type.__name__})"
+        raise_type_error(tx, err_str)
+    return result
+
+
+def generic_getitem(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
     key: VariableTracker,
@@ -422,16 +504,16 @@ def vt_getitem(
     """
     obj_type = maybe_get_python_type(obj)
     # Branch 1: mp_subscript
-    if type_implements_mp_subscript(obj_type):
+    if obj.tp_as_mapping.mp_subscript:
         return obj.mp_subscript_impl(tx, key)
     # Branch 2: sq_item (only if mp_subscript is absent)
     # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t
     #          → PySequence_GetItem (wraps negative, calls sq_item)
-    if type_implements_sq_item(obj_type):
+    if obj.tp_as_sequence.sq_item is not None:
         key_type = maybe_get_python_type(key)
-        if type_implements_nb_index(key_type):
-            key = key.nb_index_impl(tx)
-            return vt_sequence_getitem(tx, obj, key)
+        if pyindex_check(key_type):
+            key = pynumber_as_ssize_t(tx, key, IndexError)
+            return pysequence_getitem(tx, obj, key)
         raise_type_error(
             tx,
             f"{obj_type.__name__} indices must be integers, not {key_type.__name__}",
@@ -445,7 +527,7 @@ def vt_getitem(
     raise_type_error(tx, f"'{obj_type.__name__}' object is not subscriptable")
 
 
-def vt_sequence_getitem(
+def pysequence_getitem(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
     index: VariableTracker,
@@ -458,45 +540,44 @@ def vt_sequence_getitem(
     iteration protocol.  Wraps negative indices via sq_length before
     dispatching to sq_item.
     """
-    obj_type = maybe_get_python_type(obj)
-
-    if type_implements_sq_item(obj_type):
+    sq_item = obj.tp_as_sequence.sq_item
+    if sq_item is not None:
         # Negative index wrapping (abstract.c L2175-2183)
         if isinstance(index, ConstantVariable):
             index_val = index.as_python_constant()
             if isinstance(index_val, int) and index_val < 0:
-                if type_implements_sq_length(obj_type):
-                    length = obj.sq_length(tx)
+                if obj.tp_as_sequence.sq_length is not None:
+                    length = obj.sq_length_impl(tx)
                     index = ConstantVariable.create(
                         index_val + length.as_python_constant()
                     )
         return obj.sq_item_impl(tx, index)
 
-    if type_implements_mp_subscript(obj_type):
+    if obj.tp_as_mapping.mp_subscript is not None:
         raise_type_error(tx, f"'{obj.python_type_name()}' is not a sequence")
 
     raise_type_error(tx, f"'{obj.python_type_name()}' object does not support indexing")
 
 
-def vt_sequence_setitem(
+def pysequence_setitem(
     tx: "InstructionTranslatorBase",
     s: VariableTracker,
     i: VariableTracker,
     o: VariableTracker,
 ) -> VariableTracker:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1926-L1957 (PySequence_SetItem)
-    s_type = maybe_get_python_type(s)
-    if type_implements_sq_ass_item(s_type):
+    sq_ass_item = s.tp_as_sequence.sq_ass_item
+    if sq_ass_item is not None:
         # Negative index wrapping (abstract.c L1944-1952)
         if isinstance(i, ConstantVariable):
             index_val = i.as_python_constant()
             if isinstance(index_val, int) and index_val < 0:
-                if type_implements_sq_length(s_type):
-                    length = s.sq_length(tx)
+                if s.tp_as_sequence.sq_length is not None:
+                    length = s.sq_length_impl(tx)
                     i = ConstantVariable.create(index_val + length.as_python_constant())
         return s.sq_ass_item_impl(tx, i, o)
 
-    if type_implements_mp_ass_subscript(s_type):
+    if s.tp_as_mapping.mp_ass_subscript is not None:
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
 
     raise_type_error(
@@ -511,15 +592,15 @@ def generic_setitem(
     value: VariableTracker,
 ) -> VariableTracker:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L222-L254
-    o_type = maybe_get_python_type(o)
-    if type_implements_mp_ass_subscript(o_type):
+    mp_ass_subscript = o.tp_as_mapping.mp_ass_subscript
+    if mp_ass_subscript is not None:
         return o.mp_ass_subscript_impl(tx, key, value)
 
-    if type_implements_sq_ass_item(o_type):
+    if o.tp_as_sequence.sq_ass_item is not None:
         key_type = maybe_get_python_type(key)
         if pyindex_check(key_type):
-            key = key.nb_index_impl(tx)
-            return vt_sequence_setitem(tx, o, key, value)
+            key_value = pynumber_as_ssize_t(tx, key, err=IndexError)
+            return pysequence_setitem(tx, o, key_value, value)
         raise_type_error(
             tx, f"sequence index must be integer, not '{key.python_type_name()}'"
         )
@@ -528,24 +609,24 @@ def generic_setitem(
     )
 
 
-def sequence_delitem(
+def pysequence_delitem(
     tx: "InstructionTranslatorBase",
     s: VariableTracker,
     i: VariableTracker,
 ) -> VariableTracker:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1959-L1990
 
-    s_type = maybe_get_python_type(s)
-    if type_implements_sq_ass_item(s_type):
+    sq_ass_item = s.tp_as_sequence.sq_ass_item
+    if sq_ass_item is not None:
         if isinstance(i, ConstantVariable):
             idx = i.as_python_constant()
             if idx < 0:
-                if type_implements_sq_length(s_type):
-                    length = s.sq_length(tx)
-                    i = vt_add(tx, i, length)
+                if s.tp_as_sequence.sq_length is not None:
+                    length = s.sq_length_impl(tx)
+                    i = pynumber_add(tx, i, length)
         return s.sq_ass_item_impl(tx, i, None)
 
-    if type_implements_mp_ass_subscript(s_type):
+    if s.tp_as_mapping.mp_ass_subscript is not None:
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
 
     raise_type_error(
@@ -560,15 +641,15 @@ def generic_delitem(
 ) -> VariableTracker:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L256-L288
 
-    o_type = maybe_get_python_type(o)
-    if type_implements_mp_ass_subscript(o_type):
+    mp_ass_subscript = o.tp_as_mapping.mp_ass_subscript
+    if mp_ass_subscript is not None:
         return o.mp_ass_subscript_impl(tx, key, None)
 
     key_type = maybe_get_python_type(key)
     if pyindex_check(key_type):
         key_value = key.nb_index_impl(tx)
-        return sequence_delitem(tx, o, key_value)
-    elif type_implements_sq_ass_item(o_type):
+        return pysequence_delitem(tx, o, key_value)
+    elif o.tp_as_sequence.sq_ass_item is not None:
         raise_type_error(
             tx, f"sequence index must be integer, not {key.python_type_name()}"
         )
@@ -576,7 +657,7 @@ def generic_delitem(
     raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
 
 
-def generic_int(
+def pynumber_int(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
     """Mirrors PyNumber_Long (int(x) dispatch).
@@ -593,12 +674,16 @@ def generic_int(
     if obj.is_python_constant() and isinstance(obj.as_python_constant(), int):
         return ConstantVariable.create(int(obj.as_python_constant()))
 
-    obj_type = maybe_get_python_type(obj)
+    if obj.tp_as_number.nb_int is not None:
+        res = obj.nb_int_impl(tx)
+        if res.python_type() is not int:
+            raise_type_error(
+                tx,
+                f"__int__ returned non-int (type {res.python_type_name()})",
+            )
+        return res
 
-    if type_implements_nb_int(obj_type):
-        return obj.nb_int_impl(tx)
-
-    if type_implements_nb_index(obj_type):
+    if obj.tp_as_number.nb_index is not None:
         return obj.nb_index_impl(tx)
 
     # String/bytes/bytearray parsing fallback.
@@ -618,7 +703,46 @@ def generic_int(
     )
 
 
-def generic_float(
+def pylong_from_base(
+    tx: "InstructionTranslatorBase", x: VariableTracker, obase: VariableTracker
+) -> VariableTracker | None:
+    """Mirrors the explicit-base path of long_new_impl (int(x, base)).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5879-L5922
+
+    The base is resolved via PyNumber_AsSsize_t, which consults __index__, so
+    any __index__-able object is accepted. Returns None (graph break) when the
+    inputs cannot be resolved to Python constants.
+    """
+    # base = PyNumber_AsSsize_t(obase, NULL) -> nb_index.
+    if obase.is_python_constant() and issubclass(obase.python_type(), int):
+        base_vt = obase
+    elif obase.tp_as_number.nb_index is not None:
+        base_vt = obase.nb_index_impl(tx)
+    else:
+        raise_type_error(
+            tx,
+            f"'{obase.python_type_name()}' object cannot be interpreted as an integer",
+        )
+    if not (base_vt.is_python_constant() and issubclass(base_vt.python_type(), int)):
+        return None
+    base = base_vt.as_python_constant()
+    if (base != 0 and base < 2) or base > 36:
+        raise_observed_exception(
+            ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
+        )
+    if not x.is_python_constant():
+        return None
+    xval = x.as_python_constant()
+    if not isinstance(xval, (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
+    try:
+        return ConstantVariable.create(int(xval, base))
+    except ValueError as e:
+        raise_observed_exception(ValueError, tx, args=list(e.args))
+
+
+def pynumber_float(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
     """Mirrors PyNumber_Float (float(x) dispatch).
@@ -635,18 +759,22 @@ def generic_float(
     if obj.is_python_constant() and isinstance(obj.as_python_constant(), float):
         return ConstantVariable.create(float(obj.as_python_constant()))
 
-    obj_type = maybe_get_python_type(obj)
-
-    if type_implements_nb_float(obj_type):
-        return obj.nb_float_impl(tx)
+    if obj.tp_as_number.nb_float is not None:
+        res = obj.nb_float_impl(tx)
+        if res.python_type() is not float:
+            raise_type_error(
+                tx,
+                f"__float__ returned non-float (type {res.python_type_name()})",
+            )
+        return res
 
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1674-L1685
-    if type_implements_nb_index(obj_type):
+    if obj.tp_as_number.nb_index is not None:
         return obj.nb_index_impl(tx)
 
     # PyFloat_FromString fallback — handles str and bytes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1691
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), (str, bytes)):
+    if issubclass(obj.python_type(), (str, bytes)):
         try:
             return ConstantVariable.create(float(obj.as_python_constant()))
         except ValueError as e:
@@ -659,7 +787,119 @@ def generic_float(
     )
 
 
-def generic_iternext(
+def getindex(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    arg: VariableTracker,
+) -> VariableTracker:
+    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
+    obj_type = maybe_get_python_type(obj)
+
+    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
+    if i.as_python_constant() < 0:
+        if type_implements_sq_length(obj_type):
+            length = obj.sq_length_impl(tx)
+            i = pynumber_add(tx, i, length)
+    return i
+
+
+def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
+    """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
+    values outside the Py_ssize_t range raise OverflowError.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/longobject.c#L576
+    """
+    # Starting on Python 3.16, this will explicitly require an integer instance
+    # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
+    if not issubclass(obj.python_type(), int):
+        raise_type_error(tx, "an integer is required")
+    val = obj.as_python_constant()
+    if not -sys.maxsize - 1 <= val <= sys.maxsize:
+        raise_observed_exception(
+            OverflowError,
+            tx,
+            args=["Python int too large to convert to C ssize_t"],
+        )
+    return val
+
+
+def pynumber_as_ssize_t(
+    tx: "InstructionTranslatorBase",
+    item: VariableTracker,
+    err: type[Exception] | None = IndexError,
+) -> VariableTracker:
+    """Mirrors PyNumber_AsSsize_t: _PyNumber_Index(item) then PyLong_AsSsize_t.
+
+    On overflow (value outside the Py_ssize_t range) CPython remaps the
+    OverflowError to `err`, or clips to the Py_ssize_t bounds when err is None.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/abstract.c#L1469
+    """
+    from .tensor import SymNodeVariable
+
+    value = pynumber_index(tx, item)
+
+    # PyLong_AsSsize_t: a symbolic int must be specialized to a concrete
+    # ssize_t (with guard) to be usable as a C index.
+    if isinstance(value, SymNodeVariable):
+        val = value.evaluate_expr(tx.output)
+    else:
+        val = value.as_python_constant()
+
+    if not isinstance(val, int):
+        raise AssertionError("pynumber_index did not return an int-like value")
+
+    if -sys.maxsize - 1 <= val <= sys.maxsize:
+        return ConstantVariable.create(int(val))
+    if err is None:
+        r = sys.maxsize if val > 0 else -sys.maxsize - 1
+        return ConstantVariable.create(r)
+    raise_observed_exception(
+        err,
+        tx,
+        args=[f"cannot fit '{item.python_type_name()}' into an index-sized integer"],
+    )
+
+
+def pynumber_index(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> "VariableTracker":
+    """Mirrors PyNumber_Index (index(x) dispatch)."""
+
+    if obj.tp_as_number.nb_index is None:
+        raise_type_error(
+            tx,
+            f"'{obj.python_type_name()}' object cannot be interpreted as an integer",
+        )
+
+    result = obj.nb_index_impl(tx)
+
+    if not issubclass(result.python_type(), int):
+        raise_type_error(
+            tx,
+            f"__index__ returned non-int (type {result.python_type_name()})",
+        )
+
+    return result
+
+
+def pynumber_tobase(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, base: int
+) -> VariableTracker | None:
+    """Mirrors PyNumber_ToBase (bin/oct/hex dispatch).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1653-L1666
+
+    Resolves __index__ (raising TypeError if absent), then formats the
+    resulting int in the requested base. Returns None (graph break) when the
+    index result is not a Python constant.
+    """
+    index = pynumber_index(tx, obj)
+    format_fn = {2: bin, 8: oct, 16: hex}[base]
+    return ConstantVariable.create(format_fn(index.as_python_constant()))
+
+
+def pyiter_next(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
     """
@@ -671,14 +911,14 @@ def generic_iternext(
     """
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2865
 
-    T = maybe_get_python_type(obj)
-    if not type_implements_tp_iternext(T):
+    tp_iternext = obj.tp_iternext
+    if tp_iternext is None:
         raise_type_error(tx, f"expected an iterator, got '{obj.python_type_name()}'")
 
     return obj.tp_iternext_impl(tx)
 
 
-def generic_neg(
+def pynumber_negative(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
     """Mirrors PyNumber_Negative.
@@ -689,9 +929,9 @@ def generic_neg(
     1. If type has nb_negative slot, call obj.nb_negative_impl(tx)
     2. Otherwise, raise TypeError
     """
-    obj_type = maybe_get_python_type(obj)
 
-    if type_implements_nb_negative(obj_type):
+    nb_negative = obj.tp_as_number.nb_negative
+    if nb_negative is not None:
         return obj.nb_negative_impl(tx)
 
     raise_type_error(
@@ -700,7 +940,7 @@ def generic_neg(
     )
 
 
-def generic_pos(
+def pynumber_positive(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
     """Mirrors PyNumber_Positive.
@@ -711,9 +951,9 @@ def generic_pos(
     1. If type has nb_positive slot, call obj.nb_positive_impl(tx)
     2. Otherwise, raise TypeError
     """
-    obj_type = maybe_get_python_type(obj)
 
-    if type_implements_nb_positive(obj_type):
+    nb_positive = obj.tp_as_number.nb_positive
+    if nb_positive is not None:
         return obj.nb_positive_impl(tx)
 
     raise_type_error(
@@ -722,7 +962,7 @@ def generic_pos(
     )
 
 
-def generic_abs(
+def pynumber_absolute(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
     """Mirrors PyNumber_Absolute.
@@ -733,9 +973,9 @@ def generic_abs(
     1. If type has nb_absolute slot, call obj.nb_absolute_impl(tx)
     2. Otherwise, raise TypeError
     """
-    obj_type = maybe_get_python_type(obj)
 
-    if type_implements_nb_absolute(obj_type):
+    nb_absolute = obj.tp_as_number.nb_absolute
+    if nb_absolute is not None:
         return obj.nb_absolute_impl(tx)
 
     raise_type_error(
@@ -747,7 +987,29 @@ def generic_abs(
 def vt_is_iterable(obj: VariableTracker) -> bool:
     """Check if the object supports iteration (i.e. has tp_iter or sequence protocol)."""
     T = maybe_get_python_type(obj)
-    return type_implements_tp_iter(T) or pysequence_check(T)
+    return obj.tp_iter is not None or pysequence_check(T)
+
+
+def pynumber_invert(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyNumber_Invert.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1394
+
+    Algorithm:
+    1. If type has nb_invert slot, call obj.nb_invert_impl(tx)
+    2. Otherwise, raise TypeError
+    """
+
+    nb_invert = obj.tp_as_number.nb_invert
+    if nb_invert is not None:
+        return obj.nb_invert_impl(tx)
+
+    raise_type_error(
+        tx,
+        f"bad operand type for unary ~: '{obj.python_type_name()}'",
+    )
 
 
 def generic_getiter(
@@ -767,14 +1029,18 @@ def generic_getiter(
     # 3. Otherwise, raise a TypeError
 
     T = maybe_get_python_type(obj)
-    if type_implements_tp_iter(T):
+    tp_iter = obj.tp_iter
+    if tp_iter is not None:
         res = obj.tp_iter_impl(tx)
         res_T = maybe_get_python_type(res)
         if not pyiter_check(res_T):
-            raise_type_error(
-                tx,
-                f"iter() returned non-iterator of type '{res.python_type_name()}'",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{obj.python_qualified_name()}.__iter__() must return an iterator, not {res.python_qualified_name()}"
+            else:
+                err_str = (
+                    f"iter() returned non-iterator of type '{res.python_type_name()}'"
+                )
+            raise_type_error(tx, err_str)
         return res
     elif pysequence_check(T):
         from .functions import UserFunctionVariable
@@ -804,6 +1070,21 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_matrix_multiply": PyNumberSlots.NB_MATRIX_MULTIPLY,
+    "nb_inplace_matrix_multiply": PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY,
+    "nb_and": PyNumberSlots.NB_AND,
+    "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
+    "nb_xor": PyNumberSlots.NB_XOR,
+    "nb_inplace_xor": PyNumberSlots.NB_INPLACE_XOR,
+    "nb_floor_divide": PyNumberSlots.NB_FLOOR_DIVIDE,
+    "nb_inplace_floor_divide": PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE,
+    "nb_true_divide": PyNumberSlots.NB_TRUE_DIVIDE,
+    "nb_inplace_true_divide": PyNumberSlots.NB_INPLACE_TRUE_DIVIDE,
+    "nb_remainder": PyNumberSlots.NB_REMAINDER,
+    "nb_inplace_remainder": PyNumberSlots.NB_INPLACE_REMAINDER,
+    "nb_divmod": PyNumberSlots.NB_DIVMOD,
+    "nb_power": PyNumberSlots.NB_POWER,
+    "nb_inplace_power": PyNumberSlots.NB_INPLACE_POWER,
 }
 
 
@@ -918,6 +1199,91 @@ def binary_op(
     return result
 
 
+def ternary_op(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    z: VariableTracker | None,
+    op_slot: str,
+    op_name: str,
+) -> VariableTracker:
+    impl_attr = f"{op_slot}_impl"
+    nb_slot_bit = NB_SLOT_MAPPING[op_slot]
+
+    v_type = maybe_get_python_type(v)
+    w_type = maybe_get_python_type(w)
+
+    v_slot = (
+        getattr(type(v), impl_attr, None)
+        if type_implements_nb_slot(v_type, nb_slot_bit)
+        else None
+    )
+
+    w_slot = (
+        getattr(type(w), impl_attr, None)
+        if type_implements_nb_slot(w_type, nb_slot_bit)
+        else None
+    )
+
+    if v_slot is w_slot:
+        w_slot = None
+
+    if v_slot:
+        if w_slot and is_python_subtype(w, v):
+            result = w_slot(w, tx, v, z, True)
+            if not is_nb_not_implemented(result):
+                return result
+            w_slot = None
+        result = v_slot(v, tx, w, z, False)
+        if not is_nb_not_implemented(result):
+            return result
+    if w_slot:
+        result = w_slot(w, tx, v, z, True)
+        if not is_nb_not_implemented(result):
+            return result
+
+    if z:
+        z_type = maybe_get_python_type(z)
+        if type_implements_nb_slot(z_type, nb_slot_bit):
+            z_impl_attr = f"{op_slot}_z_impl"
+            z_slot = getattr(type(z), z_impl_attr, None)
+            if z_slot in (v_slot, w_slot):
+                z_slot = None
+            if z_slot:
+                result = z_slot(z, tx, v, w)
+                if not is_nb_not_implemented(result):
+                    return result
+
+    if z is None:
+        binop_type_error(tx, v, w, op_name)
+    else:
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_name}: "
+            f"'{v.python_type_name()}', '{w.python_type_name()}', '{z.python_type_name()}'",
+        )
+
+
+def ternary_iop(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+    z: VariableTracker | None,
+    iop_slot: str,
+    op_slot: str,
+    op_name: str,
+) -> VariableTracker:
+    v_type = maybe_get_python_type(v)
+    if type_implements_nb_slot(v_type, NB_SLOT_MAPPING[iop_slot]):
+        impl_attr = f"{iop_slot}_impl"
+        slot = getattr(type(v), impl_attr)
+        result = slot(v, tx, w, z)
+        if not is_nb_not_implemented(result):
+            return result
+
+    return ternary_op(tx, v, w, z, op_slot, op_name)
+
+
 #  Binary in-place operators
 #
 #    The in-place operators are defined to fall back to the 'normal', non
@@ -972,7 +1338,7 @@ def binary_iop(
 
 
 # add / inplace add needs special handling
-def vt_add(
+def pynumber_add(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
@@ -983,13 +1349,13 @@ def vt_add(
     if not is_nb_not_implemented(result):
         return result
 
-    T = maybe_get_python_type(v)
-    if type_implements_sq_concat(T):
+    sq_concat = v.tp_as_sequence.sq_concat
+    if sq_concat is not None:
         return v.sq_concat_impl(tx, w)
     binop_type_error(tx, v, w, "+")
 
 
-def vt_inplace_add(
+def pynumber_inplace_add(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
@@ -998,10 +1364,11 @@ def vt_inplace_add(
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1307-L1328
     result = binary_iop1(tx, v, w, "nb_inplace_add", "nb_add")
     if is_nb_not_implemented(result):
-        obj_type = maybe_get_python_type(v)
-        if type_implements_sq_inplace_concat(obj_type):
+        sq_inplace_concat = v.tp_as_sequence.sq_inplace_concat
+        sq_concat = v.tp_as_sequence.sq_concat
+        if sq_inplace_concat is not None:
             return v.sq_inplace_concat_impl(tx, w)
-        elif type_implements_sq_concat(obj_type):
+        elif sq_concat is not None:
             return v.sq_concat_impl(tx, w)
         else:
             binop_type_error(tx, v, w, "+=")
@@ -1020,7 +1387,7 @@ def vt_inplace_add(
 # ---------------------------------------------------------------------------
 
 
-def sequence_repeat(
+def pysequence_repeat(
     tx: "InstructionTranslatorBase",
     seq: VariableTracker,
     n: VariableTracker,
@@ -1033,7 +1400,7 @@ def sequence_repeat(
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1156-L1174
     """
     n_type = maybe_get_python_type(n)
-    if not type_implements_nb_index(n_type):
+    if not pyindex_check(n_type):
         raise_type_error(
             tx,
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
@@ -1043,18 +1410,18 @@ def sequence_repeat(
     return seq.sq_repeat_impl(tx, count)
 
 
-def sequence_inplace_repeat(
+def pysequence_inplace_repeat(
     tx: "InstructionTranslatorBase",
     seq: VariableTracker,
     n: VariableTracker,
 ) -> VariableTracker:
-    """sequence_repeat using sq_inplace_repeat.
+    """pysequence_repeat using sq_inplace_repeat.
 
-    The validation step is identical to ``sequence_repeat``; only the
+    The validation step is identical to ``pysequence_repeat``; only the
     target slot differs.
     """
     n_type = maybe_get_python_type(n)
-    if not type_implements_nb_index(n_type):
+    if not pyindex_check(n_type):
         raise_type_error(
             tx,
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
@@ -1077,7 +1444,7 @@ def validate_sequence_repeat_count(
         )
 
 
-def generic_multiply(
+def pynumber_multiply(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
@@ -1093,12 +1460,10 @@ def generic_multiply(
     if not is_nb_not_implemented(result):
         return result
 
-    v_type = maybe_get_python_type(v)
-    w_type = maybe_get_python_type(w)
-    if type_implements_sq_repeat(v_type):
-        return sequence_repeat(tx, v, w)
-    if type_implements_sq_repeat(w_type):
-        return sequence_repeat(tx, w, v)
+    if v.tp_as_sequence.sq_repeat is not None:
+        return pysequence_repeat(tx, v, w)
+    if w.tp_as_sequence.sq_repeat is not None:
+        return pysequence_repeat(tx, w, v)
 
     raise_type_error(
         tx,
@@ -1107,7 +1472,7 @@ def generic_multiply(
     )
 
 
-def generic_inplace_multiply(
+def pynumber_inplace_multiply(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
@@ -1123,21 +1488,44 @@ def generic_inplace_multiply(
     if not is_nb_not_implemented(result):
         return result
 
-    v_type = maybe_get_python_type(v)
-    w_type = maybe_get_python_type(w)
-    if type_implements_sq_inplace_repeat(v_type):
-        return sequence_inplace_repeat(tx, v, w)
-    if type_implements_sq_repeat(v_type):
-        return sequence_repeat(tx, v, w)
+    if v.tp_as_sequence.sq_inplace_repeat is not None:
+        return pysequence_inplace_repeat(tx, v, w)
+    if v.tp_as_sequence.sq_repeat is not None:
+        return pysequence_repeat(tx, v, w)
     # Cannot mutate w in-place — abstract.c L1348-1352 explicitly avoids
     # sq_inplace_repeat on the right-hand operand.
-    if type_implements_sq_repeat(w_type):
-        return sequence_repeat(tx, w, v)
+    if w.tp_as_sequence.sq_repeat is not None:
+        return pysequence_repeat(tx, w, v)
 
     raise_type_error(
         tx,
         f"unsupported operand type(s) for *=: "
         f"'{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
+def pynumber_matrix_multiply(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_MatrixMultiply."""
+    return binary_op(tx, v, w, "nb_matrix_multiply", "@")
+
+
+def pynumber_inplace_matrix_multiply(
+    tx: "InstructionTranslatorBase",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_InPlaceMatrixMultiply."""
+    return binary_iop(
+        tx,
+        v,
+        w,
+        "nb_inplace_matrix_multiply",
+        "nb_matrix_multiply",
+        "@=",
     )
 
 
@@ -1169,7 +1557,7 @@ def generic_inplace_multiply(
 # selection so that ``call_method`` routing for direct dunder calls
 # (``[1, 2].__mul__(3)``) reaches the correct slot.
 #
-# Distinct from ``generic_multiply`` / ``generic_inplace_multiply``, which
+# Distinct from ``pynumber_multiply`` / ``pynumber_inplace_multiply``, which
 # mirror the operator-level algorithm in ``Objects/abstract.c``
 # (``PyNumber_Multiply``) — cross-operand subclass priority and the
 # ``sq_repeat`` fallback when ``nb_multiply`` returns ``NotImplemented``.
@@ -1183,14 +1571,14 @@ def slot_wrapper_mul(
     reverse: bool = False,
 ) -> VariableTracker:
     """``self.__mul__(other)`` / ``self.__rmul__(other)`` slot wrapper."""
-    self_type = maybe_get_python_type(self)
-    if type_implements_nb_slot(self_type, PyNumberSlots.NB_MULTIPLY):
+    nb_multiply = self.tp_as_number.nb_multiply
+    if nb_multiply is not None:
         return self.nb_multiply_impl(tx, other, reverse=reverse)
-    if type_implements_sq_repeat(self_type):
+    if self.tp_as_sequence.sq_repeat is not None:
         # SQSLOT for __mul__ and __rmul__ both use ``wrap_indexargfunc`` —
         # the wrapper ignores the reverse flag because sq_repeat takes
         # ``(seq, count)`` regardless of which side ``self`` is on.
-        return sequence_repeat(tx, self, other)
+        return pysequence_repeat(tx, self, other)
     raise_type_error(
         tx,
         f"unsupported operand type(s) for *: "
@@ -1212,12 +1600,66 @@ def slot_wrapper_imul(
     method lookups don't graph-break on (e.g.) tuple, even though tuple
     has no ``__imul__`` attribute in standard CPython.
     """
-    self_type = maybe_get_python_type(self)
-    if type_implements_nb_slot(self_type, PyNumberSlots.NB_INPLACE_MULTIPLY):
+    nb_inplace_multiply = self.tp_as_number.nb_inplace_multiply
+    if nb_inplace_multiply is not None:
         return self.nb_inplace_multiply_impl(tx, other)
-    if type_implements_sq_inplace_repeat(self_type):
-        return sequence_inplace_repeat(tx, self, other)
+    if self.tp_as_sequence.sq_inplace_repeat is not None:
+        return pysequence_inplace_repeat(tx, self, other)
     return slot_wrapper_mul(tx, self, other)
+
+
+# ---------------------------------------------------------------------------
+# Type-object slot wrappers for ``__add__`` / ``__radd__`` / ``__iadd__``
+
+#   BINSLOT (__add__,  nb_add,      slot_nb_add, "+")           [typeobject.c L10915]
+#   RBINSLOT(__radd__, nb_add,      slot_nb_add, "+")           [L10917]
+#   SQSLOT  (__add__,  sq_concat,   NULL, wrap_binaryfunc)      [L11017]
+#   IBSLOT  (__iadd__, nb_inplace_add, ...)                     [L10960]
+#   SQSLOT  (__iadd__, sq_inplace_concat, NULL, ...)            [L11031]
+#
+# Distinct from ``pynumber_add`` / ``pynumber_inplace_add``, which mirror the
+# operator-level ``PyNumber_Add`` (cross-operand priority, sq_concat fallback).
+# ---------------------------------------------------------------------------
+
+
+def slot_wrapper_add(
+    tx: "InstructionTranslatorBase",
+    self: VariableTracker,
+    other: VariableTracker,
+    reverse: bool = False,
+) -> VariableTracker:
+    """``self.__add__(other)`` / ``self.__radd__(other)`` slot wrapper."""
+    nb_add = self.tp_as_number.nb_add
+    if nb_add is not None:
+        return self.nb_add_impl(tx, other, reverse=reverse)
+    # No SQSLOT(__radd__): sq_concat backs only the forward __add__.
+    sq_concat = self.tp_as_sequence.sq_concat
+    if not reverse and sq_concat is not None:
+        return self.sq_concat_impl(tx, other)
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for +: "
+        f"'{self.python_type_name()}' and '{other.python_type_name()}'",
+    )
+
+
+def slot_wrapper_iadd(
+    tx: "InstructionTranslatorBase",
+    self: VariableTracker,
+    other: VariableTracker,
+) -> VariableTracker:
+    """``self.__iadd__(other)`` slot wrapper.
+
+    Mirrors ``slot_wrapper_imul``: when neither ``nb_inplace_add`` nor
+    ``sq_inplace_concat`` is installed, fall back to the non-inplace slot.
+    """
+    nb_inplace_add = self.tp_as_number.nb_inplace_add
+    if nb_inplace_add is not None:
+        return self.nb_inplace_add_impl(tx, other)
+    sq_inplace_concat = self.tp_as_sequence.sq_inplace_concat
+    if sq_inplace_concat is not None:
+        return self.sq_inplace_concat_impl(tx, other)
+    return slot_wrapper_add(tx, self, other)
 
 
 # ---------------------------------------------------------------------------
@@ -1244,29 +1686,29 @@ def slot_wrapper_imul(
 #
 # Dynamo implementation:
 #
-#   richcompare_impl(self, tx, other, op) -- per-VT slot, analogous to
+#   tp_richcompare_impl(self, tx, other, op) -- per-VT slot, analogous to
 #     tp_richcompare.  Returns ConstantVariable(NotImplemented) when the
 #     type does not handle the comparison.
 #
 #   generic_richcompare(tx, lhs, rhs, op) -- analogous to do_richcompare.
-#     Implements the 4-step algorithm directly using richcompare_impl
+#     Implements the 4-step algorithm directly using tp_richcompare_impl
 #     slots.  If a user comparison method graph-breaks, the Unsupported
 #     exception propagates to COMPARE_OP (which has
 #     @break_graph_if_unsupported) and runs the comparison eagerly.
-#     UDOV.richcompare_impl disables nested graph breaks on the resolved
+#     UDOV.tp_richcompare_impl disables nested graph breaks on the resolved
 #     funcvar so the InliningInstructionTranslator does not try to split
 #     the inlined user method mid-function.
 #
-# Two entry points converge on richcompare_impl:
+# Two entry points converge on tp_richcompare_impl:
 #
 #   COMPARE_OP (a == b):
 #     -> BuiltinVariable dispatch -> generic_richcompare
-#       -> richcompare_impl (4-step: subclass priority, forward, reflected, fallback)
+#       -> tp_richcompare_impl (4-step: subclass priority, forward, reflected, fallback)
 #
 #   call_method("__eq__") (a.__eq__(b) in user code):
-#     -> base.py call_method -> richcompare_impl directly
+#     -> base.py call_method -> tp_richcompare_impl directly
 #
-# The call_method path calls richcompare_impl directly (not
+# The call_method path calls tp_richcompare_impl directly (not
 # generic_richcompare) to match CPython semantics: a.__eq__(b) invokes
 # the type's tp_richcompare slot without do_richcompare's reflected-
 # operand protocol, and may return NotImplemented.
@@ -1298,7 +1740,7 @@ def object_richcompare(
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
         # Safe to call as_python_constant(): only identity-based types use
         # object_richcompare, so eq_result is always True or NotImplemented.
-        eq_result = self.richcompare_impl(tx, other, "__eq__")
+        eq_result = self.tp_richcompare_impl(tx, other, "__eq__")
         if is_richcompare_not_implemented(eq_result):
             return eq_result
         return ConstantVariable.create(not eq_result.as_python_constant())
@@ -1354,9 +1796,9 @@ def generic_richcompare(
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L994-L1039
 
-    Implements the 4-step algorithm directly using richcompare_impl slots.
+    Implements the 4-step algorithm directly using tp_richcompare_impl slots.
     Graph breaks inside user comparison methods propagate to COMPARE_OP
-    (which runs eagerly) because UDOV.richcompare_impl disables nested
+    (which runs eagerly) because UDOV.tp_richcompare_impl disables nested
     graph breaks on the resolved funcvar.
     """
     reflected = _REFLECTED_OP[op]
@@ -1380,18 +1822,18 @@ def generic_richcompare(
         and issubclass(w_type, v_type)
     ):
         checked_reverse = True
-        result = w.richcompare_impl(tx, v, reflected)
+        result = w.tp_richcompare_impl(tx, v, reflected)
         if not is_richcompare_not_implemented(result):
             return result
 
     # Step 2: forward
-    result = v.richcompare_impl(tx, w, op)
+    result = v.tp_richcompare_impl(tx, w, op)
     if not is_richcompare_not_implemented(result):
         return result
 
     # Step 3: reflected (if not already tried)
     if not checked_reverse:
-        result = w.richcompare_impl(tx, v, reflected)
+        result = w.tp_richcompare_impl(tx, v, reflected)
         if not is_richcompare_not_implemented(result):
             return result
 
@@ -1470,19 +1912,19 @@ def generic_hash(
     return ConstantVariable.create(h)
 
 
-def generic_contains(
+def pysequence_contains(
     tx: "InstructionTranslatorBase", obj: "VariableTracker", item: "VariableTracker"
 ) -> "VariableTracker":
     """
     Implements PySequence_Contains semantics for VariableTracker objects.
 
-    If the object has sq_contains (i.e., __contains__), calls obj.sq_contains(tx, item).
+    If the object has sq_contains (i.e., __contains__), calls obj.sq_contains_impl(tx, item).
     Otherwise falls back to iterating over obj and comparing each element.
     """
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
-    T = maybe_get_python_type(obj)
-    if type_implements_sq_contains(T):
-        return obj.sq_contains(tx, item)
+    sq_contains = obj.tp_as_sequence.sq_contains
+    if sq_contains is not None:
+        return obj.sq_contains_impl(tx, item)
     else:
         # iter fallback handles both __iter__ and __getitem__ sequence protocol cases
         it = generic_getiter(tx, obj)
@@ -1597,34 +2039,273 @@ def generic_issubclass(
     result = cls.call_method(tx, "__subclasscheck__", [derived], {})
 
     # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
-    return generic_bool(tx, result)
+    return generic_is_true(tx, result)
 
 
-def virtual_iterator_next(
+# ── tp_getattro ──────────────────────────────────────────────────────
+#
+# Dynamo's PyObject_GetAttr / PyObject_GenericGetAttr.
+#
+# CPython references:
+#   PyObject_GetAttr:        Objects/object.c#L1259-L1283
+#   PyObject_GenericGetAttr: Objects/object.c#L1611-L1683
+#   _PyType_LookupRef:       Objects/typeobject.c#L5208-L5262
+#
+# PyObject_GetAttr(obj, name):
+#     tp = Py_TYPE(obj)
+#     if tp->tp_getattro:
+#         return tp->tp_getattro(obj, name)
+#     ...
+#     raise AttributeError
+#
+# Dispatch path:
+#     LOAD_ATTR / getattr() -> GetAttrBuiltinVariable -> generic_getattr
+#         -> obj.tp_getattro_impl(tx, name)
+#
+# The base VariableTracker.tp_getattro_impl tries object_generic_getattr()
+# first (MRO walk + descriptor protocol), falling back to const_getattr
+# on _UnhandledDescriptorError.  Callers of object_generic_getattr
+# directly must handle _UnhandledDescriptorError at every step (2, 4,
+# and 7), not just for unrecognized descriptor types.
+#
+# VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
+# UserDefinedClassVariable, SuperVariable) override tp_getattro_impl.
+
+_NO_DEFAULT = object()
+
+
+_UnhandledDescriptorError = UnhandledDescriptorError
+
+
+def mro_lookup(py_type: type, name: str) -> object:
+    """Walk py_type.__mro__ to find *name* in the class hierarchy.
+
+    Mirrors CPython's _PyType_LookupRef (Objects/typeobject.c).
+    Searches only the class chain (py_type.__mro__), NOT the metaclass
+    chain.  Returns the raw descriptor/value from the class __dict__,
+    or NO_SUCH_SUBOBJ if not found.
+    """
+    for base in py_type.__mro__:
+        if name in base.__dict__:
+            return base.__dict__[name]
+    return NO_SUCH_SUBOBJ
+
+
+def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
-    iter_: VariableTracker,
-    null_or_idx: VariableTracker,
-) -> tuple[VariableTracker, VariableTracker]:
+    type_attr: object,
+    obj: VariableTracker,
+    class_vt: VariableTracker,
+    source: "Source | None",
+) -> "VariableTracker | None":
+    """Invoke tp_descr_get on a type attribute if it's a descriptor.
+
+    Handles all descriptor types that have dedicated VTs with
+    tp_descr_get_impl.  Returns None if type_attr is not a recognized
+    descriptor type (plain class variable).
     """
-    Mirrors _PyForIter_VirtualIteratorNext.
+    import types as _types
 
-    When ``null_or_idx`` is a tagged int (3.15+ virtual-iter path), dispatch
-    to the iterable's ``_tp_iteritem`` slot via ``tp_iteritem_impl`` and
-    return ``(value, next_index)``.  Otherwise fall back to the standard
-    iterator protocol (``tp_iternext``) and return ``(value, NULL)``.
+    if isinstance(type_attr, property):
+        prop_vt = variables.PropertyVariable(type_attr, source=source)
+        return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.MemberDescriptorType):
+        md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.GetSetDescriptorType):
+        gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+        return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
+    _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
+    if isinstance(type_attr, _tuplegetter):
+        tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+        return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, staticmethod):
+        sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+        return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, classmethod):
+        cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+        return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.ClassMethodDescriptorType):
+        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+        return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.WrapperDescriptorType):
+        wd_vt = variables.WrapperDescriptorVariable(
+            type_attr, owner=class_vt, source=source
+        )
+        return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.MethodDescriptorType):
+        md_vt = variables.MethodDescriptorVariable(
+            type_attr, owner=class_vt, source=source
+        )
+        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.FunctionType):
+        return variables.UserMethodVariable(type_attr, obj, source=source)
 
-    Iterator exhaustion is signaled by ``ObservedUserStopIteration``
-    propagating out of the slot impl, matching the rest of Dynamo's
-    iterator protocol.
+    return None
 
-    https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/ceval.c#L3733
+
+# BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
+# does not handle it, so it falls through to _UnhandledDescriptorError
+# and generic_getattr's GetAttrVariable fallback.
+_METHOD_TYPES = (
+    types.FunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+)
+
+
+def _is_method_type(type_attr: object) -> bool:
+    return isinstance(type_attr, _METHOD_TYPES)
+
+
+def _has_custom_call_method(obj: VariableTracker) -> bool:
+    for cls in type(obj).__mro__:
+        if cls is VariableTracker:
+            return False
+        if "call_method" in cls.__dict__:
+            return True
+    return False
+
+
+def object_generic_getattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> VariableTracker:
+    """Dynamo's PyObject_GenericGetAttr.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
+
+    Implements the standard attribute lookup algorithm using the VT's
+    python_type() for MRO walking, and hooks on the VT for instance dict
+    and __getattr__ fallback.
+
+    Steps:
+      1. MRO walk on python_type() for type_attr
+      2. Data descriptor -> invoke tp_descr_get
+      3. Instance dict -> obj.lookup_instance_dict(tx, name)
+      4. Non-data descriptor -> invoke tp_descr_get
+      5. Plain class variable -> wrap in VT
+      6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
+      7. AttributeError
     """
-    from .misc import NullVariable
+    from .user_defined import is_data_descriptor
 
-    if (
-        not isinstance(null_or_idx, NullVariable)
-        and maybe_get_python_type(null_or_idx) is int
-    ):
-        return iter_.tp_iteritem_impl(tx, null_or_idx)
-    next_ = generic_iternext(tx, iter_)
-    return next_, NullVariable()
+    py_type = obj.python_type()
+    source = obj.source and AttrSource(obj.source, name)
+
+    # Step 1: MRO walk.
+    type_attr = mro_lookup(py_type, name)
+
+    # Step 2: Data descriptor takes priority over instance dict.
+    if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        if result is not None:
+            return result
+        raise _UnhandledDescriptorError(
+            f"object_generic_getattr: unhandled data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
+
+    # Step 3: Instance dict (tp_dictoffset).
+    instance_result = obj.lookup_instance_dict(tx, name)
+    if instance_result is not None:
+        return instance_result
+
+    # Step 4: Non-data descriptor with __get__.
+    if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
+        # If the VT dispatches this method through call_method (a hand-written
+        # override or a tp_methods entry), return a CallMethodVariable that
+        # dispatches through call_method instead of inlining the resolved
+        # method directly.  This preserves custom tracing logic (side effects,
+        # graph nodes, suppression) that MRO-based resolution via
+        # UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and (
+            obj._lookup_tp_table(name, "tp_methods") is not None
+            or _has_custom_call_method(obj)
+        ):
+            return variables.CallMethodVariable(obj, name, source=source)
+
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        if result is not None:
+            return result
+        raise _UnhandledDescriptorError(
+            f"object_generic_getattr: unhandled non-data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
+
+    # Step 5: Plain class variable (no __get__).
+    if type_attr is not NO_SUCH_SUBOBJ:
+        return VariableTracker.build(tx, type_attr, source)
+
+    # Step 6: __getattr__ fallback.
+    getattr_result = obj.call_getattr_fallback(tx, name)
+    if getattr_result is not None:
+        return getattr_result
+
+    # Step 7: Attribute not found -- signal to caller to fall back.
+    raise _UnhandledDescriptorError(
+        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
+    )
+
+
+def generic_getattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+    default: "VariableTracker | object" = _NO_DEFAULT,
+) -> VariableTracker:
+    """Dynamo's PyObject_GetAttr: attribute access dispatch.
+
+    Checks side effects for pending attribute mutations, then dispatches
+    to obj.tp_getattro_impl(tx, name).  On NotImplementedError, falls back
+    to GetAttrVariable (deferred resolution).
+    """
+    from .user_defined import is_data_descriptor
+
+    # NOTE [Tensor "grad" and "_grad" attr]
+    if obj.is_tensor() and name == "_grad":
+        name = "grad"
+
+    # Side effects: check for pending attribute mutations.
+    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+        if not isinstance(obj, variables.UserDefinedObjectVariable):
+            return tx.output.side_effects.load_attr(obj, name)
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            obj, name, AttrMutationKind.INSTANCE_DICT
+        ):
+            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
+            type_attr = obj.lookup_class_mro_attr(name)
+            if not isinstance(value, variables.DeletedVariable) and (
+                type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr)
+            ):
+                return value
+
+    # Handle default for getattr(obj, name, default).
+    if default is not _NO_DEFAULT:
+        hasattr_var = obj.call_obj_hasattr(tx, name)
+        if not hasattr_var.is_constant_match(True, False):
+            raise AssertionError(
+                f"hasattr_var must be a constant True or False, got {hasattr_var}"
+            )
+        if not hasattr_var.as_python_constant():
+            return default  # type: ignore[return-value]
+
+    # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
+    # tp_getattro so a tp_getattro_impl override need not repeat the consult.
+    getset = obj.lookup_tp_getset_member(name)
+    if getset is not None:
+        result = getset.getter(obj, tx)
+        if result is not None:
+            return result
+
+    # Core dispatch: call the VT's tp_getattro_impl (tp_getattro).
+    source = obj.source and AttrSource(obj.source, name)
+    try:
+        return obj.tp_getattro_impl(tx, name)
+    except AsPythonConstantNotImplementedError:
+        raise
+    except NotImplementedError:
+        return variables.GetAttrVariable(obj, name, source=source)

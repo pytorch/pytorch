@@ -546,7 +546,7 @@ struct CodeImpl {
   void emitBailOut(Node* node) {
     auto jf_index = emitGuard(node);
     auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
-    // note, guaded input is already loaded onto the stack
+    // note, guarded input is already loaded onto the stack
     // for GUARD instruction
     emitLoadInputs(node->inputs().slice(2));
     insertInstruction(TAIL_CALL, function_table_.size());

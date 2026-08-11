@@ -57,7 +57,7 @@ PyObject* returned_structseq_repr(PyStructSequence* obj) {
   }
   ss << ')';
 
-  return PyUnicode_FromString(ss.str().c_str());
+  return PyUnicode_FromString(std::move(ss).str().c_str());
 }
 
 } // namespace torch::utils

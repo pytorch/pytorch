@@ -69,6 +69,14 @@ def _make_graph_module(
 
 
 @compatibility(is_backward_compatible=False)
+def _unwrap_lazy_graph_module(gm: GraphModule) -> GraphModule:
+    # torch.jit.script cannot script _LazyGraphModule, so rebuild a plain one
+    if isinstance(gm, _LazyGraphModule):
+        return GraphModule(gm, gm.graph)
+    return gm
+
+
+@compatibility(is_backward_compatible=False)
 class _LazyGraphModule(GraphModule):
     """
     The main difference between _LazyGraphModule and GraphModule is how recompile happens.
