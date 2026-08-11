@@ -219,6 +219,7 @@ class TestPatternMatcherBase(TestCase):
                 line
                 for line in source_code.splitlines()
                 if not any(assert_key in line for assert_key in assert_keywords)
+                and not line.strip().startswith("assert_tensor_metadata(")
             ]
             source_code = "\n".join(filtered_lines)
 
