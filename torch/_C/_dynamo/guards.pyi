@@ -10,6 +10,8 @@ import torch
 # imports
 GuardManagerType: TypeAlias = enum.Enum
 
+def _has_forward_grad(value: torch.Tensor) -> bool: ...
+
 class GlobalStateGuard:
     def check(self) -> bool: ...
     def reason(self) -> str: ...
@@ -309,6 +311,8 @@ class GuardManager:
         user_stack: traceback.StackSummary | None,
         ptype: Any,
         dispatch_keys: Any,
+        forward_ad_active: bool,
+        has_forward_grad: bool,
     ) -> None: ...
     def add_dimension_marking_guard(
         self,

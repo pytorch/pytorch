@@ -70,7 +70,9 @@ class TensorCheck {
       const at::Tensor& v,
       c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      std::optional<bool> forward_ad_active = std::nullopt,
+      std::optional<bool> has_forward_grad = std::nullopt);
 
   TensorCheck(
       const LocalState& state,
@@ -106,6 +108,10 @@ class TensorCheck {
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
   bool requires_grad_;
+  // Forward AD tangents do not affect the dispatch key set, so they need an
+  // explicit guard when tracing happens inside an active dual level.
+  bool forward_ad_active_;
+  bool has_forward_grad_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;
   std::vector<std::optional<c10::SymInt>> strides_;

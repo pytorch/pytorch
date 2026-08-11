@@ -8577,9 +8577,37 @@ SavedForBackwardsAOTOutput(idx=5)""",
         def fn(x):
             return (x**2).sum()
 
-        cnt = torch._dynamo.testing.CompileCounter()
         x = torch.tensor([0.1, 0.2, 0.3])
         v = torch.ones(3)
+
+        # A graph compiled outside a dual level must not be reused after a
+        # level is entered: its generated code only computes primals.
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, v)
+            expected = fwAD.unpack_dual(fn(dual)).tangent
+            out = compiled_fn(dual)
+            self.assertEqual(fwAD.unpack_dual(out).tangent, expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Tensor guards also distinguish primals from dual tensors when both
+        # calls happen within the same active level.
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        with fwAD.dual_level():
+            compiled_fn = torch.compile(fn, backend=cnt)
+            self.assertEqual(compiled_fn(x), fn(x))
+            dual = fwAD.make_dual(x, v)
+            expected = fwAD.unpack_dual(fn(dual)).tangent
+            out = compiled_fn(dual)
+            self.assertEqual(fwAD.unpack_dual(out).tangent, expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
         with fwAD.dual_level():
             dual = fwAD.make_dual(x, v)
             expected = fwAD.unpack_dual(fn(dual)).tangent

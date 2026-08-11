@@ -503,6 +503,48 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
+    def test_tensor_match_forward_ad(self):
+        def f(x: torch.Tensor):
+            return x + 1
+
+        x = torch.ones(2)
+        with torch.autograd.forward_ad.dual_level():
+            ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+            dual = torch.autograd.forward_ad.make_dual(x, torch.ones_like(x))
+            self._test_check_fn(ref, loaded, {"x": dual}, False)
+
+            guards_state = self._cached_guards_state
+            f_code = self._cached_f_code
+
+        # Guard trees can be reconstructed in a different forward-AD state
+        # when loading a compile package. The reconstructed tensor guard must
+        # retain the state from tracing rather than infer it while loading.
+        loaded_state = torch._dynamo.package.load_guards_state(guards_state)
+        loaded_outside_level = torch._dynamo.package.load_guard_manager(
+            loaded_state, f_code, f.__globals__
+        )
+        self.assertFalse(loaded_outside_level.check({"x": x}))
+
+        with torch.autograd.forward_ad.dual_level():
+            self.assertTrue(loaded_outside_level.check({"x": x}))
+            dual = torch.autograd.forward_ad.make_dual(x, torch.ones_like(x))
+            self.assertFalse(loaded_outside_level.check({"x": dual}))
+
+        ref, _ = self._test_serialization("TENSOR_MATCH", f, x)
+        guards_state = self._cached_guards_state
+        f_code = self._cached_f_code
+        with torch.autograd.forward_ad.dual_level():
+            loaded_state = torch._dynamo.package.load_guards_state(guards_state)
+            loaded_inside_level = torch._dynamo.package.load_guard_manager(
+                loaded_state, f_code, f.__globals__
+            )
+            self.assertFalse(loaded_inside_level.check({"x": x}))
+
+        self.assertTrue(ref.check({"x": x}))
+        self.assertTrue(loaded_inside_level.check({"x": x}))
+
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):

@@ -28,6 +28,7 @@ from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._functorch.apis import _DYNAMO_WRAPPER_ATTRS
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -6240,6 +6241,80 @@ class GraphModule(torch.nn.Module):
             "Calling torch.func.jvp\\(compiled_fn\\) function from eager mode is not supported",
         ):
             torch.func.jvp(fn, (x,), (x,))
+
+    def test_forward_ad_dual_input_inductor_after_warmup(self):
+        if not torch._dynamo.is_inductor_supported():
+            raise unittest.SkipTest("requires inductor")
+
+        def fn(x):
+            return (x**2).sum()
+
+        x = torch.tensor([0.1, 0.2, 0.3])
+        v = torch.ones(3)
+
+        # Cover both transitions that can expose a cached primal-only graph:
+        # entering a dual level after warmup, and attaching a tangent while
+        # staying inside the same level.
+        for warmup_inside_dual_level in (False, True):
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            if not warmup_inside_dual_level:
+                self.assertEqual(compiled_fn(x), fn(x))
+
+            with torch.autograd.forward_ad.dual_level():
+                if warmup_inside_dual_level:
+                    self.assertEqual(compiled_fn(x), fn(x))
+                dual = torch.autograd.forward_ad.make_dual(x, v)
+                tangent = torch.autograd.forward_ad.unpack_dual(
+                    compiled_fn(dual)
+                ).tangent
+
+            self.assertEqual(tangent, torch.tensor(1.2))
+
+    def test_forward_ad_dual_input_inductor_frozen_cache_hit(self):
+        if not torch._dynamo.is_inductor_supported():
+            raise unittest.SkipTest("requires inductor")
+
+        class ModuleWithParam(nn.Module):
+            def __init__(self, weight) -> None:
+                super().__init__()
+                self.weight = nn.Parameter(torch.tensor(weight))
+                self.weight.requires_grad_(False)
+
+            def forward(self, x):
+                return (x * self.weight).sum()
+
+        x = torch.tensor([0.1, 0.2, 0.3])
+        v = torch.ones(3)
+
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(fx_graph_cache=True, freezing=True),
+        ):
+            counters.clear()
+            fn = torch.compile(
+                ModuleWithParam([2.0, 3.0, 4.0]).eval(),
+                backend="inductor",
+            )
+            self.assertEqual(fn(x), torch.tensor(2.0))
+
+            torch._dynamo.reset()
+            fn = torch.compile(
+                ModuleWithParam([5.0, 6.0, 7.0]).eval(),
+                backend="inductor",
+            )
+            self.assertEqual(fn(x), torch.tensor(3.8))
+            self.assertGreaterEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+            with torch.autograd.forward_ad.dual_level():
+                dual = torch.autograd.forward_ad.make_dual(x, v)
+                out = fn(dual)
+                tangent = torch.autograd.forward_ad.unpack_dual(out).tangent
+
+            # The tangent must come from the current module, not the weights
+            # associated with the cache entry populated above.
+            self.assertEqual(tangent, torch.tensor(18.0))
 
     @config.patch(error_on_recompile=True)
     def test_grad_recompile(self):

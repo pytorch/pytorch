@@ -213,6 +213,8 @@ class SizesStridesInfo(TypedDict):
     stride: TensorMetadataSequence
     values_size: NotRequired[TensorMetadataSequence]
     values_stride: NotRequired[TensorMetadataSequence]
+    forward_ad_active: NotRequired[bool]
+    has_forward_grad: NotRequired[bool]
 
 
 class CodeOptions(TypedDict):

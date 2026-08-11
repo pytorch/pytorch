@@ -11,6 +11,7 @@
 #include <fmt/format.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -182,12 +183,22 @@ TensorCheck::TensorCheck(
     const at::Tensor& v,
     c10::DispatchKeySet dispatch_key_set,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    std::optional<bool> forward_ad_active,
+    std::optional<bool> has_forward_grad)
     : pytype(pt),
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
       device_index_(v.device().index()),
       requires_grad_(v.requires_grad()),
+      forward_ad_active_(
+          forward_ad_active.has_value()
+              ? *forward_ad_active
+              : torch::autograd::ForwardADLevel::has_any_level()),
+      has_forward_grad_(
+          has_forward_grad.has_value()
+              ? *has_forward_grad
+              : forward_ad_active_ && v._fw_grad(/*level=*/0).defined()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {
@@ -209,6 +220,8 @@ TensorCheck::TensorCheck(
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
+      forward_ad_active_(false),
+      has_forward_grad_(false),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
@@ -216,6 +229,14 @@ TensorCheck::TensorCheck(
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
+  const bool forward_ad_active =
+      torch::autograd::ForwardADLevel::has_any_level();
+  if (forward_ad_active_ != forward_ad_active ||
+      (forward_ad_active &&
+       has_forward_grad_ != v._fw_grad(/*level=*/0).defined())) {
+    return false;
+  }
+
   // In terms of a sparse_csr tensor, it does not support strides information
   c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
   bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
@@ -279,7 +300,14 @@ std::string TensorCheck::check_verbose(
     const std::string& tensor_name) {
   std::stringstream fail_reason;
   fail_reason << "tensor '" << tensor_name << "' ";
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+  const bool forward_ad_active =
+      torch::autograd::ForwardADLevel::has_any_level();
+  if (forward_ad_active_ != forward_ad_active ||
+      (forward_ad_active &&
+       has_forward_grad_ != v._fw_grad(/*level=*/0).defined())) {
+    fail_reason << "forward AD state mismatch";
+    return std::move(fail_reason).str();
+  } else if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
     // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
@@ -695,6 +723,7 @@ struct GlobalStateGuard {
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
     _default_dtype = at::get_default_dtype();
+    _forward_ad_active = torch::autograd::ForwardADLevel::has_any_level();
   }
 
   bool check() const {
@@ -713,7 +742,9 @@ struct GlobalStateGuard {
                  at::Float32Precision::TF32) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
-            _num_threads == at::get_num_threads()) &&
+            _num_threads == at::get_num_threads() &&
+            _forward_ad_active ==
+                torch::autograd::ForwardADLevel::has_any_level()) &&
         _default_dtype == at::get_default_dtype();
   }
 
@@ -745,6 +776,8 @@ struct GlobalStateGuard {
       os << "num_threads ";
     if (_default_dtype != at::get_default_dtype())
       os << "default_dtype ";
+    if (_forward_ad_active != torch::autograd::ForwardADLevel::has_any_level())
+      os << "forward_ad_active ";
     return std::move(os).str();
   }
 
@@ -764,6 +797,7 @@ struct GlobalStateGuard {
         static_cast<int64_t>(json_t._allow_bf16_reduce);
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
+    json_j["forward_ad_active"] = json_t._forward_ad_active;
   }
 
   template <typename T>
@@ -784,6 +818,7 @@ struct GlobalStateGuard {
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
+    json_t._forward_ad_active = json_j.value("forward_ad_active", false);
   }
 
   bool _grad_mode;
@@ -797,6 +832,7 @@ struct GlobalStateGuard {
   at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
+  bool _forward_ad_active;
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 
@@ -5130,7 +5166,9 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts,
       py::object user_stack,
       py::object pytype,
-      py::object dispatch_keys)
+      py::object dispatch_keys,
+      bool forward_ad_active,
+      bool has_forward_grad)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
@@ -5165,7 +5203,9 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        forward_ad_active,
+        has_forward_grad);
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -7566,6 +7606,9 @@ PyObject* torch_c_dynamo_guards_init() {
   }
 
   auto py_m = py::handle(m).cast<py::module>();
+  py_m.def("_has_forward_grad", [](const at::Tensor& value) {
+    return value._fw_grad(/*level=*/0).defined();
+  });
   py::class_<GuardDebugInfo, std::unique_ptr<GuardDebugInfo>>(
       py_m, "GuardDebugInfo")
       .def(py::init<bool, py::list, int>())
@@ -7759,7 +7802,9 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object,
            py::type,
-           py::object>())
+           py::object,
+           bool,
+           bool>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
@@ -8283,7 +8328,9 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack,
              py::object pytype,
-             py::object dispatch_keys) -> void {
+             py::object dispatch_keys,
+             bool forward_ad_active,
+             bool has_forward_grad) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
@@ -8294,7 +8341,9 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts),
                 std::move(user_stack),
                 std::move(pytype),
-                std::move(dispatch_keys)));
+                std::move(dispatch_keys),
+                forward_ad_active,
+                has_forward_grad));
           })
 
       // return by reference because GuardManager has the ownership of accessors

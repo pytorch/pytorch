@@ -3763,6 +3763,16 @@ class GuardBuilder(GuardBuilderBase):
                 ]
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
+                forward_ad_active = metadata.get("forward_ad_active")
+                has_forward_grad = metadata.get("has_forward_grad")
+                if forward_ad_active is None or has_forward_grad is None:
+                    forward_ad_active = output_graph.dual_level >= 0
+                    has_forward_grad = (
+                        forward_ad_active
+                        and torch._C._dynamo.guards._has_forward_grad(value)
+                    )
+                    metadata["forward_ad_active"] = forward_ad_active
+                    metadata["has_forward_grad"] = has_forward_grad
 
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
@@ -3785,6 +3795,8 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    forward_ad_active,
+                    has_forward_grad,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
