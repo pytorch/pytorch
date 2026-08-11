@@ -53,7 +53,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties, serialize_triton_constexpr, TritonMeta
+from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -347,6 +347,118 @@ def user_defined_kernel_grid_fn_code(
                 writeline(statement, f"if {guards}: return {example_grid}")
 
     return fn_name, output.getvalue()
+
+
+def _is_namedtuple_type(cls: object) -> bool:
+    """True for collections.namedtuple / typing.NamedTuple classes."""
+    fields = getattr(cls, "_fields", None)
+    return (
+        isinstance(cls, type)
+        and issubclass(cls, tuple)
+        and isinstance(fields, tuple)
+        and all(isinstance(field, str) for field in fields)
+    )
+
+
+def _is_namedtuple_instance(value: object) -> bool:
+    """True for collections.namedtuple / typing.NamedTuple instances."""
+    return _is_namedtuple_type(type(value))
+
+
+def _collect_namedtuple_types(value: Any, seen: OrderedSet[type] | None = None) -> list[type]:
+    """Return NamedTuple types referenced by ``value``, dependencies first.
+
+    Used so generated Triton modules can eval ``triton_meta={...!r}`` when a
+    user passes a NamedTuple as a ``tl.constexpr`` (see #192288).
+    """
+    if seen is None:
+        seen = OrderedSet()
+    result: list[type] = []
+
+    def visit(obj: Any) -> None:
+        if _is_namedtuple_instance(obj):
+            cls = type(obj)
+            # Nested NamedTuple fields first so parents can reference them.
+            for field_name in cls._fields:
+                visit(getattr(obj, field_name))
+            if cls not in seen:
+                seen.add(cls)
+                result.append(cls)
+            return
+        if isinstance(obj, dict):
+            for item in obj.values():
+                visit(item)
+            return
+        if isinstance(obj, (list, tuple)):
+            for item in obj:
+                visit(item)
+
+    visit(value)
+    return result
+
+
+def _namedtuple_type_is_importable(cls: type) -> bool:
+    """Whether ``from {module} import {name}`` reconstructs ``cls``."""
+    mod_name = getattr(cls, "__module__", None)
+    name = getattr(cls, "__name__", None)
+    qualname = getattr(cls, "__qualname__", name)
+    if not mod_name or not name or qualname != name:
+        # Nested / local classes (``qualname`` contains ``.`` / ``<locals>``)
+        # are not importable as top-level names.
+        return False
+    if mod_name in ("__main__", "builtins") or mod_name.startswith("__"):
+        return False
+    try:
+        module = __import__(mod_name, fromlist=[name])
+    except Exception:
+        return False
+    return getattr(module, name, None) is cls
+
+
+def codegen_namedtuple_defs(constants: dict[str, Any] | Any) -> str:
+    """Emit NamedTuple imports/defs so ``repr`` of constexpr constants can eval.
+
+    Prefers ``from user_module import TypeName`` when the type is a top-level
+    importable symbol; otherwise reconstructs with ``collections.namedtuple``
+    so field/attribute access matches the eager NamedTuple.
+    """
+    # Accept either the constants dict or a single value for unit tests.
+    if isinstance(constants, dict):
+        types: list[type] = []
+        seen: OrderedSet[type] = OrderedSet()
+        for value in constants.values():
+            for cls in _collect_namedtuple_types(value, seen):
+                types.append(cls)
+    else:
+        types = _collect_namedtuple_types(constants)
+
+    if not types:
+        return ""
+
+    buf = IndentedBuffer()
+    needs_collections = False
+    lines: list[str] = []
+    emitted_names: OrderedSet[str] = OrderedSet()
+    for cls in types:
+        name = cls.__name__
+        if name in emitted_names:
+            # Two distinct NamedTuple classes sharing __name__ cannot both be
+            # bound under that name; skip the duplicate (repr would be ambiguous).
+            continue
+        if _namedtuple_type_is_importable(cls):
+            lines.append(f"from {cls.__module__} import {name}")
+        else:
+            fields = list(cls._fields)
+            needs_collections = True
+            lines.append(f"{name} = collections.namedtuple({name!r}, {fields!r})")
+        emitted_names.add(name)
+
+    if needs_collections:
+        buf.writeline("import collections")
+    for line in lines:
+        buf.writeline(line)
+    buf.newline()
+    return buf.getvalue()
 
 
 def user_defined_triton_kernel_transitive_closure_source_code(
@@ -3504,9 +3616,10 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
-                    # NamedTuple constexprs must be rewritten so ``triton_meta={...!r}``
-                    # emits importable Python (see serialize_triton_constexpr / #192288).
-                    constants[arg.name] = serialize_triton_constexpr(kwargs[arg.name])
+                    # Keep NamedTuple constexprs as-is; codegen_namedtuple_defs emits
+                    # their type into the generated module so triton_meta={...!r} evals
+                    # (see #192288). Do not substitute a non-tuple stand-in.
+                    constants[arg.name] = kwargs[arg.name]
 
             else:
                 # the only case where arg name isn't in kwargs, should be
@@ -3751,6 +3864,10 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        # NamedTuple tl.constexpr values stringify as TypeName(...); emit the
+        # type so triton_meta={triton_meta!r} can eval in this module (#192288).
+        if namedtuple_defs := codegen_namedtuple_defs(triton_meta.get("constants", {})):
+            compile_wrapper.splice(namedtuple_defs)
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 

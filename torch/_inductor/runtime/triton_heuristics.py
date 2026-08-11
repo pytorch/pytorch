@@ -232,6 +232,34 @@ def _host_tma_aligned(tensor, name):
     return tensor.clone()
 
 
+def _add_namedtuple_types_to_scope(value: Any, scope: dict[str, Any]) -> None:
+    """Bind NamedTuple types into launcher ``exec`` scope for ``repr`` inlining.
+
+    ``_convert_constant`` embeds constexpr values via ``repr``. NamedTuple
+    reprs reference their type name (``MatrixStrides(batch=8, ...)``), so the
+    type must exist in the launcher scope. Mirrors ``codegen_namedtuple_defs``
+    in the generated Triton module (#192288).
+    """
+    fields = getattr(type(value), "_fields", None)
+    if (
+        isinstance(value, tuple)
+        and isinstance(fields, tuple)
+        and all(isinstance(field, str) for field in fields)
+    ):
+        cls = type(value)
+        scope.setdefault(cls.__name__, cls)
+        for field_name in fields:
+            _add_namedtuple_types_to_scope(getattr(value, field_name), scope)
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _add_namedtuple_types_to_scope(item, scope)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _add_namedtuple_types_to_scope(item, scope)
+
+
 def autotune_hints_to_configs(
     hints: OrderedSet[AutotuneHint],
     size_hints,
@@ -3255,6 +3283,8 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
+        # NamedTuple constexprs are inlined via repr into launcher source.
+        _add_namedtuple_types_to_scope(compile_meta.get("constants", {}), scope)
 
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
