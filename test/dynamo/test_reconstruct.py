@@ -7,12 +7,13 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import IS_FBCODE
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import IS_FBCODE, HardwareClassification
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def _filter_instructions(instructions, opname):
@@ -20,6 +21,8 @@ def _filter_instructions(instructions, opname):
 
 
 class ReconstructTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def register_bytecode_hook(self, fn):
         def hook(code, out_code):
@@ -501,52 +504,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(gn(inp), inp + 3)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @unittest.skipIf(
-        not has_triton_experimental_host_tma(),
-        "Test requires triton.tools.experimental_descriptor API",
-    )
-    def test_tma_experimental_reconstruct(self):
-        import triton
-
-        def create_tma(tensor):
-            tma = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-                tensor.data_ptr(),
-                tensor.size(0),
-                tensor.size(1),
-                32,
-                32,
-                tensor.element_size(),
-            )
-            return tensor + 1, tma
-
-        x = torch.randn(128, 128, device=GPU_TYPE)
-
-        ref = create_tma(x)
-        res = torch.compile(create_tma, backend="eager")(x)
-        self.assertEqual(ref[1].desc, res[1].desc)
-
-    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @unittest.skipIf(
-        not has_triton_tensor_descriptor_host_tma(),
-        "Test requires triton.tools.tensor_descriptor API",
-    )
-    def test_tma_stable_reconstruct(self):
-        import triton
-
-        def create_tma(tensor):
-            tma = triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(
-                tensor,
-                [32, 32],
-            )
-            return tensor + 1, tma
-
-        x = torch.randn(128, 128, device=GPU_TYPE)
-
-        ref = create_tma(x)
-        res = torch.compile(create_tma, backend="eager")(x)
-        self.assertEqual(ref, res)
-
     def test_self_referential_sourceful(self):
         l = []
         l.append((0, l))
@@ -712,6 +669,62 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         # AsPythonConstantNotImplementedError("self-referential").
         self.assertEqual(child.as_python_constant(), 42)
         self.assertTrue(child.is_python_constant())
+
+class ReconstructTestDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "Test requires triton.tools.experimental_descriptor API",
+    )
+    def test_tma_experimental_reconstruct(self, device):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
+                tensor.data_ptr(),
+                tensor.size(0),
+                tensor.size(1),
+                32,
+                32,
+                tensor.element_size(),
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device=device)
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend="eager")(x)
+        self.assertEqual(ref[1].desc, res[1].desc)
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "Test requires triton.tools.tensor_descriptor API",
+    )
+    def test_tma_stable_reconstruct(self, device):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(
+                tensor,
+                [32, 32],
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device=device)
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend="eager")(x)
+        self.assertEqual(ref, res)
+
+instantiate_device_type_tests(
+    ReconstructTestDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
