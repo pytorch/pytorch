@@ -482,6 +482,10 @@ class TestRegistryRuntime(TestCase):
         cond_calls = [0]
 
         def cond(*a, **k):
+            # Reached only from the re-entrant call the shortcut triggers, so
+            # the guard must be held here: this also fails if the shortcut is
+            # removed and cond is consulted directly.
+            self.assertTrue(getattr(self.registry._router_active, "on", False))
             cond_calls[0] += 1
             return False
 
@@ -502,7 +506,7 @@ class TestRegistryRuntime(TestCase):
             out = torch.ops.aten.mul.Tensor(a, b)
 
         self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
-        # Eager dispatch ran (cond consulted) exactly once: no re-entry.
+        # Eager dispatch ran (cond consulted) exactly once: no runaway re-entry.
         self.assertEqual(cond_calls[0], 1)
 
     def test_dynamo_shortcut_still_fires_for_outer_call(self):

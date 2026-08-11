@@ -945,31 +945,33 @@ def _register_overrides_from_graph(
     def eager_router(
         keyset, *args, _fallback=fallback_kernel, _aten_overload=overload, **kwargs
     ):
-        # This branch is only safe while Dynamo is actively tracing this Python
-        # router. The broader compile-session flag can be true when this router
-        # executes eagerly; redispatching to aten there would re-enter us.
-        #
-        # `is_dynamo_compiling()` cannot tell those apart on its own: it is
-        # not a runtime flag but `return False`, which Dynamo folds to a True
-        # constant at trace time (tracing_state_functions in
-        # _dynamo/variables/torch.py). A frame carrying that folded constant
-        # can still execute eagerly -- then `_aten_overload(...)` re-enters
-        # the dispatcher from the top, lands back in this router, and
-        # recurses until RecursionError. Reproduced by OpInfo
-        # test_out_warning_scatter_add under PYTORCH_TEST_WITH_INDUCTOR once
-        # a native override is installed for the op.
-        #
-        # `_router_active` breaks that cycle: the outer call takes the
-        # shortcut (so real tracing still records the plain aten op and
-        # avoids the graph breaks of #186354), and a re-entrant call falls
-        # through to normal eager dispatch below. Deliberately narrow -- the
-        # trace-time behavior the flag exists for is unchanged, since under
-        # tracing the overload call does not come back here.
-        #
-        # COW state is guarded by Dynamo's _is_cow_tensor handler but is not
-        # modeled in the compiled graph. If a COW input reaches this router,
-        # keep the existing eager path so COW-preserving fallback semantics are
-        # maintained instead of compiling through aten and materializing it.
+        """Boxed eager kernel: divert to aten while Dynamo traces, else dispatch.
+
+        The aten shortcut is only safe while Dynamo is actively tracing this
+        Python router. The broader compile-session flag can be true when this
+        router executes eagerly; redispatching to aten there would re-enter us.
+
+        `is_dynamo_compiling()` cannot tell those apart on its own: it is not a
+        runtime flag but `return False`, which Dynamo folds to a True constant
+        at trace time (tracing_state_functions in _dynamo/variables/torch.py).
+        A frame carrying that folded constant can still execute eagerly -- then
+        `_aten_overload(...)` re-enters the dispatcher from the top, lands back
+        in this router, and recurses until RecursionError. Reproduced by OpInfo
+        test_out_warning_scatter_add under PYTORCH_TEST_WITH_INDUCTOR once a
+        native override is installed for the op.
+
+        `_router_active` breaks that cycle: the outer call takes the shortcut
+        (so real tracing still records the plain aten op and avoids the graph
+        breaks of #186354), and a re-entrant call falls through to normal eager
+        dispatch below. Deliberately narrow -- the trace-time behavior the flag
+        exists for is unchanged, since under tracing the overload call does not
+        come back here.
+
+        COW state is guarded by Dynamo's _is_cow_tensor handler but is not
+        modeled in the compiled graph. If a COW input reaches this router, keep
+        the existing eager path so COW-preserving fallback semantics are
+        maintained instead of compiling through aten and materializing it.
+        """
         if (
             torch.compiler.is_dynamo_compiling()
             and _aten_overload is not None
