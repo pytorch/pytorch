@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
@@ -242,6 +243,8 @@ class TestPatternMatcherBase(TestCase):
 
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_conv_unary_base(self, dim=4):
         if dim != 4 and dim != 5:
             raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
@@ -728,6 +731,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 class TestPatternMatcher(TestPatternMatcherBase):
     # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
     # See issue #168635 and its sub-issues.
+    hw_classification = HardwareClassification.CPU
+
     @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
@@ -1736,6 +1741,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
 
 class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.ctx_stack.enter_context(
@@ -1855,10 +1862,10 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
 
 instantiate_device_type_tests(
-    TestPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
+    TestPatternMatcherGeneric, globals(), except_for="cuda", allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestDynamicPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
+    TestDynamicPatternMatcherGeneric, globals(), except_for="cuda", allow_xpu=True
 )
 instantiate_parametrized_tests(TestPatternMatcher)
 if __name__ == "__main__":
