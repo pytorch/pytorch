@@ -29,13 +29,19 @@ from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import IS_LINUX, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    run_tests,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
-device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+device_type = getattr(
+    torch.accelerator.current_accelerator(), "type", "cpu"
+)
 
 DIM = 2000
 
@@ -79,6 +85,8 @@ class MultiProcessInductorTestCase(DistributedTestBase, InductorTestCase):
 
 
 class ReplicateTest(MultiProcessInductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return min(2, torch.accelerator.device_count())
@@ -394,6 +402,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 
 class DDP_TP_Test(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.rank = 0
