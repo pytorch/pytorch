@@ -474,6 +474,7 @@ def _load_device_backend(device: str) -> None:
     _discover_device_backend_entrypoints()
     loader = _device_backend_loaders.get(device)
     if loader is None:
+        _loaded_device_backends.discard(device)
         return
     try:
         loader()
