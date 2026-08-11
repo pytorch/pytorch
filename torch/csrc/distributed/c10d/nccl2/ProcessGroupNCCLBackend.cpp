@@ -16,6 +16,7 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -150,6 +151,32 @@ c10::intrusive_ptr<::c10d::Backend::Options> ProcessGroupNCCL::
       options_c10d_);
 }
 
+void ProcessGroupNCCL::startTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  TORCH_CHECK(
+      init_state_ == InitializationState::INITIALIZED,
+      "NCCL time estimation requires an initialized communicator");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+#else
+  TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
+#endif
+}
+
+float ProcessGroupNCCL::endTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->groupSimulateEnd(&simInfo),
+      "NCCL GroupSimulateEnd failed");
+  return simInfo.estimatedTime;
+#else
+  TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
+#endif
+}
+
 void ProcessGroupNCCL::setTimeout(std::chrono::milliseconds timeout) {
   options_c10d_->timeout = timeout;
 }
@@ -159,7 +186,18 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 void ProcessGroupNCCL::runAbortHooks() {
-  for (const auto& [_, hook] : abortHooks_) {
+  // Snapshot rather than hold the lock across the hooks: a hook may
+  // unregister itself, and the FlightRecorder hook blocks other threads for the
+  // length of its dump, which must not also block an unrelated unregister.
+  std::vector<::c10d::AbortHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
+    hooks.reserve(abortHooks_.size());
+    for (const auto& [_, hook] : abortHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  for (const auto& hook : hooks) {
     try {
       hook();
     } catch (const std::exception& e) {
@@ -173,11 +211,59 @@ void ProcessGroupNCCL::runAbortHooks() {
 void ProcessGroupNCCL::registerAbortHook(
     int64_t hook_id,
     ::c10d::AbortHook hook) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.emplace(hook_id, std::move(hook));
 }
 
 void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.erase(hook_id);
+}
+
+bool ProcessGroupNCCL::hasCompletionHooks() {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  return !completionHooks_.empty();
+}
+
+void ProcessGroupNCCL::runCompletionHooks(
+    const ::c10d::Work* work,
+    std::optional<float> duration_ms) {
+  // Snapshot rather than hold the lock across the hooks, and for a harder
+  // reason than runAbortHooks has: a hook's owner unregisters with its own lock
+  // held (c10d::FlightRecorderHook::remove does), so calling into a hook while
+  // holding completion_hooks_mutex_ would be the reverse order and deadlock.
+  std::vector<::c10d::CompletionHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+    hooks.reserve(completionHooks_.size());
+    for (const auto& [_, hook] : completionHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  ::c10d::CompletionHookArgs args;
+  args.work = work;
+  args.duration_ms = duration_ms;
+  for (const auto& hook : hooks) {
+    try {
+      hook(args);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "[TC] Completion hook threw exception: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "[TC] Completion hook threw unknown exception.";
+    }
+  }
+}
+
+void ProcessGroupNCCL::registerCompletionHook(
+    int64_t hook_id,
+    ::c10d::CompletionHook hook) {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  completionHooks_.emplace(hook_id, std::move(hook));
+}
+
+void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  completionHooks_.erase(hook_id);
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -220,6 +306,53 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
         });
   }();
   return allocator;
+}
+
+bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  return ::c10d::cuda::deviceSupportsMulticast(deviceIdx);
+}
+
+at::Tensor ProcessGroupNCCL::allocateTensor(
+    long size,
+    at::TensorOptions options) {
+  TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
+  auto device = options.device();
+  TORCH_CHECK_VALUE(
+      device.is_cuda(),
+      "NCCL tensor allocator expects a CUDA device but got ",
+      device);
+  if (!device.has_index()) {
+    device = getBoundDeviceId().value_or(
+        at::Device(at::kCUDA, at::cuda::current_device()));
+    options = options.device(device);
+  }
+  TORCH_CHECK(
+      supportsTensorAlloc(device.index()),
+      "NCCL tensor allocation is not supported on ",
+      device);
+
+  ensureInitialized(device);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  if (!memPool_) {
+    auto allocator = std::static_pointer_cast<
+        c10::cuda::CUDACachingAllocator::CUDAAllocator>(getMemAllocator());
+    auto pool = std::make_unique<at::cuda::MemPool>(std::move(allocator));
+    registerMemPool(pool.get(), /*symm=*/false);
+    memPool_ = std::move(pool);
+  }
+
+  auto threadId = std::this_thread::get_id();
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      memPool_->device(), memPool_->id(), [threadId](cudaStream_t) {
+        return std::this_thread::get_id() == threadId;
+      });
+  auto tensor = at::empty({size}, options);
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(
+      memPool_->device(), memPool_->id());
+  c10::cuda::CUDACachingAllocator::releasePool(
+      memPool_->device(), memPool_->id());
+  return tensor;
 }
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(

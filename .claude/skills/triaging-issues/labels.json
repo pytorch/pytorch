@@ -692,6 +692,10 @@
       "description": "Related to torch.optim"
     },
     {
+      "name": "module: package/deploy",
+      "description": "Add issue/PR to torch.package TODO board"
+    },
+    {
       "name": "module: padding",
       "description": ""
     },
@@ -1042,10 +1046,6 @@
     {
       "name": "oncall: mobile",
       "description": "Related to mobile support, including iOS and Android"
-    },
-    {
-      "name": "oncall: package/deploy",
-      "description": "Add issue/PR to torch.package TODO board"
     },
     {
       "name": "oncall: profiler",

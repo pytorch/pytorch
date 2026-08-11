@@ -33,7 +33,7 @@ class AotDeclaration(Protocol):
     # validating loader defaults it to _DEFAULT_ARCHS and materializes
     # it, so loaded declarations always carry it (consumers read
     # d.ARCHS directly, never getattr). Export skips (declaration x
-    # arch) pairs outside it; codegen emits a runtime gate from the
+    # arch) pairs outside it; gen_aot_lib emits a runtime gate from the
     # intersection of ARCHS with the arches actually shipped.
     ARCHS: tuple[str, ...]
 
@@ -88,8 +88,8 @@ def load_by_path(name: str, path: str):
 
     THE canonical copy for native-AOT code: torchgen ships in the wheel,
     so tools/ and torch/ can both reach it. (tools/shared/module_loader.py
-    looks equivalent but is unreachable from either -- tools/ is not a
-    wheel package.)
+    looks equivalent, but tools/ is not a wheel package, so neither
+    installed torchgen nor torch can import it.)
 
     By path rather than by import because declaration modules must load
     where their package is not importable: torchgen reads
