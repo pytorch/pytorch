@@ -17,11 +17,17 @@ from torch._inductor.virtualized import V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
+def gemm_epilogue_op_scope(
+    cute: Any, *, mlir_math: Any | None = None
+) -> dict[str, Any]:
     import operator
 
     import cutlass
-    from cutlass._mlir.dialects import math as mlir_math
+
+    if mlir_math is None:
+        from cutlass._mlir.dialects import math as default_mlir_math
+
+        mlir_math = default_mlir_math
 
     def sigmoid(x: Any) -> Any:
         return 1.0 / (1.0 + cute.math.exp(-x))
@@ -41,7 +47,9 @@ def gemm_epilogue_op_scope(cute: Any) -> dict[str, Any]:
     }
 
 
-def materialize_epilogue_function(source: str, cute: Any) -> Any:
+def materialize_epilogue_function(
+    source: str, cute: Any, *, mlir_math: Any | None = None
+) -> Any:
     function_names = [
         node.name
         for node in ast.parse(source).body
@@ -49,7 +57,7 @@ def materialize_epilogue_function(source: str, cute: Any) -> Any:
     ]
     if len(function_names) != 1:
         raise NotImplementedError("expected one GEMM epilogue function")
-    scope = gemm_epilogue_op_scope(cute)
+    scope = gemm_epilogue_op_scope(cute, mlir_math=mlir_math)
     exec(source, scope)
     return scope[function_names[0]]
 

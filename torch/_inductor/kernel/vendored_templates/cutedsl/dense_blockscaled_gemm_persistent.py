@@ -351,10 +351,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
 
         # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
         # Cross-warp reductions need up to three Float32 partial/feed values per N column.
-        local_reduce_smem_bytes = (
-            self.cta_tile_shape_mnk[1] * 3 * 4
-            if self.has_cross_warp_local_reduce
-            else 0
+        self.local_reduce_elements = (
+            self.cta_tile_shape_mnk[1] * 3 if self.has_cross_warp_local_reduce else 1
         )
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
@@ -368,7 +366,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.sf_vec_size,
             self.smem_capacity,
             self.occupancy,
-            local_reduce_smem_bytes,
+            self.local_reduce_elements,
         )
 
         # Prefetch depth = AB pipeline depth.
@@ -746,11 +744,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             sf_dtype=self.sf_dtype,
             sfa_elements=cute.cosize(self.sfa_smem_layout_staged),
             sfb_elements=cute.cosize(self.sfb_smem_layout_staged),
-            local_reduce_elements=(
-                self.cta_tile_shape_mnk[1] * 3
-                if self.has_cross_warp_local_reduce
-                else 1
-            ),
+            local_reduce_elements=self.local_reduce_elements,
         )
 
         # Launch the kernel synchronously
@@ -2414,7 +2408,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         sf_vec_size: int,
         smem_capacity: int,
         occupancy: int,
-        local_reduce_smem_bytes: int,
+        local_reduce_elements: int,
     ) -> Tuple[int, int, int]:
         """Computes the number of stages for A/B/C operands based on heuristics.
 
@@ -2440,8 +2434,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :type smem_capacity: int
         :param occupancy: Target number of CTAs per SM (occupancy).
         :type occupancy: int
-        :param local_reduce_smem_bytes: Cross-warp reduction scratch size in bytes.
-        :type local_reduce_smem_bytes: int
+        :param local_reduce_elements: Cross-warp reduction scratch size in
+            Float32 elements.
+        :type local_reduce_elements: int
 
         :return: A tuple containing the computed number of stages for:
                  (ACC stages, A/B operand stages, C stages)
@@ -2498,7 +2493,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         sfa_elements = cute.cosize(sfa_smem_layout_staged_one)
         sfb_elements = cute.cosize(sfb_smem_layout_staged_one)
         c_elements = cute.cosize(c_smem_layout_staged_one.outer)
-        local_reduce_elements = max(1, local_reduce_smem_bytes // 4)
         smem_per_cta = smem_capacity // occupancy
 
         def storage_bytes(ab_stages, c_stages):
