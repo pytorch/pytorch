@@ -1488,6 +1488,18 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_tensors_aligned_at_indices",
+      [](py::list& tensors, py::list& indices, int64_t alignment) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) % alignment != 0) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+  m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",
       [](py::dict& metadata, c10::Storage s) {
         auto dtype_arg = metadata["dtype"].ptr();
