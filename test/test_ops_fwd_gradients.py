@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     run_tests,
     skipIfTorchInductor,
@@ -60,6 +61,8 @@ _fwd_grad_all = {
 
 @unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Test that forward-over-reverse gradgrad is computed correctly
     @skipOps(
         _fwd_grad_all
