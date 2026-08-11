@@ -626,16 +626,12 @@ instantiate_device_type_tests(
     TestDistributedStateDictSaveLoadWithSharedTensor,
     globals(),
     except_for="cpu",
-    allow_xpu=True,
 )
-instantiate_device_type_tests(
-    TestDistributedReshardOnLoad, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestDistributedReshardOnLoad, globals(), except_for="cpu")
 instantiate_device_type_tests(
     TestDistributedStateDictSaveLoadWithCaching,
     globals(),
     except_for="cpu",
-    allow_xpu=True,
 )
 
 if __name__ == "__main__":
