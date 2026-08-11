@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
 if torch.distributed.is_available():
     from torch.distributed.tensor import DTensor, Replicate, Shard
     from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -29,6 +28,8 @@ if torch.distributed.is_available():
 else:
     DTensorTestBase = TestCase  # type: ignore[assignment, misc]
     with_comms = lambda fn: fn  # type: ignore[assignment]  # noqa: E731
+
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 @instantiate_parametrized_tests
@@ -902,6 +903,7 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(compiled_result.to_local(), eager_result.to_local())
         self.assertEqual(compiled_output, expected)
 
+instantiate_device_type_tests(TestHopPrintDTensor, globals())
 
 if __name__ == "__main__":
     run_tests()
