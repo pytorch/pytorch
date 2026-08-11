@@ -614,7 +614,7 @@ def _get_module_path_and_prefix(
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
 ) -> tuple[str, str]:
-    """Given and observer node, get the `Scope` or the fully qualified name for
+    """Given an observer node, get the `Scope` or the fully qualified name for
     the submodule containing the observed node, also return a prefix of "_input"
     when the observed node is an input of a F.linear op, and not the output of another
     quantized op.
@@ -698,7 +698,7 @@ def convert_standalone_module(
     is_reference: bool,
     backend_config: BackendConfig | None,
 ) -> None:
-    """Converts a observed standalone module to a quantized standalone module by calling
+    """Converts an observed standalone module to a quantized standalone module by calling
     the fx convert api, currently using the same `is_reference` flag as parent, but we may
     changing this behavior in the future (e.g. separating quantization and lowering for
     standalone module as well)

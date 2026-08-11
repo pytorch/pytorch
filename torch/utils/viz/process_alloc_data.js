@@ -233,6 +233,20 @@ function format_user_metadata(user_metadata) {
 }
 
 /**
+ * Formats post-facto annotations (from torch.cuda.memory._annotate_memory)
+ * attached to an allocation as a display string. Returns '' if none.
+ *
+ * @param {string[]|null|undefined} annotations
+ * @returns {string}
+ */
+function format_annotations(annotations) {
+  if (!annotations || annotations.length === 0) {
+    return '';
+  }
+  return 'Annotations:\n' + annotations.map(a => `  ${a}`).join('\n');
+}
+
+/**
  * Formats the forward-pass stack trace (captured via torch.autograd) as a
  * display string showing where a tensor was originally created.
  *
@@ -427,6 +441,14 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         elements.push(e);
         addr_to_alloc[e.addr] = elements.length - 1;
         actions.push(elements.length - 1);
+        break;
+      case 'annotate':
+        // Post-facto annotation (torch.cuda.memory._annotate_memory):
+        // attach to the live element for this address, if we saw its alloc.
+        if (!plot_segments && e.addr in addr_to_alloc) {
+          const elem = elements[addr_to_alloc[e.addr]];
+          (elem.annotations ??= []).push(e.user_metadata);
+        }
         break;
       case free:
       case free_completed:
@@ -1107,6 +1129,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       if (user_metadata_str) {
         text = `${text}\n${user_metadata_str}`;
       }
+      const annotations_str = format_annotations(elem.annotations);
+      if (annotations_str) {
+        text = `${text}\n${annotations_str}`;
+      }
       text = `${text}\n${format_frames(elem.frames)}`;
       text = `${text}${format_forward_frames(elem.forward_frames)}`;
       return text;
@@ -1116,4 +1142,4 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
 export { process_alloc_data, isPrivatePoolId, formatSize, formatAddr,
          elideRepeats, frameFilter, format_user_metadata,
-         format_forward_frames, format_frames };
+         format_annotations, format_forward_frames, format_frames };
