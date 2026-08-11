@@ -6372,6 +6372,37 @@ Done""",
                     out.backward()
             self.assertIn("MyFunc.apply", str(w[0].message))
 
+    @parametrize(
+        "initial_mode, backward_mode, should_raise",
+        [(True, False, False), (False, True, True)],
+    )
+    def test_anomaly_mode_changed_in_backward(
+        self, initial_mode, backward_mode, should_raise
+    ):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                torch.autograd.set_detect_anomaly(backward_mode)
+                return torch.full_like(grad, float("nan"))
+
+        inp = torch.ones(1, requires_grad=True)
+        with torch.autograd.set_detect_anomaly(initial_mode):
+            if should_raise:
+                with self.assertWarnsRegex(
+                    UserWarning, "No forward pass information available"
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Function 'MyFuncBackward' returned nan values in its 0th output.",
+                    ):
+                        MyFunc.apply(inp).sum().backward()
+            else:
+                MyFunc.apply(inp).sum().backward()
+
     def test_calculate_shape_util(self):
         out = torch.randn(10, 5, requires_grad=True)
         grad = torch.randn(5, 10, requires_grad=True)
