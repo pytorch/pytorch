@@ -279,6 +279,9 @@ def fn_prepped_for_autograd(
 @dataclass
 class JointFnHandle:
     post_forward: Callable[..., Any] | None = None
+    # Full permutation of the joint function's primal inputs in the order that
+    # their gradient edges become ready during the traced backward.
+    backward_input_order: list[int] | None = None
 
 
 # Given a fn, computes the joint.
@@ -385,6 +388,20 @@ def create_joint(
                 )
                 needed_tangents.append(tangent)
 
+        grad_primal_indices = [
+            i for i, needs_grad in enumerate(inputs_needs_grads) if needs_grad
+        ]
+        observed_input_order = []
+        observed_inputs = set()
+
+        def make_order_hook(input_idx: int) -> Callable[[Tensor], None]:
+            def record_input_order(_grad: Tensor) -> None:
+                if input_idx not in observed_inputs:
+                    observed_inputs.add(input_idx)
+                    observed_input_order.append(input_idx)
+
+            return record_input_order
+
         setup_stacktrace_preservation_hooks(
             [out.grad_fn for out in needed_outs if out.grad_fn is not None]
         )
@@ -416,6 +433,13 @@ def create_joint(
                 fx_traceback.preserve_node_meta(),
                 ExitStack() as stack,
             ):
+                for primal, input_idx in zip(
+                    grad_primals, grad_primal_indices, strict=True
+                ):
+                    stack.callback(
+                        primal.register_hook(make_order_hook(input_idx)).remove
+                    )
+
                 backward_pass_autocast = torch._functorch.config.backward_pass_autocast
                 if backward_pass_autocast == "same_as_forward":
                     # Use the ambient autocast mode(s)
@@ -456,6 +480,15 @@ def create_joint(
                         grad_outputs=needed_tangents,
                         allow_unused=True,
                     )
+            # Python autograd.Function validates the order against every
+            # forward argument before filtering out non-Tensor inputs and
+            # invalid next edges, so retain a complete input permutation.
+            unobserved_inputs = [
+                i for i in range(len(primals)) if i not in observed_inputs
+            ]
+            joint_fn_handle.backward_input_order = (
+                observed_input_order + unobserved_inputs
+            )
         backward_out_iter = iter(backward_out)
         final_outs = (
             outs,

@@ -3617,6 +3617,14 @@ class _AOTDispatchAutogradFunctionFactory:
                     disable_amp=disable_amp,
                 )
 
+        # backward() results must stay in forward-input order so each gradient
+        # reaches the right input. This changes only the engine's edge-visiting
+        # order to recover the scheduling priority hidden by graph compilation.
+        if CompiledFunction.metadata.backward_output_order is not None:
+            CompiledFunction._backward_next_edges_order = (  # type: ignore[attr-defined]
+                CompiledFunction.metadata.backward_output_order
+            )
+
         return CompiledFunction
 
 

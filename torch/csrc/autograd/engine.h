@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -86,21 +87,35 @@ class CheckpointValidGuard {
 
 struct ReadyQueue {
  private:
+  struct NodeTaskWithOrder {
+    NodeTask task;
+    uint64_t enqueue_order{0};
+  };
+
   // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-  // Shutdown tasks are first and then empty NodeTask are next.
+  // Shutdown tasks are first and then empty NodeTask are next. For normal
+  // tasks, prefer higher reentrant depths and sequence numbers, then preserve
+  // FIFO order for exact ties.
   struct CompareNodeTaskTime {
-    bool operator()(NodeTask const& t1, NodeTask const& t2) {
+    bool operator()(NodeTaskWithOrder const& t1, NodeTaskWithOrder const& t2) {
+      const auto& task1 = t1.task;
+      const auto& task2 = t2.task;
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (t2.isShutdownTask_) {
+      if (task2.isShutdownTask_) {
         return true;
-      } else if (!t1.fn_ || t1.isShutdownTask_) {
+      } else if (!task1.fn_ || task1.isShutdownTask_) {
         return false;
-      } else if (!t2.fn_) {
+      } else if (!task2.fn_) {
         return true;
-      } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
-        return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
+      } else if (task1.getReentrantDepth() == task2.getReentrantDepth()) {
+        const auto sequence_nr1 = task1.fn_->sequence_nr();
+        const auto sequence_nr2 = task2.fn_->sequence_nr();
+        if (sequence_nr1 == sequence_nr2) {
+          return t1.enqueue_order > t2.enqueue_order;
+        }
+        return sequence_nr1 < sequence_nr2;
       } else {
-        return t1.getReentrantDepth() < t2.getReentrantDepth();
+        return task1.getReentrantDepth() < task2.getReentrantDepth();
       }
     }
   };
@@ -110,8 +125,12 @@ struct ReadyQueue {
   // To protect read and writes to heap_
   mutable std::mutex mutex_;
 
-  std::priority_queue<NodeTask, std::vector<NodeTask>, CompareNodeTaskTime>
+  std::priority_queue<
+      NodeTaskWithOrder,
+      std::vector<NodeTaskWithOrder>,
+      CompareNodeTaskTime>
       heap_;
+  uint64_t next_enqueue_order_{0};
 
  public:
   // incrementOutstandingTasks indicates whether or not we should increment

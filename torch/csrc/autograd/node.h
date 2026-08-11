@@ -11,6 +11,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PyObjectSlot.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -336,6 +337,21 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
 
   uint32_t num_outputs() const noexcept {
     return next_edges_.size();
+  }
+
+  // A Node's output index has two roles: outputs[i] is accumulated along
+  // next_edge(i), and the engine normally visits next edges in that same index
+  // order when scheduling them. The first role cannot be reordered. For
+  // example, autograd.Function backward result i is the gradient for forward
+  // input i, so swapping results would send gradients to the wrong inputs.
+  //
+  // Some composite Nodes collapse a graph whose next edges had a different
+  // eager scheduling priority. Such Nodes can override this method to change
+  // only the engine's visitation order while preserving output-to-edge
+  // mapping. A nonempty result must be a permutation of next_edges() indices;
+  // an empty result selects the natural index order.
+  virtual c10::ArrayRef<uint32_t> next_edges_order() const noexcept {
+    return c10::ArrayRef<uint32_t>();
   }
 
   // Miscellaneous Methods

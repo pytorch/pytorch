@@ -535,6 +535,19 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+    backward_input_order = joint_fn_handle.backward_input_order
+    if backward_input_order is not None:
+        if len(backward_input_order) != len(fw_metadata.input_info):
+            raise AssertionError(
+                "expected backward input order to have one entry per input, "
+                f"got {len(backward_input_order)} entries for "
+                f"{len(fw_metadata.input_info)} inputs"
+            )
+        fw_metadata.backward_output_order = (
+            None
+            if backward_input_order == list(range(len(backward_input_order)))
+            else backward_input_order
+        )
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

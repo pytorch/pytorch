@@ -998,6 +998,298 @@ def forward(self, L_x_ : torch.Tensor):
                 with compiled_bwd_ctx:
                     test_fn(compiled_fn)
 
+    def test_post_acc_grad_hook_tiebreaker_order_matches_eager(self):
+        x = torch.randn(10, 10)
+
+        def get_order(module_factory, backend=None, args=(), compiled_bwd_backend=None):
+            module = module_factory()
+            hook_order = []
+
+            def hook(param, idx):
+                hook_order.append(idx)
+
+            for idx, param in enumerate(module.parameters()):
+                param.register_post_accumulate_grad_hook(
+                    functools.partial(hook, idx=idx)
+                )
+
+            fn = module
+            if backend is not None:
+                fn = torch.compile(module, backend=backend, fullgraph=True)
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend=compiled_bwd_backend, fullgraph=True)
+                )
+                if compiled_bwd_backend is not None
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                fn(x, *args).sum().backward()
+            return hook_order
+
+        def reordered_layers():
+            class ReorderedLayers(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer0 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer1 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer2 = torch.nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    x = self.layer1(x)
+                    x = self.layer0(x)
+                    x = self.layer2(x)
+                    return x
+
+            return ReorderedLayers()
+
+        def linear_with_bias():
+            return torch.nn.Linear(10, 10, bias=True)
+
+        def many_layers():
+            return torch.nn.Sequential(
+                *(torch.nn.Linear(10, 10, bias=False) for _ in range(5))
+            )
+
+        def reordered_layers_with_scale():
+            class ReorderedLayersWithScale(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer0 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer1 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer2 = torch.nn.Linear(10, 10, bias=False)
+
+                def forward(self, x, scale):
+                    x = self.layer1(x)
+                    x = scale * self.layer0(x)
+                    x = self.layer2(x)
+                    return x
+
+            return ReorderedLayersWithScale()
+
+        for module_factory, args in (
+            (reordered_layers, ()),
+            (linear_with_bias, ()),
+            (many_layers, ()),
+            (reordered_layers_with_scale, (2.0,)),
+        ):
+            eager_order = get_order(module_factory, args=args)
+            self.assertEqual(
+                get_order(module_factory, "aot_eager", args=args), eager_order
+            )
+            self.assertEqual(
+                get_order(
+                    module_factory,
+                    "aot_eager",
+                    args=args,
+                    compiled_bwd_backend="aot_eager",
+                ),
+                eager_order,
+            )
+
+    def test_post_acc_grad_hook_order_preserves_eager_graph_scheduling(self):
+        def get_order(fn, compiled_bwd=False):
+            leaves = [torch.randn(4, requires_grad=True) for _ in range(3)]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                compiled_fn(*leaves).sum().backward()
+            return hook_order
+
+        def cat(a, b, c):
+            return torch.cat((a, b, c))
+
+        def stack(a, b, c):
+            return torch.stack((a, b, c))
+
+        def nested_add(a, b, c):
+            return a + b + c
+
+        def unused_input(a, b, c):
+            return b * c
+
+        for fn in (cat, stack, nested_add, unused_input):
+            with self.subTest(fn=fn.__name__):
+                eager_order = []
+                leaves = [torch.randn(4, requires_grad=True) for _ in range(3)]
+                for idx, leaf in enumerate(leaves):
+                    leaf.register_post_accumulate_grad_hook(
+                        lambda _param, idx=idx: eager_order.append(idx)
+                    )
+                fn(*leaves).sum().backward()
+
+                self.assertEqual(get_order(fn), eager_order)
+                self.assertEqual(get_order(fn, compiled_bwd=True), eager_order)
+
+    def test_post_acc_grad_hook_order_multiple_aot_regions(self):
+        def get_order(compiled_bwd):
+            leaves = [torch.randn(4, requires_grad=True) for _ in range(4)]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            region = torch.compile(
+                lambda a, b: (a * b).sin(), backend="aot_eager", fullgraph=True
+            )
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                (
+                    region(leaves[0], leaves[1]) + region(leaves[2], leaves[3])
+                ).sum().backward()
+            return hook_order
+
+        self.assertEqual(get_order(compiled_bwd=True), get_order(compiled_bwd=False))
+
+    def test_post_acc_grad_hook_order_tensor_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def fn(a, b, c):
+            return a + b + c
+
+        def get_order(backend=None, compiled_bwd=False):
+            leaves = [
+                TwoTensor(
+                    torch.randn(4, requires_grad=True),
+                    torch.randn(4, requires_grad=True),
+                )
+                for _ in range(3)
+            ]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            compiled_fn = (
+                torch.compile(fn, backend=backend, fullgraph=True)
+                if backend is not None
+                else fn
+            )
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                compiled_fn(*leaves).sum().backward()
+            return hook_order
+
+        eager_order = get_order()
+        self.assertEqual(get_order("aot_eager"), eager_order)
+        self.assertEqual(get_order("aot_eager", compiled_bwd=True), eager_order)
+
+    def test_post_acc_grad_hook_explicit_order(self):
+        class DistinctOrderedFunction(torch.autograd.Function):
+            _backward_next_edges_order = [2, 1, 0]
+
+            @staticmethod
+            def forward(a, b, c):
+                return a + b + c
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad, grad
+
+        class OrderedFunction(torch.autograd.Function):
+            _backward_next_edges_order = [4, 0, 1, 3, 2]
+
+            @staticmethod
+            def forward(a, b, a_again, c, d):
+                return a + b + a_again + c + d
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad, grad, grad, grad
+
+        def get_order(function, input_indices, compiled_bwd):
+            leaves = [torch.randn((), requires_grad=True) for _ in range(4)]
+            hook_order = []
+            for idx, leaf in enumerate(leaves):
+                leaf.register_post_accumulate_grad_hook(
+                    lambda _param, idx=idx: hook_order.append(idx)
+                )
+
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled_bwd
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                function.apply(*(leaves[i] for i in input_indices)).backward()
+            return hook_order
+
+        for function, input_indices, expected in (
+            (DistinctOrderedFunction, (0, 1, 2), [2, 1, 0]),
+            (OrderedFunction, (0, 1, 0, 2, 3), [3, 1, 2, 0]),
+        ):
+            with self.subTest(function=function.__name__):
+                self.assertEqual(
+                    get_order(function, input_indices, compiled_bwd=False), expected
+                )
+                self.assertEqual(
+                    get_order(function, input_indices, compiled_bwd=True), expected
+                )
+
+    def test_aot_compiled_autograd_preserves_tensor_hook_gradient(self):
+        def get_hook_observation(compiled):
+            def fn(x):
+                return x * 2
+
+            leaf = torch.randn(4, requires_grad=True)
+            observations = []
+            leaf.register_hook(
+                lambda grad: observations.append(grad._base is None) or grad
+            )
+            compiled_fn = (
+                torch.compile(fn, backend="aot_eager", fullgraph=True)
+                if compiled
+                else fn
+            )
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                )
+                if compiled
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                compiled_fn(leaf).sum().backward()
+            return observations
+
+        self.assertEqual(get_hook_observation(True), get_hook_observation(False))
+
     def test_recompile(self):
         def hook(param):
             param.grad *= 2

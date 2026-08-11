@@ -6,8 +6,11 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <cstdint>
+#include <queue>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 /*
@@ -65,6 +68,22 @@ constexpr std::string_view _TURN_OFF_COMPILED_AUTOGRAD_MSG = R"(
 
 std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
   return std::string(_TURN_OFF_COMPILED_AUTOGRAD_MSG);
+}
+
+template <typename Fn>
+void for_each_next_edge_index(const Node& node, Fn fn) {
+  const auto output_order = node.next_edges_order();
+  if (output_order.empty()) {
+    for (const auto i : c10::irange(node.next_edges().size())) {
+      fn(i);
+    }
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(output_order.size() == node.next_edges().size());
+  for (const auto i : output_order) {
+    TORCH_INTERNAL_ASSERT(i < node.next_edges().size());
+    fn(i);
+  }
 }
 
 } // namespace
@@ -890,7 +909,24 @@ static CacheNode* _compiled_autograd_impl(
   std::unordered_map<Node*, int> visited_dependencies;
   visited_dependencies.reserve(dependencies.size());
 
-  std::vector<c10::intrusive_ptr<Node>> worklist{graph_root};
+  // Mirror ReadyQueue ordering within this GraphTask: higher sequence numbers
+  // run first, and next-edge visitation order breaks exact ties.
+  using NodeWithOrder = std::pair<c10::intrusive_ptr<Node>, uint64_t>;
+  auto compare_seq_nr = [](const NodeWithOrder& n1, const NodeWithOrder& n2) {
+    const auto sequence_nr1 = n1.first->sequence_nr();
+    const auto sequence_nr2 = n2.first->sequence_nr();
+    if (sequence_nr1 == sequence_nr2) {
+      return n1.second > n2.second;
+    }
+    return sequence_nr1 < sequence_nr2;
+  };
+  std::priority_queue<
+      NodeWithOrder,
+      std::vector<NodeWithOrder>,
+      decltype(compare_seq_nr)>
+      worklist(compare_seq_nr);
+  uint64_t next_enqueue_order = 0;
+  worklist.emplace(graph_root, next_enqueue_order++);
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
   for (const auto i : c10::irange(output_edges.size())) {
@@ -909,8 +945,8 @@ static CacheNode* _compiled_autograd_impl(
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   std::optional<std::string> compile_reason;
   while (!worklist.empty()) {
-    c10::intrusive_ptr<Node> fn = std::move(worklist.back());
-    worklist.pop_back();
+    c10::intrusive_ptr<Node> fn = worklist.top().first;
+    worklist.pop();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     ordered_calls.emplace_back(&call);
 
@@ -923,6 +959,10 @@ static CacheNode* _compiled_autograd_impl(
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
+        const auto output_order = fn->next_edges_order();
+        if (!output_order.empty()) {
+          node_args.collect(output_order);
+        }
       }
       CacheKey key = node_args.key();
       if (vlogger.has_value() && !compile_reason.has_value()) {
@@ -939,26 +979,27 @@ static CacheNode* _compiled_autograd_impl(
       cache = cache->lookup(key);
     }
 
-    for (const auto& edge : fn->next_edges()) {
+    for_each_next_edge_index(*fn, [&](size_t i) {
+      const auto& edge = fn->next_edge(i);
       if (!edge.is_valid()) {
-        continue;
+        return;
       }
       if (check_exec_info) {
         auto it = graph_task.exec_info_.find(edge.function.get());
         if (it == graph_task.exec_info_.end() || !it->second.should_execute()) {
-          continue;
+          return;
         }
         if (!it->second.needed_) {
           compiler_call.node_calls.lookup(edge.function).needed = false;
         }
       }
       auto it = dependencies.find(edge.function.get());
-      int count = ++visited_dependencies[it->first];
+      int count{++visited_dependencies[it->first]};
       TORCH_INTERNAL_ASSERT(count <= it->second);
       if (count == it->second) {
-        worklist.emplace_back(edge.function);
+        worklist.emplace(edge.function, next_enqueue_order++);
       }
-    }
+    });
     i++;
   }
 
@@ -1121,7 +1162,7 @@ static CacheNode* _compiled_autograd_impl(
         }
         outputs = THPVariable_UnpackList(pyoutputs);
       }
-      for (const auto i : c10::irange(outputs.size())) {
+      for_each_next_edge_index(*call.node, [&](size_t i) {
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
@@ -1129,7 +1170,7 @@ static CacheNode* _compiled_autograd_impl(
           buffer.buffer[next.input_nr] = call_accumulate(
               py_compiler, buffer.buffer[next.input_nr], output);
         }
-      }
+      });
     }
 
     PyObject* res = check(call_end_capture(py_compiler, state.outputs));
