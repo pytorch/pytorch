@@ -555,9 +555,9 @@ class NVSHMEMSignalNegativeTest(MultiProcessTestCase):
 
         # Host-side TORCH_CHECKs, no kernel is launched.
         for bad_rank in (-1, self.world_size):
-            with self.assertRaisesRegex(RuntimeError, "invalid dst_rank"):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
                 hdl.put_signal(dst_rank=bad_rank)
-            with self.assertRaisesRegex(RuntimeError, "invalid src_rank"):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
                 hdl.wait_signal(src_rank=bad_rank)
         torch.cuda.synchronize()
 

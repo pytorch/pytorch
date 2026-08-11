@@ -288,10 +288,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   void put_signal(int dst_rank, int channel, size_t timeout_ms) override {
-    TORCH_CHECK(
-        dst_rank >= 0 && dst_rank < pai_->world_size_,
-        "put_signal: invalid dst_rank ",
-        dst_rank);
+    check_rank(dst_rank, pai_->world_size_);
     TORCH_CHECK(
         pai_->signal_pads_[dst_rank] != nullptr,
         "NVSHMEMSymmetricMemory::put_signal requires the destination rank to "
@@ -308,10 +305,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override {
-    TORCH_CHECK(
-        src_rank >= 0 && src_rank < pai_->world_size_,
-        "wait_signal: invalid src_rank ",
-        src_rank);
+    check_rank(src_rank, pai_->world_size_);
     TORCH_CHECK(
         pai_->signal_pads_[src_rank] != nullptr,
         "NVSHMEMSymmetricMemory::wait_signal requires the source rank to be "
