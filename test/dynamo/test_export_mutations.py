@@ -4,10 +4,12 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
 
 
 class MutationExportTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def check_failure_on_export(self, mod, *args):
         with self.assertRaises(AssertionError):
             torch._dynamo.export(mod)(*args)
