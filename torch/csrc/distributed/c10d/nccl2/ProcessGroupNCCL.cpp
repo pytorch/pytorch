@@ -559,8 +559,8 @@ void ProcessGroupNCCL::finalize() {
     try {
       deregisterMemPool(memPool_.get());
     } catch (const std::exception& error) {
-      TC_LOG(ERROR, this)
-          << "Failed to deregister tensor allocation pool: " << error.what();
+      TC_LOG(ERROR, this) << "Failed to deregister tensor allocation pool: "
+                          << error.what();
     }
   }
 

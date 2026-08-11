@@ -96,9 +96,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         backend = dist.get_backend_impl(device=self.device)
         if not backend.supports_tensor_alloc(self.device):
             self.skipTest("multicast support is not available")
-        tensor = backend.allocate_tensor(
-            1024, dtype=torch.float32, device=self.device
-        )
+        tensor = backend.allocate_tensor(1024, dtype=torch.float32, device=self.device)
         tensor.fill_(self.rank)
         dist.all_reduce(tensor)
         self.assertEqual(
