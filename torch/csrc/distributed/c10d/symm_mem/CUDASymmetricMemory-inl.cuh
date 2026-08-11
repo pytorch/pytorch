@@ -173,6 +173,88 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
   }
 }
 
+#if defined(USE_ROCM) || !defined(NVCC_SUPPORTS_MULTICAST)
+__device__ __forceinline__ void multimem_red_add1_release_u32(uint32_t* addr) {
+  (void)addr;
+  CUDA_KERNEL_ASSERT(false);
+}
+
+__device__ __forceinline__ uint32_t ld_acquire_sys_u32(uint32_t* addr) {
+  (void)addr;
+  CUDA_KERNEL_ASSERT(false);
+  return 0;
+}
+
+__device__ __forceinline__ void red_sub_relaxed_sys_u32(
+    uint32_t* addr,
+    uint32_t val) {
+  (void)addr;
+  (void)val;
+  CUDA_KERNEL_ASSERT(false);
+}
+#else
+__device__ __forceinline__ void multimem_red_add1_release_u32(uint32_t* addr) {
+  asm("multimem.red.release.sys.global.add.u32 [%0], 1;"
+      :
+      : "l"(addr)
+      : "memory");
+}
+
+__device__ __forceinline__ uint32_t ld_acquire_sys_u32(uint32_t* addr) {
+  ::cuda::atomic_ref<uint32_t, ::cuda::thread_scope_system> ref(*addr);
+  return ref.load(::cuda::std::memory_order_acquire);
+}
+
+__device__ __forceinline__ void red_sub_relaxed_sys_u32(
+    uint32_t* addr,
+    uint32_t val) {
+  asm("red.relaxed.sys.global.add.u32 [%0], %1;"
+      :
+      : "l"(addr), "r"(0U - val)
+      : "memory");
+}
+#endif
+
+__device__ __forceinline__ bool wait_wrap_ge_u32(
+    uint32_t* addr,
+    uint32_t val,
+    size_t timeout_ms) {
+  size_t deadline = global_timer_ns() + timeout_ms * ns_per_ms;
+  while (ld_acquire_sys_u32(addr) < val) {
+    if (timeout_ms != 0 && global_timer_ns() > deadline) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[maybe_unused]] static __global__ void multimem_barrier_kernel(
+    uint32_t* local_signal_pad,
+    uint32_t* mc_signal_pad,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x == 0) {
+    auto local_flag_ptr = local_signal_pad + world_size * channel;
+    auto mc_flag_ptr = mc_signal_pad + world_size * channel;
+    multimem_red_add1_release_u32(mc_flag_ptr);
+    auto wait_success = wait_wrap_ge_u32(
+        local_flag_ptr, static_cast<uint32_t>(world_size), timeout_ms);
+    if (!wait_success) {
+      printf(
+          "[FATAL] SymmetricMemory::barrier: rank %d failed to observe "
+          "multimem barrier completion on channel %d after %lu milliseconds\n",
+          rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+    red_sub_relaxed_sys_u32(
+        local_flag_ptr, static_cast<uint32_t>(world_size));
+  }
+}
+
 // Synchronizes blocks with matching blockIdx across participating devices.
 // Note: sync_remote_block itself is not a system level barrier/fence. It is a
 // building block for expressing different synchronization patterns.
