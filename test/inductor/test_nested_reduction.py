@@ -781,6 +781,21 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
+    def test_nested_reduction_rejects_shifted_parent_output(self):
+        import torch.nn.functional as F
+
+        B, D, G = 4, 1024, 16
+
+        def f(x):
+            y = F.rms_norm(x, (D,))
+            shifted = torch.roll(y, 1, -1)
+            scale = shifted.view(B, D // G, G).abs().amax(dim=-1)
+            return y, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+
     @inductor_config.patch(emulate_precision_casts=True)
     @parametrize(
         "weight_layout",
@@ -1187,6 +1202,45 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, weight))
         self.check_fusion()
 
+    def test_producer_consumer_parent_full_intermediate(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            source = yg + scale.unsqueeze(-1)
+            pairs = source.view(B, D // G, G // 2, 2)
+            return pairs[..., 0] + 2 * pairs[..., 1], scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        expected = f(x, weight)
+        actual, sources = run_and_get_code(torch.compile(f), x, weight)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+
+    def test_producer_consumer_independent_sub_parent_source(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight, z):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            return (pairs[..., 0] + 2 * pairs[..., 1] + z) / scale.unsqueeze(-1)
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        z = torch.randn(B, D // G, G // 2, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight, z))
+        self.check_fusion()
+
     def test_producer_consumer_rejects_shifted_parent_full_intermediate(self):
         import torch.nn.functional as F
 
@@ -1409,6 +1463,24 @@ class _NestedReductionBase:
         compiled = torch.compile(f, fullgraph=True)
         for x in inputs:
             self.assertEqual(compiled(x), f(x), atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+
+    def test_independent_sub_parent_source(self):
+        B, D = 4, 512
+
+        def f(x, z):
+            y = torch.sin(z)
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            x_pairs = x.view(B, D // 2, 2)
+            y_pairs = y.view(B, D // 2, 2)
+            scale = scale.unsqueeze(-1)
+            even = (x_pairs[..., 0] + y_pairs[..., 0]).float() / scale
+            odd = (x_pairs[..., 1] + y_pairs[..., 1]).float() / scale
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        z = torch.randn_like(x)
+        self.check_nested_matches_unnested(f, (x, z))
         self.check_fusion()
 
     def _standalone_sub_parent_graph(self, B=32, D=1024, G=16):
@@ -1738,6 +1810,22 @@ class _NestedReductionBase:
             even = xg[..., 0].float() / scale_f
             odd = xg[..., 1].float() / scale_f
             return even, odd, scale, side
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_standalone_sub_parent_rejects_shifted_reduction_output(self):
+        B, D = 4, 512
+
+        def f(x):
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            shifted_scale = torch.roll(scale, 1).unsqueeze(-1)
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / shifted_scale
+            odd = pairs[..., 1].float() / shifted_scale
+            return even, odd, scale
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_numeric(f, (x,))
@@ -2490,11 +2578,11 @@ class _InternalsBase:
         self.assertEqual(len(set(store_ids)), num_outputs)
 
     def check_kernel_meta(
-        self, kernel_code: str, *, num_inputs: int, num_outputs: int
+        self, kernel_code: str, *, num_inputs: int, num_stores: int
     ) -> None:
         FileCheck().check_count(
             f"'num_load': {num_inputs}", 1, exactly=True
-        ).check_count(f"'num_store': {num_outputs}", 1, exactly=True).run(kernel_code)
+        ).check_count(f"'num_store': {num_stores}", 1, exactly=True).run(kernel_code)
 
     def check_axis_classification_contract(
         self,
@@ -2548,7 +2636,11 @@ class _InternalsBase:
         self.check_kernel_meta(
             kernel_code,
             num_inputs=meta_load,
-            num_outputs=num_outputs,
+            num_stores=(
+                num_store_instructions
+                if num_store_instructions is not None
+                else num_outputs
+            ),
         )
         if num_allocs is None:
             num_allocs = num_outputs
@@ -2763,7 +2855,7 @@ class _InternalsBase:
         self.check_kernel_meta(
             kernel_code,
             num_inputs=looped_or_persistent(3, 1),
-            num_outputs=2,
+            num_stores=2,
         )
         self.check_code(wrapper_code, num_kernels=1, num_allocs=2, num_deallocs=1)
         self.check_axis_classification_contract(
