@@ -377,7 +377,11 @@ class TestScheduler(TestCase):
         with (
             V.set_graph_handler(graph),
             patch.object(NestedReduction, "is_candidate", return_value=True),
-            patch.object(NestedReduction, "can_fuse", return_value=True),
+            patch.object(
+                NestedReduction,
+                "plan",
+                return_value=Mock(sub_parent_stages=()),
+            ),
         ):
             names = scheduler._nested_index_equivalent_dep_names(producer, consumer)
         expected = OrderedSet(["buf"]) if write_kind == "dense" else OrderedSet()
@@ -401,7 +405,11 @@ class TestScheduler(TestCase):
         with (
             V.set_graph_handler(graph),
             patch.object(NestedReduction, "is_candidate", return_value=True),
-            patch.object(NestedReduction, "can_fuse", return_value=True),
+            patch.object(
+                NestedReduction,
+                "plan",
+                return_value=Mock(sub_parent_stages=()),
+            ),
         ):
             names = scheduler._nested_index_equivalent_dep_names(producer, consumer)
         self.assertEqual(names, OrderedSet())

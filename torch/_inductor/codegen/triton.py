@@ -3294,8 +3294,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
-        # Both this map and body are kernel-lifetime state. Keeping them together
-        # lets derived iteration families safely deduplicate prologue constants.
+        # Both this map and body are kernel-lifetime state, so derived families
+        # can share function-scope constants.
         self._named_constants: dict[str, str] = {}
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
@@ -6164,8 +6164,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """Split a trailing axis into ``len(names)`` lanes.
 
         ``tl.split`` only ever yields two values, so a factor above 2 is built
-        as a binary tree. Float8 goes through uint8 because ``tl.split`` does
-        not accept fp8 operands.
+        as a binary tree. ``names`` stays in logical lane order throughout the
+        recursion. Float8 goes through uint8 because ``tl.split`` does not
+        accept fp8 operands.
         """
         factor = len(names)
         assert factor > 1 and factor & (factor - 1) == 0  # noqa: S101
@@ -7830,7 +7831,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _codegen_named_constant(
         self, sym: sympy.Symbol, expr: sympy.Expr, constexpr: bool
     ) -> None:
-        """Emit a loop-invariant named constant into the kernel prologue."""
+        """Emit a loop-invariant named constant at kernel-function scope."""
         name = str(sym)
         annotation = ": tl.constexpr" if constexpr else ""
         line = f"{name}{annotation} = {self.index_to_str(expr)}"
