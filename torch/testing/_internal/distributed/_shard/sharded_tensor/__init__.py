@@ -22,7 +22,10 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return TEST_GPU_NUM
 
     def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi", "hccl", "xccl"]:
+        # Ask the distributed framework rather than matching a fixed list, so a
+        # backend registered by an out-of-tree device is accepted the same way
+        # the built-in ones are.
+        if not dist.is_backend_available(backend):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
@@ -32,13 +35,15 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             init_method=f"file://{self.file_name}",
         )
 
-        # Set the per-rank device for the current accelerator backend.
+        # Set the per-rank device when the process group runs on the current
+        # accelerator's own backend. gloo is excluded: it is the default backend
+        # for cpu and mps, and carries no per-rank accelerator device index.
         accelerator = torch.accelerator.current_accelerator()
         if accelerator is not None:
             device_type = accelerator.type
-            # Keep the existing HPU/HCCL behavior unchanged.
-            if device_type != "hpu" and backend == dist.get_default_backend_for_device(
-                device_type
+            if (
+                backend == dist.get_default_backend_for_device(device_type)
+                and backend != dist.Backend.GLOO
             ):
                 torch.accelerator.set_device_index(self.rank)
 
