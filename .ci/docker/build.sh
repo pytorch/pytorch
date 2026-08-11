@@ -204,8 +204,8 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.14
-    THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+    ROCM_VERSION=10.0.0rc2
+    THEROCK_INDEX_URL="https://rocm.prereleases.amd.com/whl-multi-arch/"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
