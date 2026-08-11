@@ -4559,6 +4559,14 @@ class TestDistributions(DistributionsTestCase):
 class TestDistributionsDevice(DistributionsTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def setUp(self):
+        super().setUp()
+        torch.set_default_device(self.get_primary_device())
+
+    def tearDown(self):
+        torch.set_default_device(None)
+        super().tearDown()
+
     def test_default_device(self, device):
         device_type = torch.device(device).type
         self.assertEqual(torch.get_default_device().type, device_type)
@@ -7344,6 +7352,16 @@ class TestJit(DistributionsTestCase):
                 msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
+instantiate_device_type_tests(
+    TestDistributions,
+    globals(),
+    allow_mps=True,
+    except_for=(
+        "cuda",
+        "xpu",
+        "privateuse1",
+    ),
+)
 
 instantiate_device_type_tests(
     TestDistributionsDevice,
