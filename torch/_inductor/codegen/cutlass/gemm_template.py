@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cutlass.cache import maybe_fetch_ops
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -25,11 +26,12 @@ from ...ir import (
     ChoiceCaller,
     CUTLASSTemplateBuffer,
     FixedLayout,
+    FlexibleLayout,
     IRNode,
     Layout,
     ReinterpretView,
 )
-from ...utils import is_dynamic, Placeholder
+from ...utils import is_dynamic, Placeholder, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
 from ..cuda import cuda_env
@@ -430,6 +432,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     filtered_ops_cache: dict[str, list[Any]] = {}
     cache_clear = staticmethod(filtered_ops_cache.clear)
 
+    @property
+    def _device_cutlass_config(self):
+        """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+        return cutlass_utils.get_device_cutlass_config(self.device_type)
+
     def __init__(
         self,
         input_nodes: list[Buffer],
@@ -594,10 +601,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
+            device_config = self._device_cutlass_config
             for name, op in ops:
-                for (
-                    swizzle
-                ) in inductor_cutlass_config.cutlass_max_profiling_swizzle_options:
+                for swizzle in device_config.cutlass_max_profiling_swizzle_options:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
                         choices,
@@ -777,7 +783,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         """
-        Swap operands X and W (aka operans A and B) of the GEMM operation. This
+        Swap operands X and W (aka operands A and B) of the GEMM operation. This
         requires transposing the operands, which is done by swapping the strides.
         Note that we don't change the apparent external layout, just the operand layout.
         this is intentional.
@@ -1048,6 +1054,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             log.debug("Using cached ops for %s", self.cache_key)
             return self.filtered_ops_cache[self.cache_key]
 
+        counters["inductor"]["cutlass_filtered_ops_cache_miss"] += 1
+
         with dynamo_timed("CUTLASSGemmTemplate.maybe_fetch_ops"):
             maybe_ops = maybe_fetch_ops(self.device_type)
         if maybe_ops is None:
@@ -1078,7 +1086,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        ret_res = sorted_res[: inductor_cutlass_config.cutlass_max_profiling_configs]
+        device_config = self._device_cutlass_config
+        ret_res = sorted_res[: device_config.cutlass_max_profiling_configs]
         if len(self.filtered_ops_cache) < 50:
             self.filtered_ops_cache[self.cache_key] = ret_res
         else:
@@ -1274,6 +1283,36 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     and D_output_buffer.get_size() != template_buffer_node.get_size()
                 ):
                     name_to_buffer[D_output_name] = template_buffer_node
+
+                # Apply the same normalization to external read inputs. EVT
+                # propagates shapes against the 2D (M, N) accumulator, so a
+                # higher-rank read with the same number of elements (e.g. a bias
+                # whose shape is a compatible reshape of the GEMM output) must be
+                # viewed as the 2D template shape. This is only valid for
+                # contiguous reads, where the row-major flatten is
+                # memory-equivalent and thus numerically identical.
+                if template_buffer_node is not None:
+                    template_size = list(template_buffer_node.get_size())
+                    for name in input_names:
+                        buf = name_to_buffer[name]
+                        buf_layout = buf.get_layout()
+                        if (
+                            list(buf.get_size()) != template_size
+                            and buf_layout.is_contiguous()
+                            and V.graph.sizevars.statically_known_equals(
+                                sympy_product(buf.get_size()),
+                                sympy_product(template_size),
+                            )
+                        ):
+                            new_layout = FixedLayout(
+                                buf_layout.device,
+                                buf_layout.dtype,
+                                template_size,
+                                FlexibleLayout.contiguous_strides(template_size),
+                            )
+                            name_to_buffer[name] = ReinterpretView(  # type: ignore[assignment] # pyrefly: ignore[unsupported-operation]
+                                data=buf, layout=new_layout
+                            )
 
                 if not output_names:
                     raise AssertionError("There should be at least one write")
@@ -1713,8 +1752,17 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             raise RuntimeError("Invalid Gemm config: \n" + op_def)
         op_type = match.groups()[0]
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            op_def += f"\n  using {op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{op_type}>;\n"
-            op_type = f"{op_type}_device_type"
+            # Append KERNEL_NAME to the struct name to ensure uniqueness across
+            # compiled .so files. When multiple kernels share the same GEMM core
+            # but have different epilogues (e.g., LinearCombination vs EVT), they
+            # produce identical struct names. On SYCL/XPU this causes the runtime
+            # to dispatch the wrong binary; on CUDA it avoids potential symbol
+            # collisions. KERNEL_NAME gets replaced with a unique per-.so hash
+            # in scheduling.py.
+            unique_op_type = f"{op_type}_{Placeholder.KERNEL_NAME}"
+            op_def = op_def.replace(f"struct {op_type} :", f"struct {unique_op_type} :")
+            op_def += f"\n  using {unique_op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{unique_op_type}>;\n"
+            op_type = f"{unique_op_type}_device_type"
 
         return op_def, op_type
 

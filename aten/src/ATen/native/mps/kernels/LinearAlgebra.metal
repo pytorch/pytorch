@@ -7,6 +7,8 @@
 #include <metal_stdlib>
 
 using namespace metal;
+#include <ATen/native/mps/kernels/Gemv.h>
+
 constant uint TILE_DIM = 16;
 
 template <typename T>
@@ -256,52 +258,93 @@ kernel void naive_addbmm(
   }
 }
 
-inline float blockReduceSum(
-    threadgroup float* sharedScratch,
-    float val,
-    uint linear_tid) {
-  float simd_result = simd_sum(val);
-  // each warp's first index should write the result to consecutive
-  // ids in sharedScratch buffer
-  if (linear_tid % 32 == 0) {
-    sharedScratch[linear_tid / 32] = simd_result;
+template <bool col_major, typename T>
+inline device T& get_ref(device T* A, uint row, uint col, uint N) {
+  if (col_major) {
+    return A[row * N + col];
   }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // final reduction across first warp
-  if (linear_tid < 8) { // 256/32 = 8 simdgroups
-    float sum = sharedScratch[linear_tid];
-    sum = simd_sum(sum);
-    sharedScratch[0] = sum;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  return sharedScratch[0];
-}
-
-template <bool col_major>
-inline device float& get_ref(device float* A, uint row, uint col, uint N);
-
-template <>
-inline device float& get_ref<true>(
-    device float* A,
-    uint row,
-    uint col,
-    uint N) {
-  return A[row * N + col];
-}
-
-template <>
-inline device float& get_ref<false>(
-    device float* A,
-    uint row,
-    uint col,
-    uint N) {
   return A[row + col * N];
 }
 
-template <bool upper>
+template <typename T>
+inline int factor_tile32_warp(
+    threadgroup T (&tile)[32][33],
+    threadgroup T (&col)[32],
+    uint n,
+    uint lane) {
+  T row[32];
+  for (uint c = 0; c < 32; c++) {
+    row[c] = tile[lane][c];
+  }
+  int ret = 0;
+  for (uint kk = 0; kk < n; kk++) {
+    float dsq = simd_broadcast(c10::metal::cast_to<float>(row[kk]), ushort(kk));
+    if (!(dsq > 0.0f)) {
+      ret = int(kk) + 1;
+      break;
+    }
+    float rs = rsqrt(dsq);
+    T l = (lane == kk) ? c10::metal::cast_to<T>(dsq * rs) : row[kk] * rs;
+    col[lane] = l;
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+    T ccol[32];
+#pragma unroll
+    for (uint i = 0; i < 32; i++) {
+      ccol[i] = col[i];
+    }
+    if (lane >= kk) {
+      row[kk] = l;
+      if (lane > kk) {
+#pragma unroll
+        for (uint i = 0; i < 32; i++) {
+          if (i > kk) {
+            row[i] = c10::metal::fma(-l, c10::metal::conj(ccol[i]), row[i]);
+          }
+        }
+      }
+    }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (lane < n) {
+    for (uint c = 0; c < 32; c++) {
+      tile[lane][c] = row[c];
+    }
+    col[lane] =
+        c10::metal::cast_to<T>(1.0f / c10::metal::cast_to<float>(row[lane]));
+  }
+  return ret;
+}
+
+// Solves row * D^-T in registers against the factored 32x32 diagonal block
+// `diagT` (rdiag[c] = 1 / diagT[c][c]) by right-looking column elimination:
+// the critical path per column is one multiply plus the fma into the next
+// column; the remaining unrolled updates pipeline behind it.
+inline void trsm_row32(
+    thread float (&row)[32],
+    threadgroup float (&diagT)[32][33],
+    threadgroup float (&rdiag)[32]) {
+  for (uint c = 0; c < 32; c++) {
+    // batch the column loads ahead of the fma burst; an interleaved
+    // load/fma sequence stalls the in-order pipe on every smem access
+    float dcol[32];
+#pragma unroll
+    for (uint i = 0; i < 32; i++) {
+      dcol[i] = diagT[i][c];
+    }
+    float xc = row[c] * rdiag[c];
+    row[c] = xc;
+#pragma unroll
+    for (uint i = 0; i < 32; i++) {
+      if (i > c) {
+        row[i] = fma(-xc, dcol[i], row[i]);
+      }
+    }
+  }
+}
+
+template <bool upper, typename T>
 kernel void factorDiagonalBlock(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device int* info [[buffer(1)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
@@ -319,8 +362,9 @@ kernel void factorDiagonalBlock(
   const uint row0 = k * NB;
   const uint col0 = k * NB;
 
-  threadgroup float tile[32][33];
-  threadgroup float reduceScratch[8];
+  threadgroup T tile[32][33];
+  threadgroup T col[32];
+  threadgroup float scratch[1];
   const uint tileSize = actSize * actSize;
 
   for (uint i = linear_tid; i < tileSize; i += group_size) {
@@ -330,70 +374,23 @@ kernel void factorDiagonalBlock(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-#pragma unroll 4
-  for (uint kk = 0; kk < actSize; kk++) {
-    float diagElt = 0.0f;
-    if (kk > 0) {
-      float4 partialSum4 = float4(0.0f);
-      uint i = linear_tid * 4;
-      // vectorized reduce
-      for (; i + 4 <= kk; i += group_size * 4) {
-        float4 val4;
-        val4.x = (i < kk) ? tile[kk][i] : 0.0f;
-        val4.y = (i + 1 < kk) ? tile[kk][i + 1] : 0.0f;
-        val4.z = (i + 2 < kk) ? tile[kk][i + 2] : 0.0f;
-        val4.w = (i + 3 < kk) ? tile[kk][i + 3] : 0.0f;
-
-        partialSum4 = fma(val4, val4, partialSum4);
-      }
-
-      float partialSum =
-          partialSum4.x + partialSum4.y + partialSum4.z + partialSum4.w;
-
-      // remaining elements
-      for (i = linear_tid + (kk / 4) * 4; i < kk; i += group_size) {
-        float val = tile[kk][i];
-        partialSum = fma(val, val, partialSum);
-      }
-      diagElt = blockReduceSum(reduceScratch, partialSum, linear_tid);
-    }
-
+  // simdgroups are linear chunks of the linearized threadgroup, so threads
+  // 0..31 form simdgroup 0
+  if (linear_tid < 32) {
+    int f = factor_tile32_warp(tile, col, actSize, linear_tid);
     if (linear_tid == 0) {
-      float diagVal = tile[kk][kk] - diagElt;
-      if (!(diagVal > 0.0f)) {
-        info[bid.x] = kk + 1;
-        return;
-      }
-      tile[kk][kk] = sqrt(diagVal);
+      scratch[0] = float(f);
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    float pivot = tile[kk][kk];
-
-    for (uint j = kk + 1 + linear_tid; j < actSize; j += group_size) {
-      float4 partialSum4 = float4(0.0f);
-      uint i = 0;
-
-      // 4 elements at a time
-      for (; i + 4 <= kk; i += 4) {
-        float4 row4 =
-            float4(tile[j][i], tile[j][i + 1], tile[j][i + 2], tile[j][i + 3]);
-        float4 diag4 = float4(
-            tile[kk][i], tile[kk][i + 1], tile[kk][i + 2], tile[kk][i + 3]);
-        partialSum4 = fma(row4, diag4, partialSum4);
-      }
-      float partialSum =
-          partialSum4.x + partialSum4.y + partialSum4.z + partialSum4.w;
-      // remaining elements
-      for (; i < kk; i++) {
-        partialSum = fma(tile[j][i], tile[kk][i], partialSum);
-      }
-      float val = tile[j][kk];
-      val -= partialSum;
-      val /= pivot;
-      tile[j][kk] = val;
+  int fail = int(scratch[0]);
+  if (fail != 0) {
+    // first failure wins; report the global leading-minor index like LAPACK
+    if (linear_tid == 0 && info[bid.x] == 0) {
+      info[bid.x] = int(row0) + fail;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    return;
   }
 
   for (uint i = linear_tid; i < tileSize; i += group_size) {
@@ -403,31 +400,55 @@ kernel void factorDiagonalBlock(
   }
 }
 
-template [[host_name("factorDiagonalBlockU")]]
-kernel void factorDiagonalBlock<true>(
-    device float* A [[buffer(0)]],
-    device int* info [[buffer(1)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 bid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+#define INSTANTIATE_FACTOR_DIAGONAL_BLOCK(SUFF, UPPER, DTYPE)    \
+  template [[host_name("factorDiagonalBlock" #SUFF "_" #DTYPE)]] \
+  kernel void factorDiagonalBlock<UPPER, DTYPE>(                 \
+      device DTYPE * A [[buffer(0)]],                            \
+      device int* info [[buffer(1)]],                            \
+      constant uint& N [[buffer(2)]],                            \
+      constant uint& NB [[buffer(3)]],                           \
+      constant uint& k [[buffer(4)]],                            \
+      uint3 tid [[thread_position_in_threadgroup]],              \
+      uint3 bid [[threadgroup_position_in_grid]],                \
+      uint3 tpg [[threads_per_threadgroup]]);
 
-template [[host_name("factorDiagonalBlockL")]]
-kernel void factorDiagonalBlock<false>(
-    device float* A [[buffer(0)]],
-    device int* info [[buffer(1)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 bid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(U, true, float)
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(L, false, float)
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(U, true, float2)
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(L, false, float2)
 
-template <bool upper>
+inline float trsm_dot(
+    threadgroup const float* x,
+    threadgroup const float* y,
+    uint n) {
+  float4 sum4 = float4(0.0);
+  uint p = 0;
+  for (; p + 4 <= n; p += 4) {
+    float4 x4 = float4(x[p], x[p + 1], x[p + 2], x[p + 3]);
+    float4 y4 = float4(y[p], y[p + 1], y[p + 2], y[p + 3]);
+    sum4 = fma(x4, y4, sum4);
+  }
+  float sum = sum4.x + sum4.y + sum4.z + sum4.w;
+  for (; p < n; p++) {
+    sum = fma(x[p], y[p], sum);
+  }
+  return sum;
+}
+
+inline float2 trsm_dot(
+    threadgroup const float2* x,
+    threadgroup const float2* y,
+    uint n) {
+  float2 sum = float2(0.0);
+  for (uint p = 0; p < n; p++) {
+    sum = c10::metal::fma(x[p], c10::metal::conj(y[p]), sum);
+  }
+  return sum;
+}
+
+template <bool upper, typename T>
 kernel void applyTRSM(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -455,8 +476,8 @@ kernel void applyTRSM(
     return;
   }
 
-  threadgroup float diag[32 * 32];
-  threadgroup float target[32 * 32];
+  threadgroup T diag[32 * 32];
+  threadgroup T target[32 * 32];
 
   for (uint i = linear_tid; i < actSize_k * actSize_k; i += group_size) {
     uint r = i / actSize_k;
@@ -473,34 +494,13 @@ kernel void applyTRSM(
 // forward substitution with loop unrolling and vectorization
 #pragma unroll 4
   for (uint col = 0; col < actSize_k; col++) {
-    float diag_val = diag[col * actSize_k + col];
+    float diag_val = c10::metal::cast_to<float>(diag[col * actSize_k + col]);
     diag_val = (fabs(diag_val) < 1e-6f) ? copysign(1e-6f, diag_val) : diag_val;
 
     // multiple rows per thread
     for (uint row = linear_tid; row < actSize_j; row += group_size) {
-      float sum = target[row * actSize_k + col];
-      // vectorized accumulation
-      float4 sum4 = float4(0.0);
-      uint p = 0;
-      for (; p + 4 <= col; p += 4) {
-        float4 target4 = float4(
-            target[row * actSize_k + p],
-            target[row * actSize_k + p + 1],
-            target[row * actSize_k + p + 2],
-            target[row * actSize_k + p + 3]);
-        float4 diag4 = float4(
-            diag[col * actSize_k + p],
-            diag[col * actSize_k + p + 1],
-            diag[col * actSize_k + p + 2],
-            diag[col * actSize_k + p + 3]);
-        sum4 = fma(target4, -diag4, sum4);
-      }
-      sum += sum4.x + sum4.y + sum4.z + sum4.w;
-
-      // remaining elements
-      for (; p < col; p++) {
-        sum = fma(target[row * actSize_k + p], -diag[col * actSize_k + p], sum);
-      }
+      T sum = target[row * actSize_k + col] -
+          trsm_dot(target + row * actSize_k, diag + col * actSize_k, col);
       target[row * actSize_k + col] = sum / diag_val;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -514,29 +514,113 @@ kernel void applyTRSM(
   }
 }
 
-template [[host_name("applyTRSMU")]]
-kernel void applyTRSM<true>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+#define INSTANTIATE_APPLY_TRSM(SUFF, UPPER, DTYPE)     \
+  template [[host_name("applyTRSM" #SUFF "_" #DTYPE)]] \
+  kernel void applyTRSM<UPPER, DTYPE>(                 \
+      device DTYPE * A [[buffer(0)]],                  \
+      constant uint & N [[buffer(2)]],                 \
+      constant uint & NB [[buffer(3)]],                \
+      constant uint & k [[buffer(4)]],                 \
+      uint3 tid [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint3 tpg [[threads_per_threadgroup]]);
 
-template [[host_name("applyTRSML")]]
-kernel void applyTRSM<false>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+INSTANTIATE_APPLY_TRSM(U, true, float)
+INSTANTIATE_APPLY_TRSM(L, false, float)
+INSTANTIATE_APPLY_TRSM(U, true, float2)
+INSTANTIATE_APPLY_TRSM(L, false, float2)
 
 template <bool upper>
+inline void syrk_simdgroup_tile(
+    device float* A,
+    uint batch_offset,
+    uint N,
+    uint NB,
+    uint k,
+    uint row0,
+    uint col0,
+    uint actSize_h,
+    uint actSize_j,
+    uint actSize_k,
+    bool diag_tile,
+    uint warp_id,
+    uint simdGroupsPerThreadgroup) {
+  simdgroup_matrix<float, 8, 8> negative_identity =
+      simdgroup_matrix<float, 8, 8>(-1.0);
+  simdgroup_matrix<float, 8, 8> Prod;
+  simdgroup_matrix<float, 8, 8> Afrag;
+  simdgroup_matrix<float, 8, 8> Bfrag;
+
+  uint numSbX = actSize_h / 8; // How many 8-wide blocks
+  uint numSbY = actSize_j / 8; // How many 8-tall blocks
+  uint totalSubBlocks = numSbX * numSbY;
+
+  for (uint sb = warp_id; sb < totalSubBlocks; sb += simdGroupsPerThreadgroup) {
+    uint sb_y = (sb / numSbX) * 8;
+    uint sb_x = (sb % numSbX) * 8;
+
+    // Skip elements that are below diagonal if j == h
+    if (diag_tile && sb_y < sb_x) {
+      continue;
+    }
+
+    // Same logic to load/store Cfrag, Afrag, Bfrag...
+    simdgroup_matrix<float, 8, 8> Cfrag;
+    simdgroup_load(
+        Cfrag,
+        &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
+        N,
+        0,
+        !upper);
+
+    for (uint kk = 0; kk < actSize_k; kk += 8) {
+      simdgroup_load(
+          Afrag,
+          &get_ref<upper>(A + batch_offset, row0 + sb_y, k * NB + kk, N),
+          N,
+          0,
+          !upper);
+      simdgroup_load(
+          Bfrag,
+          &get_ref<upper>(A + batch_offset, col0 + sb_x, k * NB + kk, N),
+          N,
+          /* matrix_origin = */ 0,
+          /* transpose = */ upper);
+
+      simdgroup_multiply(Prod, Afrag, Bfrag);
+      simdgroup_multiply_accumulate(Cfrag, Prod, negative_identity, Cfrag);
+    }
+
+    simdgroup_store(
+        Cfrag,
+        &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
+        N,
+        0,
+        !upper);
+  }
+}
+
+// never called; satisfies the complex instantiation (no if constexpr in
+// Metal 3)
+template <bool upper>
+inline void syrk_simdgroup_tile(
+    device float2*,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    bool,
+    uint,
+    uint) {}
+
+template <bool upper, typename T>
 kernel void applySYRK(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -572,72 +656,32 @@ kernel void applySYRK(
 
   // Check if dimensions are multiples of 8
   // so we can use simdoup matrices
-  bool use_simdgroup =
+  const bool use_simdgroup = !c10::metal::is_complex_v<T> &&
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
 
   if (use_simdgroup) {
-    simdgroup_matrix<float, 8, 8> negative_identity =
-        simdgroup_matrix<float, 8, 8>(-1.0);
-    simdgroup_matrix<float, 8, 8> Prod;
-    simdgroup_matrix<float, 8, 8> Afrag;
-    simdgroup_matrix<float, 8, 8> Bfrag;
-
-    uint numSbX = actSize_h / 8; // How many 8-wide blocks
-    uint numSbY = actSize_j / 8; // How many 8-tall blocks
-    uint totalSubBlocks = numSbX * numSbY;
-
-    for (uint sb = warp_id; sb < totalSubBlocks;
-         sb += simdGroupsPerThreadgroup) {
-      uint sb_y = (sb / numSbX) * 8;
-      uint sb_x = (sb % numSbX) * 8;
-
-      // Skip elements that are below diagonal if j == h
-      if (j == h && sb_y < sb_x) {
-        continue;
-      }
-
-      // Same logic to load/store Cfrag, Afrag, Bfrag...
-      simdgroup_matrix<float, 8, 8> Cfrag;
-      simdgroup_load(
-          Cfrag,
-          &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
-          N,
-          0,
-          !upper);
-
-      for (uint kk = 0; kk < actSize_k; kk += 8) {
-        simdgroup_load(
-            Afrag,
-            &get_ref<upper>(A + batch_offset, row0 + sb_y, k * NB + kk, N),
-            N,
-            0,
-            !upper);
-        simdgroup_load(
-            Bfrag,
-            &get_ref<upper>(A + batch_offset, col0 + sb_x, k * NB + kk, N),
-            N,
-            /* matrix_origin = */ 0,
-            /* transpose = */ upper);
-
-        simdgroup_multiply(Prod, Afrag, Bfrag);
-        simdgroup_multiply_accumulate(Cfrag, Prod, negative_identity, Cfrag);
-      }
-
-      simdgroup_store(
-          Cfrag,
-          &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
-          N,
-          0,
-          !upper);
-    }
+    syrk_simdgroup_tile<upper>(
+        A,
+        batch_offset,
+        N,
+        NB,
+        k,
+        row0,
+        col0,
+        actSize_h,
+        actSize_j,
+        actSize_k,
+        j == h,
+        warp_id,
+        simdGroupsPerThreadgroup);
   } else {
     // Fallback for non-multiple-of-8 dimensions
-    threadgroup float sum_accumulator[32 * 32];
+    threadgroup T sum_accumulator[32 * 32];
     for (uint y = ty; y < actSize_j; y += tpg.y) {
       for (uint x = tx; x < actSize_h; x += tpg.x) {
         // since we use this for accumulator, better to set it to 0.0
         // to avoid random values
-        sum_accumulator[y * tpg.x + x] = 0.0f;
+        sum_accumulator[y * tpg.x + x] = T(0);
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -647,13 +691,11 @@ kernel void applySYRK(
           continue;
         }
 
-        float sum = 0.0f;
+        T sum = T(0);
         for (uint i = 0; i < actSize_k; i++) {
-          float a_val =
-              get_ref<upper>(A + batch_offset, row0 + y, k * NB + i, N);
-          float b_val =
-              get_ref<upper>(A + batch_offset, col0 + x, k * NB + i, N);
-          sum = fma(a_val, b_val, sum);
+          T a_val = get_ref<upper>(A + batch_offset, row0 + y, k * NB + i, N);
+          T b_val = get_ref<upper>(A + batch_offset, col0 + x, k * NB + i, N);
+          sum = c10::metal::fma(a_val, c10::metal::conj(b_val), sum);
         }
         sum_accumulator[y * tpg.x + x] += sum;
       }
@@ -668,27 +710,1534 @@ kernel void applySYRK(
   }
 }
 
-template [[host_name("applySYRKU")]]
-kernel void applySYRK<true>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]);
+#define INSTANTIATE_APPLY_SYRK(SUFF, UPPER, DTYPE)     \
+  template [[host_name("applySYRK" #SUFF "_" #DTYPE)]] \
+  kernel void applySYRK<UPPER, DTYPE>(                 \
+      device DTYPE * A [[buffer(0)]],                  \
+      constant uint & N [[buffer(2)]],                 \
+      constant uint & NB [[buffer(3)]],                \
+      constant uint & k [[buffer(4)]],                 \
+      uint3 tid [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint3 tpg [[threads_per_threadgroup]],           \
+      uint sgitg [[simdgroup_index_in_threadgroup]]);
 
-template [[host_name("applySYRKL")]]
-kernel void applySYRK<false>(
+INSTANTIATE_APPLY_SYRK(U, true, float)
+INSTANTIATE_APPLY_SYRK(L, false, float)
+INSTANTIATE_APPLY_SYRK(U, true, float2)
+INSTANTIATE_APPLY_SYRK(L, false, float2)
+
+template <bool upper>
+kernel void factorDiagonalPanel(
+    device float* A [[buffer(0)]],
+    device int* info [[buffer(1)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  constexpr uint GROUP = 96; // 3 simdgroups
+  const uint tid = tid3.x;
+  const uint c0 = k * NB;
+  const uint actPanel = min(N - c0, NB);
+  const uint S = (actPanel + 31) / 32;
+  device float* Ab = A + ulong(bid.x) * N * N;
+
+  // lower tiles of the block; tile (a, b), a >= b, lives at a*(a+1)/2 + b
+  threadgroup float blk[6][32][33];
+  threadgroup float rdiag[32];
+  threadgroup float scratch[1];
+
+  if (k == 0 && tid == 0) {
+    info[bid.x] = 0;
+  }
+
+  const bool full = (actPanel == NB) && (N % 4 == 0);
+  if (full) {
+    // float4 over the contiguous device dim; smem stores are scalar (the
+    // 33-padded rows are not 16B aligned)
+    for (uint i = tid; i < 6 * 256; i += GROUP) {
+      const uint t = i / 256;
+      const uint e = i % 256;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint fast = (e & 7) * 4; // contiguous-dim offset
+      const uint slow = e >> 3;
+      const uint r = upper ? slow : fast;
+      const uint c = upper ? fast : slow;
+      float4 v = *(device const float4*)(&get_ref<upper>(
+          Ab, c0 + 32 * a + r, c0 + 32 * b + c, N));
+      if (upper) {
+        blk[t][r][c + 0] = v.x;
+        blk[t][r][c + 1] = v.y;
+        blk[t][r][c + 2] = v.z;
+        blk[t][r][c + 3] = v.w;
+      } else {
+        blk[t][r + 0][c] = v.x;
+        blk[t][r + 1][c] = v.y;
+        blk[t][r + 2][c] = v.z;
+        blk[t][r + 3][c] = v.w;
+      }
+    }
+  } else {
+    for (uint i = tid; i < 6 * 1024; i += GROUP) {
+      const uint t = i / 1024;
+      const uint e = i % 1024;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint r = upper ? e >> 5 : e & 31;
+      const uint c = upper ? e & 31 : e >> 5;
+      if (32 * a + r < actPanel && 32 * b + c < actPanel) {
+        blk[t][r][c] = get_ref<upper>(Ab, c0 + 32 * a + r, c0 + 32 * b + c, N);
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint s = 0; s < S; s++) {
+    const uint actS = min(32u, actPanel - 32 * s);
+    const uint m = S - 1 - s;
+    threadgroup float(&diagT)[32][33] = blk[s * (s + 1) / 2 + s];
+
+    if (warp_id == 0) {
+      int f = factor_tile32_warp(diagT, rdiag, actS, lane);
+      if (lane == 0) {
+        scratch[0] = float(f);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    int fail = int(scratch[0]);
+    if (fail != 0) {
+      // bail without writing the block back; the result is undefined once
+      // info is set
+      if (tid == 0 && info[bid.x] == 0) {
+        info[bid.x] = int(c0 + 32 * s) + fail;
+      }
+      return;
+    }
+
+    // TRSM the strips below within the block, one simdgroup per strip
+    if (warp_id < m) {
+      const uint rt = s + 1 + warp_id;
+      const uint actR = min(32u, actPanel - 32 * rt);
+      threadgroup float(&st)[32][33] = blk[rt * (rt + 1) / 2 + s];
+      if (lane < actR) {
+        float row[32];
+        for (uint c = 0; c < 32; c++) {
+          row[c] = st[lane][c];
+        }
+        trsm_row32(row, diagT, rdiag);
+        for (uint c = 0; c < 32; c++) {
+          st[lane][c] = row[c];
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // rank-32 update of the remaining tiles, one simdgroup per (rt, ht) pair
+    const uint nPairs = m * (m + 1) / 2;
+    if (warp_id < nPairs) {
+      const uint jRel = (warp_id == 0) ? 0 : 1;
+      const uint hRel = (warp_id == 2) ? 1 : 0;
+      const uint rt = s + 1 + jRel;
+      const uint ht = s + 1 + hRel;
+      const uint actR = min(32u, actPanel - 32 * rt);
+      const uint actH = min(32u, actPanel - 32 * ht);
+      threadgroup float(&stR)[32][33] = blk[rt * (rt + 1) / 2 + s];
+      threadgroup float(&stH)[32][33] = blk[ht * (ht + 1) / 2 + s];
+      threadgroup float(&tg)[32][33] = blk[rt * (rt + 1) / 2 + ht];
+
+      if (actR == 32 && actH == 32) {
+        simdgroup_float8x8 negI = simdgroup_float8x8(-1.0f);
+        for (uint f = 0; f < 16; f++) {
+          uint fy = (f / 4) * 8;
+          uint fx = (f % 4) * 8;
+          if (rt == ht && fy < fx) {
+            continue;
+          }
+          simdgroup_float8x8 C, Af, Bf, P;
+          simdgroup_load(C, &tg[fy][fx], 33);
+          for (uint kk = 0; kk < 32; kk += 8) {
+            simdgroup_load(Af, &stR[fy][kk], 33);
+            simdgroup_load(Bf, &stH[fx][kk], 33, 0, /*transpose=*/true);
+            simdgroup_multiply(P, Af, Bf);
+            simdgroup_multiply_accumulate(C, P, negI, C);
+          }
+          simdgroup_store(C, &tg[fy][fx], 33);
+        }
+      } else {
+        // ragged last-panel tiles: scalar fallback
+        for (uint idx = lane; idx < actR * actH; idx += 32) {
+          uint y = idx / actH;
+          uint x = idx % actH;
+          if (rt == ht && y < x) {
+            continue;
+          }
+          float sum = 0.0f;
+          for (uint kk = 0; kk < 32; kk++) {
+            sum = fma(stR[y][kk], stH[x][kk], sum);
+          }
+          tg[y][x] -= sum;
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (full) {
+    for (uint i = tid; i < 6 * 256; i += GROUP) {
+      const uint t = i / 256;
+      const uint e = i % 256;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint fast = (e & 7) * 4;
+      const uint slow = e >> 3;
+      const uint r = upper ? slow : fast;
+      const uint c = upper ? fast : slow;
+      float4 v;
+      if (upper) {
+        v = float4(
+            blk[t][r][c], blk[t][r][c + 1], blk[t][r][c + 2], blk[t][r][c + 3]);
+      } else {
+        v = float4(
+            blk[t][r][c], blk[t][r + 1][c], blk[t][r + 2][c], blk[t][r + 3][c]);
+      }
+      *(device float4*)(&get_ref<upper>(
+          Ab, c0 + 32 * a + r, c0 + 32 * b + c, N)) = v;
+    }
+  } else {
+    for (uint i = tid; i < 6 * 1024; i += GROUP) {
+      const uint t = i / 1024;
+      const uint e = i % 1024;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint r = upper ? e >> 5 : e & 31;
+      const uint c = upper ? e & 31 : e >> 5;
+      if (32 * a + r < actPanel && 32 * b + c < actPanel) {
+        get_ref<upper>(Ab, c0 + 32 * a + r, c0 + 32 * b + c, N) = blk[t][r][c];
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_FACTOR_DIAGONAL_PANEL(SUFF, UPPER) \
+  template [[host_name("factorDiagonalPanel" #SUFF)]]  \
+  kernel void factorDiagonalPanel<UPPER>(              \
+      device float* A [[buffer(0)]],                   \
+      device int* info [[buffer(1)]],                  \
+      constant uint& N [[buffer(2)]],                  \
+      constant uint& NB [[buffer(3)]],                 \
+      constant uint& k [[buffer(4)]],                  \
+      uint3 tid3 [[thread_position_in_threadgroup]],   \
+      uint3 bid [[threadgroup_position_in_grid]],      \
+      uint warp_id [[simdgroup_index_in_threadgroup]], \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_FACTOR_DIAGONAL_PANEL(U, true)
+INSTANTIATE_FACTOR_DIAGONAL_PANEL(L, false)
+
+template <bool upper>
+kernel void applyPanelTRSM(
     device float* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  constexpr uint GROUP = 128; // 4 simdgroups
+  const uint tid = tid3.x;
+  const uint c0 = k * NB;
+  const uint r0 = (k + 1) * NB + tgid.y * 32;
+  const uint actR = min(32u, N - r0);
+  device float* Ab = A + ulong(tgid.x) * N * N;
+
+  threadgroup float strip[32][97];
+  threadgroup float diagT[32][33];
+  threadgroup float dT[32][33];
+  threadgroup float rdiag[32];
+
+  const bool full = (actR == 32) && (N % 4 == 0);
+  if (full) {
+    for (uint i = tid; i < 768; i += GROUP) {
+      uint r, c;
+      if (upper) {
+        r = i / 24;
+        c = (i % 24) * 4;
+      } else {
+        r = (i & 7) * 4;
+        c = i >> 3;
+      }
+      float4 v =
+          *(device const float4*)(&get_ref<upper>(Ab, r0 + r, c0 + c, N));
+      if (upper) {
+        strip[r][c + 0] = v.x;
+        strip[r][c + 1] = v.y;
+        strip[r][c + 2] = v.z;
+        strip[r][c + 3] = v.w;
+      } else {
+        strip[r + 0][c] = v.x;
+        strip[r + 1][c] = v.y;
+        strip[r + 2][c] = v.z;
+        strip[r + 3][c] = v.w;
+      }
+    }
+  } else {
+    for (uint i = tid; i < actR * 96; i += GROUP) {
+      uint r = upper ? i / 96 : i % actR;
+      uint c = upper ? i % 96 : i / actR;
+      strip[r][c] = get_ref<upper>(Ab, r0 + r, c0 + c, N);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  simdgroup_float8x8 negI = simdgroup_float8x8(-1.0f);
+  const bool aligned4 = (N % 4 == 0);
+  for (uint s = 0; s < NB / 32; s++) {
+    const uint d0 = c0 + 32 * s;
+
+    if (aligned4) {
+      for (uint i = tid; i < 256; i += GROUP) {
+        uint fast = (i & 7) * 4;
+        uint slow = i >> 3;
+        uint r = upper ? slow : fast;
+        uint c = upper ? fast : slow;
+        float4 v =
+            *(device const float4*)(&get_ref<upper>(Ab, d0 + r, d0 + c, N));
+        if (upper) {
+          diagT[r][c + 0] = v.x;
+          diagT[r][c + 1] = v.y;
+          diagT[r][c + 2] = v.z;
+          diagT[r][c + 3] = v.w;
+        } else {
+          diagT[r + 0][c] = v.x;
+          diagT[r + 1][c] = v.y;
+          diagT[r + 2][c] = v.z;
+          diagT[r + 3][c] = v.w;
+        }
+      }
+    } else {
+      for (uint i = tid; i < 1024; i += GROUP) {
+        uint r = upper ? i >> 5 : i & 31;
+        uint c = upper ? i & 31 : i >> 5;
+        diagT[r][c] = get_ref<upper>(Ab, d0 + r, d0 + c, N);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // strip[:, s] -= strip[:, t < s] @ D(s, t)^T; simdgroup w owns fragment
+    // row 8w of the 32x32 target, with each D(s, t) staged through smem
+    if (s > 0) {
+      const uint fy = warp_id * 8;
+      simdgroup_float8x8 C[4];
+      for (uint j = 0; j < 4; j++) {
+        simdgroup_load(C[j], &strip[fy][32 * s + 8 * j], 97);
+      }
+      for (uint t = 0; t < s; t++) {
+        const uint ct = c0 + 32 * t;
+        if (aligned4) {
+          for (uint i = tid; i < 256; i += GROUP) {
+            uint fast = (i & 7) * 4;
+            uint slow = i >> 3;
+            uint r = upper ? slow : fast;
+            uint c = upper ? fast : slow;
+            float4 v =
+                *(device const float4*)(&get_ref<upper>(Ab, d0 + r, ct + c, N));
+            if (upper) {
+              dT[r][c + 0] = v.x;
+              dT[r][c + 1] = v.y;
+              dT[r][c + 2] = v.z;
+              dT[r][c + 3] = v.w;
+            } else {
+              dT[r + 0][c] = v.x;
+              dT[r + 1][c] = v.y;
+              dT[r + 2][c] = v.z;
+              dT[r + 3][c] = v.w;
+            }
+          }
+        } else {
+          for (uint i = tid; i < 1024; i += GROUP) {
+            uint r = upper ? i >> 5 : i & 31;
+            uint c = upper ? i & 31 : i >> 5;
+            dT[r][c] = get_ref<upper>(Ab, d0 + r, ct + c, N);
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        for (uint kf = 0; kf < 32; kf += 8) {
+          simdgroup_float8x8 Af, P;
+          simdgroup_load(Af, &strip[fy][32 * t + kf], 97);
+          for (uint j = 0; j < 4; j++) {
+            simdgroup_float8x8 Bf;
+            simdgroup_load(Bf, &dT[8 * j][kf], 33, 0, /*transpose=*/true);
+            simdgroup_multiply(P, Af, Bf);
+            simdgroup_multiply_accumulate(C[j], P, negI, C[j]);
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+      for (uint j = 0; j < 4; j++) {
+        simdgroup_store(C[j], &strip[fy][32 * s + 8 * j], 97);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (warp_id == 0) {
+      rdiag[lane] = 1.0f / diagT[lane][lane];
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      if (lane < actR) {
+        float row[32];
+        for (uint c = 0; c < 32; c++) {
+          row[c] = strip[lane][32 * s + c];
+        }
+        trsm_row32(row, diagT, rdiag);
+        for (uint c = 0; c < 32; c++) {
+          strip[lane][32 * s + c] = row[c];
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (full) {
+    for (uint i = tid; i < 768; i += GROUP) {
+      uint r, c;
+      if (upper) {
+        r = i / 24;
+        c = (i % 24) * 4;
+      } else {
+        r = (i & 7) * 4;
+        c = i >> 3;
+      }
+      float4 v;
+      if (upper) {
+        v = float4(
+            strip[r][c], strip[r][c + 1], strip[r][c + 2], strip[r][c + 3]);
+      } else {
+        v = float4(
+            strip[r][c], strip[r + 1][c], strip[r + 2][c], strip[r + 3][c]);
+      }
+      *(device float4*)(&get_ref<upper>(Ab, r0 + r, c0 + c, N)) = v;
+    }
+  } else {
+    for (uint i = tid; i < actR * 96; i += GROUP) {
+      uint r = upper ? i / 96 : i % actR;
+      uint c = upper ? i % 96 : i / actR;
+      get_ref<upper>(Ab, r0 + r, c0 + c, N) = strip[r][c];
+    }
+  }
+}
+
+#define INSTANTIATE_APPLY_PANEL_TRSM(SUFF, UPPER)      \
+  template [[host_name("applyPanelTRSM" #SUFF)]]       \
+  kernel void applyPanelTRSM<UPPER>(                   \
+      device float* A [[buffer(0)]],                   \
+      constant uint& N [[buffer(2)]],                  \
+      constant uint& NB [[buffer(3)]],                 \
+      constant uint& k [[buffer(4)]],                  \
+      uint3 tid3 [[thread_position_in_threadgroup]],   \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint warp_id [[simdgroup_index_in_threadgroup]], \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_APPLY_PANEL_TRSM(U, true)
+INSTANTIATE_APPLY_PANEL_TRSM(L, false)
+
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+
+template <bool upper, int BM, int BN, int NSG>
+kernel void applySYRKTrailing(
+    device float* A [[buffer(0)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const int gN = int(N);
+  const int o = int((k + 1) * NB);
+  const int pc = int(k * NB);
+  const int T = gN - o;
+  const int K = int(NB);
+  const int ro = int(tgid.y) * BM;
+  const int co = int(tgid.x) * BN;
+  if (ro + BM <= co) {
+    return;
+  }
+  device float* Ab = A + ulong(tgid.z) * ulong(N) * ulong(N);
+
+  constexpr auto desc = upper
+      ? mpp::tensor_ops::matmul2d_descriptor(
+            BM,
+            BN,
+            static_cast<int>(dynamic_extent),
+            false,
+            true,
+            false,
+            mpp::tensor_ops::matmul2d_descriptor::mode::multiply)
+      : mpp::tensor_ops::matmul2d_descriptor(
+            BN,
+            BM,
+            static_cast<int>(dynamic_extent),
+            true,
+            false,
+            false,
+            mpp::tensor_ops::matmul2d_descriptor::mode::multiply);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<NSG>> op;
+
+  device float* panel = upper ? (Ab + o * gN + pc) : (Ab + o + pc * gN);
+  device float* trail = upper ? (Ab + o * gN + o) : (Ab + o + o * gN);
+  const auto eP =
+      upper ? dextents<int32_t, 2>(K, T) : dextents<int32_t, 2>(T, K);
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tA(
+      panel, eP, array<int32_t, 2>{1, gN});
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tB(
+      panel, eP, array<int32_t, 2>{1, gN});
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tC(
+      trail, dextents<int32_t, 2>(T, T), array<int32_t, 2>{1, gN});
+
+  const bool inside = (ro + BM <= T) && (co + BN <= T);
+
+  if (inside) {
+    if (upper) {
+      auto mA = tA.template slice<dynamic_extent, BM>(0, ro);
+      auto mB = tB.template slice<dynamic_extent, BN>(0, co);
+      auto mC = tC.template slice<BN, BM>(co, ro);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[1]);
+        int c = co + int(idx[0]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    } else {
+      auto mA = tA.template slice<BN, dynamic_extent>(co, 0);
+      auto mB = tB.template slice<BM, dynamic_extent>(ro, 0);
+      auto mC = tC.template slice<BM, BN>(ro, co);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[0]);
+        int c = co + int(idx[1]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    }
+  } else {
+    if (upper) {
+      auto mA = tA.slice(0, ro);
+      auto mB = tB.slice(0, co);
+      auto mC = tC.slice(co, ro);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        if (!cT.is_valid_element(e)) {
+          continue;
+        }
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[1]);
+        int c = co + int(idx[0]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    } else {
+      auto mA = tA.slice(co, 0);
+      auto mB = tB.slice(ro, 0);
+      auto mC = tC.slice(ro, co);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        if (!cT.is_valid_element(e)) {
+          continue;
+        }
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[0]);
+        int c = co + int(idx[1]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    }
+  }
+}
+
+#define INSTANTIATE_SYRK_TRAILING(SUFF, UPPER, BM, BN, NSG)      \
+  template [[host_name("applySYRKTrailing" #SUFF "_" #BM "_" #BN \
+                       "_" #NSG)]] kernel void                   \
+  applySYRKTrailing<UPPER, BM, BN, NSG>(                         \
+      device float* A [[buffer(0)]],                             \
+      constant uint& N [[buffer(2)]],                            \
+      constant uint& NB [[buffer(3)]],                           \
+      constant uint& k [[buffer(4)]],                            \
+      uint3 tgid [[threadgroup_position_in_grid]]);
+
+INSTANTIATE_SYRK_TRAILING(U, true, 64, 64, 4)
+INSTANTIATE_SYRK_TRAILING(L, false, 64, 64, 4)
+INSTANTIATE_SYRK_TRAILING(U, true, 32, 64, 2)
+INSTANTIATE_SYRK_TRAILING(L, false, 32, 64, 2)
+INSTANTIATE_SYRK_TRAILING(U, true, 32, 128, 4)
+INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
+
+#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+
+// LU factorization with partial pivoting (mirrors LAPACK sgetrf), in place on a
+// row-major fp32 (B, M, N) buffer. The host (lu_factor_panel_encode in
+// LinearAlgebra.mm) drives a blocked right-looking schedule built from:
+//   factorPanelLU / luStream* -> sgetf2 (unblocked panel, isamax pivoting)
+//   laswpGatherLU             -> slaswp (apply a block's row interchanges)
+//   trsmPanelLU               -> strsm  (unit-lower triangular solve)
+//   gemmLU / gemmSimdLU       -> sgemm  (Schur update A22 -= L21 * U12)
+//   transposeInPlaceLU        -> row-major factor to column-major LU output
+// Buffer slots: (0) A in/out, (1) pivots (1-based), (2) info, (3) dims{M,N},
+// (4) per-kernel params, (5) window descriptor, (6) streaming scratch.
+// Unblocked 32-wide panel factor; each thread owns R rows, W = 32/R columns.
+template <short R, short W>
+kernel void factorPanelLU(
+    device float* A [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint minMN = min(M, N);
+  const uint d0 = params.x;
+  const uint H = M - d0;
+  const uint nb = min(uint(W), minMN - d0);
+  device float* Ab = A + ulong(bid.x) * M * N;
+  device int* pv = pivots + ulong(bid.x) * minMN;
+
+  if (d0 == 0 && tid == 0) {
+    info[bid.x] = 0;
+  }
+
+  threadgroup float pivBuf[W];
+  threadgroup float rowJBuf[W];
+  threadgroup float wval[32];
+  threadgroup uint widx[32];
+  threadgroup uint sPiv[1];
+
+  float row[R][W];
+  const bool vec4 = ((N % 4u) == 0) && (nb == W);
+#pragma unroll
+  for (short r = 0; r < R; r++) {
+    const uint lr = tid + uint(r) * G;
+    if (lr < H) {
+      device const float* src = Ab + ulong(d0 + lr) * N + d0;
+      if (vec4) {
+#pragma unroll
+        for (short c = 0; c < W; c += 4) {
+          const float4 v = *(device const float4*)(src + c);
+          for (short ci = 0; ci < 4; ci++) {
+            row[r][c + ci] = v[ci];
+          }
+        }
+      } else {
+#pragma unroll
+        for (short c = 0; c < W; c++) {
+          row[r][c] = (uint(c) < nb) ? src[c] : 0.0f;
+        }
+      }
+    }
+  }
+
+  const uint nwarps = G / c10::metal::simdgroup_size;
+  for (uint j = 0; j < nb; j++) {
+    // local first-max over owned rows, then two-level argmax reduction with
+    // smallest-index tiebreak (matches LAPACK isamax)
+    float bv = -1.0f;
+    uint bi = 0xffffffffu;
+#pragma unroll
+    for (short r = 0; r < R; r++) {
+      const uint lr = tid + uint(r) * G;
+      if (lr < H && lr >= j) {
+        const float v = fabs(row[r][j]);
+        if (v > bv) {
+          bv = v;
+          bi = lr;
+        }
+      }
+    }
+    const float mv = simd_max(bv);
+    const uint mi = simd_min((bv == mv) ? bi : 0xffffffffu);
+    if (lane == 0) {
+      wval[warp_id] = mv;
+      widx[warp_id] = mi;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (warp_id == 0) {
+      const float v2 = (lane < nwarps) ? wval[lane] : -1.0f;
+      const uint i2 = (lane < nwarps) ? widx[lane] : 0xffffffffu;
+      const float m2 = simd_max(v2);
+      uint p2 = simd_min((v2 == m2) ? i2 : 0xffffffffu);
+      if (lane == 0) {
+        if (p2 == 0xffffffffu) { // all-NaN column: pivot on j, NaN spreads
+          p2 = j;
+        }
+        sPiv[0] = p2;
+        pv[d0 + j] = int(d0 + p2 + 1); // 1-based like LAPACK
+        if (m2 == 0.0f && info[bid.x] == 0) {
+          info[bid.x] = int(d0 + j + 1);
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    const uint p = sPiv[0];
+
+    // swap full rows j <-> p through smem; pivBuf doubles as the U row j
+    // broadcast for the rank-1 update
+    if (tid == j) {
+#pragma unroll
+      for (short c = 0; c < W; c++) {
+        rowJBuf[c] = row[0][c];
+      }
+    }
+#pragma unroll
+    for (short r = 0; r < R; r++) {
+      if (tid + uint(r) * G == p) {
+#pragma unroll
+        for (short c = 0; c < W; c++) {
+          pivBuf[c] = row[r][c];
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (p != j) {
+      if (tid == j) {
+#pragma unroll
+        for (short c = 0; c < W; c++) {
+          row[0][c] = pivBuf[c];
+        }
+      }
+#pragma unroll
+      for (short r = 0; r < R; r++) {
+        if (tid + uint(r) * G == p) {
+#pragma unroll
+          for (short c = 0; c < W; c++) {
+            row[r][c] = rowJBuf[c];
+          }
+        }
+      }
+    }
+
+    const float upiv = pivBuf[j];
+    if (upiv != 0.0f) {
+      const float rp = 1.0f / upiv;
+      // batch the smem loads ahead of the fma burst (in-order pipe)
+      float uc[W];
+#pragma unroll
+      for (short c = 0; c < W; c++) {
+        uc[c] = pivBuf[c];
+      }
+#pragma unroll
+      for (short r = 0; r < R; r++) {
+        const uint lr = tid + uint(r) * G;
+        if (lr < H && lr > j) {
+          const float l = row[r][j] * rp;
+          row[r][j] = l;
+#pragma unroll
+          for (short c = 0; c < W; c++) {
+            if (uint(c) > j) {
+              row[r][c] = fma(-l, uc[c], row[r][c]);
+            }
+          }
+        }
+      }
+    }
+  }
+
+#pragma unroll
+  for (short r = 0; r < R; r++) {
+    const uint lr = tid + uint(r) * G;
+    if (lr < H) {
+      device float* dst = Ab + ulong(d0 + lr) * N + d0;
+      if (vec4) {
+#pragma unroll
+        for (short c = 0; c < W; c += 4) {
+          *(device float4*)(dst + c) =
+              float4(row[r][c], row[r][c + 1], row[r][c + 2], row[r][c + 3]);
+        }
+      } else {
+#pragma unroll
+        for (short c = 0; c < W; c++) {
+          if (uint(c) < nb) {
+            dst[c] = row[r][c];
+          }
+        }
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_FACTOR_PANEL_LU(R, W)              \
+  template [[host_name("factorPanelLU_" #R "_" #W)]]   \
+  kernel void factorPanelLU<R, W>(                     \
+      device float* A [[buffer(0)]],                   \
+      device int* pivots [[buffer(1)]],                \
+      device int* info [[buffer(2)]],                  \
+      constant uint2& dims [[buffer(3)]],              \
+      constant uint4& params [[buffer(4)]],            \
+      uint3 tid3 [[thread_position_in_threadgroup]],   \
+      uint3 bid [[threadgroup_position_in_grid]],      \
+      uint3 tpg [[threads_per_threadgroup]],           \
+      uint warp_id [[simdgroup_index_in_threadgroup]], \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_FACTOR_PANEL_LU(1, 32)
+INSTANTIATE_FACTOR_PANEL_LU(2, 16)
+INSTANTIATE_FACTOR_PANEL_LU(4, 8)
+
+// Streaming panel factorization for tall panels (H > kStreamMinRows): factor
+// one column at a time across many threadgroups when the register-resident
+// factorPanelLU no longer fits. luStreamUpdate applies column j's rank-1 update
+// over all rows and writes each threadgroup's local argmax partial to scratch;
+// luStreamPivot then reduces those partials to the global pivot for column j.
+[[max_total_threads_per_threadgroup(kLUStreamNT)]]
+kernel void luStreamUpdate(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]], // d0, j, RPT, searchOnly
+    device float* scratch [[buffer(6)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint d0 = params.x;
+  const uint j = params.y;
+  const uint RPT = params.z;
+  const bool searchOnly = params.w != 0;
+  const uint minMN = min(M, N);
+  const uint nb = min(32u, minMN - d0);
+  const uint H = M - d0;
+  device float* Ab = A + ulong(tgid.y) * M * N;
+  device float* scr = scratch + ulong(tgid.y) * (2 * kLUStreamNT + 32);
+  device float* uRow = scr + 2 * kLUStreamNT;
+
+  const uint rowStart = searchOnly ? j : j + 1;
+  const uint sc = searchOnly ? j : j + 1; // column searched for next pivot
+  const uint base = rowStart + (tgid.x * kLUStreamWarpsPerTG + warp_id) * RPT;
+
+  float uc = 0.0f;
+  float rp = 0.0f;
+  bool doUpdate = false;
+  if (!searchOnly) {
+    const float upiv = uRow[j];
+    doUpdate = upiv != 0.0f;
+    rp = doUpdate ? (1.0f / upiv) : 0.0f;
+    uc = (lane < nb) ? uRow[lane] : 0.0f;
+  }
+
+  float bv = -1.0f;
+  uint bi = 0xffffffffu;
+  const bool active = lane >= j && lane < nb;
+  for (uint r = 0; r < RPT; r++) {
+    const uint lr = base + r;
+    if (lr >= H) {
+      break;
+    }
+    device float* rowp = Ab + ulong(d0 + lr) * N + d0;
+    float v = active ? rowp[lane] : 0.0f;
+    if (doUpdate) {
+      const float l = simd_broadcast(v, ushort(j)) * rp;
+      if (lane == uint(j)) {
+        v = l;
+      } else if (lane > j && lane < nb) {
+        v = fma(-l, uc, v);
+      }
+      if (active) {
+        rowp[lane] = v;
+      }
+    }
+    if (lane == sc && sc < nb) {
+      const float av = fabs(v);
+      if (av > bv) {
+        bv = av;
+        bi = lr;
+      }
+    }
+  }
+  threadgroup float wv[kLUStreamWarpsPerTG];
+  threadgroup uint wi[kLUStreamWarpsPerTG];
+  const float mv = simd_max(bv);
+  const uint mi = simd_min((bv == mv) ? bi : 0xffffffffu);
+  if (lane == 0) {
+    wv[warp_id] = mv;
+    wi[warp_id] = mi;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (warp_id == 0) {
+    const float v2 = (lane < kLUStreamWarpsPerTG) ? wv[lane] : -1.0f;
+    const uint i2 = (lane < kLUStreamWarpsPerTG) ? wi[lane] : 0xffffffffu;
+    const float m2 = simd_max(v2);
+    const uint p2 = simd_min((v2 == m2) ? i2 : 0xffffffffu);
+    if (lane == 0) {
+      scr[tgid.x] = m2;
+      ((device uint*)(scr + kLUStreamNT))[tgid.x] = p2;
+    }
+  }
+}
+
+// Reduce luStreamUpdate's per-threadgroup argmax partials to the global pivot
+// for column j, record it (1-based, like LAPACK), swap the pivot row, and
+// broadcast the resulting U row back to scratch for the next update.
+[[max_total_threads_per_threadgroup(kLUStreamNT)]]
+kernel void luStreamPivot(
+    device float* A [[buffer(0)]],
+    device int* pivots [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]], // d0, j, npart
+    device float* scratch [[buffer(6)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint d0 = params.x;
+  const uint j = params.y;
+  const uint npart = params.z;
+  const uint minMN = min(M, N);
+  const uint nb = min(32u, minMN - d0);
+  const uint tid = tid3.x; // threadgroup of kLUStreamNT threads
+  device float* Ab = A + ulong(tgid.x) * M * N;
+  device int* pv = pivots + ulong(tgid.x) * minMN;
+  device float* scr = scratch + ulong(tgid.x) * (2 * kLUStreamNT + 32);
+  device const uint* sidx = (device const uint*)(scr + kLUStreamNT);
+  device float* uRow = scr + 2 * kLUStreamNT;
+
+  if (d0 == 0 && j == 0 && tid == 0) {
+    info[tgid.x] = 0;
+  }
+  threadgroup float wv[kLUStreamWarpsPerTG];
+  threadgroup uint wi[kLUStreamWarpsPerTG];
+  threadgroup uint sPiv[1];
+
+  // first-max semantics: equal partials resolve to the smaller global row
+  float bv = -1.0f;
+  uint bi = 0xffffffffu;
+  for (uint i = tid; i < npart; i += kLUStreamNT) {
+    const float v = scr[i];
+    const uint ix = sidx[i];
+    if (v > bv || (v == bv && ix < bi)) {
+      bv = v;
+      bi = ix;
+    }
+  }
+  const float mv = simd_max(bv);
+  const uint mi = simd_min((bv == mv) ? bi : 0xffffffffu);
+  if (lane == 0) {
+    wv[warp_id] = mv;
+    wi[warp_id] = mi;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (warp_id == 0) {
+    const float v2 = (lane < kLUStreamWarpsPerTG) ? wv[lane] : -1.0f;
+    const uint i2 = (lane < kLUStreamWarpsPerTG) ? wi[lane] : 0xffffffffu;
+    const float m2 = simd_max(v2);
+    uint p2 = simd_min((v2 == m2) ? i2 : 0xffffffffu);
+    if (lane == 0) {
+      if (p2 == 0xffffffffu) { // all-NaN column: pivot on j, NaN spreads
+        p2 = j;
+      }
+      sPiv[0] = p2;
+      pv[d0 + j] = int(d0 + p2 + 1); // 1-based like LAPACK
+      if (m2 == 0.0f && info[tgid.x] == 0) {
+        info[tgid.x] = int(d0 + j + 1);
+      }
+    }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+    const uint p = sPiv[0];
+    if (lane < nb) {
+      device float* rj = Ab + ulong(d0 + j) * N + d0 + lane;
+      float vj = *rj;
+      if (p != j) {
+        device float* rp2 = Ab + ulong(d0 + p) * N + d0 + lane;
+        const float vp = *rp2;
+        *rj = vp;
+        *rp2 = vj;
+        vj = vp;
+      }
+      uRow[lane] = vj;
+    }
+  }
+}
+
+// slaswp: apply a block's pivot interchanges as one staged gather/scatter
+// through threadgroup memory, not nb sequential row swaps.
+kernel void laswpGatherLU(
+    device float* A [[buffer(0)]],
+    device const int* pivots [[buffer(1)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    constant uint4& w [[buffer(5)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]);
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint d0 = params.x;
+  const uint nb = params.y; // <= 32
+  const uint W0 = w.y - w.x;
+  const uint W = W0 + (w.w - w.z);
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  device float* Ab = A + ulong(tgid.y) * M * N;
+  device const int* pvt = pivots + ulong(tgid.y) * min(M, N) + d0;
+
+  threadgroup uint rowIds[64]; // global row of each slot
+  threadgroup uint src[64]; // slot whose staged data this slot receives
+  threadgroup uint counts[1];
+  threadgroup float stage[64][64];
+
+  if (warp_id == 0) {
+    // pivots are stored 1-based (LAPACK convention)
+    const uint myp = (lane < nb) ? uint(pvt[lane]) - 1 : 0xffffffffu;
+    const bool outb = (lane < nb) && (myp >= d0 + nb);
+    // dedup out-of-band pivot rows; first occurrence keeps
+    bool keep = outb;
+    for (ushort t = 0; t < 32; t++) {
+      const uint pt = simd_broadcast(myp, t);
+      if (outb && uint(t) < lane && pt == myp) {
+        keep = false;
+      }
+    }
+    const uint pre = simd_prefix_exclusive_sum(keep ? 1u : 0u);
+    if (lane < nb) {
+      rowIds[lane] = d0 + lane;
+    }
+    if (keep) {
+      rowIds[nb + pre] = myp;
+    }
+    const uint nextras = simd_sum(keep ? 1u : 0u);
+    if (lane == 0) {
+      counts[0] = nb + nextras;
+    }
+    src[lane] = lane;
+    src[lane + 32] = lane + 32;
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+    // simulate the swap sequence on slot indices; extras located by ballot
+    const uint exRow =
+        (nb + lane < counts[0]) ? rowIds[nb + lane] : 0xffffffffu;
+    for (uint s = 0; s < nb; s++) {
+      const uint p2 = simd_broadcast(myp, ushort(s));
+      uint slotp;
+      if (p2 < d0 + nb) {
+        slotp = p2 - d0;
+      } else {
+        slotp = nb + simd_min((exRow == p2) ? lane : 0xffffffffu);
+      }
+      if (lane == 0 && slotp != s) {
+        const uint t2 = src[s];
+        src[s] = src[slotp];
+        src[slotp] = t2;
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint nlist = counts[0];
+  const uint vbase = tgid.x * 64;
+  const bool aligned = (N % 4u) == 0;
+
+  for (uint i = tid; i < nlist * 16; i += G) {
+    const uint r = i / 16;
+    const uint q = (i % 16) * 4;
+    const uint v = vbase + q;
+    if (v >= W) {
+      continue;
+    }
+    const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
+    const uint cnt = min(4u, W - v);
+    device const float* sp = Ab + ulong(rowIds[r]) * N + c;
+    if (cnt == 4 && aligned) {
+      const float4 t = *(device const float4*)sp;
+      stage[r][q + 0] = t.x;
+      stage[r][q + 1] = t.y;
+      stage[r][q + 2] = t.z;
+      stage[r][q + 3] = t.w;
+    } else {
+      for (uint e = 0; e < cnt; e++) {
+        stage[r][q + e] = sp[e];
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint i = tid; i < nlist * 16; i += G) {
+    const uint r = i / 16;
+    const uint sr = src[r];
+    if (sr == r) {
+      continue;
+    }
+    const uint q = (i % 16) * 4;
+    const uint v = vbase + q;
+    if (v >= W) {
+      continue;
+    }
+    const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
+    const uint cnt = min(4u, W - v);
+    device float* dp = Ab + ulong(rowIds[r]) * N + c;
+    if (cnt == 4 && aligned) {
+      *(device float4*)dp = float4(
+          stage[sr][q], stage[sr][q + 1], stage[sr][q + 2], stage[sr][q + 3]);
+    } else {
+      for (uint e = 0; e < cnt; e++) {
+        dp[e] = stage[sr][q + e];
+      }
+    }
+  }
+}
+
+// strsm: solve unit-lower L*X = B for the panel's off-diagonal block, with L
+// staged in threadgroup memory and one thread per column of B.
+template <short TS>
+kernel void trsmPanelLU(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint d0 = params.x;
+  const uint cs = params.y;
+  const uint ce = params.z;
+  const uint nr = params.w;
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  device float* Ab = A + ulong(tgid.x) * M * N;
+
+  threadgroup float L[TS][TS + 1];
+  if ((N % 4u) == 0 && nr == TS) {
+    for (uint i = tid; i < TS * TS / 4; i += G) {
+      const uint r = i / (TS / 4);
+      const uint c = (i % (TS / 4)) * 4;
+      const float4 v = *(device const float4*)(Ab + ulong(d0 + r) * N + d0 + c);
+      L[r][c + 0] = v.x;
+      L[r][c + 1] = v.y;
+      L[r][c + 2] = v.z;
+      L[r][c + 3] = v.w;
+    }
+  } else {
+    // zero-pad the ragged block so the unrolled solve below stays a no-op
+    // past nr
+    for (uint i = tid; i < TS * TS; i += G) {
+      const uint r = i / TS;
+      const uint c = i % TS;
+      L[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c] : 0.0f;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint col = cs + tgid.y * G + tid;
+  if (col >= ce) {
+    return;
+  }
+  float x[TS];
+#pragma unroll
+  for (short r = 0; r < TS; r++) {
+    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : 0.0f;
+  }
+#pragma unroll
+  for (short c = 0; c < TS; c++) {
+    // batch the column loads ahead of the fma burst (in-order pipe)
+    float dcol[TS];
+#pragma unroll
+    for (short i = 0; i < TS; i++) {
+      dcol[i] = L[i][c];
+    }
+    const float xc = x[c];
+#pragma unroll
+    for (short i = 0; i < TS; i++) {
+      if (i > c) {
+        x[i] = fma(-xc, dcol[i], x[i]);
+      }
+    }
+  }
+#pragma unroll
+  for (short r = 0; r < TS; r++) {
+    if (uint(r) < nr) {
+      Ab[ulong(d0 + r) * N + col] = x[r];
+    }
+  }
+}
+
+#define INSTANTIATE_TRSM_PANEL_LU(TS)                \
+  template [[host_name("trsmPanelLU_" #TS)]]         \
+  kernel void trsmPanelLU<TS>(                       \
+      device float* A [[buffer(0)]],                 \
+      constant uint2& dims [[buffer(3)]],            \
+      constant uint4& params [[buffer(4)]],          \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]],   \
+      uint3 tpg [[threads_per_threadgroup]]);
+
+INSTANTIATE_TRSM_PANEL_LU(8)
+INSTANTIATE_TRSM_PANEL_LU(16)
+INSTANTIATE_TRSM_PANEL_LU(32)
+
+// In-place square transpose so the row-major factor matches the column-major LU
+// view; tiles with tj < ti are produced by their mirror.
+kernel void transposeInPlaceLU(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const uint N = dims.y;
+  const uint ti = tgid.y * 32;
+  const uint tj = tgid.x * 32;
+  if (tj < ti) {
+    return;
+  }
+  device float* Ab = A + ulong(tgid.z) * N * N;
+  threadgroup float ta[32][33];
+  threadgroup float tb[32][33];
+  const uint lx = tid3.x; // 0..31
+  const uint ly = tid3.y; // 0..7
+
+  for (uint r = ly; r < 32; r += 8) {
+    if (ti + r < N && tj + lx < N) {
+      ta[r][lx] = Ab[ulong(ti + r) * N + tj + lx];
+    }
+    if (tj + r < N && ti + lx < N) {
+      tb[r][lx] = Ab[ulong(tj + r) * N + ti + lx];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint r = ly; r < 32; r += 8) {
+    if (ti + r < N && tj + lx < N) {
+      Ab[ulong(ti + r) * N + tj + lx] = tb[lx][r];
+    }
+    if (tj + r < N && ti + lx < N) {
+      Ab[ulong(tj + r) * N + ti + lx] = ta[lx][r];
+    }
+  }
+}
+
+// Schur-complement trailing update C -= A*B (sgemm) via simdgroup matmul;
+// fallback used when matmul2d is unavailable (cf. gemmLU).
+kernel void gemmSimdLU(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& win [[buffer(4)]],
+    constant uint4& kwin [[buffer(5)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint rs = win.x;
+  const uint Tm = win.y - rs;
+  const uint cs = win.z;
+  const uint Tn = win.w - cs;
+  const uint kc = kwin.x;
+  const uint kw = kwin.y;
+  const uint ro = tgid.y * 32;
+  const uint co = tgid.x * 64;
+  const uint tid = tid3.x;
+  device float* Ab = A + ulong(tgid.z) * M * N;
+
+  threadgroup float As[32][17];
+  threadgroup float Bs[16][65];
+  threadgroup float Cs[32][65];
+
+  simdgroup_float8x8 acc[8];
+#pragma unroll
+  for (short f = 0; f < 8; f++) {
+    acc[f] = simdgroup_float8x8(0.0f);
+  }
+
+  for (uint k0 = 0; k0 < kw; k0 += 16) {
+    for (uint i = tid; i < 32 * 16; i += 128) {
+      const uint r = i / 16;
+      const uint c = i % 16;
+      const bool ok = (ro + r < Tm) && (k0 + c < kw);
+      As[r][c] = ok ? Ab[ulong(rs + ro + r) * N + kc + k0 + c] : 0.0f;
+    }
+    for (uint i = tid; i < 16 * 64; i += 128) {
+      const uint r = i / 64;
+      const uint c = i % 64;
+      const bool ok = (k0 + r < kw) && (co + c < Tn);
+      Bs[r][c] = ok ? Ab[ulong(kc + k0 + r) * N + cs + co + c] : 0.0f;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint kk = 0; kk < 16; kk += 8) {
+      simdgroup_float8x8 a;
+      simdgroup_load(a, &As[8 * warp_id][kk], 17);
+#pragma unroll
+      for (short f = 0; f < 8; f++) {
+        simdgroup_float8x8 b;
+        simdgroup_load(b, &Bs[kk][8 * f], 65);
+        simdgroup_multiply_accumulate(acc[f], a, b, acc[f]);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+#pragma unroll
+  for (short f = 0; f < 8; f++) {
+    simdgroup_store(acc[f], &Cs[8 * warp_id][8 * f], 65);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint i = tid; i < 32 * 64; i += 128) {
+    const uint r = i / 64;
+    const uint c = i % 64;
+    if (ro + r < Tm && co + c < Tn) {
+      device float* p = Ab + ulong(rs + ro + r) * N + cs + co + c;
+      *p = *p - Cs[r][c];
+    }
+  }
+}
+
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+
+// Same Schur update C -= A*B (sgemm) as gemmSimdLU, but via MetalPerformance-
+// Primitives matmul2d (macOS 26.2+, gated by lu_has_matmul2d()).
+template <int BM, int BN, int NSG>
+kernel void gemmLU(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& win [[buffer(4)]],
+    constant uint4& kwin [[buffer(5)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const int gN = int(dims.y);
+  const int rs = int(win.x);
+  const int Tm = int(win.y) - rs;
+  const int cs = int(win.z);
+  const int Tn = int(win.w) - cs;
+  const int kc = int(kwin.x);
+  const int K = int(kwin.y);
+  const int ro = int(tgid.y) * BM;
+  const int co = int(tgid.x) * BN;
+  device float* Ab = A + ulong(tgid.z) * ulong(dims.x) * ulong(dims.y);
+
+  constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      BM,
+      BN,
+      static_cast<int>(dynamic_extent),
+      false,
+      false,
+      false,
+      mpp::tensor_ops::matmul2d_descriptor::mode::multiply);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<NSG>> op;
+
+  device float* aP = Ab + rs * gN + kc;
+  device float* bP = Ab + kc * gN + cs;
+  device float* cP = Ab + rs * gN + cs;
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tA(
+      aP, dextents<int32_t, 2>(K, Tm), array<int32_t, 2>{1, gN});
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tB(
+      bP, dextents<int32_t, 2>(Tn, K), array<int32_t, 2>{1, gN});
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tC(
+      cP, dextents<int32_t, 2>(Tn, Tm), array<int32_t, 2>{1, gN});
+
+  auto schur = [&](auto mA, auto mB, auto mC, bool checkValid) {
+    auto cT = op.template get_destination_cooperative_tensor<
+        decltype(mA),
+        decltype(mB),
+        float>();
+    op.run(mA, mB, cT);
+    uint16_t e = 0;
+    for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+      if (checkValid && !cT.is_valid_element(e)) {
+        continue;
+      }
+      auto idx = it.get_multidimensional_index();
+      const int r = ro + int(idx[1]);
+      const int c = co + int(idx[0]);
+      cT[e] = cP[r * gN + c] - cT[e];
+    }
+    cT.store(mC);
+  };
+
+  const bool inside = (ro + BM <= Tm) && (co + BN <= Tn);
+  if (inside) {
+    schur(
+        tA.template slice<dynamic_extent, BM>(0, ro),
+        tB.template slice<BN, dynamic_extent>(co, 0),
+        tC.template slice<BN, BM>(co, ro),
+        false);
+  } else {
+    schur(tA.slice(0, ro), tB.slice(co, 0), tC.slice(co, ro), true);
+  }
+}
+
+#define INSTANTIATE_GEMM_LU(BM, BN, NSG)                 \
+  template [[host_name("gemmLU_" #BM "_" #BN "_" #NSG)]] \
+  kernel void gemmLU<BM, BN, NSG>(                       \
+      device float* A [[buffer(0)]],                     \
+      constant uint2& dims [[buffer(3)]],                \
+      constant uint4& win [[buffer(4)]],                 \
+      constant uint4& kwin [[buffer(5)]],                \
+      uint3 tgid [[threadgroup_position_in_grid]]);
+
+INSTANTIATE_GEMM_LU(64, 64, 4)
+INSTANTIATE_GEMM_LU(32, 64, 2)
+
+#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
+
+template <bool upper, bool unit, short TS>
+kernel void trsmDiagSolveLU(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint d0 = params.x;
+  const uint cs = params.y;
+  const uint ce = params.z;
+  const uint nr = params.w;
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  device float* Ab = A + ulong(tgid.x) * M * N;
+
+  threadgroup float T[TS][TS + 1];
+  for (uint i = tid; i < TS * TS; i += G) {
+    const uint r = i / TS;
+    const uint c = i % TS;
+    T[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c]
+                                 : (r == c ? 1.0f : 0.0f);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint col = cs + tgid.y * G + tid;
+  if (col >= ce) {
+    return;
+  }
+  float x[TS];
+#pragma unroll
+  for (short r = 0; r < TS; r++) {
+    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : 0.0f;
+  }
+  if (!upper) {
+#pragma unroll
+    for (short c = 0; c < TS; c++) {
+      float dcol[TS];
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        dcol[i] = T[i][c];
+      }
+      const float xc = unit ? x[c] : x[c] / T[c][c];
+      x[c] = xc;
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        if (i > c) {
+          x[i] = fma(-xc, dcol[i], x[i]);
+        }
+      }
+    }
+  } else {
+#pragma unroll
+    for (short c = TS - 1; c >= 0; c--) {
+      float dcol[TS];
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        dcol[i] = T[i][c];
+      }
+      const float xc = unit ? x[c] : x[c] / T[c][c];
+      x[c] = xc;
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        if (i < c) {
+          x[i] = fma(-xc, dcol[i], x[i]);
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (short r = 0; r < TS; r++) {
+    if (uint(r) < nr) {
+      Ab[ulong(d0 + r) * N + col] = x[r];
+    }
+  }
+}
+
+#define INSTANTIATE_TRSM_DIAG_SOLVE(UP, UN, SUFF)    \
+  template [[host_name("trsmDiagSolveLU_" #SUFF)]]   \
+  kernel void trsmDiagSolveLU<UP, UN, 32>(           \
+      device float* A [[buffer(0)]],                 \
+      constant uint2& dims [[buffer(3)]],            \
+      constant uint4& params [[buffer(4)]],          \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]],   \
+      uint3 tpg [[threads_per_threadgroup]]);
+
+INSTANTIATE_TRSM_DIAG_SOLVE(false, true, lower_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(true, false, upper_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(false, false, lower_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(true, true, upper_unit)
+
+kernel void luApplyPivotsRHS(
+    device float* A [[buffer(0)]],
+    device const int* pivots [[buffer(1)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint coff = params.x;
+  const uint k = params.y;
+  const uint npiv = params.z;
+  const uint inverse = params.w;
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  device float* Ab = A + ulong(tgid.x) * M * N;
+  device const int* pv = pivots + ulong(tgid.x) * npiv;
+
+  for (uint s = 0; s < npiv; s++) {
+    const uint i = inverse ? (npiv - 1 - s) : s;
+    const uint p = uint(pv[i] - 1);
+    if (p != i) {
+      for (uint col = tid; col < k; col += G) {
+        const uint cc = coff + col;
+        const float t = Ab[ulong(i) * N + cc];
+        Ab[ulong(i) * N + cc] = Ab[ulong(p) * N + cc];
+        Ab[ulong(p) * N + cc] = t;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
 
 kernel void applyPivots(
     device float* P [[buffer(0)]],
@@ -940,34 +2489,47 @@ kernel void unpack_pivots(
 }
 
 template <typename T>
-kernel void linalg_qr_householder(
-    device T* A [[buffer(0)]],
-    device T* Q [[buffer(1)]],
-    device T* R [[buffer(2)]],
-    device int* info [[buffer(3)]],
-    constant QrParams& params [[buffer(4)]],
-    device T* v_work [[buffer(5)]],
-    uint3 thread_pos [[thread_position_in_threadgroup]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+kernel void geqrf(
+    device T* R [[buffer(0)]],
+    device T* tau [[buffer(1)]],
+    constant GeqrfParams<>& params [[buffer(2)]],
+    device T* v_work [[buffer(3)]],
+    uint thread_pos [[thread_position_in_threadgroup]],
+    uint tpg [[threads_per_threadgroup]],
+    uint tg_pos [[threadgroup_position_in_grid]]) {
   using opmath_t = c10::metal::opmath_t<T>;
 
-  const uint32_t tid = thread_pos.x;
-  const uint32_t group_size = tpg.x;
-  const uint32_t m = params.m;
-  const uint32_t n = params.n;
+  const uint32_t tid = thread_pos;
+  const uint32_t group_size = tpg;
+  const uint32_t m = params.A_sizes[params.num_batch_dims];
+  const uint32_t n = params.A_sizes[params.num_batch_dims + 1];
+  const uint32_t K = min(m, n);
 
   // Batch indexing
-  const uint32_t batch_idx = tg_pos.x;
-  const uint32_t A_stride = m * n;
-  const uint32_t Q_stride = m * m;
-  const uint32_t R_stride = m * n;
+  uint32_t batch_idx = tg_pos;
   const uint32_t v_stride = m;
-
-  device T* A_batch = A + batch_idx * A_stride;
-  device T* Q_batch = Q + batch_idx * Q_stride;
-  device T* R_batch = R + batch_idx * R_stride;
   device T* v_batch = v_work + batch_idx * v_stride;
+
+  // Find the matrices for this thread's batch index
+  uint32_t A_offset = 0;
+  uint32_t tau_offset = 0;
+
+  for (int32_t dim = params.num_batch_dims - 1; dim >= 0; dim--) {
+    auto dim_size = params.A_sizes[dim];
+    auto dim_idx = batch_idx % dim_size;
+
+    A_offset += dim_idx * params.A_strides[dim];
+    tau_offset += dim_idx * params.tau_strides[dim];
+
+    batch_idx /= dim_size;
+  }
+
+  device T* R_batch = R + A_offset;
+  device T* tau_batch = tau + tau_offset;
+
+  const uint32_t tau_stride = params.tau_strides[params.num_batch_dims];
+  const uint32_t R_stride_r = params.A_strides[params.num_batch_dims];
+  const uint32_t R_stride_c = params.A_strides[params.num_batch_dims + 1];
 
   constexpr auto kMaxThreadsPerThreadgroup = 1024;
   constexpr auto kMaxSIMDGroups =
@@ -976,22 +2538,13 @@ kernel void linalg_qr_householder(
   threadgroup opmath_t scratch[kMaxSIMDGroups];
   threadgroup opmath_t tau_shared;
 
-  // initialize Q = Identity (m x m)
-  for (uint32_t i = tid; i < m * m; i += group_size) {
-    Q_batch[i] = static_cast<T>((i / m == i % m) ? 1.0 : 0.0);
-  }
-
-  // initialize R = A (m x n)
-  for (uint32_t i = tid; i < m * n; i += group_size) {
-    R_batch[i] = A_batch[i];
-  }
-  threadgroup_barrier(mem_flags::mem_device);
-
-  for (uint32_t k = 0; k < min(m, n); k++) {
+  for (uint32_t k = 0; k < K; k++) {
+    uint32_t R_k_offset = k * R_stride_c;
+    uint32_t tau_k_offset = k * tau_stride;
     // Step 1: compute norm of R[k:m, k] and copy to v_batch
     opmath_t norm_sq = 0.0;
     for (uint32_t i = k + tid; i < m; i += group_size) {
-      T r_ik = R_batch[i * n + k];
+      T r_ik = R_batch[i * R_stride_r + R_k_offset];
       v_batch[i] = r_ik;
       const auto val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
@@ -1024,18 +2577,23 @@ kernel void linalg_qr_householder(
           v_batch[i] = static_cast<T>(static_cast<opmath_t>(v_batch[i]) / u1);
         }
 
-        R_batch[k * n + k] = static_cast<T>(-beta);
+        R_batch[k * R_stride_r + R_k_offset] = static_cast<T>(-beta);
       }
+      tau_batch[tau_k_offset] = static_cast<T>(tau_shared);
     }
     threadgroup_barrier(mem_flags::mem_device);
 
-    const auto tau = tau_shared;
-    if (tau < tau_eps)
-      continue;
+    const auto tau_val = tau_shared;
 
-    // (zero out column k below diagonal)
+    // Store the essential part of the Householder vector, below the diagonal.
+    // The implicit leading 1 at row k is not stored.
     for (uint32_t i = k + 1 + tid; i < m; i += group_size) {
-      R_batch[i * n + k] = static_cast<T>(0.0);
+      R_batch[i * R_stride_r + R_k_offset] = v_batch[i];
+    }
+
+    if (tau_val < tau_eps) {
+      threadgroup_barrier(mem_flags::mem_device);
+      continue;
     }
 
     // Step 3: apply reflection to trailing columns of R
@@ -1047,73 +2605,47 @@ kernel void linalg_qr_householder(
 
     for (uint32_t j_base = k + 1; j_base < n; j_base += num_simd_groups) {
       uint32_t j = j_base + simd_group_id;
+      uint32_t R_j_offset = j * R_stride_c;
       if (j < n) {
         // Each SIMD group computes dot product for its column
         // Use SIMD reduction within the group
         opmath_t dot = 0.0;
         for (uint32_t i = k + simd_lane; i < m; i += 32) {
           opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
-          opmath_t r_ij = static_cast<opmath_t>(R_batch[i * n + j]);
+          opmath_t r_ij =
+              static_cast<opmath_t>(R_batch[i * R_stride_r + R_j_offset]);
           dot = fma(v_i, r_ij, dot);
         }
         opmath_t vt_col = simd_sum(dot);
-        opmath_t factor = tau * vt_col;
+        opmath_t factor = tau_val * vt_col;
 
         // Update column
         for (uint32_t i = k + simd_lane; i < m; i += 32) {
           opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
-          opmath_t r_ij = static_cast<opmath_t>(R_batch[i * n + j]);
-          R_batch[i * n + j] = static_cast<T>(r_ij - v_i * factor);
-        }
-      }
-    }
-    threadgroup_barrier(mem_flags::mem_device);
-
-    // Step 4: accumulate Q = Q * H_k
-    // each SIMD group handles one row
-    for (uint32_t i_base = 0; i_base < m; i_base += num_simd_groups) {
-      uint32_t i = i_base + simd_group_id;
-      if (i < m) {
-        opmath_t dot = 0.0;
-        for (uint32_t j = k + simd_lane; j < m; j += 32) {
-          opmath_t v_j = static_cast<opmath_t>(v_batch[j]);
-          opmath_t q_ij = static_cast<opmath_t>(Q_batch[i * m + j]);
-          dot = fma(q_ij, v_j, dot);
-        }
-        opmath_t row_v = simd_sum(dot);
-        opmath_t factor = tau * row_v;
-
-        // Update row
-        for (uint32_t j = k + simd_lane; j < m; j += 32) {
-          opmath_t v_j = static_cast<opmath_t>(v_batch[j]);
-          opmath_t q_ij = static_cast<opmath_t>(Q_batch[i * m + j]);
-          Q_batch[i * m + j] = static_cast<T>(q_ij - v_j * factor);
+          opmath_t r_ij =
+              static_cast<opmath_t>(R_batch[i * R_stride_r + R_j_offset]);
+          R_batch[i * R_stride_r + R_j_offset] =
+              static_cast<T>(r_ij - v_i * factor);
         }
       }
     }
 
     threadgroup_barrier(mem_flags::mem_device);
-  }
-
-  if (tid == 0) {
-    info[0] = 0;
   }
 }
 
-#define REGISTER_QR(T)                                \
-  template [[host_name("linalg_qr_householder_" #T)]] \
-  kernel void linalg_qr_householder<T>(               \
-      device T * A [[buffer(0)]],                     \
-      device T * Q [[buffer(1)]],                     \
-      device T * R [[buffer(2)]],                     \
-      device int* info [[buffer(3)]],                 \
-      constant QrParams& params [[buffer(4)]],        \
-      device T* v_work [[buffer(5)]],                 \
-      uint3 tid [[thread_position_in_threadgroup]],   \
-      uint3 tpg [[threads_per_threadgroup]],          \
-      uint3 tg_pos [[threadgroup_position_in_grid]]);
+#define REGISTER_GEQRF(T)              \
+  template [[host_name("geqrf_" #T)]]  \
+  kernel void geqrf<T>(                \
+      device T * R,                    \
+      device T * tau,                  \
+      constant GeqrfParams<> & params, \
+      device T * v_work,               \
+      uint tid,                        \
+      uint tpg,                        \
+      uint tg_pos);
 
-REGISTER_QR(float);
+REGISTER_GEQRF(float);
 
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \

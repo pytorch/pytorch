@@ -89,8 +89,12 @@ def _query_changed_files_from_github(pr_number: int) -> list[str]:
 
 
 def python_test_file_to_test_name(tests: set[str]) -> set[str]:
-    prefix = f"test{os.path.sep}"
-    valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
+    prefix = "test/"
+    valid_tests = {
+        f
+        for f in (test.replace("\\", "/") for test in tests)
+        if f.startswith(prefix) and f.endswith(".py")
+    }
     valid_tests = {f[len(prefix) : -len(".py")] for f in valid_tests}
 
     return valid_tests

@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import multiprocessing
 import os
+import pickle
 import queue
 import sys
 import tempfile
@@ -92,6 +93,37 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
         json.dump({"shapes": precompile_shapes, "strides": precompile_strides, "dtypes": precompile_dtypes}, f)
 """
 )
+
+
+class TestNVGemmPickling(TestCase):
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
+    def test_scaled_operand_constraints_pickle_round_trip(self):
+        import cutlass
+        from cutlass.operators import ScaleMode, ScaleSwizzleMode
+        from cutlass.operators.metadata import (
+            DenseTensorConstraints,
+            ScaledOperandConstraints,
+        )
+
+        import torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils  # noqa: F401
+
+        quantized = DenseTensorConstraints(cutlass.Float16, (1, 0), 16)
+        scale = DenseTensorConstraints(cutlass.Float32, (1,), 4)
+        constraints = ScaledOperandConstraints(
+            quantized,
+            scale,
+            ScaleMode.Blockwise1x16,
+            ScaleSwizzleMode.Swizzle32x4x4,
+        )
+
+        restored = pickle.loads(pickle.dumps(constraints))
+        self.assertEqual(restored.quantized, quantized)
+        self.assertEqual(restored.scale, scale)
+        self.assertEqual(restored.mode, ScaleMode.Blockwise1x16)
+        self.assertEqual(restored.swizzle, ScaleSwizzleMode.Swizzle32x4x4)
 
 
 def _daemon_compile_worker(q, worker_start_method):
@@ -1575,7 +1607,9 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 with ThreadPoolExecutor(max_workers=num_threads) as pool:
                     list(pool.map(write_to_cache, range(num_threads)))
 
-                self.assertEqual(errors, [], f"Concurrent writes failed: {errors}")
+                self.assertEqual(
+                    errors, [], lambda msg: f"{msg}\nConcurrent writes failed: {errors}"
+                )
 
                 # Verify the file is valid by loading it
                 fresh_mem: dict = {}

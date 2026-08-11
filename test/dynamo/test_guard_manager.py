@@ -172,6 +172,19 @@ user_stack=None)
             torch.use_deterministic_algorithms(_orig)
         self.assertTrue(guard(None))
         self.assertTrue(guard.check_verbose(None).result)
+        with torch.autograd.forward_ad.dual_level():
+            self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: forward_ad_active '],
+num_guards_executed=0,
+user_stack=None)
+""",
+            )
+        self.assertTrue(guard(None))
 
     def test_global_state_reason(self):
         with torch.enable_grad():
@@ -507,12 +520,22 @@ user_stack=None)
             None,
             type(x),
             torch._C._dispatch_keys(x),
+            False,
+            False,
         )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
         self.assertTrue(guard_manager.check(torch.randn(4, 4)))
         self.assertTrue(guard_manager.check_verbose(torch.randn(4, 4)).result)
         self.assertFalse(guard_manager.check(x.t_()))
+
+        with torch.autograd.forward_ad.dual_level():
+            self.assertFalse(guard_manager.check(torch.randn(4, 4)))
+            dual_primal = torch.randn(4, 4)
+            dual = torch.autograd.forward_ad.make_dual(
+                dual_primal, torch.ones_like(dual_primal)
+            )
+            self.assertFalse(guard_manager.check(dual))
 
         x = torch.randn(4, 4)
         x.t_()
@@ -2160,7 +2183,9 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         # Only fail if the leak is larger than 1MB.
         self.assertLessEqual(
-            delta, 1 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+            delta,
+            1 * 1024 * 1024,
+            lambda msg: f"{msg}\nMemory leaked: {delta / 1024 / 1024:.2f} MB",
         )
 
     def test_dict_keys_match(self):

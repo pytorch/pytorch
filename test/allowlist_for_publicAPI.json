@@ -463,6 +463,7 @@
     "matrix_norm",
     "matrix_power",
     "matrix_rank",
+    "matrix_sqrth",
     "multi_dot",
     "norm",
     "pinv",

@@ -29,7 +29,6 @@ from torch._functorch.apis import _DYNAMO_WRAPPER_ATTRS
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
 from torch._inductor.utils import fresh_cache
-from torch._subclasses.fake_tensor import is_fake
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -673,11 +672,10 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[s77]", s77: "Sym(s77)"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         sum_1: "f32[]" = l_x_.sum()
         item: "Sym(zuf0)" = sum_1.item();  sum_1 = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, l_x_, item);  wrap_body_1 = s77 = l_x_ = item = None
         getitem: "f32[s77]" = wrap[0];  wrap = None
         return (getitem,)
@@ -703,11 +701,10 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3]"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         sum_1: "f32[]" = l_x_.sum()
         item: "Sym(zuf0)" = sum_1.item();  sum_1 = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, item);  wrap_body_1 = l_x_ = item = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
@@ -761,13 +758,12 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[s77]", s77: "Sym(s77)"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         nonzero: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, l_x_, sym_size_int, nonzero);  wrap_body_1 = s77 = l_x_ = sym_size_int = nonzero = None
         getitem: "f32[s77]" = wrap[0]
         getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
@@ -796,8 +792,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3]"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         nonzero: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
@@ -805,6 +799,7 @@ class GraphModule(torch.nn.Module):
         le: "Sym(u0 <= 3)" = sym_size_int <= 3
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, sym_size_int, nonzero);  wrap_body_1 = l_x_ = sym_size_int = nonzero = None
         getitem: "f32[3]" = wrap[0]
         getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
@@ -858,11 +853,10 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "i16[3]"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         getitem = l_x_[0]
         item: "Sym(u0)" = getitem.item();  getitem = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, item, l_x_);  wrap_body_1 = item = l_x_ = None
         getitem_1: "i16[3]" = wrap[0];  wrap = None
         return (getitem_1,)
@@ -922,8 +916,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3]"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         nonzero: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
@@ -931,6 +923,7 @@ class GraphModule(torch.nn.Module):
         le: "Sym(u0 <= 3)" = sym_size_int <= 3
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, sym_size_int, nonzero);  wrap_body_1 = l_x_ = sym_size_int = nonzero = None
         getitem: "f32[3]" = wrap[0]
         getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
@@ -995,8 +988,6 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        wrap_body_1 = self.wrap_body_1
-
         nonzero: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
@@ -1013,6 +1004,7 @@ class GraphModule(torch.nn.Module):
 
         cat: "i64[u0 + u1, 1]" = torch.cat((nonzero, nonzero_1));  nonzero = nonzero_1 = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, sym_size_int, sym_size_int_1, cat, l_x_);  wrap_body_1 = sym_size_int = sym_size_int_1 = cat = l_x_ = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
@@ -2232,10 +2224,10 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    cond_false_0 = self.cond_false_0
-    cond_true_0 = self.cond_true_0
     sum_1 = l_x_.sum()
     gt = sum_1 > 0;  sum_1 = None
+    cond_false_0 = self.cond_false_0
+    cond_true_0 = self.cond_true_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_,));  gt = cond_true_0 = cond_false_0 = l_x_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
@@ -2279,10 +2271,10 @@ def forward(self, l_x_):
                 """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    cond_false_0 = self.cond_false_0
-    cond_true_0 = self.cond_true_0
     sum_1 = l_x_.sum();  l_x_ = None
     gt = sum_1 > 0;  sum_1 = None
+    cond_false_0 = self.cond_false_0
+    cond_true_0 = self.cond_true_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, ());  gt = cond_true_0 = cond_false_0 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
@@ -3344,10 +3336,9 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        hints_wrapper_body_1 = self.hints_wrapper_body_1
-
         add: "f32[2, 4]" = l_x_ + l_y_;  l_x_ = None
 
+        hints_wrapper_body_1 = self.hints_wrapper_body_1
         hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (add, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = add = l_y_ = None
         getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
         return (getitem,)
@@ -6098,11 +6089,11 @@ class GraphModule(torch.nn.Module):
             return grad_res
 
         compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
-        compiled_fn = torch.compile(fn, **compile_options)
+        compiled_fn = torch.compile(fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
         vmapped_fn = torch.vmap(compiled_fn)
         for attr in _DYNAMO_WRAPPER_ATTRS:
             self.assertFalse(hasattr(vmapped_fn, attr), attr)
-        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)
+        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
 
         x = torch.randn(8, dtype=torch.float64)
         expected = vmapped_fn(x)
@@ -6134,12 +6125,12 @@ class GraphModule(torch.nn.Module):
         )
         for transform, fn, x in cases:
             with self.subTest(transform=transform.__name__):
-                compiled_fn = torch.compile(fn, **compile_options)
+                compiled_fn = torch.compile(fn, **compile_options)  # noqa: UNSPECIFIED_BACKEND
                 transformed_fn = transform(compiled_fn)
                 for attr in _DYNAMO_WRAPPER_ATTRS:
                     self.assertFalse(hasattr(transformed_fn, attr), attr)
 
-                compiled_transformed_fn = torch.compile(
+                compiled_transformed_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
                     transformed_fn, **compile_options
                 )
 
@@ -6251,65 +6242,44 @@ class GraphModule(torch.nn.Module):
         ):
             torch.func.jvp(fn, (x,), (x,))
 
-    def test_forward_ad_dual_input_inductor(self):
+    def test_forward_ad_dual_input_inductor_after_warmup(self):
         if not torch._dynamo.is_inductor_supported():
             raise unittest.SkipTest("requires inductor")
 
-        def wrapped_fn(x):
+        def fn(x):
             return (x**2).sum()
 
         x = torch.tensor([0.1, 0.2, 0.3])
         v = torch.ones(3)
-        expected = torch.tensor(1.2)
 
-        def check_dual_tangent(fn):
+        # Cover both transitions that can expose a cached primal-only graph:
+        # entering a dual level after warmup, and attaching a tangent while
+        # staying inside the same level.
+        for warmup_inside_dual_level in (False, True):
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            if not warmup_inside_dual_level:
+                self.assertEqual(compiled_fn(x), fn(x))
+
             with torch.autograd.forward_ad.dual_level():
-                dual_input = torch.autograd.forward_ad.make_dual(x, v)
-                out = fn(dual_input)
-                tangent = torch.autograd.forward_ad.unpack_dual(out).tangent
+                if warmup_inside_dual_level:
+                    self.assertEqual(compiled_fn(x), fn(x))
+                dual = torch.autograd.forward_ad.make_dual(x, v)
+                tangent = torch.autograd.forward_ad.unpack_dual(
+                    compiled_fn(dual)
+                ).tangent
 
-            self.assertIsNotNone(tangent)
-            self.assertEqual(tangent, expected)
+            self.assertEqual(tangent, torch.tensor(1.2))
 
-        with fresh_cache(), torch._inductor.config.patch(fx_graph_cache=True):
-            for enable_autograd_cache in (False, True):
-                for warmup in (False, True):
-                    with torch._functorch.config.patch(
-                        enable_autograd_cache=enable_autograd_cache
-                    ):
-                        torch._dynamo.reset()
-                        fn = torch.compile(backend="inductor", fullgraph=True)(
-                            wrapped_fn
-                        )
-
-                        if warmup:
-                            self.assertEqual(fn(x), wrapped_fn(x))
-
-                        check_dual_tangent(fn)
-
-        with (
-            fresh_cache(),
-            torch._functorch.config.patch(
-                enable_autograd_cache=True, bundled_autograd_cache=True
-            ),
-        ):
-            for warmup in (False, True):
-                torch._dynamo.reset()
-                fn = torch.compile(backend="inductor", fullgraph=True)(wrapped_fn)
-
-                if warmup:
-                    self.assertEqual(fn(x), wrapped_fn(x))
-
-                check_dual_tangent(fn)
-
-    def test_forward_ad_dual_input_inductor_cache_hit_with_frozen_param(self):
+    def test_forward_ad_dual_input_inductor_frozen_cache_hit(self):
         if not torch._dynamo.is_inductor_supported():
             raise unittest.SkipTest("requires inductor")
 
         class ModuleWithParam(nn.Module):
-            def __init__(self) -> None:
+            def __init__(self, weight) -> None:
                 super().__init__()
-                self.weight = nn.Parameter(torch.tensor([2.0, 3.0, 4.0]))
+                self.weight = nn.Parameter(torch.tensor(weight))
                 self.weight.requires_grad_(False)
 
             def forward(self, x):
@@ -6317,7 +6287,6 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor([0.1, 0.2, 0.3])
         v = torch.ones(3)
-        expected = torch.tensor(9.0)
 
         with (
             fresh_cache(),
@@ -6325,43 +6294,27 @@ class GraphModule(torch.nn.Module):
         ):
             counters.clear()
             fn = torch.compile(
-                ModuleWithParam().eval(), backend="inductor", fullgraph=True
+                ModuleWithParam([2.0, 3.0, 4.0]).eval(),
+                backend="inductor",
             )
             self.assertEqual(fn(x), torch.tensor(2.0))
 
             torch._dynamo.reset()
             fn = torch.compile(
-                ModuleWithParam().eval(), backend="inductor", fullgraph=True
+                ModuleWithParam([5.0, 6.0, 7.0]).eval(),
+                backend="inductor",
             )
-            self.assertEqual(fn(x), torch.tensor(2.0))
+            self.assertEqual(fn(x), torch.tensor(3.8))
             self.assertGreaterEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
             with torch.autograd.forward_ad.dual_level():
-                dual_input = torch.autograd.forward_ad.make_dual(x, v)
-                out = fn(dual_input)
+                dual = torch.autograd.forward_ad.make_dual(x, v)
+                out = fn(dual)
                 tangent = torch.autograd.forward_ad.unpack_dual(out).tangent
 
-            self.assertIsNotNone(tangent)
-            self.assertFalse(is_fake(tangent))
-            self.assertEqual(tangent, expected)
-
-    def test_forward_ad_level_inference_mode_inductor(self):
-        if not torch._dynamo.is_inductor_supported():
-            raise unittest.SkipTest("requires inductor")
-
-        def wrapped_fn(x):
-            return (x + 1).sin()
-
-        x = torch.randn(3)
-        compiled_fn = torch.compile(backend="inductor", fullgraph=True)(wrapped_fn)
-        self.assertEqual(compiled_fn(x), wrapped_fn(x))
-
-        counters.clear()
-        with torch.autograd.forward_ad.dual_level():
-            with torch.inference_mode():
-                self.assertEqual(compiled_fn(x), wrapped_fn(x))
-
-        self.assertEqual(counters["inductor"]["forward_ad_fallback"], 0)
+            # The tangent must come from the current module, not the weights
+            # associated with the cache entry populated above.
+            self.assertEqual(tangent, torch.tensor(18.0))
 
     @config.patch(error_on_recompile=True)
     def test_grad_recompile(self):
