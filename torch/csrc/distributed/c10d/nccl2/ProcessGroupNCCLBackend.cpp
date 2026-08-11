@@ -150,6 +150,32 @@ c10::intrusive_ptr<::c10d::Backend::Options> ProcessGroupNCCL::
       options_c10d_);
 }
 
+void ProcessGroupNCCL::startTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  TORCH_CHECK(
+      init_state_ == InitializationState::INITIALIZED,
+      "NCCL time estimation requires an initialized communicator");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+#else
+  TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
+#endif
+}
+
+float ProcessGroupNCCL::endTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->groupSimulateEnd(&simInfo),
+      "NCCL GroupSimulateEnd failed");
+  return simInfo.estimatedTime;
+#else
+  TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
+#endif
+}
+
 void ProcessGroupNCCL::setTimeout(std::chrono::milliseconds timeout) {
   options_c10d_->timeout = timeout;
 }
