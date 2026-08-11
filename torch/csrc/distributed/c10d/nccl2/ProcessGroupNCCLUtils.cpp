@@ -8,9 +8,11 @@
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace c10d::nccl2 {
 
@@ -239,12 +241,23 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
 void ProcessGroupNCCL::checkWorkQueue() {
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
+  // Abort hooks run where a failure is DETECTED, not only where the process is
+  // torn down, because the teardown paths run no hook at all in the
+  // configurations where the process survives the failure and a post-mortem is
+  // worth the most: abortProcess() returns early when
+  // abort_process_on_timeout_or_error_ is off or reconfigure is on. So despite
+  // the name, a hook may run here with no abort following it. That matches what
+  // the hooks are for (capture debug info about the failure, e.g.
+  // c10d::FlightRecorderHook writes its trace) and callers must tolerate being
+  // called more than once per failure, since the teardown paths still fire.
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
+      runAbortHooks();
       break;
     case WorkNCCL::WorkStatus::ERROR:
       comm_state_ = CommState::ERROR;
+      runAbortHooks();
       break;
     default:
       // For COMPLETED, NOT_STARTED, and INPROGRESS, no state change needed
@@ -291,22 +304,11 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       if (shutdown_) {
         break;
       }
-      if (comm_state_ != CommState::NORMAL &&
-          abort_process_on_timeout_or_error_ &&
-          !options_c10d_->enable_reconfigure) {
-        if (comm_state_ == CommState::TIMEOUT) {
-          TC_LOG(ERROR, this)
-              << "Aborting process due to timeout on rank " << rank_
-              << " - timeout watchdog detected operation timeout";
-        } else if (comm_state_ == CommState::ERROR) {
-          TC_LOG(ERROR, this)
-              << "Aborting process due to error on rank " << rank_
-              << " - timeout watchdog detected operation error. ";
-        }
-
-        runAbortHooks();
-
-        ::abort();
+      if (comm_state_ != CommState::NORMAL) {
+        handleWatchdogFailure(
+            comm_state_ == CommState::TIMEOUT
+                ? "timeout - timeout watchdog detected operation timeout"
+                : "error - timeout watchdog detected operation error");
       }
 
       // Detect a communicator-level async error while the comm is still
@@ -320,40 +322,23 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
             "failed to get async error");
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;
+          // Detected here rather than through the work queue, so this needs its
+          // own notification; see checkWorkQueue() for why detection and not
+          // just teardown.
+          runAbortHooks();
           if (!options_c10d_->enable_reconfigure) {
-            TC_LOG(ERROR, this)
-                << "Aborting process due to error on rank " << rank_
-                << " - nccl hit async error: " << ncclGetErrorString(asyncErr);
-
-            runAbortHooks();
-
-            abort();
+            TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
+                                << ": " << ncclGetErrorString(asyncErr);
           } else {
             // Revoked below by the reconfigurable-mode handler.
             TC_LOG(ERROR, this)
                 << "Async error on rank " << rank_ << ": "
                 << ncclGetErrorString(asyncErr) << " (reconfigurable mode)";
           }
+          handleWatchdogFailure(
+              std::string("error - nccl hit async error: ") +
+              ncclGetErrorString(asyncErr));
         }
-      }
-
-      // In reconfigurable mode, gracefully revoke the communicator on any
-      // failure
-      // -- timeout or error, whether surfaced by the work queue or an async
-      // comm error -- so in-flight operations are stopped and the comm can
-      // later be reconfigured. This is the only revoke path under CUDA graph
-      // replay, where no synchronous collective reaches
-      // checkAndAbortIfTimedOutOrError(); isAborted() then reports the revoked
-      // state to the caller. revokeNcclComm() is idempotent and the revoked_
-      // check keeps the watchdog from logging every iteration.
-      if (comm_state_ != CommState::NORMAL &&
-          options_c10d_->enable_reconfigure && !revoked_.load()) {
-        TC_LOG(ERROR, this)
-            << "Revoking communicator on rank " << rank_
-            << " - watchdog detected "
-            << (comm_state_ == CommState::TIMEOUT ? "timeout" : "error")
-            << " (reconfigurable mode)";
-        revokeNcclComm();
       }
     }
   } catch (const std::exception& e) {
@@ -385,16 +370,16 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::runtime_error("NCCL operation timed out");
     } else {
-      abortNcclComm();
-      if (abort_process_on_timeout_or_error_) {
-        TC_LOG(ERROR, this) << "Aborting process due to timeout";
-        runAbortHooks();
-        ::abort();
-      } else {
-        throw std::runtime_error("NCCL operation timed out");
-      }
+      handleWatchdogFailure("timeout - collective operation timed out");
+      throw std::runtime_error("NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
+    // CleanUpOnly may have already removed the communicator on the watchdog
+    // thread, so a later collective cannot query the original NCCL error.
+    if (!nccl_comm_) {
+      throw std::runtime_error(
+          "NCCL communicator was aborted after a previous error");
+    }
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -409,15 +394,8 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::move(ncclException);
     }
-    abortNcclComm();
-    if (abort_process_on_timeout_or_error_) {
-      TC_LOG(ERROR, this) << "Aborting process due to error: "
-                          << ncclException.what();
-      runAbortHooks();
-      ::abort();
-    } else {
-      throw std::move(ncclException);
-    }
+    handleWatchdogFailure(std::string("error - ") + ncclException.what());
+    throw std::move(ncclException);
   }
 }
 
@@ -567,7 +545,8 @@ std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
     bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (timing_enabled == timing_enabled_.load() && !event_pool_.empty()) {
+  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
+      !event_pool_.empty()) {
     auto event = std::move(event_pool_.front());
     event_pool_.pop();
     return event;
@@ -582,7 +561,7 @@ void ProcessGroupNCCL::returnEvent(
     bool timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
-  if (timing_enabled == timing_enabled_.load() &&
+  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
       event_pool_.size() < max_event_pool_size_) {
     event_pool_.push(std::move(event));
   }
@@ -606,14 +585,7 @@ void ProcessGroupNCCL::detachMemoryHook() {
   NCCLCachingAllocatorHook::getInstance().deregisterComm(this);
 }
 
-void ProcessGroupNCCL::register_address(void* addr, size_t len) {
-  if (nccl_comm_ == nullptr) {
-    return;
-  }
-  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
-  TORCH_CHECK(
-      !memoryRegistrationHandles_.count(addr),
-      "Memory already registered with NCCL");
+void ProcessGroupNCCL::registerAddressLocked(void* addr, size_t len) {
   void* handle = nullptr;
   NCCL_CHECK(
       nccl_api_,
@@ -627,7 +599,20 @@ void ProcessGroupNCCL::register_address(void* addr, size_t len) {
       addr, RegistrationHandle{handle, nullptr, len});
 }
 
-void ProcessGroupNCCL::deregister_address(void* addr) {
+void ProcessGroupNCCL::register_address(void* addr, size_t len) {
+  if (nccl_comm_ == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  TORCH_CHECK(
+      !memoryRegistrationHandles_.count(addr),
+      "Memory already registered with NCCL");
+  registerAddressLocked(addr, len);
+}
+
+void ProcessGroupNCCL::deregister_address(
+    void* addr,
+    bool from_allocator_hook) {
   if (nccl_comm_ == nullptr) {
     return;
   }
@@ -637,6 +622,19 @@ void ProcessGroupNCCL::deregister_address(void* addr) {
     return;
   }
   if (it->second.winHandle != nullptr) {
+    // Tearing the window down is still the least bad option -- the allocator is
+    // about to hand this address range back, and a later allocation reusing it
+    // would silently resolve to the stale window -- but say so loudly: on NCCL
+    // builds where ncclCommWindowDeregister barriers, a rank-divergent free
+    // hangs here, on an allocator thread, holding the allocator's mutex.
+    if (from_allocator_hook) {
+      TORCH_WARN_ONCE(
+          "A symmetric-window segment was freed without deregister_mem_pool() "
+          "being called first, so its NCCL window is being torn down from the "
+          "CUDA allocator hook. That is only safe if every rank frees the same "
+          "segment in the same order; call deregister_mem_pool() from every "
+          "rank before freeing.");
+    }
     NCCL_CHECK_IGNORE(
         nccl_api_,
         nccl_api_->commWindowDeregister(nccl_comm_, it->second.winHandle),
@@ -689,6 +687,17 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
   ncclWindow_t win = nullptr;
   auto rc = nccl_api_->commWindowRegister(
       nccl_comm_, it->first, it->second.len, &win, NCCL_WIN_COLL_SYMMETRIC);
+  if (rc == ncclInProgress) {
+    // NCCL retains &win in its async registration task, so keep this stack
+    // frame alive until the task has populated the handle.
+    waitForNcclCompletion(
+        *nccl_api_,
+        nccl_comm_,
+        rc,
+        options_c10d_->timeout,
+        "NCCL symmetric window registration failed");
+    rc = ncclSuccess;
+  }
   if (rc != ncclSuccess) {
     return rc;
   }
@@ -701,6 +710,108 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
   }
   it->second.winHandle = win;
   return ncclSuccess;
+}
+
+namespace {
+
+// Segments currently backing `id`, in allocation order. Symmetric window
+// registration is collective, so every rank has to walk them in the same
+// order; registration_counter is the only cross-rank-stable ordering the
+// snapshot offers (this is what the stock backend sorts on too).
+std::vector<c10::cuda::CUDACachingAllocator::SegmentInfo> poolSegments(
+    const c10::cuda::MempoolId_t& id) {
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(id);
+  std::sort(
+      snapshot.segments.begin(),
+      snapshot.segments.end(),
+      [](const auto& a, const auto& b) {
+        return a.registration_counter < b.registration_counter;
+      });
+  return std::move(snapshot.segments);
+}
+
+constexpr const char* kUninitializedCommError =
+    "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue";
+
+} // namespace
+
+void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
+  if (nccl_comm_ == nullptr) {
+    C10_THROW_ERROR(DistBackendError, kUninitializedCommError);
+  }
+  TORCH_CHECK(
+      pool->device() == device_.index(),
+      "MemPool is on device ",
+      static_cast<int>(pool->device()),
+      " but this process group is bound to ",
+      device_);
+  TC_LOG(INFO, this) << "Registering MemPool " << pool->id().first << ":"
+                     << pool->id().second << " (symm=" << symm << ") on "
+                     << device_;
+  {
+    std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+    registeredMemPools_.insert(pool->id());
+  }
+  bool symmUnsupported = false;
+  for (const auto& segment : poolSegments(pool->id())) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    void* addr = reinterpret_cast<void*>(segment.address);
+    {
+      std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+      // The allocator hook normally registered this segment already; only the
+      // ones it could not reach (allocated while the comm was down, or
+      // deregistered by an earlier deregisterMemPool) are left to do here.
+      if (!memoryRegistrationHandles_.count(addr)) {
+        registerAddressLocked(addr, segment.total_size);
+      }
+    }
+    if (!symm) {
+      continue;
+    }
+    // Only segments that exist now can be upgraded: the window call is
+    // collective, so a segment another thread allocates concurrently must be
+    // left to the next registerMemPool.
+    auto rc = ensureSegmentWindow(addr);
+    if (rc == ncclInvalidUsage) {
+      // No symmetric-memory-capable transport (or NCCL predates
+      // ncclCommWindowRegister). The stock backend keeps the plain
+      // registration and reports success here; do the same, but say so.
+      symmUnsupported = true;
+      continue;
+    }
+    TORCH_CHECK(
+        rc == ncclSuccess,
+        "Failed to register segment ",
+        addr,
+        " as an NCCL symmetric window: ",
+        nccl_api_->getErrorString(rc));
+  }
+  if (symmUnsupported) {
+    TC_LOG(WARNING, this)
+        << "Symmetric (NVLS) registration unavailable for MemPool "
+        << pool->id().first << ":" << pool->id().second
+        << "; its buffers stay registered as plain NCCL user buffers.";
+  }
+}
+
+void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
+  if (nccl_comm_ == nullptr) {
+    C10_THROW_ERROR(DistBackendError, kUninitializedCommError);
+  }
+  {
+    std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+    TORCH_CHECK(
+        registeredMemPools_.erase(pool->id()) == 1,
+        "Trying to unregister not previously registered pool");
+  }
+  TC_LOG(INFO, this) << "Deregistering MemPool " << pool->id().first << ":"
+                     << pool->id().second << " on " << device_;
+  for (const auto& segment : poolSegments(pool->id())) {
+    // deregister_address tears the symmetric window down before the plain
+    // registration and tolerates a segment that is not registered.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    deregister_address(reinterpret_cast<void*>(segment.address));
+  }
 }
 
 } // namespace c10d::nccl2

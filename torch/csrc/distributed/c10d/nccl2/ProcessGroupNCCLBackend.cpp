@@ -88,9 +88,27 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
+      event_cache_enabled_(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
+      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
+          ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
+          ::c10d::SkipCleanUp))),
+      blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+
+  if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
+    auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+    options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
+  }
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
+      "with RCCL");
+#endif
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
@@ -141,7 +159,18 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 void ProcessGroupNCCL::runAbortHooks() {
-  for (const auto& [_, hook] : abortHooks_) {
+  // Snapshot rather than hold the lock across the hooks: a hook may
+  // unregister itself, and the FlightRecorder hook blocks other threads for the
+  // length of its dump, which must not also block an unrelated unregister.
+  std::vector<::c10d::AbortHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
+    hooks.reserve(abortHooks_.size());
+    for (const auto& [_, hook] : abortHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  for (const auto& hook : hooks) {
     try {
       hook();
     } catch (const std::exception& e) {
@@ -155,11 +184,59 @@ void ProcessGroupNCCL::runAbortHooks() {
 void ProcessGroupNCCL::registerAbortHook(
     int64_t hook_id,
     ::c10d::AbortHook hook) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.emplace(hook_id, std::move(hook));
 }
 
 void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.erase(hook_id);
+}
+
+bool ProcessGroupNCCL::hasCompletionHooks() {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  return !completionHooks_.empty();
+}
+
+void ProcessGroupNCCL::runCompletionHooks(
+    const ::c10d::Work* work,
+    std::optional<float> duration_ms) {
+  // Snapshot rather than hold the lock across the hooks, and for a harder
+  // reason than runAbortHooks has: a hook's owner unregisters with its own lock
+  // held (c10d::FlightRecorderHook::remove does), so calling into a hook while
+  // holding completion_hooks_mutex_ would be the reverse order and deadlock.
+  std::vector<::c10d::CompletionHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+    hooks.reserve(completionHooks_.size());
+    for (const auto& [_, hook] : completionHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  ::c10d::CompletionHookArgs args;
+  args.work = work;
+  args.duration_ms = duration_ms;
+  for (const auto& hook : hooks) {
+    try {
+      hook(args);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "[TC] Completion hook threw exception: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "[TC] Completion hook threw unknown exception.";
+    }
+  }
+}
+
+void ProcessGroupNCCL::registerCompletionHook(
+    int64_t hook_id,
+    ::c10d::CompletionHook hook) {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  completionHooks_.emplace(hook_id, std::move(hook));
+}
+
+void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
+  completionHooks_.erase(hook_id);
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -206,6 +283,10 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
+  TORCH_CHECK(
+      supportsWindow(),
+      "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
+      "supported on ROCm");
   // Trigger the lazy bootstrap: prefer the tensor's device, then the bound
   // device, then the current CUDA device.
   if (init_state_ != InitializationState::INITIALIZED) {
@@ -225,6 +306,16 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     window->tensor_register(*tensor);
   }
   return window;
+}
+
+bool ProcessGroupNCCL::supportsWindow() const {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
+  int runtime_version = 0;
+  return ncclGetVersion(&runtime_version) == ncclSuccess &&
+      runtime_version >= NCCL_VERSION(2, 29, 0);
+#else
+  return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------

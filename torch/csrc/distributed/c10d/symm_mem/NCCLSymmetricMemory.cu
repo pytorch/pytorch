@@ -397,6 +397,7 @@ void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
 #ifdef NCCL_HAS_ONE_SIDED_API
+  check_rank(dst_rank, world_size_);
   TORCH_CHECK(channel == 0, "channel must be 0 (sigIdx is reserved for future use)");
 
   c10::cuda::CUDAGuard guard(device_idx_);
@@ -422,6 +423,7 @@ void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_m
 
 void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
 #ifdef NCCL_HAS_ONE_SIDED_API
+  check_rank(src_rank, world_size_);
   TORCH_CHECK(channel == 0, "channel must be 0 (sigIdx is reserved for future use)");
 
   c10::cuda::CUDAGuard guard(device_idx_);
