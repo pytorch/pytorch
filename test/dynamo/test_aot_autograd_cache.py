@@ -3348,6 +3348,62 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    @unittest.skipIf(not HAS_GPU, "requires accelerator")
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    def test_autocast_in_graph_is_cacheable(self):
+        """
+        An autocast context manager inside the compiled region is traced into
+        _enter_autocast/_exit_autocast nodes. Those are cacheable, and the dtype
+        they carry is part of the key, so graphs compiled under different dtypes
+        must not be reused for each other.
+        """
+
+        def fn(x, w, dtype):
+            with torch.amp.autocast(GPU_TYPE, dtype=dtype):
+                return torch.nn.functional.gelu(x @ w)
+
+        def run(dtype):
+            torch._dynamo.reset()
+            counters.clear()
+            compiled = torch.compile(fn, backend="inductor")
+            with torch.no_grad():
+                out = compiled(x, w, dtype)
+            return out, (
+                counters["aot_autograd"]["autograd_cache_miss"],
+                counters["aot_autograd"]["autograd_cache_hit"],
+                counters["aot_autograd"]["autograd_cache_bypass"],
+            )
+
+        with fresh_cache():
+            x = torch.randn(8, 64, device=GPU_TYPE)
+            w = torch.randn(64, 64, device=GPU_TYPE)
+
+            out_bf16, (miss, hit, bypass) = run(torch.bfloat16)
+            self.assertEqual(out_bf16.dtype, torch.bfloat16)
+            # Previously this bypassed the cache entirely.
+            self.assertEqual(bypass, 0)
+            self.assertEqual((miss, hit), (1, 0))
+
+            # A different dtype must not reuse the bfloat16 entry.
+            out_fp16, (miss, hit, bypass) = run(torch.float16)
+            self.assertEqual(out_fp16.dtype, torch.float16)
+            self.assertEqual(bypass, 0)
+            self.assertEqual((miss, hit), (1, 0))
+
+            # Recompiling the original dtype hits.
+            out_bf16_2, (miss, hit, bypass) = run(torch.bfloat16)
+            self.assertEqual(out_bf16_2.dtype, torch.bfloat16)
+            self.assertEqual((miss, hit), (0, 1))
+            self.assertEqual(out_bf16_2, out_bf16)
+
+            # ...and so does the second dtype, with its own entry.
+            out_fp16_2, (miss, hit, bypass) = run(torch.float16)
+            self.assertEqual(out_fp16_2.dtype, torch.float16)
+            self.assertEqual((miss, hit), (0, 1))
+            self.assertEqual(out_fp16_2, out_fp16)
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
