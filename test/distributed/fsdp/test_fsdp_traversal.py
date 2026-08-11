@@ -75,8 +75,6 @@ class TestTraversal(FSDPTestContinuous):
         )
 
 
-instantiate_device_type_tests(
-    TestTraversal, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestTraversal, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
