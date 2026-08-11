@@ -33,6 +33,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
+from torch._dynamo.graph_utils import remove_noop_sdpa_masks
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
@@ -55,6 +56,8 @@ def eager(
 ) -> Callable[..., Any]:
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
+
+    remove_noop_sdpa_masks(gm)
 
     if torch._functorch.config.force_autograd_cache:
         from torch._dynamo.aot_compile_types import GraphModuleSerializableCallable
