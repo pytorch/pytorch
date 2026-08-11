@@ -9,6 +9,9 @@ on:
   push:
     branches:
       - huydhn/test-remote-buildkit-action
+  pull_request:
+    paths:
+      - .github/workflows/test-remote-buildkit-action.yml
 
 env:
   DOCKER_BUILDKIT: 1
@@ -23,7 +26,7 @@ permissions:
 jobs:
   # One cheap target out of build-manywheel-images.yml's 14-entry matrix.
   manywheel-cpu:
-    runs-on: mt-rel-l-x86iavx512-8-64
+    runs-on: mt-l-x86iavx512-16-128
     container:
       image: ghcr.io/actions/actions-runner:latest
     defaults:
