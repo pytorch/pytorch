@@ -729,16 +729,14 @@ def _nccl2_options(
     return backend_options
 
 
-def _eager_connect_nccl2(
-    backend: C10DBackend, opts: _DistributedBackendOptions
-) -> C10DBackend:
+def _nccl2_device(
+    opts: _DistributedBackendOptions,
+) -> torch.device | None:
     if opts.enable_reconfigure:
-        return backend
+        return None
 
     process_group = opts.process_group
-    if process_group is None:
-        raise AssertionError("nccl2 requires a parent process group")
-    device = process_group.bound_device_id
+    device = process_group.bound_device_id if process_group is not None else None
     if device is None:
         if torch.cuda.is_initialized():
             device_index = torch.cuda.current_device()
@@ -755,10 +753,10 @@ def _eager_connect_nccl2(
             )
             device_index = global_rank % device_count
         device = torch.device("cuda", device_index)
-        process_group.bound_device_id = device
+        if process_group is not None:
+            process_group.bound_device_id = device
 
-    backend.eager_connect_single_device(device)
-    return backend
+    return device
 
 
 def _create_nccl2_process_group(
@@ -780,9 +778,13 @@ def _create_nccl2_process_group(
             opts.store, opts.global_ranks_in_group, pg_options
         )
     backend = ProcessGroupNCCL2(
-        opts.store, opts.group_rank, opts.group_size, pg_options
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        pg_options,
+        _nccl2_device(opts),
     )
-    return _eager_connect_nccl2(backend, opts)
+    return backend
 
 
 def _create_nccl_lazy_process_group(
@@ -804,9 +806,13 @@ def _create_nccl_lazy_process_group(
             opts.store, opts.global_ranks_in_group, pg_options
         )
     backend = ProcessGroupNCCLLazy(
-        opts.store, opts.group_rank, opts.group_size, pg_options
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        pg_options,
+        _nccl2_device(opts),
     )
-    return _eager_connect_nccl2(backend, opts)
+    return backend
 
 
 def _create_ucc_process_group(

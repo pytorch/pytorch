@@ -1044,6 +1044,24 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
+    def test_creator_without_process_group(self) -> None:
+        self._run_child(
+            """
+opts = torch._C._distributed_c10d._DistributedBackendOptions()
+opts.store = dist.HashStore()
+opts.group_rank = 0
+opts.group_size = 1
+opts.timeout = dist.constants.default_pg_timeout
+opts.group_id = "standalone"
+opts.global_ranks_in_group = [0]
+backend = dist.distributed_c10d._create_nccl2_process_group(opts, None)
+backend.shutdown()
+"""
+        )
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
     def test_barrier_after_init(self) -> None:
         # The allocation is merely deferred, so barrier() is the second entrance
         # into the same allocator: without lazyInitDevice() it hits the identical
