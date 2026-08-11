@@ -17510,10 +17510,13 @@ op_db: list[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        # NumPy >= 2.5 raises instead of wrapping when an out-of-range Python int is
+        # written into an unsigned result, so keep value representable in dtype.
+        # 247 is what -9 already wrapped to for uint8, so the numerics are unchanged.
         sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
-                                                    'value': -9},
+                                                    'value': -9 if dtype.is_signed else 247},
                                                     {'threshold': float.fromhex('0x1.3ap-3'),
-                                                    'value': -9}),
+                                                    'value': -9 if dtype.is_signed else 247}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
