@@ -3,32 +3,39 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class InductorAnnotationTestCase(TestCase):
-    def get_code(self):
+    hw_classification = HardwareClassification.CUDA
+
+    def get_code(self, device):
         def f(a, b):
             return a + b, a * b
 
-        a = torch.randn(5, device="cuda")
-        b = torch.randn(5, device="cuda")
+        a = torch.randn(5, device=device)
+        b = torch.randn(5, device=device)
         f_comp = torch.compile(f)
 
         _, code = run_and_get_code(f_comp, a, b)
         return code[0]
 
-    @requires_cuda_and_triton
-    def test_no_annotations(self):
-        code = self.get_code()
+    @requires_capabilities(Capability.lib.triton)
+    def test_no_annotations(self, device):
+        code = self.get_code(device)
 
         self.assertTrue("from torch.cuda import nvtx" not in code)
         self.assertTrue("training_annotation" not in code)
 
     @inductor_config.patch(annotate_training=True)
-    @requires_cuda_and_triton
-    def test_training_annotation(self):
-        code = self.get_code()
+    @requires_capabilities(Capability.lib.triton)
+    def test_training_annotation(self, device):
+        code = self.get_code(device)
 
         self.assertTrue("from torch.cuda import nvtx" in code)
         self.assertTrue(
@@ -37,6 +44,8 @@ class InductorAnnotationTestCase(TestCase):
         )
         self.assertTrue(code.count("nvtx._device_range_end(training_annotation)") >= 1)
 
+
+instantiate_device_type_tests(InductorAnnotationTestCase, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
