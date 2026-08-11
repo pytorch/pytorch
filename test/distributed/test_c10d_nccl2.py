@@ -81,6 +81,8 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def test_time_estimate(self) -> None:
         torch.cuda.set_device(self.device)
         process_group = dist.distributed_c10d._get_default_group()
+        warmup = torch.ones(1, device=self.device)
+        dist.all_reduce(warmup)
         tensor = torch.full((1024,), self.rank, device=self.device)
         with dist._time_estimator(group=process_group, device=self.device) as context:
             dist.all_reduce(tensor)
