@@ -215,7 +215,7 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
-    keepalive: list[Any]
+    keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
 
@@ -229,7 +229,7 @@ class SideEffects:
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
-        keepalive: list[Any] | None = None,
+        keepalive: list[object] | None = None,
         save_for_backward: list[
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
         ]
@@ -276,7 +276,7 @@ class SideEffects:
         # Deferred side-effect checking for nullified attribute mutations.
         # Maps (vt_id, attr_name) → (original_value, current_value).
         # On validation, we check original == current.
-        self.deferred_attr_mutations: dict[tuple[int, str], tuple[Any, Any]] = {}
+        self.deferred_attr_mutations: dict[tuple[int, str], tuple[object, object]] = {}
 
     def ignore_mutations_on(self, var: VariableTracker) -> None:
         """Mutations to this variable will be executed but not tracked,
@@ -425,10 +425,10 @@ class SideEffects:
             tensor_hooks=self.tensor_hooks,
         )
 
-    def __contains__(self, item: Any) -> bool:
+    def __contains__(self, item: object) -> bool:
         return id(item) in self.id_to_variable
 
-    def __getitem__(self, item: Any) -> VariableTracker:
+    def __getitem__(self, item: object) -> VariableTracker:
         return self.id_to_variable[id(item)]
 
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
@@ -581,39 +581,18 @@ class SideEffects:
             raise AssertionError(f"Missing attribute mutation kind for {item}.{name}")
         return self.attr_mutation_kinds[item][name]
 
-    def _record_traced_source(
-        self, item: VariableTracker, name: str, traced_source: Source | None
-    ) -> None:
-        if traced_source is None:
-            item_source = getattr(item, "source", None)
-            if item_source is None:
-                return
-            traced_source = AttrSource(item_source, name)
-        output_graph = self.output_graph_weakref()
-        if output_graph:
-            output_graph.current_tx.output.current_tracer.traced_sources.add(
-                traced_source
-            )
-
     def load_attr(
         self,
         item: VariableTracker,
         name: str,
         deleted_ok: bool = False,
         check: bool = False,
-        traced_source: Source | None = None,
     ) -> VariableTracker:
         if check:
             if not self.is_attribute_mutation(item):
                 raise AssertionError(
                     f"Expected attribute mutation for {item} in load_attr"
                 )
-        # Reads served from here bypass VariableBuilder, so record the source
-        # ourselves -- otherwise a subgraph that reads an attribute mutated
-        # before it ran has no traced source to intersect with mutated_sources
-        # and is wrongly considered reusable. Mirrors store_attr's key so the
-        # two sets line up.
-        self._record_traced_source(item, name, traced_source)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented(
@@ -647,12 +626,16 @@ class SideEffects:
             raise AssertionError(
                 f"Expected CellVariable, got {type(cellvar)} in load_cell"
             )
-        # Recorded here rather than only in load_attr because an unmutated cell
-        # returns pre_existing_contents below without going through load_attr,
-        # and a mutation landing after that read must still be detected.
-        contents = cellvar.pre_existing_contents
-        contents_source = getattr(contents, "source", None) if contents else None
-        self._record_traced_source(cellvar, "cell_contents", contents_source)
+        # Track the cell_contents source during subgraph tracing so that
+        # mutations (e.g. nonlocal counter = 3) are detected by the reuse
+        # mechanism via set intersection with mutated_sources.
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            cell_source = getattr(cellvar, "source", None)
+            if cell_source is not None:
+                output_graph.current_tx.output.current_tracer.traced_sources.add(
+                    AttrSource(cell_source, "cell_contents")
+                )
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -669,9 +652,16 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(gvar)} in load_global"
             )
-        # gvar's source already names the global, so override load_attr's
-        # default key for the same reason store_global does.
-        return self.load_attr(gvar, name, traced_source=GlobalSource(name))
+        # This path serves the read out of side effects, bypassing
+        # VariableBuilder, so record the source here the way load_cell does --
+        # otherwise a subgraph reading a rebound global has no traced source to
+        # intersect with mutated_sources and is wrongly considered reusable.
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            output_graph.current_tx.output.current_tracer.traced_sources.add(
+                GlobalSource(name)
+            )
+        return self.load_attr(gvar, name)
 
     def store_global(
         self, gvar: VariableTracker, name: str, value: VariableTracker
@@ -749,7 +739,7 @@ class SideEffects:
 
     def _track_obj(
         self,
-        item: Any,
+        item: object,
         variable: VariableTracker,
         mutation_type_cls: type = ValueMutationExisting,
     ) -> VariableTracker:
@@ -772,7 +762,7 @@ class SideEffects:
 
     def track_object_existing(
         self,
-        item: Any,
+        item: object,
         variable: VariableTracker,
     ) -> VariableTracker:
         # TODO: Modify this API so that we preserve type info of
@@ -988,7 +978,7 @@ class SideEffects:
         self.keepalive.append(cell)
         return variable
 
-    def track_global_existing(self, source: Source, item: Any) -> VariableTracker:
+    def track_global_existing(self, source: Source, item: object) -> VariableTracker:
         variable = variables.NewGlobalVariable(
             mutation_type=AttributeMutationExisting(),
             source=source,
