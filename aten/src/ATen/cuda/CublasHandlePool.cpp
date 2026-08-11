@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
@@ -301,35 +302,16 @@ at::DataPtr getNewCUDABlasLtWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getCUDABlasLtWorkspaceSize());
 }
 
-struct CaptureState {
-  uint64_t id;
-  uint64_t epoch;
-};
-
-CaptureState captureState(cudaStream_t stream, const Workspace* workspace) {
-  const uint64_t epoch =
-      cublas_capture_epoch.load(std::memory_order_acquire);
-  if (workspace != nullptr && workspace->capture_epoch == epoch) {
-    return {workspace->capture_id, epoch};
+void retainWorkspaceIfCapturing(cudaStream_t stream, Workspace& workspace) {
+  const uint64_t epoch = cublas_capture_epoch.load(std::memory_order_acquire);
+  if (workspace.capture_epoch == epoch) {
+    return;
   }
   auto capture_id = c10::cuda::captureIdMayInitCtx(stream);
-  return {
-      capture_id.has_value() ? static_cast<uint64_t>(*capture_id) : 0, epoch};
-}
-
-bool workspaceCanBeReused(
-    Workspace& workspace,
-    size_t required_size,
-    CaptureState capture_state) {
-  // A workspace created outside the current capture may point into the
-  // ordinary allocator pool, whose lifetime is not retained by the graph.
-  // Replace it on first use during capture so the replacement comes from the
-  // graph-private pool. Outside capture, preserve existing reuse behavior.
-  const bool compatible = capture_state.id == 0 ||
-      workspace.capture_id == capture_state.id;
-  workspace.capture_id = capture_state.id;
-  workspace.capture_epoch = capture_state.epoch;
-  return workspace.size >= required_size && compatible;
+  if (capture_id.has_value()) {
+    retain_cublas_workspace(*capture_id, workspace.data);
+  }
+  workspace.capture_epoch = epoch;
 }
 
 void setCublasWorkspace(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
@@ -341,26 +323,21 @@ void setCublasWorkspace(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
 
   size_t workspace_size = getChosenWorkspaceSize();
   auto workspace_it = workspace_map.find(key);
-  CaptureState capture_state = captureState(
-      _stream,
-      workspace_it == workspace_map.end() ? nullptr : &workspace_it->second);
   if (workspace_it != workspace_map.end() &&
-      workspaceCanBeReused(
-          workspace_it->second, workspace_size, capture_state)) {
+      workspace_it->second.size >= workspace_size) {
+    retainWorkspaceIfCapturing(_stream, workspace_it->second);
     TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
-        handle, workspace_it->second.data.get(), workspace_size));
+        handle, workspace_it->second.data->get(), workspace_size));
     return;
   }
 
   auto [it, _] = workspace_map.insert_or_assign(
       key,
       Workspace{
-          getNewWorkspace(),
-          workspace_size,
-          capture_state.id,
-          capture_state.epoch});
+          std::make_shared<at::DataPtr>(getNewWorkspace()), workspace_size, 0});
+  retainWorkspaceIfCapturing(_stream, it->second);
   TORCH_CUDABLAS_CHECK(
-      cublasSetWorkspace(handle, it->second.data.get(), workspace_size));
+      cublasSetWorkspace(handle, it->second.data->get(), workspace_size));
 }
 
 void* getCUDABlasLtWorkspace() {
@@ -373,43 +350,37 @@ void* getCUDABlasLtWorkspace() {
     auto& workspace_map = at::cuda::cublas_stream_to_workspace();
     size_t workspace_size = getChosenWorkspaceSize();
     auto workspace_it = workspace_map.find(key);
-    CaptureState capture_state = captureState(
-        _stream,
-        workspace_it == workspace_map.end() ? nullptr : &workspace_it->second);
     if (workspace_it != workspace_map.end() &&
-        workspaceCanBeReused(
-            workspace_it->second, workspace_size, capture_state)) {
-      return workspace_it->second.data.mutable_get();
+        workspace_it->second.size >= workspace_size) {
+      retainWorkspaceIfCapturing(_stream, workspace_it->second);
+      return workspace_it->second.data->mutable_get();
     }
     auto [it, _] = workspace_map.insert_or_assign(
         key,
         Workspace{
-            getNewWorkspace(),
+            std::make_shared<at::DataPtr>(getNewWorkspace()),
             workspace_size,
-            capture_state.id,
-            capture_state.epoch});
-    return it->second.data.mutable_get();
+            0});
+    retainWorkspaceIfCapturing(_stream, it->second);
+    return it->second.data->mutable_get();
   }
 #endif
   auto& workspace_map = cublaslt_stream_to_workspace();
   size_t workspace_size = getCUDABlasLtWorkspaceSize();
   auto workspace_it = workspace_map.find(key);
-  CaptureState capture_state = captureState(
-      _stream,
-      workspace_it == workspace_map.end() ? nullptr : &workspace_it->second);
   if (workspace_it != workspace_map.end() &&
-      workspaceCanBeReused(
-          workspace_it->second, workspace_size, capture_state)) {
-    return workspace_it->second.data.mutable_get();
+      workspace_it->second.size >= workspace_size) {
+    retainWorkspaceIfCapturing(_stream, workspace_it->second);
+    return workspace_it->second.data->mutable_get();
   }
   auto [it, _] = workspace_map.insert_or_assign(
       key,
       Workspace{
-          getNewCUDABlasLtWorkspace(),
+          std::make_shared<at::DataPtr>(getNewCUDABlasLtWorkspace()),
           workspace_size,
-          capture_state.id,
-          capture_state.epoch});
-  return it->second.data.mutable_get();
+          0});
+  retainWorkspaceIfCapturing(_stream, it->second);
+  return it->second.data->mutable_get();
 }
 
 cublasHandle_t getCurrentCUDABlasHandle(bool setup) {

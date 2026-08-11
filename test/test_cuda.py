@@ -3970,8 +3970,8 @@ exit(2)
             try:
                 with torch.cuda.stream(stream):
                     # Allocate this thread's workspace before capture, in the
-                    # ordinary pool. The operation below must replace it after
-                    # this stream begins capture on the main thread.
+                    # ordinary pool. The graph must retain it when this stream
+                    # begins capture on the main thread.
                     torch.cuda.current_blas_handle()
                 ready.set()
                 if not launch.wait(timeout=30):
@@ -3997,13 +3997,11 @@ exit(2)
                 raise state["error"]
 
         # Force an ordinary-pool stale pointer to become an illegal address.
-        # A correctly replaced graph-pool workspace remains mapped.
+        # A workspace correctly retained by the graph remains mapped.
         torch.cuda.empty_cache()
         graph.replay()
         torch.cuda.synchronize()
-        torch.testing.assert_close(
-            state["output"], expected, rtol=1e-2, atol=2e-1
-        )
+        torch.testing.assert_close(state["output"], expected, rtol=1e-2, atol=2e-1)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(

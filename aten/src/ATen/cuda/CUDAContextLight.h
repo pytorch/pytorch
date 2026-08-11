@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <unordered_map>
 #include <utility>
 
@@ -97,13 +98,10 @@ TORCH_CUDA_CPP_API void notifyCublasCaptureBegin();
 // (guaranteed by DeviceThreadHandlePool), so each thread's workspace
 // map is only ever accessed by that thread.
 struct Workspace {
-  at::DataPtr data;
+  std::shared_ptr<at::DataPtr> data;
   size_t size;
-  // Zero means the workspace was allocated outside capture. Otherwise this is
-  // the capture id whose private pool owns the allocation.
-  uint64_t capture_id;
-  // Global capture epoch at which capture_id was last checked. This avoids a
-  // cudaStreamGetCaptureInfo call on every cuBLAS invocation.
+  // Global capture epoch at which graph ownership was last checked. This
+  // avoids a cudaStreamGetCaptureInfo call on every cuBLAS invocation.
   uint64_t capture_epoch;
 };
 

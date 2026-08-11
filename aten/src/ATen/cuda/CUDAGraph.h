@@ -9,6 +9,8 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stack>
 #include <vector>
@@ -45,6 +47,9 @@ TORCH_CUDA_CPP_API bool is_graph_capture_active();
 struct CUDAGraph;
 
 TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
+TORCH_CUDA_CPP_API void retain_cublas_workspace(
+    CaptureId_t capture_id,
+    const std::shared_ptr<at::DataPtr>& workspace);
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
@@ -108,6 +113,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
+  friend void retain_cublas_workspace(
+      CaptureId_t capture_id,
+      const std::shared_ptr<at::DataPtr>& workspace);
+
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
@@ -164,6 +173,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // know you'll replay those graphs in the same order you captured them.
   MempoolId_t mempool_id_;
   std::vector<MempoolId_t> retained_mempool_ids_;
+
+  // cuBLAS workspaces can originate in a short-lived worker thread's local
+  // cache. Keep any workspace used during capture alive for the graph's
+  // lifetime, independently of the thread that submitted the cuBLAS work.
+  std::mutex retained_cublas_workspaces_mutex_;
+  std::vector<std::shared_ptr<at::DataPtr>> retained_cublas_workspaces_;
 
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;

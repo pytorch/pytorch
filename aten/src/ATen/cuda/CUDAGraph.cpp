@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAFunctions.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 
@@ -40,6 +41,25 @@ CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id) {
     return it->second;
   }
   return nullptr;
+}
+
+void retain_cublas_workspace(
+    CaptureId_t capture_id,
+    const std::shared_ptr<at::DataPtr>& workspace) {
+  std::lock_guard<std::mutex> capture_lock(_currently_capturing_graphs_mutex);
+  auto graph_it = _currently_capturing_graphs.find(capture_id);
+  if (graph_it == _currently_capturing_graphs.end()) {
+    return;
+  }
+
+  CUDAGraph* graph = graph_it->second;
+  std::lock_guard<std::mutex> workspace_lock(
+      graph->retained_cublas_workspaces_mutex_);
+  const auto& retained = graph->retained_cublas_workspaces_;
+  if (std::find(retained.begin(), retained.end(), workspace) ==
+      retained.end()) {
+    graph->retained_cublas_workspaces_.push_back(workspace);
+  }
 }
 
 MempoolId_t graph_pool_handle() {
@@ -143,13 +163,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
 
-  // A workspace allocated before capture belongs to the ordinary caching
-  // allocator pool, so a captured cuBLAS kernel must not retain its address.
-  // Clear the capture stream's workspace on this thread before pool routing is
-  // enabled. Threads that join the capture lazily replace stale workspaces in
-  // setCublasWorkspace/getCUDABlasLtWorkspace after observing the capture id.
-  clearCublasWorkspacesForStream(capture_stream_.stream());
-
 #if defined(USE_ROCM)
   // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
   // Ensure the handle for the intended capture stream exists before
@@ -192,7 +205,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
-  notifyCublasCaptureBegin();
   c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
@@ -204,6 +216,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.emplace(capture_id_, this);
   }
+  notifyCublasCaptureBegin();
 }
 
 // capture_end is split so callers can run work on the captured cudaGraph_t
@@ -394,6 +407,10 @@ void CUDAGraph::reset() {
     // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
     // private pool cleanup
     clearCublasWorkspacesForStream(capture_stream_.stream());
+    {
+      std::lock_guard<std::mutex> lock(retained_cublas_workspaces_mutex_);
+      retained_cublas_workspaces_.clear();
+    }
 
     // notifyCaptureDestroy may throw. How should we handle this?
     for (const auto& pool : retained_mempool_ids_) {
