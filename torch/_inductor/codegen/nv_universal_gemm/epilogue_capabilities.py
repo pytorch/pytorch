@@ -25,6 +25,7 @@ class NVGemmReductionCapabilities:
     source_types: frozenset[str]
     secondary_kinds: frozenset[str] | None
     m_axis_feed_main_secondary_kinds: frozenset[str] = frozenset()
+    max_n_axis_consumer_group: int | None = None
 
     def supports(
         self,
@@ -47,6 +48,19 @@ class NVGemmReductionCapabilities:
     def supports_contract(
         self, contract: GemmReductionPlan | GemmReductionArguments
     ) -> bool:
+        if (
+            self.max_n_axis_consumer_group is not None
+            and contract.axis == 1
+            and contract.group > self.max_n_axis_consumer_group
+            and (
+                contract.feeds_main
+                or contract.feed_output is not None
+                or contract.secondary_feed_output is not None
+                or contract.consumer_fn is not None
+                or contract.secondary_consumer_fn is not None
+            )
+        ):
+            return False
         if not self.supports(
             contract.reduction_type,
             contract.source_type,
@@ -89,6 +103,7 @@ DENSE_GEMM_REDUCTION_CAPABILITIES = NVGemmReductionCapabilities(
     m_axis_feed_main_secondary_kinds=frozenset(
         ("normalize_sum_affine", "normalize_sum_reverse_affine", "sum_mul_affine")
     ),
+    max_n_axis_consumer_group=32,
 )
 
 
@@ -97,10 +112,7 @@ BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES = NVGemmReductionCapabilities(
         DENSE_GEMM_REDUCTION_CAPABILITIES.reduction_kinds
         - frozenset(("direct_bool_gt_zero", "logsumexp", "variance_affine"))
     ),
-    feed_main_only_kinds=(
-        DENSE_GEMM_REDUCTION_CAPABILITIES.feed_main_only_kinds
-        | frozenset(("online_softmax",))
-    ),
+    feed_main_only_kinds=DENSE_GEMM_REDUCTION_CAPABILITIES.feed_main_only_kinds,
     source_types=DENSE_GEMM_REDUCTION_CAPABILITIES.source_types,
     secondary_kinds=None,
 )

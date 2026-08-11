@@ -33,13 +33,18 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmReductionCompileConfig,
     materialize_epilogue_function,
 )
-from torch.utils._ordered_set import OrderedSet
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
 
 
 class _EFCOpScope:
-    """Expose an EFC configuration through the shared CuTeDSL op namespace."""
+    """Provide the module-shaped namespaces expected by generated epilogues.
+
+    Generated source calls both ``cute.math`` and ``mlir_math`` operations. EFC
+    exposes those operations on its configuration object, so this adapter serves
+    as the ``cute`` namespace and its own ``math`` child while forwarding every
+    operation to that configuration.
+    """
 
     def __init__(self, efc_config):
         self.efc_config = efc_config
@@ -68,7 +73,8 @@ def _direct_cutedsl_epilogue(metadata):
         stride: Any = tensors[name].stride
         if callable(stride):
             stride = stride()
-        assert isinstance(stride, Iterable)  # noqa: S101
+        if not isinstance(stride, Iterable):
+            raise AssertionError(f"expected iterable stride, got {type(stride)}")
         stride = tuple(stride)
         padded_shape = (1,) * (3 - len(shape)) + shape
         padded_stride = (0,) * (3 - len(stride)) + stride
@@ -83,9 +89,6 @@ def _direct_cutedsl_epilogue(metadata):
     input_mode_maps = {
         name: source_mode_map(name) for name in inputs if name != "accum"
     }
-    broadcast_names = OrderedSet(
-        name for name, mode_map in input_mode_maps.items() if mode_map is not None
-    )
 
     def load(name, parameter):
         mode_map = input_mode_maps[name]
@@ -114,8 +117,8 @@ def _direct_cutedsl_epilogue(metadata):
         call_scope = direct_fn.__globals__.copy()
         call_scope.update(gemm_epilogue_op_scope(op_scope))
         call_scope["mlir_math"] = op_scope
-        # Rebind globals because the traced function targets CuTeDSL operations,
-        # while EFC exposes the same operations through its configuration object.
+        # Rebind globals because the generated function targets module-level
+        # CuTeDSL operations while EFC exposes them through this trace's config.
         call_fn = FunctionType(
             direct_fn.__code__,
             call_scope,
@@ -128,7 +131,8 @@ def _direct_cutedsl_epilogue(metadata):
         if len(outputs) == 1:
             result_values = (results,)
         else:
-            assert isinstance(results, tuple)  # noqa: S101
+            if not isinstance(results, tuple):
+                raise AssertionError(f"expected tuple results, got {type(results)}")
             result_values = results
         for name, value in zip(outputs, result_values, strict=True):
             by_name[name].store(value)
@@ -136,7 +140,6 @@ def _direct_cutedsl_epilogue(metadata):
     named_epilogue = common_efc.create_named_epilogue(
         ["efc_config", *parameter_names], epilogue
     )
-    named_epilogue._broadcast_source_names = broadcast_names
     return named_epilogue
 
 
@@ -147,21 +150,22 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
     designed_for_min_cc = 100
 
     def __init__(self, metadata):
+        # The parent requires a traced EVT DAG, which direct CuTeDSL epilogues do
+        # not have. Initialize the common operator metadata before choosing the
+        # direct or EVT-specific epilogue adapter below.
         CuteDslOperator.__init__(self, metadata)
         OpToCuteImpl.setdefault(ActivationOp.Identity, lambda efc_config, value: value)
         OpToCuteImplStr.setdefault(ActivationOp.Identity, lambda value: value)
-        epilogue_op = (
-            _direct_cutedsl_epilogue(metadata)
-            if metadata.epilogue is not None
-            and metadata.epilogue.traced_epilogue is None
-            else EFCConverter.convert(
+        if metadata.epilogue is None:
+            epilogue_op = EFCConverter.identity_efc
+        elif metadata.epilogue.traced_epilogue is None:
+            epilogue_op = _direct_cutedsl_epilogue(metadata)
+        else:
+            epilogue_op = EFCConverter.convert(
                 metadata.epilogue.traced_epilogue.dag_ir,
                 metadata.epilogue.parameter_names,
                 parameter_tensors=metadata.epilogue.tensors,
             )
-            if metadata.epilogue is not None
-            else EFCConverter.identity_efc
-        )
         self.impl = PersistentDenseGemmEFCKernel(
             metadata.operands.accumulator_type,
             metadata.operands.out.dtype,
