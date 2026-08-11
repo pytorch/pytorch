@@ -12,6 +12,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
 @torch._dynamo.config.patch(trace_autograd_ops=True)
 @skipIfTorchDynamo()
 class TestForwardLossBackward(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_backward_test(self, fn, mod, x, backend=None):
         """
         Shared utility for running backward tests.

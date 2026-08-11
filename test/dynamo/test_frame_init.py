@@ -5,6 +5,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo.eval_frame import set_eval_frame
 from torch._dynamo.types import ConvertFrameReturn, GuardedCode, wrap_guarded_code
 from torch._guards import CompileId
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def target_with_varkwargs(arg1, /, positional_only_arg, *, keyword_only_arg, **kwargs):
@@ -78,6 +79,8 @@ def varargs_code2(arg1, /, positional_only_arg, *varargs, **kwargs):
 
 
 class FrameInitTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_frame_init(self):
         code_map1 = {
             target_with_varargs.__code__: varargs_code1.__code__,
