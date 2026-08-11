@@ -614,7 +614,6 @@ class TestSubprocessEnv(TestCase):
             "TORCHINDUCTOR_CACHE_DIR",
             "TRITON_CACHE_DIR",
             "TORCHINDUCTOR_CUTLASS_DIR",
-            "FLYDSL_RUNTIME_CACHE_DIR",
         ]
         old_env = {key: os.environ.get(key) for key in env_keys}
         pool = FakePool()
@@ -623,7 +622,6 @@ class TestSubprocessEnv(TestCase):
             os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
             os.environ.pop("TRITON_CACHE_DIR", None)
             os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
-            os.environ.pop("FLYDSL_RUNTIME_CACHE_DIR", None)
 
             with (
                 patch.object(AsyncCompile, "use_process_pool", return_value=True),
@@ -643,7 +641,6 @@ class TestSubprocessEnv(TestCase):
                         "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
                         "TRITON_CACHE_DIR": None,
                         "TORCHINDUCTOR_CUTLASS_DIR": None,
-                        "FLYDSL_RUNTIME_CACHE_DIR": None,
                     },
                 )
         finally:
@@ -728,7 +725,6 @@ class TestSubprocessEnv(TestCase):
             "TORCHINDUCTOR_CACHE_DIR",
             "TRITON_CACHE_DIR",
             "TORCHINDUCTOR_CUTLASS_DIR",
-            "FLYDSL_RUNTIME_CACHE_DIR",
         ]
         old_env = {key: os.environ.get(key) for key in env_keys}
         pool = FakePool()
@@ -737,7 +733,6 @@ class TestSubprocessEnv(TestCase):
             os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
             os.environ.pop("TRITON_CACHE_DIR", None)
             os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
-            os.environ.pop("FLYDSL_RUNTIME_CACHE_DIR", None)
 
             with patch.object(AsyncCompile, "process_pool", return_value=pool):
                 AsyncCompile().nvgemm_precompile(
@@ -760,7 +755,6 @@ class TestSubprocessEnv(TestCase):
                     "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
                     "TRITON_CACHE_DIR": None,
                     "TORCHINDUCTOR_CUTLASS_DIR": None,
-                    "FLYDSL_RUNTIME_CACHE_DIR": None,
                 },
             )
         finally:
