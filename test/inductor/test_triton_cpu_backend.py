@@ -5,7 +5,6 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skip,
     skipOps,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
@@ -69,32 +68,35 @@ if HAS_CPU and TRITON_HAS_CPU:
             unittest.skip("Triton CPU: slow test")(getattr(CpuTritonTests, name)),
         )
 
-    class TestInductorOpInfoTriton(test_torchinductor_opinfo.InductorOpInfoTemplate):
-        # Start Triton CPU OpInfo coverage with index_add only. Other ops will
-        # be enabled over time
-        test_comprehensive = config.patch(
-            {
-                "cpu_backend": "triton",
-                "test_configs.runtime_triton_dtype_assert": False,
-                "test_configs.runtime_triton_shape_assert": False,
-            }
-        )(
-            skipOps(
-                {
-                    skip(op.name, op.variant_test_name or "", device_type="cpu")
-                    for op in test_torchinductor_opinfo.op_db[
-                        test_torchinductor_opinfo.START : test_torchinductor_opinfo.END
-                    ]
-                    if op.full_name != "index_add"
-                }
-            )(test_torchinductor_opinfo.InductorOpInfoTemplate.test_comprehensive)
+    def make_inductor_opinfo_triton_cpu_cls():
+        ops_subset = [
+            next(
+                op
+                for op in test_torchinductor_opinfo.op_db
+                if op.full_name == "index_add"
+            )
+        ]
+        TestTorchInductorOpInfo = test_torchinductor_opinfo.make_inductor_opinfo_cls(
+            test_torchinductor_opinfo._ops(ops_subset),
+            skipOps(test_torchinductor_opinfo.test_skips_or_fails),
+        )
+        opinfo_scope = {
+            TestTorchInductorOpInfo.__name__: TestTorchInductorOpInfo,
+        }
+        instantiate_device_type_tests(
+            TestTorchInductorOpInfo, opinfo_scope, only_for="cpu"
         )
 
-    instantiate_device_type_tests(
-        TestInductorOpInfoTriton,
-        globals(),
-        only_for="cpu",
-    )
+        cpu_cls_name = f"{TestTorchInductorOpInfo.__name__}CPU"
+        if cpu_cls_name not in opinfo_scope:
+            raise AssertionError(f"Expected {cpu_cls_name} in OpInfo test scope")
+        generated_cpu_cls = opinfo_scope[cpu_cls_name]
+
+        return config.patch({"cpu_backend": "triton"})(
+            type("TestInductorOpInfoTritonCPU", (generated_cpu_cls,), {})
+        )
+
+    TestInductorOpInfoTritonCPU = make_inductor_opinfo_triton_cpu_cls()
 
 
 if __name__ == "__main__":

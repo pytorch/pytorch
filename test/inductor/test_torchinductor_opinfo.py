@@ -1275,330 +1275,339 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
     return []
 
 
-@wrapper_noop_set_seed_decorator
-# Keep the OpInfo test body in a reusable template so other Inductor backend
-# test modules can instantiate backend-specific subclasses. Classes passed to
-# instantiate_device_type_tests must define their test methods directly, so
-# subclasses should rebind test_comprehensive from this template.
-class InductorOpInfoTemplate(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls._test_config_stack = contextlib.ExitStack()
-        cls._test_config_stack.enter_context(
-            torch._inductor.config.patch(
-                {
-                    "test_configs.runtime_triton_dtype_assert": True,
-                    "test_configs.runtime_triton_shape_assert": True,
-                }
+# Clone test class so that other test modules can instantiate their own test classes
+# TODO: support generating inductor backend subclasses in instantiate_device_type_tests
+def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
+    @wrapper_noop_set_seed_decorator
+    class TestInductorOpInfo(TestCase):
+        @classmethod
+        def setUpClass(cls):
+            super().setUpClass()
+            cls._test_config_stack = contextlib.ExitStack()
+            cls._test_config_stack.enter_context(
+                torch._inductor.config.patch(
+                    {
+                        "test_configs.runtime_triton_dtype_assert": True,
+                        "test_configs.runtime_triton_shape_assert": True,
+                    }
+                )
             )
+
+        @classmethod
+        def tearDownClass(cls):
+            cls._test_config_stack.close()
+            super().tearDownClass()
+
+        def tearDown(self):
+            torch._dynamo.reset()
+
+        check_model = check_model
+        check_model_gpu = check_model_gpu
+
+        @onlyNativeDeviceTypes
+        @suppress_warnings
+        @skipCUDAMemoryLeakCheckIf(
+            True
+        )  # inductor kernels failing this test intermittently
+        @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+        @skipXPUIf(
+            not HAS_XPU_AND_TRITON,
+            "Skipped! Supported XPU compiler and Triton not found",
         )
+        @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+        @skipCPUIf(IS_MACOS, "Skipped under macOS")
+        @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+        @skipIfTorchDynamo("Test uses dynamo already")
+        @skipIfCrossRef
+        @skip_ops_decorator
+        @ops_decorator
+        @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+        @torch._inductor.config.patch(
+            {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+        )
+        @torch._inductor.config.patch("shape_padding", False)
+        @collection_decorator
+        def test_comprehensive(self, device, dtype, op):
+            device_type = torch.device(device).type
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._test_config_stack.close()
-        super().tearDownClass()
+            if device_type not in (GPU_TYPE, "cpu"):
+                raise AssertionError(f"Unexpected device_type: {device_type}")
 
-    def tearDown(self):
-        torch._dynamo.reset()
+            torch._dynamo.reset()
+            with torch.no_grad():
+                # TODO: should we move empty_cache to the common device interface
+                if device_type == "cuda":
+                    torch.cuda.empty_cache()
+                elif device == "xpu":
+                    torch.xpu.empty_cache()
+            op_name = op.name
+            if op.variant_test_name:
+                op_name += f".{op.variant_test_name}"
 
-    check_model = check_model
-    check_model_gpu = check_model_gpu
+            # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
+            allowed_dtypes = [f16, f32, f64, i32, i64, b8]
+            if op_name not in (
+                "nn.functional.interpolate.bilinear",
+                "nn.functional.interpolate.bicubic",
+                "nn.functional.upsample_bilinear",
+                "nn.functional.upsample_nearest",
+                "fill",
+                "full_like",
+            ):
+                if dtype not in allowed_dtypes:
+                    raise unittest.SkipTest("Skipped!")
 
-    @onlyNativeDeviceTypes
-    @suppress_warnings
-    @skipCUDAMemoryLeakCheckIf(
-        True
-    )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
-    @skipXPUIf(
-        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
-    )
-    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
-    @skipCPUIf(IS_MACOS, "Skipped under macOS")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @skipIfTorchDynamo("Test uses dynamo already")
-    @skipIfCrossRef
-    @_ops(op_db[START:END])
-    @skipOps(test_skips_or_fails)
-    @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
-    @torch._inductor.config.patch(
-        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
-    )
-    @torch._inductor.config.patch("shape_padding", False)
-    @collection_decorator
-    def test_comprehensive(self, device, dtype, op):
-        device_type = torch.device(device).type
-
-        if device_type not in (GPU_TYPE, "cpu"):
-            raise AssertionError(f"Unexpected device_type: {device_type}")
-
-        torch._dynamo.reset()
-        with torch.no_grad():
-            # TODO: should we move empty_cache to the common device interface
-            if device_type == "cuda":
-                torch.cuda.empty_cache()
-            elif device == "xpu":
-                torch.xpu.empty_cache()
-        op_name = op.name
-        if op.variant_test_name:
-            op_name += f".{op.variant_test_name}"
-
-        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
-        allowed_dtypes = [f16, f32, f64, i32, i64, b8]
-        if op_name not in (
-            "nn.functional.interpolate.bilinear",
-            "nn.functional.interpolate.bicubic",
-            "nn.functional.upsample_bilinear",
-            "nn.functional.upsample_nearest",
-            "fill",
-            "full_like",
-        ):
-            if dtype not in allowed_dtypes:
-                raise unittest.SkipTest("Skipped!")
-
-        # with open("test_output.txt", "a") as f:
-        #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
-        # {inductor_skips[device_type].get(op_name, set())}", flush=True, file=f)
-        #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
-        # {inductor_skips[device_type].get(op_name, set())}", flush=True)
-        if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
-            #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
-            #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
-        elif (
-            device_type == "cpu"
-            and IS_LINUX
-            and dtype
-            in inductor_expected_failures_single_sample[device_type].get(op_name, set())
-        ) or dtype in inductor_gradient_expected_failures_single_sample[
-            device_type
-        ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE
-        else:
-            test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
-
-        overridden_kwargs = {}
-        overridden_kwargs.update(
-            inductor_override_kwargs.get(device_type, {}).get(op_name, {})
-        )
-        overridden_kwargs.update(
-            inductor_override_kwargs.get(device_type, {}).get((op_name, dtype), {})
-        )
-        if (
-            TEST_WITH_ROCM
-            and device_type == GPU_TYPE
-            and op_name == "addmm"
-            and dtype is f16
-            and isRocmArchAnyOf(MI200_ARCH)
-        ):
-            # MI200 eager backward routes FP16 GEMMs through the rocBLAS
-            # alt-impl to preserve denormals while inductor's compiled GEMM does
-            # not, so the two diverge at FP16 scale. See:
-            # https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
-            # Checked at runtime, not in inductor_override_kwargs, because the
-            # arch query would force import-time HIP init that this module
-            # otherwise avoids. reference_in_float=True (the eager FP32
-            # reference) is inherited from the ("addmm", f16) cuda entry above.
-            # Observed rel diff is ~9 * eps; use ~2e-2 for headroom across
-            # samples and rocBLAS solver versions. Set atol explicitly since
-            # PyTorch requires rtol/atol overrides to be paired.
-            overridden_kwargs.update({"rtol": 2e-2, "atol": 1e-3})
-        func = op.get_op()
-
-        def fn(*args, **kwargs):
-            return func(*args, **kwargs)
-
-        requires_grad = (
-            op.supports_autograd
-            and dtype in op.supported_backward_dtypes(device_type)
-            # TODO: OpInfo really ought to error out for this case, but it's
-            # not exercised in test_ops_gradients atm.  The problem is not
-            # complex32 per-se (which is supported by data movement only ops)
-            # but that when we do backwards we expect other ops like add to work
-            and dtype not in (torch.complex32, torch.bcomplex32)
-        )
-        samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
-        extra = _inductor_extra_samples(op_name, device, dtype, requires_grad)
-        if extra:
-            samples = itertools.chain(samples, extra)
-
-        if (
-            dtype in inductor_one_sample.get(device_type, {}).get(op_name, {})
-        ) and not ALL_SAMPLES:
-            if isinstance(samples, (list, tuple)):
-                samples = [samples[0]]
+            #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
+            # {inductor_skips[device_type].get(op_name, set())}", flush=True, file=f)
+            #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
+            # {inductor_skips[device_type].get(op_name, set())}", flush=True)
+            if dtype in inductor_skips[device_type].get(op_name, set()):
+                test_expect = ExpectedTestResult.SKIP
+                # with open("test_output.txt", "a") as f:
+                #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
+                #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
+            elif (
+                device_type == "cpu"
+                and IS_LINUX
+                and dtype
+                in inductor_expected_failures_single_sample[device_type].get(
+                    op_name, set()
+                )
+            ) or dtype in inductor_gradient_expected_failures_single_sample[
+                device_type
+            ].get(op_name, set()):
+                test_expect = ExpectedTestResult.XFAILURE
             else:
-                samples = [next(samples)]
+                test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
-        class HasRngOp(TorchDispatchMode):
-            def __init__(self) -> None:
-                super().__init__()
-                self.has_rng_op = False
+            overridden_kwargs = {}
+            overridden_kwargs.update(
+                inductor_override_kwargs.get(device_type, {}).get(op_name, {})
+            )
+            overridden_kwargs.update(
+                inductor_override_kwargs.get(device_type, {}).get((op_name, dtype), {})
+            )
+            if (
+                TEST_WITH_ROCM
+                and device_type == GPU_TYPE
+                and op_name == "addmm"
+                and dtype is f16
+                and isRocmArchAnyOf(MI200_ARCH)
+            ):
+                # MI200 eager backward routes FP16 GEMMs through the rocBLAS
+                # alt-impl to preserve denormals while inductor's compiled GEMM does
+                # not, so the two diverge at FP16 scale. See:
+                # https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
+                # Checked at runtime, not in inductor_override_kwargs, because the
+                # arch query would force import-time HIP init that this module
+                # otherwise avoids. reference_in_float=True (the eager FP32
+                # reference) is inherited from the ("addmm", f16) cuda entry above.
+                # Observed rel diff is ~9 * eps; use ~2e-2 for headroom across
+                # samples and rocBLAS solver versions. Set atol explicitly since
+                # PyTorch requires rtol/atol overrides to be paired.
+                overridden_kwargs.update({"rtol": 2e-2, "atol": 1e-3})
+            func = op.get_op()
 
-            def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs if kwargs else {}
-                if torch.Tag.nondeterministic_seeded in func.tags:
-                    self.has_rng_op = True
-
+            def fn(*args, **kwargs):
                 return func(*args, **kwargs)
 
-        def do_nopython_and_has_rng(fn, args, kwargs):
-            try:
-                mode = FakeTensorMode()
+            requires_grad = (
+                op.supports_autograd
+                and dtype in op.supported_backward_dtypes(device_type)
+                # TODO: OpInfo really ought to error out for this case, but it's
+                # not exercised in test_ops_gradients atm.  The problem is not
+                # complex32 per-se (which is supported by data movement only ops)
+                # but that when we do backwards we expect other ops like add to work
+                and dtype not in (torch.complex32, torch.bcomplex32)
+            )
+            samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
+            extra = _inductor_extra_samples(op_name, device, dtype, requires_grad)
+            if extra:
+                samples = itertools.chain(samples, extra)
 
-                def map_to_fake(e):
-                    if isinstance(e, torch.Tensor):
-                        return mode.from_tensor(e)
-                    else:
-                        return e
-
-                args, kwargs = tree_map(map_to_fake, (args, kwargs))
-                with HasRngOp() as rng_mode, mode:
-                    with enable_python_dispatcher():
-                        fn(*args, **kwargs)
-
-            except (DataDependentOutputException, DynamicOutputShapeException):
-                return False, rng_mode.has_rng_op
-
-            return True, rng_mode.has_rng_op
-
-        def get_contexts(has_rng_op, args, kwargs):
-            if has_rng_op:
-                # TODO - enable this, running into errors
-                return (
-                    # (
-                    #     lambda: torch._inductor.config.patch(
-                    #         {"fallback_random": True, "implicit_fallbacks": True}
-                    #     ),
-                    #     {"assert_equal": True},
-                    # ),
-                    (
-                        contextlib.nullcontext,
-                        {"assert_equal": False},
-                    ),
-                )
-
-            ctx = functools.partial(maybe_skip_size_asserts, op)
-            if op_name in CUSTOM_ASSERT_EQUALS_FNS:
-                assert_equal_fn = CUSTOM_ASSERT_EQUALS_FNS[op_name](args, kwargs)
-                return (
-                    (
-                        ctx,
-                        {"assert_equal": assert_equal_fn},
-                    ),
-                )
-
-            return ((ctx, {}),)
-
-        try:
-
-            def _get_tolerances(dtype):
-                _custom_tolerances = {
-                    torch.float32: (1.3e-5, 1.5e-5),
-                }
-                # When we are running opportunistic_fastatomics, we will expect some floating point rounding
-                # errors as the order of operation is not guaranteed.
-                if dtype in _custom_tolerances:
-                    return _custom_tolerances[dtype]
+            if (
+                dtype in inductor_one_sample.get(device_type, {}).get(op_name, {})
+            ) and not ALL_SAMPLES:
+                if isinstance(samples, (list, tuple)):
+                    samples = [samples[0]]
                 else:
-                    return None, None
+                    samples = [next(samples)]
 
-            for sample_input in samples:
-                args = [sample_input.input] + list(sample_input.args)
-                kwargs = sample_input.kwargs
-                # UNCOMMENT TO DEBUG SEGFAULTS
+            class HasRngOp(TorchDispatchMode):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.has_rng_op = False
 
-                # with open("test_output.txt", "a") as f:
-                #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-                #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
-                rtol, atol = _get_tolerances(dtype)
-                no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                for context_fn, kwarg_overrides in get_contexts(
-                    has_rng_op, args, kwargs
-                ):
-                    with context_fn():
-                        # Base kwargs
-                        adjusted_kwargs = {
-                            "check_lowp": False,
-                            "nopython": no_python,
-                            "check_has_compiled": no_python,
-                            "atol": atol,
-                            "rtol": rtol,
-                        }
+                def __torch_dispatch__(self, func, types, args, kwargs=None):
+                    kwargs = kwargs if kwargs else {}
+                    if torch.Tag.nondeterministic_seeded in func.tags:
+                        self.has_rng_op = True
 
-                        # Backend-specific adjustments
-                        # Triton
-                        if has_triton():
-                            adjusted_kwargs.update(
-                                copy_to_gpu=False,
-                            )
+                    return func(*args, **kwargs)
+
+            def do_nopython_and_has_rng(fn, args, kwargs):
+                try:
+                    mode = FakeTensorMode()
+
+                    def map_to_fake(e):
+                        if isinstance(e, torch.Tensor):
+                            return mode.from_tensor(e)
+                        else:
+                            return e
+
+                    args, kwargs = tree_map(map_to_fake, (args, kwargs))
+                    with HasRngOp() as rng_mode, mode:
+                        with enable_python_dispatcher():
+                            fn(*args, **kwargs)
+
+                except (DataDependentOutputException, DynamicOutputShapeException):
+                    return False, rng_mode.has_rng_op
+
+                return True, rng_mode.has_rng_op
+
+            def get_contexts(has_rng_op, args, kwargs):
+                if has_rng_op:
+                    # TODO - enable this, running into errors
+                    return (
+                        # (
+                        #     lambda: torch._inductor.config.patch(
+                        #         {"fallback_random": True, "implicit_fallbacks": True}
+                        #     ),
+                        #     {"assert_equal": True},
+                        # ),
+                        (
+                            contextlib.nullcontext,
+                            {"assert_equal": False},
+                        ),
+                    )
+
+                ctx = functools.partial(maybe_skip_size_asserts, op)
+                if op_name in CUSTOM_ASSERT_EQUALS_FNS:
+                    assert_equal_fn = CUSTOM_ASSERT_EQUALS_FNS[op_name](args, kwargs)
+                    return (
+                        (
+                            ctx,
+                            {"assert_equal": assert_equal_fn},
+                        ),
+                    )
+
+                return ((ctx, {}),)
+
+            try:
+
+                def _get_tolerances(dtype):
+                    _custom_tolerances = {
+                        torch.float32: (1.3e-5, 1.5e-5),
+                    }
+                    # When we are running opportunistic_fastatomics, we will expect some floating point rounding
+                    # errors as the order of operation is not guaranteed.
+                    if dtype in _custom_tolerances:
+                        return _custom_tolerances[dtype]
+                    else:
+                        return None, None
+
+                for sample_input in samples:
+                    args = [sample_input.input] + list(sample_input.args)
+                    kwargs = sample_input.kwargs
+                    # UNCOMMENT TO DEBUG SEGFAULTS
+
+                    # with open("test_output.txt", "a") as f:
+                    #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+                    #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
+                    rtol, atol = _get_tolerances(dtype)
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(
+                        has_rng_op, args, kwargs
+                    ):
+                        with context_fn():
+                            # Base kwargs
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "check_has_compiled": no_python,
+                                "atol": atol,
+                                "rtol": rtol,
+                            }
+
+                            # Backend-specific adjustments
+                            # Triton
+                            if has_triton():
+                                adjusted_kwargs.update(
+                                    copy_to_gpu=False,
+                                )
+                                if device_type == GPU_TYPE:
+                                    adjusted_kwargs["reference_in_float"] = False
+
+                            # skip checking gradient on CPU for now
                             if device_type == GPU_TYPE:
-                                adjusted_kwargs["reference_in_float"] = False
+                                # Only check gradients if there are input tensors requiring gradients
+                                has_grad_inputs = any(
+                                    getattr(x, "requires_grad", False)
+                                    for x in tree_leaves((args, kwargs))
+                                )
+                                adjusted_kwargs.update(
+                                    check_gradient=requires_grad and has_grad_inputs,
+                                    output_process_fn_grad=sample_input.output_process_fn_grad,
+                                )
+                            else:
+                                adjusted_kwargs["check_gradient"] = False
 
-                        # skip checking gradient on CPU for now
-                        if device_type == GPU_TYPE:
-                            # Only check gradients if there are input tensors requiring gradients
-                            has_grad_inputs = any(
-                                getattr(x, "requires_grad", False)
-                                for x in tree_leaves((args, kwargs))
-                            )
-                            adjusted_kwargs.update(
-                                check_gradient=requires_grad and has_grad_inputs,
-                                output_process_fn_grad=sample_input.output_process_fn_grad,
-                            )
-                        else:
-                            adjusted_kwargs["check_gradient"] = False
+                            # Update with overridden kwargs and context-specific overrides
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
 
-                        # Update with overridden kwargs and context-specific overrides
-                        adjusted_kwargs.update(overridden_kwargs)
-                        adjusted_kwargs.update(kwarg_overrides)
+                            # Call the appropriate check method based on device type
+                            exact_stride = op_name not in inductor_skip_exact_stride
+                            if exact_stride and device_type == "cpu":
+                                exact_stride = (
+                                    op_name not in inductor_skip_exact_stride_cpu
+                                )
+                            # XPU has additional layout optimizations that change strides differently from eager mode.
+                            if exact_stride and GPU_TYPE == "xpu":
+                                exact_stride = (
+                                    op_name not in inductor_skip_exact_stride_xpu
+                                )
+                            if device_type == GPU_TYPE:
+                                self.check_model_gpu(
+                                    fn,
+                                    args,
+                                    kwargs,
+                                    **adjusted_kwargs,
+                                    exact_stride=exact_stride,
+                                )
+                            else:
+                                self.check_model(
+                                    fn,
+                                    args,
+                                    kwargs,
+                                    **adjusted_kwargs,
+                                    exact_stride=exact_stride,
+                                )
 
-                        # Call the appropriate check method based on device type
-                        exact_stride = op_name not in inductor_skip_exact_stride
-                        if exact_stride and device_type == "cpu":
-                            exact_stride = op_name not in inductor_skip_exact_stride_cpu
-                        # XPU has additional layout optimizations that change strides differently from eager mode.
-                        if exact_stride and GPU_TYPE == "xpu":
-                            exact_stride = op_name not in inductor_skip_exact_stride_xpu
-                        if device_type == GPU_TYPE:
-                            self.check_model_gpu(
-                                fn,
-                                args,
-                                kwargs,
-                                **adjusted_kwargs,
-                                exact_stride=exact_stride,
-                            )
-                        else:
-                            self.check_model(
-                                fn,
-                                args,
-                                kwargs,
-                                **adjusted_kwargs,
-                                exact_stride=exact_stride,
-                            )
+            except Exception as e:
+                known_failure = False
+                if dtype in inductor_should_fail_with_exception[device_type].get(
+                    op_name, set()
+                ):
+                    failure = inductor_should_fail_with_exception[device_type][op_name][
+                        dtype
+                    ]
+                    if failure in str(e):
+                        known_failure = True
+                if not known_failure:
+                    raise e
 
-        except Exception as e:
-            known_failure = False
-            if dtype in inductor_should_fail_with_exception[device_type].get(
-                op_name, set()
-            ):
-                failure = inductor_should_fail_with_exception[device_type][op_name][
-                    dtype
-                ]
-                if failure in str(e):
-                    known_failure = True
-            if not known_failure:
-                raise e
+            # with open("test_output.txt", "a") as f:
+            #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
 
-        # with open("test_output.txt", "a") as f:
-        #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+    return TestInductorOpInfo
 
 
-class TestInductorOpInfo(InductorOpInfoTemplate):
-    test_comprehensive = InductorOpInfoTemplate.test_comprehensive
-
+TestInductorOpInfo = make_inductor_opinfo_cls(
+    ops_decorator=_ops(op_db[START:END]),
+    skip_ops_decorator=skipOps(test_skips_or_fails),
+)
 
 instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
 
