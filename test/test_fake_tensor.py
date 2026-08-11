@@ -3375,6 +3375,41 @@ class FakeTensorPropTest(TestCase):
         self.assertEqual(x.size(), y.size())
         self.assertEqual(x.stride(), y.stride())
 
+    def test_batch_norm_stride_match(self):
+        # Regression test for #192668: eager CPU batch_norm always returns a
+        # format-contiguous output while CUDA preserves the input layout; the
+        # fake output strides must match eager on both.
+        def check(x, op=torch.ops.aten.native_batch_norm.default):
+            C = x.shape[1]
+            w, b = torch.ones(C, device=x.device), torch.zeros(C, device=x.device)
+            m, v = torch.zeros(C, device=x.device), torch.ones(C, device=x.device)
+            args = (x, w, b, m, v, True, 0.1, 1e-5)
+            eager = op(*args)[0]
+            with FakeTensorMode() as mode:
+                fake_args = tuple(
+                    mode.from_tensor(a) if isinstance(a, torch.Tensor) else a
+                    for a in args
+                )
+                fake = op(*fake_args)[0]
+            self.assertEqual(eager.stride(), fake.stride())
+
+        def make_cases(device):
+            cl = torch.channels_last
+            return [
+                torch.randn(2, 3, 4, device=device).transpose(1, 2),
+                torch.randn(2, 4, 3, device=device),
+                torch.randn(2, 4, 8, 8, device=device).to(memory_format=cl),
+                torch.randn(8, 8, 4, 2, device=device).permute(3, 2, 0, 1),
+            ]
+
+        for x in make_cases("cpu"):
+            check(x)
+        x = torch.randn(2, 3, 4).transpose(1, 2)
+        check(x, op=torch.ops.aten._native_batch_norm_legit.default)
+        if RUN_CUDA:
+            for x in make_cases("cuda"):
+                check(x)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_torch_load_with_fake_mode(self):
         model = torch.nn.Linear(5, 10)
