@@ -1255,7 +1255,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 output_names = epilogue.writes
                 var_name_to_buffer_name = epilogue.renames
                 evt_py_code = epilogue.source
-                assert evt_py_code is not None  # noqa: S101
+                if evt_py_code is None:
+                    raise AssertionError("expected EVT epilogue source")
 
                 # TODO: mlazos remove this by returning buffer metadata from
                 # ir_to_evt_python code
