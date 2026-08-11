@@ -2246,6 +2246,11 @@ def _tensors_data_ptrs_at_indices_equal(
     ptrs: list[_int | None],
     indices: list[_int],
 ) -> _bool: ...
+def _tensors_aligned_at_indices(
+    tensors: list[Tensor | _int],
+    indices: list[_int],
+    alignment: _int,
+) -> _bool: ...
 def _construct_CUDA_Tensor_From_Storage_And_Metadata(
     metadata: dict,
     storage: Storage,

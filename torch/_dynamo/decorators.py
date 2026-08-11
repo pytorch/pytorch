@@ -1367,6 +1367,27 @@ def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> No
             mark_static(t, i)
 
 
+# Note: [Static input do-not-copy contract]
+# The underlying semantics of a "static address" tensor is that it is
+# weight-like (large, long-lived, reused across calls), so the compiled
+# artifact must never fall back to copying it per call. Everything else is a
+# downstream approximation of that invariant:
+# - cudagraphs skips copying static inputs into graph-owned memory, and when
+#   an unguarded static's address changes (legal: one artifact serves many
+#   module instances under inline_inbuilt_nn_modules, see #126822) it
+#   re-records a new cudagraph keyed on the pointers rather than copying.
+# - Non-trees cudagraph replay asserts pointer equality instead
+#   (cudagraphify_impl in compile_fx.py).
+# - Inductor bakes the example's 16-byte alignment into generated code and
+#   exempts static inputs from the runtime clone-if-misaligned fixup
+#   (get_input_idxs_to_check), since cloning a weight per call is unacceptable.
+#   Because the fixup is skipped, a runtime assert (assert_static_inputs_aligned)
+#   instead raises if an unguarded static that was aligned at compile time is
+#   swapped to a misaligned address, rather than silently running an
+#   alignment-assuming kernel on a misaligned pointer.
+# All nn.Module params/buffers are auto-marked unguarded-static (#130391);
+# guard=True pins the exact data_ptr with a guard (used by the optimizer
+# capture) and recompiles on any address change.
 @forbid_in_graph
 def mark_static_address(t: Any, guard: bool = False) -> None:
     """

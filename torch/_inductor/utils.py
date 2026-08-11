@@ -3720,6 +3720,65 @@ def align_inputs_from_check_idxs(
     return run
 
 
+def get_static_input_idxs_to_assert_aligned(
+    inputs: Sequence[InputType],
+    static_input_idxs: Sequence[int],
+) -> list[int]:
+    # Inductor bakes each example input's 16-byte alignment into codegen and
+    # exempts static inputs from the runtime clone-if-misaligned fixup (see
+    # get_input_idxs_to_check), since cloning a weight per call is unacceptable.
+    # A static input's address may legally change between calls (one artifact
+    # serves many module instances under inline_inbuilt_nn_modules, #126822), so
+    # for a static whose example was aligned we assert at runtime that it stays
+    # aligned; a misaligned swap must raise rather than silently run an
+    # alignment-assuming kernel on a misaligned pointer. A static whose example
+    # was already misaligned got unaligned codegen and needs no assert.
+    # See Note: [Static input do-not-copy contract] in torch/_dynamo/decorators.py.
+    static = OrderedSet(static_input_idxs)
+    result = []
+    for i in static:
+        inp = inputs[i]
+        if not isinstance(inp, torch.Tensor) or not is_gpu(inp.device.type):
+            continue
+        with maybe_get_suppress_shape_guards_ctx():
+            if tensor_is_aligned(inp):
+                result.append(i)
+    return result
+
+
+def assert_static_inputs_aligned(
+    model: Callable[[list[InputType]], _T],
+    alignment_assert_idxs: Sequence[int],
+) -> Callable[[list[InputType]], _T]:
+    if len(alignment_assert_idxs) == 0:
+        return model
+
+    idxs = list(alignment_assert_idxs)
+
+    def run(new_inputs: list[InputType]) -> Any:
+        if not torch._C._tensors_aligned_at_indices(
+            new_inputs,  # type: ignore[arg-type]
+            idxs,
+            GPU_ALIGN_BYTES,
+        ):
+            misaligned = [
+                i
+                for i in idxs
+                if new_inputs[i].data_ptr() % GPU_ALIGN_BYTES != 0  # type: ignore[union-attr]
+            ]
+            raise RuntimeError(
+                f"static input at indices {misaligned} is not {GPU_ALIGN_BYTES}-byte "
+                f"aligned, but inductor compiled assuming alignment. Static inputs "
+                f"(parameters and mark_static_address tensors) that were aligned at "
+                f"compile time must stay aligned across calls; pad or realign the "
+                f"tensor so its data_ptr is a multiple of {GPU_ALIGN_BYTES}. See "
+                f"Note: [Static input do-not-copy contract]."
+            )
+        return model(new_inputs)
+
+    return run
+
+
 def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
     if 0 in x.size():
         # Short-circuits if the shape has no elements
