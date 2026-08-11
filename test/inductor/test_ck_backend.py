@@ -77,7 +77,7 @@ class TestCKBackend(TestCase):
         "max_autotune_gemm_backends",
         (
             subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
-            subtest("CKTILE", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
+            "CKTILE",
             "ATen,CK",
         ),
         name_fn=lambda b: {
