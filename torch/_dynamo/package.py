@@ -231,8 +231,18 @@ def _defining_module_name(code: types.CodeType) -> str | None:
         name = getattr(module, "__name__", None)
         if name is not None and sys.modules.get(name) is module:
             return name
+    return _scan_sys_modules_for_file(code.co_filename)
+
+
+@functools.cache
+def _scan_sys_modules_for_file(filename: str) -> str | None:
+    """
+    Memoized because the fallback is O(len(sys.modules)) and this runs per
+    inlined code object during capture, on the shared caching_precompile path.
+    A hit is stable; a miss is recomputed only when a new filename shows up.
+    """
     for key, candidate in list(sys.modules.items()):
-        if getattr(candidate, "__file__", None) == code.co_filename:
+        if getattr(candidate, "__file__", None) == filename:
             return key
     return None
 

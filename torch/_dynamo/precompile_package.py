@@ -46,14 +46,19 @@ Know these before relying on an artifact in production:
   REPORTS by default rather than refusing, because real models trip it on
   library internals: measured on stock models, torchvision resnet18 and
   mobilenet_v3 report none, timm's ViT reports one (a re-exported
-  ``torch._assert``) and transformers' Qwen2 reports 33, of which only the
-  attention-implementation registry looks genuinely config-selected. Nor is
-  torchvision uniformly clean: efficientnet_b0 reports 2 and timm's swin
-  reports 5, one of which is a real config slot. Refusing
+  ``torch._assert``) and transformers' Qwen2 reports 33 built from a two-layer
+  config, 55 for the pretrained 24-layer, of which only the
+  attention-implementation registry looks genuinely config-selected. Report
+  counts are per model, not per library: torchvision's efficientnet_b0 reports
+  2 and timm's swin reports 5, one of which is a real config slot. Refusing
   by default would refuse real models and train users to switch the check off,
   so audit the list once for your model and pass
   ``require_no_risky_drops=True`` to enforce it thereafter.
-* A transformers model does not round trip today. Capture, save and load work,
+* A transformers model does not round trip today, and some do not even capture:
+  T5 raises ``PackageError: Cannot find module for code <code object __init__``
+  from ``_get_code_source``, which is byte-identical to base and which plain
+  ``caching_precompile`` also raises, so it is upstream too. For the families
+  that do capture, save and load work,
   but the first served call recompiles and ``serving()`` therefore raises. The
   entry frame is a ``functools.wraps`` decorator defined in
   ``transformers/utils/generic.py`` (``can_return_tuple`` for Qwen2), so its
@@ -65,6 +70,16 @@ Know these before relying on an artifact in production:
   ``torch._dynamo.config.caching_precompile`` records the same mapping -- so it
   needs fixing in the loader, not here. Vision models (torchvision, timm) do
   round trip.
+* A guard can also be KEPT and yet stop discriminating, which no rail reports.
+  Guards are rebuilt at load against the loading process, so one whose source
+  resolves through a reconstructed function's ``__globals__`` re-derives its
+  expected value from the serving machine and compares that value to itself.
+  A global rebound between capture and serve is then absorbed silently and the
+  capture-time graph is served. This is upstream in guard serialization, not
+  specific to this module -- the same shape reproduces through the untouched
+  ``<locals>`` reconstruction path -- but note it applies to KEPT guards, where
+  ``dropped_guards`` and ``risky_dropped_guards`` say nothing. In practice such
+  a function is itself an identity drop, so the risky list does name it.
 * SystemInfo checks Python, PyTorch, CUDA, Triton and GPU name at load, but NOT
   the CPU vector ISA. Inductor bakes the vector width into generated CPU code,
   so an artifact captured on an AVX-512 host and served on an AVX2 host can
@@ -74,7 +89,8 @@ Know these before relying on an artifact in production:
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
 * ``install()`` patches code objects process-globally, so an artifact is not
   scoped to the object it was loaded onto: other instances of the same class
-  are served from it too, and ``torch._dynamo.reset()`` unloads it. Two
+  are served from it too, and ``torch._dynamo.reset()`` stops it serving,
+  though the globals install() wrote stay in the module until ``unload()``. Two
   artifacts for ONE CLASS cannot be loaded at once: they collide on the entry
   frame, whose entries clear en masse, so the second load evicts the first,
   with a warning. Load one artifact per class per process.
@@ -138,6 +154,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Not a public surface -- see the module docstring. This exists so `from ...
+# import *` in a debugging session pulls the entry points rather than every
+# private helper, and so linters do not flag them as unused.
 __all__ = [
     "PrecompileSession",
     "PrecompileSummary",

@@ -4412,6 +4412,13 @@ class GuardsStatePickler(pickle.Pickler):
                     # A guard manager node exists for this function, so the
                     # reloaded scope must be able to evaluate sources rooted at
                     # it; _Missing raises AttributeError there instead.
+                    # NB the reconstruction takes __globals__ from the LOADING
+                    # process, so a guard resolving through it is re-derived
+                    # there rather than compared against the captured value:
+                    # over-strict when the module differs, and blind to a
+                    # global rebound between capture and load. Both predate
+                    # this branch -- the <locals> path above does the same --
+                    # but this widens the set of functions that reach it.
                     return type(self)._unpickle_nested_function, (
                         obj.__code__,
                         obj.__module__,
