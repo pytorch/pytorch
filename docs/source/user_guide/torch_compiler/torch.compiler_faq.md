@@ -555,7 +555,7 @@ This should just be used for **debugging purposes** and is in no way a
 replacement for the PyTorch API, as it is **much less performant** and, as a
 private API, **may change without notice**. At any rate, `torch._numpy` is a
 Python implementation of NumPy in terms of PyTorch and it is used internally by `torch.compile` to
-transform NumPy code into Pytorch code. It is rather easy to read and modify,
+transform NumPy code into PyTorch code. It is rather easy to read and modify,
 so if you find any bug in it feel free to submit a PR fixing it or simply open
 an issue.
 
