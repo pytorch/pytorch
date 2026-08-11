@@ -108,10 +108,8 @@ def remove_no_ops(
                 v1 = getattr(t1, field)
                 v2 = getattr(t2, field)
                 if field == "shape":
-                    # Shapes may contain unbacked SymInts; comparing the tuples
-                    # with `!=` would force a guard. Use sym_eq + guard_or_false
-                    # so "unknown" is treated as "not equal" (conservative:
-                    # don't elide a no-op we can't prove is a no-op).
+                    # Shapes may contain unbacked SymInts; tuple `!=` would
+                    # force a guard. Conservatively treat unknown as "not equal".
                     if not guard_or_false(sym_eq(v1, v2)):
                         return False
                 elif v1 != v2:
