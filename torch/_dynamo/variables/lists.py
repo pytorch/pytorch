@@ -55,6 +55,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    GetSet,
     Method,
     ValueMutationNew,
     VariableTracker,
@@ -168,7 +169,7 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         return VariableTracker.build(tx, self.debug_repr())
 
     def as_proxy(self) -> Any:
@@ -215,13 +216,13 @@ class BaseListVariable(VariableTracker):
     ) -> list[VariableTracker]:
         return list(self.items)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
-    mp_length = sq_length
+    mp_length_impl = sq_length_impl
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
@@ -563,7 +564,7 @@ class RangeVariable(BaseListVariable):
         repr += ")"
         return repr
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: range_repr in https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Objects/rangeobject.c#L673-L691
         return VariableTracker.build(tx, self.debug_repr())
 
@@ -711,15 +712,15 @@ class RangeVariable(BaseListVariable):
         rng = range(self.start(), self.stop(), self.step())
         return [variables.ConstantVariable.create(x) for x in rng]
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for range objects."""
         length = self.range_length()
         if length > sys.maxsize:
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
 
-    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self.sq_length(tx)
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.sq_length_impl(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
@@ -779,7 +780,7 @@ class RangeVariable(BaseListVariable):
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
         return self.getitem_const(tx, key)
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # range_contains: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/rangeobject.c#L482-L490
@@ -809,7 +810,7 @@ class RangeVariable(BaseListVariable):
         index = key.as_python_constant()
         return self.apply_index(tx, index)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -879,14 +880,14 @@ class RangeVariable(BaseListVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
@@ -1043,7 +1044,7 @@ class ListVariable(CommonListMethodsVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -1060,7 +1061,7 @@ class ListVariable(CommonListMethodsVariable):
     def debug_repr(self) -> str:
         return self.debug_repr_helper("[", "]")
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         return VariableTracker.build(tx, f"[{items}]")
 
@@ -1220,7 +1221,7 @@ class ListVariable(CommonListMethodsVariable):
             self.call_method(tx, "extend", args, {})
         return ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
@@ -1230,7 +1231,7 @@ class ListVariable(CommonListMethodsVariable):
                 return VariableTracker.build(tx, class_type, source=source)
             else:
                 return VariableTracker.build(tx, class_type, source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1388,6 +1389,11 @@ class DequeVariable(CommonListMethodsVariable):
         *CommonListMethodsVariable._nonvar_fields,
     }
 
+    # deque exposes a single read-only getset descriptor, maxlen.
+    tp_getset = {
+        "maxlen": GetSet(lambda self, tx: self.maxlen, None),
+    }
+
     def _rotate(
         self,
         tx: "InstructionTranslatorBase",
@@ -1418,7 +1424,7 @@ class DequeVariable(CommonListMethodsVariable):
 
     tp_methods = {"rotate": Method(_rotate)}
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -1573,7 +1579,7 @@ class DequeVariable(CommonListMethodsVariable):
             "deque([", "], maxlen=" + self.maxlen.debug_repr() + ")"
         )
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
             return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
@@ -1617,13 +1623,6 @@ class DequeVariable(CommonListMethodsVariable):
             ]
         )
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "maxlen":
-            return self.maxlen
-        return super().getattro_impl(tx, name)
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1635,6 +1634,23 @@ class DequeVariable(CommonListMethodsVariable):
         # below (which uses the pre-call maxlen captured here).
         if name == "__init__":
             return self.tp_init_impl(tx, args, kwargs)
+
+        if name == "__setattr__":
+            # deque has no __dict__, so every attribute write raises. A name
+            # backed by a getset descriptor (maxlen) is read-only; anything else
+            # is simply absent.
+            attr_name = args[0].as_python_constant()
+            if self.lookup_tp_getset_member(attr_name) is not None:
+                msg = (
+                    f"attribute '{attr_name}' of 'collections.deque' objects "
+                    "is not writable"
+                )
+            else:
+                msg = (
+                    f"'collections.deque' object has no attribute '{attr_name}' "
+                    "and no __dict__ for setting new attributes"
+                )
+            raise_observed_exception(AttributeError, tx, args=[msg])
 
         if name == "__reversed__":
             # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
@@ -1793,7 +1809,7 @@ class TupleVariable(BaseListVariable):
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -1812,7 +1828,7 @@ class TupleVariable(BaseListVariable):
             return self.debug_repr_helper("(", ",)")
         return self.debug_repr_helper("(", ")")
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if len(self.items) == 1:
             items += ","
@@ -1832,14 +1848,14 @@ class TupleVariable(BaseListVariable):
         else:
             return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
             class_type = self.python_type()
             return VariableTracker.build(tx, class_type, source=source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1932,7 +1948,7 @@ class SizeVariable(TupleVariable):
     def debug_repr(self) -> str:
         return self.debug_repr_helper("torch.Size([", "])")
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = ", ".join(tracked_repr(tx, item) for item in self.items)
         return VariableTracker.build(tx, f"torch.Size([{items}])")
 
@@ -2235,7 +2251,7 @@ class SliceVariable(VariableTracker):
             raise_observed_exception(TypeError, tx, args=[str(e)])
         return h, False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -2257,7 +2273,7 @@ class SliceVariable(VariableTracker):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
@@ -2268,7 +2284,7 @@ class SliceVariable(VariableTracker):
         if name not in fields:
             unimplemented(
                 gb_type="Unsupported attribute for slice() object",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation=f"Expected attribute to be one of {','.join(fields)} "
                 f"but got {name}",
                 hints=[*graph_break_hints.USER_ERROR],
