@@ -934,6 +934,26 @@ class _NestedReductionBase:
             self.assertEqual(compiled(x), f(x), atol=1e-2, rtol=1e-2)
         self.check_fusion()
 
+    def test_independent_sub_parent_source(self):
+        B, D = 4, 512
+
+        def f(x, z):
+            y = torch.sin(z)
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            x_pairs = x.view(B, D // 2, 2)
+            y_pairs = y.view(B, D // 2, 2)
+            scale = scale.unsqueeze(-1)
+            even = (x_pairs[..., 0] + y_pairs[..., 0]).float() / scale
+            odd = (x_pairs[..., 1] + y_pairs[..., 1]).float() / scale
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        z = torch.randn_like(x)
+        self.check_nested_matches_unnested(f, (x, z))
+        self.check_fusion()
+
     def _standalone_sub_parent_graph(self, B=32, D=1024, G=16):
         def f(x):
             xg = x.view(B, D // G, G)
@@ -1106,6 +1126,24 @@ class _NestedReductionBase:
             even = xg[..., 0].float() / scale_f
             odd = xg[..., 1].float() / scale_f
             return even, odd, scale, side
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_standalone_sub_parent_rejects_shifted_reduction_output(self):
+        B, D = 4, 512
+
+        def f(x):
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            shifted_scale = torch.roll(scale, 1).unsqueeze(-1)
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / shifted_scale
+            odd = pairs[..., 1].float() / shifted_scale
+            return even, odd, scale
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_numeric(f, (x,))
