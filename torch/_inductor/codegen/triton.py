@@ -5273,9 +5273,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # Eager tree-reduces each tile before accumulating tiles linearly.
         strict_reduction = (
-            self._strict_reduction_rblock() is not None and reduction_type == "sum"
+            self._strict_reduction_rblock() is not None
+            and reduction_type in ("sum", "prod")
         )
         strict_reduction_loop = strict_reduction and not self.persistent_reduction
+        # Inner-tree combiner used to linear-accumulate the per-tile trees:
+        # "+" for sum, "*" for prod (identity 0.0 / 1.0 comes from `default`).
+        strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
         # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
@@ -5348,6 +5352,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             Helper to generate a reduction call, e.g. tl.sum.
             """
             triton_reduction_fn = get_triton_reduction_function(reduction_type)
+            if strict_reduction and reduction_type == "prod":
+                # Strict prod carries reduction_ordering via a dedicated helper;
+                # the default triton_helpers.prod stays portable on Triton builds
+                # that lack the keyword.
+                triton_reduction_fn = "triton_helpers.prod_inner_tree"
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
             if reduction_type == "dot":
@@ -5611,7 +5620,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     and not self.features.has_strict_multirow_reduction()
                 ):
                     zero = constant_repr(cast(Any, default))
-                    _result = f"{zero} + ({_result})"
+                    _result = f"{zero} {strict_op} ({_result})"
                 result_var = self.cse.generate(
                     self.compute, _result, dtype=_dtype, shape=_shape
                 )
@@ -5765,7 +5774,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dtype=chunk_dtype,
                     shape=chunk_shape,
                 )
-                self.compute.writeline(f"{accumulator} = {accumulator} + {chunk}")
+                self.compute.writeline(
+                    f"{accumulator} = {accumulator} {strict_op} {chunk}"
+                )
                 self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)

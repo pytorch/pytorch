@@ -7900,7 +7900,7 @@ def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     if (
         current_node is None
         or config.numerics != "strict"
-        or current_node.target != aten.sum.dim_IntList
+        or current_node.target not in (aten.sum.dim_IntList, aten.prod.dim_int)
         or dtype is not None
         or axis is None
         or not has_triton_reduction_ordering()
@@ -8104,12 +8104,15 @@ def cummin(x, axis=None):
 
 @register_lowering(aten.prod)
 def prod(x, axis=None, keepdims=False, *, dtype=None):
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("prod", override_return_dtype=dtype)
+    fn = make_reduction(
+        "prod", override_return_dtype=dtype, strict_reduction=strict_reduction
+    )
     return fn(x, axis, keepdims, dtype=dtype)
 
 
