@@ -22,9 +22,9 @@ from torch._higher_order_ops.partitioner import (
     HopPartitionedGraph,
 )
 from torch._higher_order_ops.utils import (
-    _batch_dims_as_last,
+    _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
-    _move_batch_dims_to_last,
+    _move_batch_dims_to_last_for_scan,
     _VmapCombineFnWrapper,
     check_meta_consistency,
     fill_none_with_masks,
@@ -1156,9 +1156,9 @@ def scan_batch_rule(
     )
     # move to last dim to not interfere with scan's batching
     unbatched_init, unbatched_xs, unbatched_additional_inputs = (
-        _move_batch_dims_to_last(unbatched_args, in_dims)
+        _move_batch_dims_to_last_for_scan(unbatched_args, in_dims)
     )
-    after_move_dims = _batch_dims_as_last(in_dims)
+    after_move_dims = _batch_dims_as_last_for_scan(in_dims)
 
     with interpreter.lower():
         wrapper = _VmapCombineFnWrapper(
