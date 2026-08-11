@@ -655,11 +655,7 @@ class TestPGTransportEdgeCases(TestCase):
         self.assertGreaterEqual(self.mock_work.wait.call_count, 4)
 
 
-instantiate_device_type_tests(
-    PgTransportGPU, globals(), except_for="cpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestPGTransportEdgeCases, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(PgTransportGPU, globals(), except_for="cpu")
+instantiate_device_type_tests(TestPGTransportEdgeCases, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
