@@ -1,11 +1,13 @@
+#pragma once
+
 #if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
 #error \
-    "c10/util/complex_utils.h is not meant to be individually included. Include c10/util/complex.h instead."
+    "torch/headeronly/util/complex_utils.h is not meant to be individually included. Include torch/headeronly/util/complex.h instead."
 #endif
 
 #include <limits>
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 template <typename T>
 struct is_complex : public std::false_type {};
@@ -31,7 +33,7 @@ struct scalar_value_type<c10::complex<T>> {
   using type = T;
 };
 
-} // namespace c10
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 

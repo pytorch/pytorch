@@ -31,7 +31,7 @@ _FLYDSL_DSL_NAME = "flydsl"
 # Kernels registered through this gate are written against the FlyDSL 0.3.x
 # flydsl.expr.gpu.shuffle_xor interface. Other versions fall back to ATen
 # unless a developer explicitly sets TORCH_NATIVE_SKIP_VERSION_CHECK=1.
-_FLYDSL_SUPPORTED_RELEASE = (0, 3)
+_FLYDSL_SUPPORTED_RELEASES = ((0, 3),)
 
 
 @functools.cache
@@ -76,14 +76,16 @@ def _version_is_ok() -> bool:
         return True
     if (
         version is not None
-        and version.release[:2] == _FLYDSL_SUPPORTED_RELEASE
+        and version.release[:2] in _FLYDSL_SUPPORTED_RELEASES
         and not version.is_prerelease
     ):
         return True
 
-    supported = ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE))
+    supported = ", ".join(
+        ".".join(map(str, release)) + ".x" for release in _FLYDSL_SUPPORTED_RELEASES
+    )
     log.info(
-        "FlyDSL version %s is not supported (expected a stable %s.x release); "
+        "FlyDSL version %s is not supported (supported stable releases: %s); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,
         supported,
