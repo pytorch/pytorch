@@ -2137,5 +2137,23 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
+instantiate_device_type_tests(
+    TestFullyShardAllocFromPG,
+    globals(),
+    only_for=["cuda"],
+)
+
+instantiate_device_type_tests(
+    TestFullyShardSymmMem,
+    globals(),
+    only_for=["cuda"],
+)
+
+instantiate_device_type_tests(
+    TestFullyShardForceSumReduction,
+    globals(),
+    only_for=["cuda"],
+)
+
 if __name__ == "__main__":
     run_tests()
