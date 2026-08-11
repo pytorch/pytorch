@@ -122,6 +122,7 @@ class FlexGemmEpiModLocalReducePlan:
     """QuACK EpiOp configuration for one analyzed grouped local reduction."""
 
     geometry: FlexGemmLocalReduceGeometry
+    physical_span: int = 1
     out: torch.Tensor | None = None
     feeds_main: bool = False
     combine: Callable[..., Any] | str | None = None
@@ -137,6 +138,8 @@ class FlexGemmEpiModLocalReducePlan:
     def __post_init__(self) -> None:
         if self.out is None and not self.feeds_main:
             raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.physical_span not in (1, 2):
+            raise RuntimeError("FlexGEMM local-reduce physical_span must be 1 or 2")
         if self.combine is None:
             raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
         if self.output_layout is not None and not isinstance(
@@ -149,6 +152,15 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
+        if (
+            self.physical_span > 1
+            and self.prepass is None
+            and not self.fragment_reduced
+        ):
+            raise RuntimeError(
+                "FlexGEMM pair-domain reductions require a prepass or a "
+                "fragment-reduced callback"
+            )
         if self.feeds_main and not (
             self.axis == 1 and self.group <= LOCAL_REDUCE_FRAGMENT_WIDTH
         ):
@@ -166,6 +178,7 @@ class FlexGemmEpiModLocalReducePlan:
     def cache_key(self) -> tuple[Any, ...]:
         return (
             self.geometry,
+            self.physical_span,
             self.feeds_main,
             self.combine,
             self.finalize,
@@ -235,11 +248,19 @@ def flex_gemm_epimod(
             else op_types[kind](name, dtype=dtype)
         )
     if main_transform is not None:
+        min_fragment_n = (
+            local_reduce.group * local_reduce.physical_span
+            if local_reduce is not None
+            and local_reduce.feeds_main
+            and local_reduce.fragment_reduced
+            else None
+        )
         outputs = (
             epi_ops.GroupedMainStore(
                 "main",
                 main_transform.group,
                 paired=not fragmentwise and main_transform.group == 2,
+                min_fragment_n=min_fragment_n,
             ),
         )
     else:
@@ -287,6 +308,10 @@ def flex_gemm_epimod(
                     callable(store_finalize)
                     and len(inspect.signature(store_finalize).parameters) == 2
                 ):
+                    if local_reduce.physical_span > 1:
+                        raise RuntimeError(
+                            "pair-domain local-reduce stores do not support binary finalizers"
+                        )
                     if output_layout is not None:
                         raise RuntimeError(
                             "local-reduce output layouts do not support binary finalizers"
@@ -308,10 +333,12 @@ def flex_gemm_epimod(
                         output_layout=output_layout,
                         reduce_planes=local_reduce.reduce_planes,
                         fragment_reduced=local_reduce.fragment_reduced,
+                        physical_span=local_reduce.physical_span,
                     )
                 sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
         else:
-            if local_reduce.feeds_main:
+            fragment_feed = local_reduce.feeds_main and local_reduce.fragment_reduced
+            if local_reduce.feeds_main and not fragment_feed:
                 if output_layout is not None:
                     raise RuntimeError(
                         "feed-main local reductions do not support output layouts"
@@ -323,20 +350,19 @@ def flex_gemm_epimod(
                     combine=local_reduce.combine,
                     finalize=finalize,
                 )
+                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
             else:
                 reduce_op = grouped_reduce.GroupedLocalReduce(
                     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
                     axis=local_reduce.axis,
                     group=local_reduce.group,
                     combine=local_reduce.combine,
-                    finalize=finalize,
+                    finalize=store_finalize if fragment_feed else finalize,
                     output_layout=output_layout,
                     reduce_planes=local_reduce.reduce_planes,
                     fragment_reduced=local_reduce.fragment_reduced,
+                    physical_span=local_reduce.physical_span,
                 )
-            if local_reduce.feeds_main:
-                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-            else:
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
     if fragmentwise:
         epimod = epilogue_module.fragment_epilogue(
@@ -442,27 +468,28 @@ def gemm_epimod(
     if local_reduce is not None:
         grouped_reduce = importlib.import_module("quack.grouped_reduce")
         local_reduce_out = local_reduce.out
+        logical_n = b.shape[-1] // local_reduce.physical_span
         if local_reduce_out is not None:
             if local_reduce.output_layout is None:
                 grouped_reduce.validate_grouped_reduce_out(
                     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
                     local_reduce_out,
                     a.shape[-2],
-                    b.shape[-1],
+                    logical_n,
                     local_reduce.group,
                     local_reduce.axis,
                 )
             else:
-                grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
+                grouped_dim = a.shape[-2] if local_reduce.axis == 0 else logical_n
                 if grouped_dim % local_reduce.group:
                     raise ValueError(
                         f"group {local_reduce.group} must divide the grouped dim "
                         f"{grouped_dim} (axis={local_reduce.axis})"
                     )
                 rows, cols = (
-                    (a.shape[-2], b.shape[-1] // local_reduce.group)
+                    (a.shape[-2], logical_n // local_reduce.group)
                     if local_reduce.axis == 1
-                    else (a.shape[-2] // local_reduce.group, b.shape[-1])
+                    else (a.shape[-2] // local_reduce.group, logical_n)
                 )
                 if local_reduce_out.numel() != rows * cols:
                     initialize_local_reduce_out = local_reduce_out

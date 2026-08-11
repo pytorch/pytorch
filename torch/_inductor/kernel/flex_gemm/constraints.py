@@ -94,6 +94,12 @@ FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "FlexGEMM grouped main output shape must contract only the GEMM N dimension"
 )
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = "unsupported FlexGEMM epilogue: main output shape must equal the physical GEMM output shape"
+FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR = (
+    "FlexGEMM nested TensorSSA composition does not support captured tensors"
+)
+FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR = (
+    "FlexGEMM nested TensorSSA composition requires complete physical lane coverage"
+)
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
 LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_reduce_out"
