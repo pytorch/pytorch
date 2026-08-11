@@ -7,29 +7,31 @@ the PEP 517 backend (the wheel is assembled before torch is ever
 importable). Stage 2 is therefore a post-install step:
 
   * CI: .ci/pytorch/build.sh runs it after installing the built wheel,
-    then reassembles the wheel (incremental, via the persistent build
-    dir) so the artifact shipped to test jobs embeds the kernels
+    passing --wheel so the relinked library is patched back into that
+    wheel (see patch_wheel) before it ships to test jobs
   * dev: `spin develop` / `spin install` chain it after the pip
     install; after a raw `pip install -e .`, run it manually:
     python tools/native_aot/build_stage2.py
 
-Skips -- leaving a normal artifacts-free build -- when any prerequisite
-is missing, so the standard build NEVER hard-depends on the DSL stack:
+Skips -- leaving a normal artifacts-free build -- when AOT kernels are
+not applicable to this build:
 
-  * NATIVE_AOT=0 in the environment (explicit opt-out)
+  * TORCH_NATIVE_AOT=0 in the environment (explicit opt-out)
   * no CUDA build (USE_CUDA off / no nvcc toolchain in the build)
-  * DSL runtime not importable (nvidia_cutlass_dsl or tvm_ffi, the
-    same pair torch/_native/cutedsl_utils.py gates the JIT layer on)
+  * no toolchain targets this build's backend (Toolchain.BACKENDS); a
+    ROCm build skips here today, and gains AOT support by adding a
+    toolchain class rather than by editing this gate
   * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
     for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
     arch list is unset and a supported GPU is present
 
-A failure AFTER the skip checks is a real error and fails the build:
-silently shipping a wheel without the kernels it was asked to embed is
-worse than failing loudly (pass NATIVE_AOT=0 to bypass).
+Past those checks the DSL runtimes are REQUIRED, not optional: a
+toolchain that targets this backend was asked for declared kernels, and
+a wheel missing some of them underperforms silently instead of failing.
+So a missing runtime -- or any later failure -- fails the build. Set
+TORCH_NATIVE_AOT=0 to build without embedded DSL kernels.
 """
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -37,6 +39,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
+BUILD_DIR = os.path.join(REPO, "build")
+# Must match the NATIVE_AOT_ARTIFACTS_DIR cache var of caffe2/CMakeLists.txt,
+# which defaults to ${CMAKE_BINARY_DIR}/native_aot: the relink below only sees
+# artifacts the embedded glob picks up.
+NATIVE_AOT_ARTIFACTS_DIR = os.path.join(BUILD_DIR, "native_aot")
 # See export.py: as a script sys.path[0] is this directory, so the repo root
 # has to go on the path for `tools.native_aot` to import from any cwd.
 sys.path.insert(0, REPO)
@@ -71,19 +78,47 @@ def _torch_probe(expr: str) -> bool:
 
 
 def should_run() -> bool:
-    if os.getenv("NATIVE_AOT", "1") == "0":
-        _report("disabled (NATIVE_AOT=0)")
+    if os.getenv("TORCH_NATIVE_AOT", "1") == "0":
+        _report("disabled (TORCH_NATIVE_AOT=0)")
         return False
-    for dist in ("nvidia_cutlass_dsl", "tvm_ffi"):
-        if importlib.util.find_spec(dist) is None:
-            _report(f"skipped ({dist} not installed)")
-            return False
     if not _torch_probe("True"):
         _report("skipped (built torch not importable)")
         return False
     if not _torch_probe("torch.backends.cuda.is_built()"):
         _report("skipped (torch built without CUDA)")
         return False
+
+    # Platform BEFORE runtimes: which toolchains are even candidates is a
+    # property of the build, so a backend with no AOT toolchain is "not
+    # applicable", not "missing a wheel". torch.version.hip is the
+    # discriminator -- backends.cuda.is_built() is True on ROCm too.
+    from tools.native_aot import toolchains
+
+    backend = "rocm" if _torch_probe("torch.version.hip is not None") else "cuda"
+    usable = toolchains.for_backend(backend)
+    if not usable:
+        _report(f"skipped (no AOT toolchain targets {backend})")
+        return False
+
+    # Past here the backend HAS toolchains, so their runtimes are REQUIRED,
+    # not optional: shipping a wheel with only some of the declared kernels
+    # is the silent-partial-artifact failure the sidecar and orphan checks
+    # exist to prevent, and it would show up as a performance regression
+    # rather than an error. Set TORCH_NATIVE_AOT=0 to opt out of AOT
+    # kernels entirely -- that is the supported way to build without the
+    # DSL wheels.
+    gaps = {
+        k: tc.missing_runtimes() for k, tc in usable.items() if tc.missing_runtimes()
+    }
+    if gaps:
+        detail = "; ".join(
+            f"{k} needs {', '.join(ms)}" for k, ms in sorted(gaps.items())
+        )
+        raise RuntimeError(
+            f"native-AOT stage 2: this {backend} build has AOT toolchains whose "
+            f"runtimes are not installed ({detail}). Install them, or set "
+            f"TORCH_NATIVE_AOT=0 to build without embedded DSL kernels."
+        )
     arch_list = os.getenv("TORCH_CUDA_ARCH_LIST")
     if arch_list:
         from tools.native_aot import export as export_mod
@@ -195,10 +230,13 @@ def main(argv: list[str] | None = None) -> int:
     if not should_run():
         return 0
     py = sys.executable
+    art = NATIVE_AOT_ARTIFACTS_DIR
     _report("exporting kernels")
-    subprocess.check_call([py, os.path.join(HERE, "export.py")], cwd=REPO)
+    export = [py, os.path.join(HERE, "export.py"), "--out-dir", art]
+    subprocess.check_call(export, cwd=REPO)
     _report("generating stub sources")
-    subprocess.check_call([py, os.path.join(HERE, "gen_aot_lib.py")], cwd=REPO)
+    gen = [py, os.path.join(HERE, "gen_aot_lib.py"), "--artifacts-dir", art]
+    subprocess.check_call(gen, cwd=REPO)
     # Relink JUST torch_cuda: the embedded glob (CONFIGURE_DEPENDS)
     # picks up the new artifacts. A full `--target install` would also
     # work but walks the whole install manifest (~15 min); the targeted
@@ -206,13 +244,12 @@ def main(argv: list[str] | None = None) -> int:
     # exactly what install would do for this file: verified
     # byte-identical, no RPATH/install-time fixup applies to torch_cuda.
     _report("relinking torch_cuda with embedded kernels")
-    build_dir = os.path.join(REPO, "build")
     subprocess.check_call(
-        ["cmake", "--build", ".", "--target", "torch_cuda"], cwd=build_dir
+        ["cmake", "--build", ".", "--target", "torch_cuda"], cwd=BUILD_DIR
     )
     import shutil
 
-    built = os.path.join(build_dir, "lib", "libtorch_cuda.so")
+    built = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
     if not os.path.exists(built):
         raise RuntimeError(f"expected relinked library at {built}")
     installed = os.path.join(_installed_lib_dir(), "libtorch_cuda.so")

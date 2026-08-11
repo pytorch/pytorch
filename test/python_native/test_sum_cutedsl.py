@@ -1,7 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
 # Correctness + bitwise-equivalence tests for the CuTeDSL ``aten::sum``
-# inner-tree override (``torch/_native/ops/sum``). The override is gated on
+# inner-tree override (``torch/_native/ops/reductions``). The override is gated on
 # ``PYTORCH_SUM_INNER_TREE`` and registered for CUDA; these tests are gated on
 # CuTeDSL availability so the assertions exercise the CuTeDSL kernel.
 #
@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
 
 
 def _cutedsl_impl():
-    from torch._native.ops.sum import cutedsl_impl
+    from torch._native.ops.reductions import cutedsl_impl
 
     return cutedsl_impl
 

@@ -98,8 +98,10 @@ class TestExportJobs(unittest.TestCase):
         # Plain "fork" gives workers a dead CUDA context (measured:
         # is_initialized() False, allocation fails, no exception) because
         # the parent initializes CUDA before the pool starts.
-        self.assertNotEqual(export.POOL_START_METHOD, "fork")
-        self.assertIn(export.POOL_START_METHOD, ("forkserver", "spawn"))
+        # Pinned to forkserver, not just "not fork": main() calls
+        # set_forkserver_preload unconditionally, which a spawn context
+        # would silently ignore.
+        self.assertEqual(export.POOL_START_METHOD, "forkserver")
 
     def test_cutedsl_export_passes_gpu_arch(self):
         # The arch must reach the compiler as a --gpu-arch OPTION, not as
@@ -143,6 +145,47 @@ class TestExportJobs(unittest.TestCase):
                 {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
             )
             self.assertIsNone(seen["options"])
+
+    def test_toolchains_declare_their_backend(self):
+        # Which build backends a kind can emit for is DATA, not a platform
+        # check buried in the gate: that is what lets a ROCm build skip
+        # cleanly today and what makes a future ROCm DSL a new class with
+        # BACKENDS = ("rocm",) rather than an edit to build_stage2.
+        for kind, tc in toolchains.TOOLCHAINS.items():
+            self.assertTrue(tc.BACKENDS, f"{kind} declares no BACKENDS")
+        self.assertEqual(sorted(toolchains.for_backend("rocm")), [])
+        self.assertEqual(
+            sorted(toolchains.for_backend("cuda")),
+            sorted(toolchains.TOOLCHAINS),
+        )
+
+    def test_missing_runtime_is_fatal_not_skipped(self):
+        # A declaration whose toolchain targets this build's backend was
+        # ASKED for, so a missing runtime must fail rather than quietly
+        # ship a wheel with fewer kernels than declared. TORCH_NATIVE_AOT=0
+        # is the supported way to build without the DSL wheels.
+        import unittest.mock as mock
+
+        with mock.patch.object(
+            toolchains.CuteDslToolchain, "missing_runtimes", classmethod(lambda cls: [])
+        ):
+            b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+            with mock.patch.object(export, "load_builder", lambda *a: lambda p: b):
+                # Runtime present: gets past the gate (fails later, on the
+                # real compile, which this harness cannot do).
+                with self.assertRaises(Exception) as cm:
+                    export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+                self.assertNotIn("TORCH_NATIVE_AOT=0", str(cm.exception))
+
+        with mock.patch.object(
+            toolchains.CuteDslToolchain,
+            "missing_runtimes",
+            classmethod(lambda cls: ["cutlass"]),
+        ):
+            b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+            with mock.patch.object(export, "load_builder", lambda *a: lambda p: b):
+                with self.assertRaisesRegex(RuntimeError, "cannot export"):
+                    export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_pool_preload_stays_fork_safe(self):
         # The forkserver's server process is the fork PARENT for every
@@ -300,8 +343,6 @@ class TestSidecarIntegrity(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "could not be read"):
                 export._read_sidecar(path)
 
-
-class TestSpecExpansion(unittest.TestCase):
     def test_cross_product(self):
         pts = export.expand_specs(
             [{"dtype": ["float32", "bfloat16"], "N": [1024, 2048], "K": 8}]
@@ -403,8 +444,9 @@ class TestInt32SizeGate(unittest.TestCase):
         self.assertIn("values->sizes().begin()", gate)
         # Declines, never truncates.
         self.assertIn("return false;", gate)
-        # Non-tensor params contribute nothing.
-        self.assertNotIn(" k", gate.replace("_naot", ""))
+        # Non-tensor params contribute nothing: a wrongly-included scalar
+        # would emit its name in a sizes() probe.
+        self.assertNotIn("k.sizes()", gate)
 
     def test_gate_empty_without_tensors(self):
         self.assertEqual(gen_aot_lib._int32_size_gate("int64_t k, bool largest"), "")
@@ -556,8 +598,6 @@ class TestReadOnlyInputs(unittest.TestCase):
         self.assertIn("mX_s.data = const_cast<void*>(mX.const_data_ptr());", src)
         self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
 
-
-class TestSourceStaleness(unittest.TestCase):
     def test_closure_covers_shared_declaration_machinery(self):
         # The grid expander and the validating loader decide which spec
         # points exist and what a declaration means, so editing them
@@ -662,6 +702,22 @@ class TestToolchainRegistry(unittest.TestCase):
         for tc in toolchains.TOOLCHAINS.values():
             for pattern in tc.link_source_globs:
                 self.assertIn(pattern.split("/")[-1], cmake)
+
+
+CUBIN_SIDECAR = {
+    "prefix": "fakemm_f32",
+    "kind": "triton",
+    "symbol": "_fakemm_kernel",
+    "spec": {"dtype": "float32"},
+    "launch": {"grid_x": "B_dim*((M+31)/32)"},
+    "shared": 512,
+    "block_x": 128,
+    "args": [
+        {"name": "a", "kind": "tensor"},
+        {"name": "B_dim", "kind": "scalar", "ctype": "int32_t"},
+        {"name": "M", "kind": "scalar", "ctype": "int32_t"},
+    ],
+}
 
 
 class TestEndToEndGeneration(unittest.TestCase):
