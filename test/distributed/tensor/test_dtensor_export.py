@@ -543,8 +543,8 @@ graph():
     %max_1 : [num_users=1] = call_method[target=max](args = (%l_x_,), kwargs = {})
     %clamp : [num_users=1] = call_function[target=torch.clamp](args = (%max_1,), kwargs = {min: 1})
     %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
-    %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
-    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
+    %ge : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
+    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge, Runtime assertion failed for expression u0 >= 1 on node 'ge'), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
     return (getitem,)""",
         )

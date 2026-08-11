@@ -35,8 +35,12 @@ from torch._dynamo.exc import PackageError
 from torch._dynamo.graph_utils import _graph_device_type
 from torch.utils.weak import WeakIdKeyDictionary
 
-from .bytecode_transformation import get_code_keys
-from .utils import counters, dynamo_timed, increment_frame
+from .bytecode_transformation import (
+    COMPILED_FN_PREFIX,
+    get_code_keys,
+    is_compiled_fn_name,
+)
+from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
 
 logger = logging.getLogger(__name__)
@@ -143,11 +147,21 @@ def load_guard_manager(
         OutputGraphCommon(guards_state.output_graph),
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
+        guard_build_local_state=getattr(guards_state, "local_state", None),
     ).guard_manager
 
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
+
+
+def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
+    for name in code.co_names:
+        if is_compiled_fn_name(name):
+            yield _BackendId(name)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            yield from _backend_ids_from_code(const)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -770,6 +784,8 @@ class CompilePackage:
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
+        for backend_id in _backend_ids_from_code(dynamo_code):
+            self._add_backend_id(backend_id)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
@@ -808,17 +824,22 @@ class CompilePackage:
             raise AssertionError("_current_entry is not set in add_import_source")
         self._current_entry.import_sources[alias] = module_name
 
-    def add_backend_id(self, backend_id: str, backend: Any | None = None) -> None:
+    def _add_backend_id(
+        self, backend_id: _BackendId, backend: Any | None = None
+    ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
-        if not backend_id.startswith("__compiled_fn_"):
-            raise AssertionError(
-                f"backend_id must start with '__compiled_fn_', got '{backend_id}'"
-            )
-        backend_id = _BackendId(backend_id)
-        self._current_entry.backend_ids.append(backend_id)
+        if backend_id not in self._current_entry.backend_ids:
+            self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
             self._cached_backends[backend_id] = backend
+
+    def add_backend_id(self, backend_id: str, backend: Any | None = None) -> None:
+        if not backend_id.startswith(f"{COMPILED_FN_PREFIX}_"):
+            raise AssertionError(
+                f"backend_id must start with '{COMPILED_FN_PREFIX}_', got '{backend_id}'"
+            )
+        self._add_backend_id(_BackendId(backend_id), backend)
 
     def validate(self) -> None:
         if self._current_entry is not None:
@@ -833,6 +854,10 @@ class CompilePackage:
             )
 
     def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
+        # A pre-reset compile in this process may still own `name` via a
+        # CleanupHook that hasn't fired yet. We're taking over the binding now,
+        # so that hook must not delete it once its code object is collected.
+        CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
         self._installed_globals.setdefault(module, []).append(name)
 
@@ -843,7 +868,7 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set in uninstall")
         for module, names in self._installed_globals.items():
             for name in names:
-                module.__dict__.pop(name)
+                module.__dict__.pop(name, None)
 
         self._installed_globals = {}
 
@@ -858,6 +883,7 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
+        from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
         self.uninstall()
@@ -907,6 +933,7 @@ class CompilePackage:
                     # or guarded codes.
                     continue
 
+                input_codes.add(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -937,6 +964,11 @@ class CompilePackage:
                         builtin_dict_name
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
+                        # A pre-reset compile's CleanupHook may still own this
+                        # name even when we're about to leave its value alone
+                        # below (same dict object every compile in this
+                        # module), so it must not delete it once collected.
+                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
                         builtins_dict = get_builtins_dict(runtime_global_scope)
                         if builtin_dict_name in runtime_global_scope:
                             if (

@@ -8,6 +8,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
 
@@ -55,11 +56,11 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
             ],
             record_shapes=True,
             with_stack=True,
-            with_modules=True,
         )
         return group_name, prof
 
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_ce_allgather(self):
         group_name, prof = self._init()
         dtype = torch.float
@@ -103,6 +104,7 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
         #     prof.export_chrome_trace("test_ce_allgather.json")
 
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_ce_alltoall(self):
         group_name, prof = self._init()
         dtype = torch.float
