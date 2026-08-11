@@ -146,22 +146,22 @@ class SIMDKernelFeatures:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
 
     @cache_on_self
-    def strict_sum_reductions(self) -> tuple[ir.Reduction, ...]:
+    def strict_reductions(self) -> tuple[ir.Reduction, ...]:
         return tuple(
             node.node.data
             for node in self.reduction_nodes()
             if isinstance(node.node, ir.ComputedBuffer)
             and isinstance(node.node.data, ir.Reduction)
-            and node.node.data.strict_sum_rblock is not None
+            and node.node.data.strict_reduction_rblock is not None
         )
 
-    def has_strict_sum_multirow_reduction(self) -> bool:
-        return any(r.strict_sum_multirow for r in self.strict_sum_reductions())
+    def has_strict_multirow_reduction(self) -> bool:
+        return any(r.strict_reduction_multirow for r in self.strict_reductions())
 
     @cache_on_self
-    def strict_sum_rblock(self) -> int | None:
+    def strict_reduction_rblock(self) -> int | None:
         rblocks = OrderedSet(
-            reduction.strict_sum_rblock for reduction in self.strict_sum_reductions()
+            reduction.strict_reduction_rblock for reduction in self.strict_reductions()
         )
         if not rblocks:
             return None

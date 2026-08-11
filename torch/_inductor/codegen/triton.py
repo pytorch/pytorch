@@ -2963,8 +2963,7 @@ class TMACompatibilityChecker:
         # XBLOCK=1 after the initial TMA probe. Their output store must therefore
         # use the scalar fallback rather than a 16-byte tensor descriptor.
         if self.for_store and (
-            self.kernel.no_x_dim
-            or self.kernel.features.has_strict_sum_multirow_reduction()
+            self.kernel.no_x_dim or self.kernel.features.has_strict_multirow_reduction()
         ):
             log.debug(
                 "%s stores with XBLOCK=1 cannot transfer 16 bytes.",
@@ -3096,7 +3095,7 @@ class TMACompatibilityChecker:
             )
 
         if (
-            self.kernel.features.strict_sum_rblock() == 1
+            self.kernel.features.strict_reduction_rblock() == 1
             and innermost_block_symt in TritonSymbols.reduction_types
         ):
             log.debug(
@@ -3654,7 +3653,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return triton_type(dtype)
 
     def should_use_cooperative_reduction(self) -> bool:
-        if self._strict_sum_rblock() is not None:
+        if self._strict_reduction_rblock() is not None:
             return False
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
             V.graph.get_current_device_or_throw(),
@@ -3772,10 +3771,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     @cache_on_self
-    def _strict_sum_rblock(self) -> int | None:
+    def _strict_reduction_rblock(self) -> int | None:
         if self.num_reduction_dims != 1:
             return None
-        return self.features.strict_sum_rblock()
+        return self.features.strict_reduction_rblock()
 
     def want_no_x_dim(self):
         return (
@@ -5273,11 +5272,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
         # Eager tree-reduces each tile before accumulating tiles linearly.
-        strict_sum = self._strict_sum_rblock() is not None and reduction_type in (
-            "sum",
-            "prod",
+        strict_reduction = (
+            self._strict_reduction_rblock() is not None
+            and reduction_type in ("sum", "prod")
         )
-        strict_sum_loop = strict_sum and not self.persistent_reduction
+        strict_reduction_loop = strict_reduction and not self.persistent_reduction
         # Inner-tree combiner used to linear-accumulate the per-tile trees:
         # "+" for sum, "*" for prod (identity 0.0 / 1.0 comes from `default`).
         strict_op = "*" if reduction_type == "prod" else "+"
@@ -5353,6 +5352,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             Helper to generate a reduction call, e.g. tl.sum.
             """
             triton_reduction_fn = get_triton_reduction_function(reduction_type)
+            if strict_reduction and reduction_type == "prod":
+                # Strict prod carries reduction_ordering via a dedicated helper;
+                # the default triton_helpers.prod stays portable on Triton builds
+                # that lack the keyword.
+                triton_reduction_fn = "triton_helpers.prod_inner_tree"
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
             if reduction_type == "dot":
@@ -5369,7 +5373,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 reduction_ordering = (
                     ", reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)"
-                    if strict_sum
+                    if strict_reduction
                     else ""
                 )
                 result, shape = self.reduction_resize_and_shape(  # type: ignore[assignment]
@@ -5611,7 +5615,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 _result, _dtype, _shape = final_reduction(
                     self.compute, masked_value, masked_value.dtype
                 )
-                if strict_sum and not self.features.has_strict_sum_multirow_reduction():
+                if (
+                    strict_reduction
+                    and not self.features.has_strict_multirow_reduction()
+                ):
                     zero = constant_repr(cast(Any, default))
                     _result = f"{zero} {strict_op} ({_result})"
                 result_var = self.cse.generate(
@@ -5645,7 +5652,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.body.writeline(
                         f"{accumulator} = tl.full({dense_size_str}, {default}, {acc_type})"
                     )
-                elif strict_sum_loop:
+                elif strict_reduction_loop:
                     accumulator.shape = tuple(result_shape)
                     result_size_str = f"[{', '.join(result_shape)}]"
                     self.body.writeline(
@@ -5750,7 +5757,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dim,
                     dtype,
                 )
-            elif strict_sum_loop:
+            elif strict_reduction_loop:
                 zero = cast(str, default)
                 masked = self.cse.generate(
                     self.compute,
@@ -7059,8 +7066,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
-        if (rblock := self._strict_sum_rblock()) is not None:
-            out["strict_sum_rblock"] = rblock
+        if (rblock := self._strict_reduction_rblock()) is not None:
+            out["strict_reduction_rblock"] = rblock
         if (
             config.benchmark_kernel
             or config.profile_bandwidth
@@ -7483,7 +7490,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return math.prod(rblocks) if rblocks else None
 
     def _get_persistent_reduction_block(self, rnumel) -> int:
-        if (rblock := self._strict_sum_rblock()) is not None:
+        if (rblock := self._strict_reduction_rblock()) is not None:
             if V.graph.sizevars.statically_known_geq(rblock, rnumel):
                 return rblock
             raise AssertionError(
@@ -7508,7 +7515,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # bound anyway so taking the hit of non-coalesced loads is okay.
         if (
             kernel_features.contains_op("sort")
-            or kernel_features.has_strict_sum_multirow_reduction()
+            or kernel_features.has_strict_multirow_reduction()
         ):
             kernel_kwargs["override_persistent_reduction"] = True
             kernel_kwargs["override_cooperative_reduction"] = False

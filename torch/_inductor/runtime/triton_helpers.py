@@ -231,11 +231,15 @@ def _prod_accumulate(a, b):
 
 
 @triton.jit
-def prod(input, axis, reduction_ordering: tl.constexpr = None):
-    # Only forward reduction_ordering when set: Triton builds that lack the
-    # keyword must still compile default (non-strict) prod, which omits it.
-    if reduction_ordering is None:
-        return tl.reduce(input, axis, _prod_accumulate)
+def prod(input, axis):
+    return tl.reduce(input, axis, _prod_accumulate)
+
+
+@triton.jit
+def prod_inner_tree(input, axis, reduction_ordering: tl.constexpr):
+    # Strict-numerics only. Emitted solely on the strict path, which is gated
+    # behind has_triton_reduction_ordering(), so Triton builds lacking the
+    # keyword never compile this helper -- keeping default `prod` portable.
     return tl.reduce(
         input, axis, _prod_accumulate, reduction_ordering=reduction_ordering
     )

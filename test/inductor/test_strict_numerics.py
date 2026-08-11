@@ -310,7 +310,7 @@ class StrictNumericsTest(TestCase):
         return fn, args, result_index, cfg, expected_metrics, kernel_count
 
     @parametrize("kind", FUSION_CASES)
-    def test_fusion_preserves_strict_sum(self, device, kind):
+    def test_fusion_preserves_strict_reduction(self, device, kind):
         fn, args, index, cfg, expected_metrics, kernel_count = self._make_fusion_case(
             kind, device
         )
@@ -331,7 +331,7 @@ class StrictNumericsTest(TestCase):
         elif kind == "multi_output":
             self.assertEqual(eager[0], result[0])
 
-    def test_combo_kernel_preserves_strict_sum_blocks(self, device):
+    def test_combo_kernel_preserves_strict_reduction_blocks(self, device):
         args = (
             torch.randn(8, 12000, device=device),
             torch.randn(8, 12000, device=device),
@@ -355,7 +355,7 @@ class StrictNumericsTest(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "requires TMA support")
     @parametrize("kind", ("multirow", "split"))
-    def test_tma_preserves_strict_sum(self, device, kind):
+    def test_tma_preserves_strict_reduction(self, device, kind):
         if kind == "multirow":
             x = torch.randn(64, 5, device=device)
         else:
