@@ -91,13 +91,22 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       GetAllocator(kMeta),
       /*resizable=*/true
     ),
-    base_(base)
+    base_(base),
+    mutation_base_storage_nbytes_(get_nbytes(base)),
+    mutation_base_dtype_(base.scalar_type()),
+    mutation_base_layout_(base.layout())
 {
+  if (mutation_base_layout_ == Layout::Strided) {
+    mutation_base_sizes_ = base.sym_sizes().vec();
+    mutation_base_strides_ = base.sym_strides().vec();
+    mutation_base_storage_offset_ = base.sym_storage_offset();
+  }
   // SparseTensorImpl has no storage, so we cannot query its nbytes.
   // (original_storage_size is only used for storage resizing in fsdp anyway, which does not apply to sparse)
   // Same for XLA
   if (base.unsafeGetTensorImpl()->has_storage() && data_ptr().device().type() != c10::DeviceType::XLA) {
     original_storage_size_ = base.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+    mutation_base_storage_nbytes_ = original_storage_size_;
   } else {
     original_storage_size_ = -1;
   }

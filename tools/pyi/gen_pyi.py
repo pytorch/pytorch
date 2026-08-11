@@ -273,7 +273,9 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: object) -> _bool: ...",
         ]
     elif name in asymmetric_comparison_ops:
-        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+        return [
+            f"def {opname}(self, other: Tensor | Number | PySymType | _complex) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
@@ -1171,6 +1173,9 @@ def gen_pyi(
             "_functionalize_unsafe_set": [
                 "def _functionalize_unsafe_set(dst: Tensor, src: Tensor) -> None: ..."
             ],
+            "_functionalize_unsafe_set_storage_for_functional_tensor": [
+                "def _functionalize_unsafe_set_storage_for_functional_tensor(dst: Tensor, src: Tensor) -> None: ..."
+            ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
                 defs(
                     "_functionalize_mark_mutation_hidden_from_autograd",
@@ -1230,6 +1235,107 @@ def gen_pyi(
             "_functionalize_has_metadata_mutation": [
                 defs(
                     "_functionalize_has_metadata_mutation", ["tensor: Tensor"], "_bool"
+                )
+            ],
+            "_functionalize_was_storage_changed_after_mutation": [
+                defs(
+                    "_functionalize_was_storage_changed_after_mutation",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_has_size_mutation": [
+                defs("_functionalize_has_size_mutation", ["tensor: Tensor"], "_bool")
+            ],
+            "_functionalize_had_metadata_mutation_under_no_grad_or_inference_mode": [
+                defs(
+                    "_functionalize_had_metadata_mutation_under_no_grad_or_inference_mode",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_has_aliased_metadata_mutation": [
+                defs(
+                    "_functionalize_has_aliased_metadata_mutation",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_has_aliased_data_mutation": [
+                defs(
+                    "_functionalize_has_aliased_data_mutation",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_get_data_mutation_ranges": [
+                defs(
+                    "_functionalize_get_data_mutation_ranges",
+                    ["tensor: Tensor"],
+                    "list[tuple[_int | SymInt, _int | SymInt]]",
+                )
+            ],
+            "_functionalize_record_data_mutation_range": [
+                defs(
+                    "_functionalize_record_data_mutation_range",
+                    ["tensor: Tensor"],
+                    "None",
+                )
+            ],
+            "_functionalize_mark_data_mutation_requires_full_storage": [
+                defs(
+                    "_functionalize_mark_data_mutation_requires_full_storage",
+                    ["tensor: Tensor"],
+                    "None",
+                )
+            ],
+            "_functionalize_mark_data_mutation_carrier": [
+                defs(
+                    "_functionalize_mark_data_mutation_carrier",
+                    ["tensor: Tensor"],
+                    "None",
+                )
+            ],
+            "_functionalize_has_data_mutation_carrier": [
+                defs(
+                    "_functionalize_has_data_mutation_carrier",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_had_data_mutation_carrier": [
+                defs(
+                    "_functionalize_had_data_mutation_carrier",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_data_mutation_requires_full_storage": [
+                defs(
+                    "_functionalize_data_mutation_requires_full_storage",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_has_data_mutation_full_overwrite": [
+                defs(
+                    "_functionalize_has_data_mutation_full_overwrite",
+                    ["tensor: Tensor"],
+                    "_bool",
+                )
+            ],
+            "_functionalize_get_mutation_storage_nbytes": [
+                defs(
+                    "_functionalize_get_mutation_storage_nbytes",
+                    ["tensor: Tensor", "preserves_storage_offset: _bool"],
+                    "_int | SymInt",
+                )
+            ],
+            "_functionalize_was_storage_offset_mutated": [
+                defs(
+                    "_functionalize_was_storage_offset_mutated",
+                    ["tensor: Tensor"],
+                    "_bool",
                 )
             ],
             "_functionalize_apply_view_metas": [
@@ -2002,6 +2108,7 @@ def gen_pyi(
             "cfloat",
             "complex128",
             "cdouble",
+            "bcomplex32",
             "quint8",
             "qint8",
             "qint32",

@@ -1,6 +1,7 @@
 # Owner(s): ["module: codegen"]
 # ruff: noqa: F841
 
+import pickle
 import unittest
 from contextlib import nullcontext
 
@@ -203,6 +204,43 @@ class TestFunctionalization(TestCase):
         # but fixing it for Storage() objects is annoying.
         r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
         self.assertEqual(str(r.device), "cpu")
+
+    def test_set_after_mutation(self):
+        def data_then_set(a):
+            a.add_(1)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        def metadata_then_set(a):
+            a.resize_(10)
+            a.set_(torch.arange(3.0))
+            return a.clone()
+
+        for fn, inp in (
+            (data_then_set, torch.arange(5.0)),
+            (metadata_then_set, torch.empty(0)),
+        ):
+            with self.subTest(fn=fn.__name__):
+                expected = fn(inp.clone())
+                actual = torch.func.functionalize(fn)(inp.clone())
+                self.assertEqual(actual, expected)
+
+    def test_quantized_alias_mutation(self):
+        def f(x):
+            x.detach().relu_()
+            return x
+
+        q = torch.quantize_per_tensor(
+            torch.tensor([-2.0, 1.0, 3.0]), scale=0.25, zero_point=3, dtype=torch.qint8
+        )
+        expected = f(q.clone())
+        actual = torch.func.functionalize(f)(q.clone())
+        self.assertEqual(actual, expected)
+
+        actual_reapply_views = _functionalize(f, reapply_views=True, crossref=False)(
+            q.clone()
+        )
+        self.assertEqual(actual_reapply_views, expected)
 
     def test_advanced_indexing(self):
         def f():
@@ -2095,6 +2133,85 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     """,
         )
 
+    def test_data_mutation_ranges_preserve_logical_layout(self):
+        def mutation_ranges(base, fn, *, reapply_views=True):
+            functional = torch._to_functional_tensor(base)
+            torch._enable_functionalization(reapply_views=reapply_views)
+            try:
+                fn(functional)
+                return torch._functionalize_get_data_mutation_ranges(functional)
+            finally:
+                torch._disable_functionalization()
+
+        def repeated_alias_write(functional):
+            alias = functional.detach()
+            alias.add_(1)
+            alias.add_(1)
+
+        self.assertEqual(
+            mutation_ranges(torch.arange(10.0)[5:], repeated_alias_write),
+            [(20, 40), (20, 40)],
+        )
+        self.assertEqual(
+            mutation_ranges(torch.arange(10.0)[::2], repeated_alias_write),
+            [(0, 36), (0, 36)],
+        )
+
+        def direct_then_alias_write(functional):
+            functional.add_(1)
+            functional.detach().add_(1)
+
+        # The direct write does not need an alias interval; the later alias
+        # write must still retain the input's original nonzero offset.
+        self.assertEqual(
+            mutation_ranges(torch.arange(10.0)[5:], direct_then_alias_write),
+            [(20, 40)],
+        )
+        self.assertEqual(
+            mutation_ranges(
+                torch.arange(10.0)[5:],
+                lambda functional: functional[1:3].add_(1),
+                reapply_views=False,
+            ),
+            [],
+        )
+
+    def test_batch_norm_out_with_mutable_inputs(self):
+        def f(x, weight, bias, running_mean, running_var, out, mean, invstd):
+            return torch.ops.aten._native_batch_norm_legit.out(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                True,
+                0.1,
+                1e-5,
+                out=out,
+                save_mean=mean,
+                save_invstd=invstd,
+            )
+
+        args = (
+            torch.randn(2, 3, 4, 4),
+            torch.randn(3),
+            torch.randn(3),
+            torch.zeros(3),
+            torch.ones(3),
+            torch.empty(2, 3, 4, 4),
+            torch.empty(3),
+            torch.empty(3),
+        )
+        ref_args = tuple(x.clone() for x in args)
+        test_args = tuple(x.clone() for x in args)
+
+        ref_out = f(*ref_args)
+        test_out = torch.func.functionalize(f)(*test_args)
+
+        self.assertEqual(test_out, ref_out)
+        for test_arg, ref_arg in zip(test_args, ref_args):
+            self.assertEqual(test_arg, ref_arg)
+
     # This tests our python shims around C++ Functionalization: FunctionalTensor and FunctionalTensorMode
     def test_python_functionalization(self):
         def f(x):
@@ -2161,6 +2278,29 @@ def forward(self, x_1):
             )
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_to_dense(self):
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        inputs = [torch.randn(2, 3).to_sparse()]
+        if torch.backends.mkldnn.is_available():
+            inputs.append(torch.randn(2, 3).to_mkldnn())
+
+        for x in inputs:
+            for use_op in (False, True):
+                with maybe_disable, FunctionalTensorMode():
+                    x_wrapped = FunctionalTensor.to_functional(x)
+                    if use_op:
+                        out_wrapped = torch.ops.aten.to_dense.default(x_wrapped)
+                    else:
+                        out_wrapped = x_wrapped.to_dense()
+
+                out_unwrapped = out_wrapped.elem
+                torch._sync(out_unwrapped)
+                out = torch._from_functional_tensor(out_unwrapped)
+                self.assertEqual(out.layout, torch.strided)
+                self.assertEqual(out, x.to_dense())
 
     def test_python_functionalization_is_conj(self):
         def f(x):
@@ -2336,6 +2476,94 @@ def forward(self, arg0_1):
 )
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
+
+
+class TestViewMetaSerialization(TestCase):
+    # Exercise to_serializable_tuple() via as_tuple() and pickle, covering each
+    # element kind that used to be a dangling reference: std::vector (resize_/
+    # _unsafe_view_), const at::Tensor& (_make_dual), and const
+    # std::optional<at::Tensor>& (_nested_view_from_jagged). Deterministic UAF
+    # under ASAN before the fix; the tensor cases segfault even without ASAN.
+
+    def _make_dual_view_meta(self, tangent, level=0):
+        # _make_dual_ViewMeta's SerializableTuple is (has_symbolic_inputs,
+        # reapply_views, inverse_return_mode, tangent, level); the tangent
+        # element is the `const at::Tensor&` reference that used to dangle.
+        return torch._C._functionalization._make_dual_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                tangent,
+                level,
+            )
+        )
+
+    def _nested_jagged_view_meta(self, offsets, lengths):
+        # _nested_view_from_jagged_ViewMeta's SerializableTuple is
+        # (has_symbolic_inputs, reapply_views, inverse_return_mode, offsets,
+        # dummy, lengths, ragged_idx, min_seqlen, max_seqlen). lengths/min_seqlen/
+        # max_seqlen are `const std::optional<at::Tensor>&` elements; this covers
+        # the optional<Tensor> decay path (min_seqlen/max_seqlen left as None).
+        return torch._C._functionalization._nested_view_from_jagged_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                offsets,
+                torch.zeros(offsets.shape[0] - 1),
+                lengths,
+                1,
+                None,
+                None,
+            )
+        )
+
+    def test_resize_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5]))
+        reapply_views, size = view_meta.as_tuple()
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(size, [3, 4, 5])
+
+    def test_unsafe_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6]))
+        has_symbolic_inputs, size = view_meta.as_tuple()
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(size, [2, 6])
+
+    def test_make_dual_view_meta_tensor_element_as_tuple(self):
+        tangent = torch.arange(6.0).reshape(2, 3)
+        view_meta = self._make_dual_view_meta(tangent, level=0)
+        has_symbolic_inputs, reapply_views, _, restored_tangent, level = (
+            view_meta.as_tuple()
+        )
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(level, 0)
+        self.assertEqual(restored_tangent, tangent)
+
+    def test_nested_jagged_view_meta_optional_tensor_elements_as_tuple(self):
+        offsets = torch.tensor([0, 2, 4])
+        lengths = torch.tensor([2, 2])
+        view_meta = self._nested_jagged_view_meta(offsets, lengths)
+        restored = view_meta.as_tuple()
+        self.assertEqual(restored[3], offsets)
+        # present optional<Tensor> round-trips, absent ones stay None
+        self.assertEqual(restored[5], lengths)
+        self.assertEqual(restored[7], None)
+        self.assertEqual(restored[8], None)
+
+    def test_view_meta_pickle_roundtrip(self):
+        for view_meta in (
+            torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5])),
+            torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6])),
+            self._make_dual_view_meta(torch.arange(6.0).reshape(2, 3)),
+            self._nested_jagged_view_meta(
+                torch.tensor([0, 2, 4]), torch.tensor([2, 2])
+            ),
+        ):
+            restored = pickle.loads(pickle.dumps(view_meta))
+            self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
 
 
 if __name__ == "__main__":

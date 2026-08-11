@@ -14,17 +14,20 @@ import itertools
 import pprint
 import typing
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any
 
 import torch
 import torch.fx as fx
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
+from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -34,13 +37,16 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
-from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
-from torch._prims_common import compute_required_storage_length, CUDARngStateHelper
-from torch._subclasses import FakeTensor
+from torch._prims_common import (
+    compute_required_storage_length,
+    CUDARngStateHelper,
+    is_non_overlapping_and_dense_or_false,
+)
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -77,6 +83,7 @@ from .schemas import (
     MemoryFormatMeta,
     MutationType,
     OpaqueMeta,
+    OutputAliasInfo,
     OutputType,
     PlainTensorMeta,
     SubclassCreationMeta,
@@ -101,6 +108,19 @@ from .utils import (
 )
 
 
+if typing.TYPE_CHECKING:
+    from .codegen import PySourceBuilder
+
+
+def _snapshot_external_objects(ctx: Any) -> None:
+    """Snapshot the external object registry onto ctx for backward restore."""
+    ctx._external_objects = {
+        k: ref()
+        for k, ref in index_to_external_object_weakref.items()
+        if ref() is not None
+    }
+
+
 def _unwrap_tensor_subclasses_no_symints(
     args: list[Any],
 ) -> list[Any]:
@@ -112,16 +132,125 @@ zip = strict_zip
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
-def _resize_storage_if_needed(dst: Tensor, src: Tensor) -> None:
+def _resize_storage_if_needed(
+    dst: Tensor,
+    src: Tensor,
+    target_storage_offset: int | torch.SymInt,
+) -> None:
     dst_storage = dst.untyped_storage()
     required_nbytes = (
         compute_required_storage_length(
-            src.size(), src.stride(), typing.cast(int, src.storage_offset())
+            src.shape,
+            src.stride(),
+            typing.cast(int, target_storage_offset),
         )
-        * src.element_size()
+        * dst.element_size()
     )
     if dst_storage.nbytes() < required_nbytes:
         dst_storage.resize_(required_nbytes)
+
+
+def _validate_input_mutation_density(tensor: Tensor) -> None:
+    if tensor.layout is not torch.strided or not is_non_overlapping_and_dense_or_false(
+        tensor
+    ):
+        raise RuntimeError(
+            "AOTAutograd cannot safely replay input mutations when "
+            "the runtime input is not non-overlapping and dense"
+        )
+
+
+def _input_mutation_carrier_end(tensor: Tensor) -> int | torch.SymInt:
+    return (
+        tensor.storage_offset() * tensor.element_size()
+        if tensor.numel() == 0
+        else compute_required_storage_length(
+            tensor.shape,
+            tensor.stride(),
+            typing.cast(int, tensor.storage_offset()),
+        )
+        * tensor.element_size()
+    )
+
+
+def _validate_input_mutation_storage_capacity(tensor: Tensor) -> None:
+    """Reject runtime storage capacity that the functional carrier cannot see."""
+    _validate_input_mutation_density(tensor)
+    carrier_end = _input_mutation_carrier_end(tensor)
+    if tensor.untyped_storage().nbytes() > carrier_end:
+        raise RuntimeError(
+            "AOTAutograd cannot replay storage-resizing input mutations when "
+            "the runtime input has hidden trailing storage capacity"
+        )
+
+
+def _validate_input_mutation_full_storage(tensor: Tensor) -> None:
+    _validate_input_mutation_storage_capacity(tensor)
+    if tensor.storage_offset() != 0:
+        raise RuntimeError(
+            "AOTAutograd cannot replay a nonempty internal-alias mutation unless "
+            "the runtime input carries its entire storage"
+        )
+
+
+@contextlib.contextmanager
+def _replay_input_mutation_version_counter(
+    tensor: Tensor, mutation_version_delta: int
+) -> Generator[None, None, None]:
+    """Hide physical replay bumps, then apply the recorded version delta."""
+    if mutation_version_delta < 0:
+        raise AssertionError(
+            "mutation_version_delta must be greater than or equal to zero"
+        )
+
+    # Inference tensors do not have a version counter. In particular, entering the
+    # preservation context would try to read one and raise. Normal tensors used
+    # under inference mode still take the preservation path and retain eager's
+    # version-counter behavior.
+    if tensor.is_inference():
+        yield
+        return
+
+    with torch.autograd._unsafe_preserve_version_counter(tensor):
+        yield
+
+    if mutation_version_delta:
+        torch.autograd.graph.increment_version(
+            itertools.repeat(tensor, mutation_version_delta)
+        )
+
+
+@contextlib.contextmanager
+def _replay_graph_handled_input_mutation_version_counters(
+    mutations: tuple[tuple[Tensor, int], ...],
+) -> Generator[None, None, None]:
+    """Apply logical deltas while hiding consolidated physical graph bumps."""
+    versioned_mutations = tuple(
+        (tensor, mutation_version_delta)
+        for tensor, mutation_version_delta in mutations
+        if not tensor.is_inference()
+    )
+    for tensor, mutation_version_delta in versioned_mutations:
+        if mutation_version_delta < 0:
+            raise AssertionError(
+                "mutation_version_delta must be greater than or equal to zero"
+            )
+        if mutation_version_delta:
+            torch.autograd.graph.increment_version(
+                itertools.repeat(tensor, mutation_version_delta)
+            )
+
+    tensors = tuple(tensor for tensor, _ in versioned_mutations)
+    if not tensors:
+        yield
+        return
+
+    # Functionalization may consolidate several mutations into one graph op or
+    # may emit a copy_ for an alias whose eager version counter did not change.
+    # Preserve the already-replayed logical versions across all physical graph
+    # mutations.
+    with torch.autograd._unsafe_preserve_version_counter(tensors):
+        yield
 
 
 def _unwrap_no_symints(args: list[Any]) -> list[Any]:
@@ -146,7 +275,7 @@ def _describe_arg_for_logging(arg: object) -> str:
         )
     elif isinstance(arg, torch.Tensor):
         return f"Tensor(shape={arg.shape}, dtype={arg.dtype}, device={arg.device})"
-    elif opaque_object.is_opaque_type(type(arg)):
+    elif opaque_object.is_custom_class(type(arg)):
         return f"Opaque: {type(arg).__name__}"
     else:
         return f"{type(arg).__name__}: {arg}"
@@ -206,11 +335,16 @@ class RuntimeWrapper(CompilerWrapper):
 
 class NoopAliasHandler:
     def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
+        self,
+        info: OutputAliasInfo,
+        runtime_metadata: ViewAndMutationMeta,
+        trace_joint: bool,
     ) -> None:
         pass
 
-    def __call__(self, orig_inputs: list[Any], fw_outs: list[Any], out: Any) -> Any:
+    def __call__(
+        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
+    ) -> Any:
         return out
 
 
@@ -226,8 +360,13 @@ def _identity(x: Any) -> Any:
 
 class AliasOfInputHandler:
     def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
+        self,
+        info: OutputAliasInfo,
+        runtime_metadata: ViewAndMutationMeta,
+        trace_joint: bool,
     ) -> None:
+        if info.base_idx is None:
+            raise AssertionError("expected info.base_idx to be set")
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
@@ -235,7 +374,7 @@ class AliasOfInputHandler:
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = orig_inputs[self.base_idx]
         return gen_alias_from_base(
@@ -249,13 +388,17 @@ class AliasOfInputHandler:
 
 class IsInputHandler:
     def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
+        self,
+        info: OutputAliasInfo,
+        runtime_metadata: ViewAndMutationMeta,
+        trace_joint: bool,
     ) -> None:
+        if info.base_idx is None:
+            raise AssertionError("expected info.base_idx to be set")
         self.base_idx = info.base_idx
-        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
 
     def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = orig_inputs[self.base_idx]
         return aliased_base_tensor
@@ -263,8 +406,13 @@ class IsInputHandler:
 
 class AliasOfIntermediateHandler:
     def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
+        self,
+        info: OutputAliasInfo,
+        runtime_metadata: ViewAndMutationMeta,
+        trace_joint: bool,
     ) -> None:
+        if info.base_idx is None:
+            raise AssertionError("expected info.base_idx to be set")
         self._unwrap_aliased_base_tensor = _identity
         if info.output_type in (
             OutputType.alias_of_intermediate,
@@ -283,7 +431,7 @@ class AliasOfIntermediateHandler:
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
@@ -295,7 +443,15 @@ class AliasOfIntermediateHandler:
         )
 
 
-_HANDLER_MAP = {
+_HANDLER_MAP: dict[
+    OutputType,
+    type[
+        NoopAliasHandler
+        | AliasOfInputHandler
+        | IsInputHandler
+        | AliasOfIntermediateHandler
+    ],
+] = {
     OutputType.non_alias: NoopAliasHandler,
     OutputType.unsafe_view_alias: NoopAliasHandler,
     OutputType.custom_function_view: NoopAliasHandler,
@@ -308,8 +464,10 @@ _HANDLER_MAP = {
 
 
 def make_output_handler(
-    info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-) -> Any:
+    info: OutputAliasInfo, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
+) -> (
+    NoopAliasHandler | AliasOfInputHandler | IsInputHandler | AliasOfIntermediateHandler
+):
     handler_type = _HANDLER_MAP[info.output_type]
     return handler_type(info, runtime_metadata, trace_joint)
 
@@ -497,10 +655,11 @@ class _FirstInvocationContext:
 
 # Note [RuntimeWrapper codegen specification methods]
 # The run() method on _RuntimeCompiledFnInvoker and the capture_orig_inputs(),
-# increment_mutation_versions(), and finalize() methods on _RuntimeForwardEpilogue
-# are the readable reference implementations for the codegen'd _runtime_wrapper
-# generated in _create_runtime_wrapper(). They are not called on the hot path;
-# the codegen inlines their logic with all branches resolved at compile time.
+# graph_handled_input_mutation_versions() and finalize() methods on
+# _RuntimeForwardEpilogue are the readable reference
+# implementations for the codegen'd _runtime_wrapper generated in
+# _create_runtime_wrapper(). They are not called on the hot path; the codegen
+# inlines their logic with all branches resolved at compile time.
 #
 # WARNING: Any semantic change to the runtime wrapper must be reflected in both
 # the reference methods here and the codegen in _create_runtime_wrapper().
@@ -576,10 +735,26 @@ class _RuntimeForwardEpilogue:
     trace_joint: bool
     keep_input_mutations: bool
     epilogue_args_idx: tuple[int, ...] = field(init=False)
-    output_handlers: tuple[Any, ...] = field(init=False)
+    output_handlers: tuple[
+        NoopAliasHandler
+        | AliasOfInputHandler
+        | IsInputHandler
+        | AliasOfIntermediateHandler,
+        ...,
+    ] = field(init=False)
 
     def __post_init__(self) -> None:
         epilogue_args_idx = list(self.runtime_metadata.mutated_inp_runtime_indices)
+        for i, info in enumerate(self.runtime_metadata.input_info):
+            if (
+                info.mutation_replay_requires_full_storage
+                or info.mutation_replay_overwrites_storage
+                or info.mutation_replay_resizes_storage
+                or (info.mutates_data and info.mutates_metadata)
+            ) and i not in epilogue_args_idx:
+                # Runtime safety checks must also see graph-handled mutations;
+                # they run before the compiled graph can mutate an input.
+                epilogue_args_idx.append(i)
         for info in self.runtime_metadata.output_info:
             if (
                 info.output_type == OutputType.alias_of_input
@@ -589,7 +764,8 @@ class _RuntimeForwardEpilogue:
                     raise AssertionError(
                         f"expected info.base_idx to be int, got {type(info.base_idx)}"
                     )
-                epilogue_args_idx.append(info.base_idx)
+                if info.base_idx not in epilogue_args_idx:
+                    epilogue_args_idx.append(info.base_idx)
         self.epilogue_args_idx = tuple(epilogue_args_idx)
 
         if config.unlift_effect_tokens:
@@ -610,24 +786,38 @@ class _RuntimeForwardEpilogue:
     # WARNING: this is a reference implementation; the hot path uses codegen'd
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
-    def capture_orig_inputs(self, args: list[Any]) -> dict[int, Any]:
-        return {i: args[i] for i in self.epilogue_args_idx}
+    def capture_orig_inputs(self, args: list[Any]) -> dict[int, Tensor]:
+        return {i: typing.cast(Tensor, args[i]) for i in self.epilogue_args_idx}
 
-    # WARNING: this is a reference implementation; the hot path uses codegen'd
-    # code from _create_runtime_wrapper(). Keep both in sync.
-    # See Note [RuntimeWrapper codegen specification methods]
-    def increment_mutation_versions(self, args: list[Any]) -> None:
-        if self.keep_input_mutations:
-            mutated_args = (
-                args[i]
-                for i in self.runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
+    def validate_input_mutation_storage_capacity(
+        self, orig_inputs: dict[int, Tensor]
+    ) -> None:
+        for inpt_idx, meta in enumerate(self.runtime_metadata.input_info):
+            if meta.mutation_replay_requires_full_storage:
+                _validate_input_mutation_full_storage(orig_inputs[inpt_idx])
+            elif meta.mutation_replay_overwrites_storage:
+                _validate_input_mutation_density(orig_inputs[inpt_idx])
+            elif meta.mutation_replay_resizes_storage:
+                _validate_input_mutation_storage_capacity(orig_inputs[inpt_idx])
+            elif meta.mutates_data and meta.mutates_metadata:
+                _validate_input_mutation_density(orig_inputs[inpt_idx])
+
+    def graph_handled_input_mutation_versions(
+        self, args: list[Any]
+    ) -> AbstractContextManager[None]:
+        mutations = tuple(
+            (
+                typing.cast(Tensor, args[i]),
+                self.runtime_metadata.input_info[i].mutation_version_delta,
             )
-            torch.autograd.graph.increment_version(mutated_args)
+            for i in self.runtime_metadata.mutated_graph_handled_indices
+        )
+        return _replay_graph_handled_input_mutation_version_counters(mutations)
 
     # WARNING: this is a reference implementation; the hot path uses codegen'd
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
-    def finalize(self, orig_inputs: dict[int, Any], all_outs: list[Any]) -> Any:
+    def finalize(self, orig_inputs: dict[int, Tensor], all_outs: list[Any]) -> Any:
         self._validate_compiled_output_arity(all_outs)
         updated_inputs, fw_outs = self._split_mutated_inputs(all_outs)
         if updated_inputs is not None:
@@ -666,7 +856,7 @@ class _RuntimeForwardEpilogue:
         )
 
     def _apply_input_mutations(
-        self, orig_inputs: dict[int, Any], updated_inputs: list[Any]
+        self, orig_inputs: dict[int, Tensor], updated_inputs: list[Any]
     ) -> None:
         for i, inpt_idx in enumerate(self.runtime_metadata.mutated_inp_runtime_indices):
             meta = self.runtime_metadata.input_info[inpt_idx]
@@ -692,8 +882,16 @@ class _RuntimeForwardEpilogue:
                             f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
                         )
                     updated_inpt = updated_inpt.alias
-                with torch.no_grad():
-                    original_inpt.set_(updated_inpt)
+                with _replay_input_mutation_version_counter(
+                    original_inpt, meta.mutation_version_delta
+                ):
+                    with torch.no_grad():
+                        if meta.mutation_is_shallow_copy_data:
+                            torch.ops.aten.shallow_copy_data_(
+                                original_inpt, updated_inpt
+                            )
+                        else:
+                            original_inpt.set_(updated_inpt)
                 continue
             if meta.mutates_metadata and not meta.mutates_data:
                 if self.trace_joint:
@@ -702,38 +900,47 @@ class _RuntimeForwardEpilogue:
                             f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
                         )
                     updated_inpt = updated_inpt.alias
-                # We need to grab the size/stride/storage_offset from the compiled forward,
-                # and use that to mutate the metadata of the input
-                _resize_storage_if_needed(original_inpt, updated_inpt)
-                original_inpt.as_strided_(
-                    updated_inpt.size(),
-                    updated_inpt.stride(),
-                    updated_inpt.storage_offset(),
+                # We need to grab the size/stride/storage_offset from the compiled
+                # forward, and use that to mutate the metadata of the input.
+                target_storage_offset = (
+                    original_inpt.storage_offset()
+                    if meta.mutation_replay_preserves_storage_offset
+                    else updated_inpt.storage_offset()
                 )
-            else:
-                if meta.mutates_data and meta.mutates_metadata:
-                    _resize_storage_if_needed(original_inpt, updated_inpt)
-                    original_inpt.as_strided_(
-                        updated_inpt.size(),
-                        updated_inpt.stride(),
-                        updated_inpt.storage_offset(),
+                with _replay_input_mutation_version_counter(
+                    original_inpt, meta.mutation_version_delta
+                ):
+                    if meta.mutation_replay_resizes_storage:
+                        _resize_storage_if_needed(
+                            original_inpt,
+                            updated_inpt,
+                            target_storage_offset,
+                        )
+                    metadata_grad_ctx = (
+                        torch.no_grad()
+                        if meta.mutations_under_no_grad_or_inference_mode
+                        or (meta.is_leaf and original_inpt.requires_grad)
+                        else nullcontext()
                     )
-                else:
-                    if not meta.mutates_data:
-                        raise AssertionError("expected meta.mutates_data to be True")
+                    with metadata_grad_ctx:
+                        original_inpt.as_strided_(
+                            updated_inpt.size(),
+                            updated_inpt.stride(),
+                            target_storage_offset,
+                        )
+                continue
+
+            def copy_updated_input() -> None:
                 if meta.is_leaf and original_inpt.requires_grad:
                     # We can hit this situation in this case:
                     #   def f(x):
                     #       x.detach().mul_(2)
                     #       return x + 1
                     # AOTAutograd will see a mutation in the above case, and try to
-                    # apply a copy_() here, in the epilogue.
-                    # But if x required gradients, and is a leaf, then autograd
-                    # will yell at us for trying to mutate it.
-                    # However, it's only possible to end up in this scenario (like the above)
-                    # if all of the mutations to the leaf input were non-autograd-tracking mutations
-                    # (aka mutations under no_grad(), or on detached views).
-                    # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
+                    # apply a copy_() here, in the epilogue. But if x required
+                    # gradients and is a leaf, autograd will reject it. Reaching this
+                    # path means all mutations were non-autograd-tracking, so
+                    # detaching the replay is correct.
                     original_inpt.detach().copy_(updated_inpt)
                 else:
                     # Check if we have stream index information for this mutated input
@@ -749,8 +956,45 @@ class _RuntimeForwardEpilogue:
                         )
                     original_inpt.copy_(updated_inpt)
 
+            if meta.mutates_data and meta.mutates_metadata:
+                # Replaying one logical mixed mutation requires both as_strided_()
+                # and copy_(), and multiple logical mutations can be consolidated into
+                # the same pair. Hide those physical bumps, then apply the exact delta
+                # observed on the functional input wrapper.
+                with _replay_input_mutation_version_counter(
+                    original_inpt, meta.mutation_version_delta
+                ):
+                    target_storage_offset = (
+                        original_inpt.storage_offset()
+                        if meta.mutation_replay_preserves_storage_offset
+                        else updated_inpt.storage_offset()
+                    )
+                    if meta.mutation_replay_resizes_storage:
+                        _resize_storage_if_needed(
+                            original_inpt,
+                            updated_inpt,
+                            target_storage_offset,
+                        )
+                    mutation_grad_ctx = (
+                        torch.no_grad()
+                        if meta.mutations_hidden_from_autograd
+                        or meta.mutations_under_no_grad_or_inference_mode
+                        else nullcontext()
+                    )
+                    with mutation_grad_ctx:
+                        original_inpt.as_strided_(
+                            updated_inpt.size(),
+                            updated_inpt.stride(),
+                            target_storage_offset,
+                        )
+                        copy_updated_input()
+            else:
+                if not meta.mutates_data:
+                    raise AssertionError("expected meta.mutates_data to be True")
+                copy_updated_input()
+
     def _replay_output_aliases(
-        self, orig_inputs: dict[int, Any], fw_outs: list[Any]
+        self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
     ) -> Any:
         if self.runtime_metadata.num_outputs_aliased == 0:
             return fw_outs
@@ -770,144 +1014,168 @@ class _RuntimeForwardEpilogue:
 
 
 def _codegen_capture_orig_inputs(
-    rw_lines: list[str],
+    buf: "PySourceBuilder",
     epilogue_args_idx: tuple[int, ...],
 ) -> None:
     if epilogue_args_idx:
         idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
-        rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
+        buf.emit(f"orig_inputs = {{{idx_str}}}", indent=1)
     else:
-        rw_lines.append("    orig_inputs = {}")
+        buf.emit("orig_inputs = {}", indent=1)
 
 
-def _codegen_increment_mutation_versions(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
-    keep_input_mutations: bool,
-    runtime_metadata: ViewAndMutationMeta,
+def _codegen_validate_input_mutation_storage_capacity(
+    buf: "PySourceBuilder", runtime_metadata: ViewAndMutationMeta
 ) -> None:
-    if (
-        keep_input_mutations
-        and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
-    ):
-        rw_globals["_increment_version_"] = torch.autograd.graph.increment_version
-        mut_idx = tuple(runtime_metadata.mutated_graph_handled_indices_seen_by_autograd)
-        gen_expr = ", ".join(f"args[{i}]" for i in mut_idx)
-        rw_lines.append(f"    _increment_version_(({gen_expr},))")
+    for i, meta in enumerate(runtime_metadata.input_info):
+        if meta.mutation_replay_requires_full_storage:
+            helper_name = "_validate_input_mutation_full_storage_"
+            helper = _validate_input_mutation_full_storage
+        elif meta.mutation_replay_overwrites_storage:
+            helper_name = "_validate_input_mutation_density_"
+            helper = _validate_input_mutation_density
+        elif meta.mutation_replay_resizes_storage:
+            helper_name = "_validate_input_mutation_storage_capacity_"
+            helper = _validate_input_mutation_storage_capacity
+        elif meta.mutates_data and meta.mutates_metadata:
+            helper_name = "_validate_input_mutation_density_"
+            helper = _validate_input_mutation_density
+        else:
+            continue
+        buf.add_global(helper_name, helper)
+        buf.emit(f"{helper_name}(orig_inputs[{i}])", indent=1)
 
 
 def _codegen_normalize_as_list(
-    lines: list[str], var_name: str, *, indent_level: int
+    buf: "PySourceBuilder", var_name: str, *, indent_level: int
 ) -> None:
-    indent = "    " * indent_level
-    lines.append(f"{indent}if isinstance({var_name}, tuple):")
-    lines.append(f"{indent}    {var_name} = list({var_name})")
-    lines.append(f"{indent}elif not isinstance({var_name}, list):")
-    lines.append(f"{indent}    {var_name} = [{var_name}]")
+    buf.emit(f"if isinstance({var_name}, tuple):", indent=indent_level)
+    buf.emit(f"{var_name} = list({var_name})", indent=indent_level + 1)
+    buf.emit(f"elif not isinstance({var_name}, list):", indent=indent_level)
+    buf.emit(f"{var_name} = [{var_name}]", indent=indent_level + 1)
 
 
 def _codegen_compiled_fn_invocation(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
+    buf: "PySourceBuilder",
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
+    *,
+    indent_level: int = 1,
 ) -> None:
-    rw_lines.append("    with _first_ctx_():")
+    buf.emit("with _first_ctx_():", indent=indent_level)
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
     if trace_joint:
-        rw_lines.append("        args_ = list(args)")
+        buf.emit("args_ = list(args)", indent=indent_level + 1)
         for idx in indices_of_inps_to_detach:
-            rw_lines.append(
-                f"        if isinstance(args_[{idx}], torch.Tensor): "
-                f"args_[{idx}] = args_[{idx}].detach()"
+            buf.emit(
+                f"if isinstance(args_[{idx}], torch.Tensor): "
+                f"args_[{idx}] = args_[{idx}].detach()",
+                indent=indent_level + 1,
             )
-        rw_lines.append(
-            "        prev_view_replay_enabled = torch._C._is_view_replay_enabled()"
+        buf.emit(
+            "prev_view_replay_enabled = torch._C._is_view_replay_enabled()",
+            indent=indent_level + 1,
         )
-        rw_lines.append("        try:")
-        rw_lines.append("            if not prev_view_replay_enabled:")
-        rw_lines.append("                torch._C._set_view_replay_enabled(True)")
-        rw_lines.append("            with torch.enable_grad():")
-        rw_lines.append("                _on_before_call_()")
+        buf.emit("try:", indent=indent_level + 1)
+        buf.emit("if not prev_view_replay_enabled:", indent=indent_level + 2)
+        buf.emit("torch._C._set_view_replay_enabled(True)", indent=indent_level + 3)
+        buf.emit("with torch.enable_grad():", indent=indent_level + 2)
+        buf.emit("_on_before_call_()", indent=indent_level + 3)
         if disable_amp:
-            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("                with _DisableAutocast_():")
-            rw_lines.append("                    all_outs = _compiled_fn_(args_)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=5)
+            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
+            buf.emit("with _DisableAutocast_():", indent=indent_level + 3)
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=indent_level + 4)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 4)
         else:
-            rw_lines.append("                all_outs = _compiled_fn_(args_)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
-        rw_lines.append("        finally:")
-        rw_lines.append(
-            "            if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:"
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=indent_level + 3)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 3)
+        buf.emit("finally:", indent=indent_level + 1)
+        buf.emit(
+            "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
+            indent=indent_level + 2,
         )
-        rw_lines.append(
-            "                torch._C._set_view_replay_enabled(prev_view_replay_enabled)"
+        buf.emit(
+            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)",
+            indent=indent_level + 3,
         )
     else:
-        rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
-        rw_lines.append("        try:")
-        rw_lines.append(
-            "            if grad_enabled: torch._C._set_grad_enabled(False)"
+        buf.emit("grad_enabled = torch.is_grad_enabled()", indent=indent_level + 1)
+        buf.emit("try:", indent=indent_level + 1)
+        buf.emit(
+            "if grad_enabled: torch._C._set_grad_enabled(False)",
+            indent=indent_level + 2,
         )
-        rw_lines.append("            _on_before_call_()")
+        buf.emit("_on_before_call_()", indent=indent_level + 2)
         if disable_amp:
-            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append("                all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
+            buf.emit("with _DisableAutocast_():", indent=indent_level + 2)
+            buf.emit("all_outs = _compiled_fn_(args)", indent=indent_level + 3)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 3)
         else:
-            rw_lines.append("            all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
-        rw_lines.append("        finally:")
-        rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
-    rw_lines.append("    del args")
+            buf.emit("all_outs = _compiled_fn_(args)", indent=indent_level + 2)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=indent_level + 2)
+        buf.emit("finally:", indent=indent_level + 1)
+        buf.emit(
+            "if grad_enabled: torch._C._set_grad_enabled(True)",
+            indent=indent_level + 2,
+        )
+    buf.emit("del args", indent=indent_level)
+
+
+# signatures mirror the _RuntimeForwardEpilogue reference methods
+# (_apply_input_mutations / _replay_output_aliases). The codegen'd _alias_fn
+# always builds and returns a list, so list[Any] is tighter than the reference's
+# -> Any (the early `return fw_outs` path does not exist in the codegen'd fn).
+_EpilogueApplyMutationsFn = Callable[[dict[int, Tensor], list[Any]], None]
+_EpilogueReplayAliasesFn = Callable[[dict[int, Tensor], list[Any]], list[Any]]
 
 
 def _codegen_epilogue(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
+    buf: "PySourceBuilder",
     runtime_metadata: ViewAndMutationMeta,
-    runtime_epilogue: _RuntimeForwardEpilogue,
+    apply_mutations_fn: _EpilogueApplyMutationsFn | None,
+    replay_aliases_fn: _EpilogueReplayAliasesFn | None,
     num_mutated_runtime_inps: int,
     expected_outs: int,
 ) -> None:
-    rw_lines.append(f"    if len(all_outs) != {expected_outs}:")
-    rw_lines.append(
-        f'        raise AssertionError(f"expected {expected_outs} outputs, '
-        f'got {{len(all_outs)}}")'
+    buf.emit(f"if len(all_outs) != {expected_outs}:", indent=1)
+    buf.emit(
+        f'raise AssertionError(f"expected {expected_outs} outputs, '
+        f'got {{len(all_outs)}}")',
+        indent=2,
     )
 
     if num_mutated_runtime_inps > 0:
-        rw_lines.append(f"    updated_inputs = all_outs[:{num_mutated_runtime_inps}]")
-        rw_lines.append(f"    fw_outs = all_outs[{num_mutated_runtime_inps}:]")
-        rw_lines.append("    _apply_mutations_(orig_inputs, updated_inputs)")
-        rw_globals["_apply_mutations_"] = runtime_epilogue._apply_input_mutations
+        buf.emit(f"updated_inputs = all_outs[:{num_mutated_runtime_inps}]", indent=1)
+        buf.emit(f"fw_outs = all_outs[{num_mutated_runtime_inps}:]", indent=1)
+        buf.emit("_apply_mutations_(orig_inputs, updated_inputs)", indent=1)
+        buf.add_global("_apply_mutations_", apply_mutations_fn)
     else:
-        rw_lines.append("    fw_outs = all_outs")
+        buf.emit("fw_outs = all_outs", indent=1)
 
     if runtime_metadata.num_outputs_aliased > 0:
-        rw_globals["_replay_aliases_"] = runtime_epilogue._replay_output_aliases
-        rw_lines.append("    ret_outs = _replay_aliases_(orig_inputs, fw_outs)")
+        buf.add_global("_replay_aliases_", replay_aliases_fn)
+        buf.emit("ret_outs = _replay_aliases_(orig_inputs, fw_outs)", indent=1)
     else:
-        rw_lines.append("    ret_outs = fw_outs")
+        buf.emit("ret_outs = fw_outs", indent=1)
 
     if runtime_metadata.dynamic_outputs:
-        rw_globals["_mark_dynamic_"] = mark_dynamo_propagated_dynamic_indices
+        buf.add_global("_mark_dynamic_", mark_dynamo_propagated_dynamic_indices)
         for i, o in enumerate(runtime_metadata.output_info):
             if o.dynamic_dims is not None:
                 dims_name = f"_dyn_dims_{i}"
-                rw_globals[dims_name] = o.dynamic_dims
-                rw_lines.append(f"    _mark_dynamic_(ret_outs[{i}], {dims_name})")
+                buf.add_global(dims_name, o.dynamic_dims)
+                buf.emit(f"_mark_dynamic_(ret_outs[{i}], {dims_name})", indent=1)
 
     if runtime_metadata.grad_enabled_mutation is not None:
-        rw_lines.append(
-            f"    torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})"
+        buf.emit(
+            f"torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})",
+            indent=1,
         )
 
-    rw_lines.append("    return ret_outs")
+    buf.emit("return ret_outs", indent=1)
 
 
 def _create_runtime_wrapper(
@@ -931,78 +1199,75 @@ def _create_runtime_wrapper(
         keep_input_mutations=keep_input_mutations,
     )
 
+    # The orchestration closes over these two codegen'd epilogue functions directly
+    # (bound into rw_globals as _apply_mutations_ / _replay_aliases_ in _codegen_epilogue).
+    # Each stays None when its epilogue step is absent for this graph.
+    codegen_apply_mutations: _EpilogueApplyMutationsFn | None = None
+    codegen_alias_fn: _EpilogueReplayAliasesFn | None = None
+
     # Codegen output alias regeneration: emit straight-line code per output
     # with all handler branches resolved at compile time.
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = runtime_epilogue.output_handlers
-        alias_lines = ["def _alias_fn(orig_inputs, fw_outs):"]
-        alias_lines.append("    ret_outs = []")
-        alias_globals: dict[str, object] = {
-            "gen_alias_from_base": gen_alias_from_base,
-            "_unwrap_tensoralias": _unwrap_tensoralias,
-        }
-        for i, handler in enumerate(output_handlers):
-            if isinstance(handler, NoopAliasHandler):
-                alias_lines.append(f"    ret_outs.append(fw_outs[{i}])")
-            elif isinstance(handler, IsInputHandler):
-                alias_lines.append(
-                    f"    ret_outs.append(orig_inputs[{handler.base_idx}])"
-                )
-            elif isinstance(handler, AliasOfInputHandler):
-                vms_name = f"_vms_{i}"
-                alias_globals[vms_name] = handler.view_meta_sequence
-                out_expr = (
-                    f"_unwrap_tensoralias(fw_outs[{i}])"
-                    if trace_joint
-                    else f"fw_outs[{i}]"
-                )
-                alias_lines.append(
-                    f"    ret_outs.append(gen_alias_from_base("
-                    f"orig_inputs[{handler.base_idx}], {out_expr}, "
-                    f"{handler.requires_grad!r}, {vms_name}, "
-                    f"replay_views={handler.replay_views!r}))"
-                )
-            elif isinstance(handler, AliasOfIntermediateHandler):
-                vms_name = f"_vms_{i}"
-                alias_globals[vms_name] = handler.view_meta_sequence
-                out_expr = (
-                    f"_unwrap_tensoralias(fw_outs[{i}])"
-                    if trace_joint
-                    else f"fw_outs[{i}]"
-                )
-                base_unwrap = handler._unwrap_aliased_base_tensor is _unwrap_tensoralias
-                base_expr = (
-                    f"_unwrap_tensoralias(fw_outs[{handler.base_idx}])"
-                    if base_unwrap
-                    else f"fw_outs[{handler.base_idx}]"
-                )
-                alias_lines.append(
-                    f"    ret_outs.append(gen_alias_from_base("
-                    f"{base_expr}, {out_expr}, "
-                    f"{handler.requires_grad!r}, {vms_name}, "
-                    f"replay_views={handler.replay_views!r}))"
-                )
-            else:
-                raise AssertionError(
-                    f"unhandled output handler type: {type(handler).__name__}"
-                )
-        alias_lines.append("    return ret_outs")
-        alias_source = "\n".join(alias_lines)
+        from .codegen import PySourceBuilder
 
-        from .subclass_codegen import _compile_and_exec_source
-
-        _codegen_alias_fn = _compile_and_exec_source(
-            alias_source, alias_globals, "_alias_fn", "output_alias_wrapper"
+        buf = PySourceBuilder(
+            "_alias_fn",
+            args="orig_inputs, fw_outs",
+            artifact_name="output_alias_wrapper",
         )
-        import types
-
-        def _replay_alias(self, orig_inputs, fw_outs):
-            return _codegen_alias_fn(orig_inputs, fw_outs)
-
-        runtime_epilogue._replay_output_aliases = types.MethodType(  # type: ignore[attr-defined]
-            _replay_alias,
-            runtime_epilogue,
+        buf.bind(
+            gen_alias_from_base=gen_alias_from_base,
+            _unwrap_tensoralias=_unwrap_tensoralias,
         )
+        with buf.indent():
+            buf.writeline("ret_outs = []")
+            for i, handler in enumerate(output_handlers):
+                if isinstance(handler, NoopAliasHandler):
+                    buf.writeline(f"ret_outs.append(fw_outs[{i}])")
+                elif isinstance(handler, IsInputHandler):
+                    buf.writeline(f"ret_outs.append(orig_inputs[{handler.base_idx}])")
+                elif isinstance(handler, AliasOfInputHandler):
+                    vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
+                    out_expr = (
+                        f"_unwrap_tensoralias(fw_outs[{i}])"
+                        if trace_joint
+                        else f"fw_outs[{i}]"
+                    )
+                    buf.writeline(
+                        f"ret_outs.append(gen_alias_from_base("
+                        f"orig_inputs[{handler.base_idx}], {out_expr}, "
+                        f"{handler.requires_grad!r}, {vms_name}, "
+                        f"replay_views={handler.replay_views!r}))"
+                    )
+                elif isinstance(handler, AliasOfIntermediateHandler):
+                    vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
+                    out_expr = (
+                        f"_unwrap_tensoralias(fw_outs[{i}])"
+                        if trace_joint
+                        else f"fw_outs[{i}]"
+                    )
+                    base_unwrap = (
+                        handler._unwrap_aliased_base_tensor is _unwrap_tensoralias
+                    )
+                    base_expr = (
+                        f"_unwrap_tensoralias(fw_outs[{handler.base_idx}])"
+                        if base_unwrap
+                        else f"fw_outs[{handler.base_idx}]"
+                    )
+                    buf.writeline(
+                        f"ret_outs.append(gen_alias_from_base("
+                        f"{base_expr}, {out_expr}, "
+                        f"{handler.requires_grad!r}, {vms_name}, "
+                        f"replay_views={handler.replay_views!r}))"
+                    )
+                else:
+                    raise AssertionError(
+                        f"unhandled output handler type: {type(handler).__name__}"
+                    )
+            buf.writeline("return ret_outs")
+
+        codegen_alias_fn = typing.cast(_EpilogueReplayAliasesFn, buf.build())
 
     def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
         if (
@@ -1025,82 +1290,162 @@ def _create_runtime_wrapper(
     # Codegen mutation epilogue: emit straight-line code per mutated input
     # with all branches resolved at compile time.
     if runtime_metadata.num_mutated_inp_runtime_indices > 0:
-        mut_lines = ["def _apply_mutations(orig_inputs, updated_inputs):"]
-        mut_globals: dict[str, object] = {
-            "torch": torch,
-            "_unwrap_tensoralias": _unwrap_tensoralias,
-            "_resize_storage_if_needed": _resize_storage_if_needed,
-        }
-        for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
-            meta = runtime_metadata.input_info[inpt_idx]
-            if not meta.mutates_data and not meta.mutates_metadata:
-                continue
-            oi = f"orig_inputs[{inpt_idx}]"
-            ui = f"updated_inputs[{i}]"
-            if meta.mutates_storage_metadata:
-                if trace_joint:
-                    mut_lines.append(f"    _u{i} = _unwrap_tensoralias({ui})")
-                else:
-                    mut_lines.append(f"    _u{i} = {ui}")
-                mut_lines.append(f"    with torch.no_grad(): {oi}.set_(_u{i})")
-            elif meta.mutates_metadata and not meta.mutates_data:
-                if trace_joint:
-                    mut_lines.append(f"    _u{i} = _unwrap_tensoralias({ui})")
-                else:
-                    mut_lines.append(f"    _u{i} = {ui}")
-                mut_lines.append(f"    _resize_storage_if_needed({oi}, _u{i})")
-                mut_lines.append(
-                    f"    {oi}.as_strided_(_u{i}.size(), _u{i}.stride(), _u{i}.storage_offset())"
-                )
-            else:
-                if meta.mutates_data and meta.mutates_metadata:
-                    mut_lines.append(f"    _resize_storage_if_needed({oi}, {ui})")
-                    mut_lines.append(
-                        f"    {oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
-                    )
-                else:
-                    assert meta.mutates_data, (  # noqa: S101
-                        f"expected mutates_data for input {inpt_idx}"
-                    )
-                if meta.is_leaf:
-                    mut_lines.append(
-                        f"    if {oi}.requires_grad: {oi}.detach().copy_({ui})"
-                    )
-                    mut_lines.append(f"    else: {oi}.copy_({ui})")
-                else:
-                    has_stream = (
-                        runtime_metadata.mutated_inp_stream_indices is not None
-                        and i < len(runtime_metadata.mutated_inp_stream_indices)
-                        and runtime_metadata.mutated_inp_stream_indices[i] is not None
-                    )
-                    if has_stream:
-                        msg_name = f"_stream_err_{i}"
-                        mut_globals[msg_name] = (
-                            "Mutations on inputs with user-specified streams are not yet supported. "
-                            "See: https://github.com/pytorch/pytorch/issues/172522"
-                        )
-                        mut_lines.append(f"    raise RuntimeError({msg_name})")
+        from .codegen import PySourceBuilder
+
+        buf = PySourceBuilder(
+            "_apply_mutations",
+            args="orig_inputs, updated_inputs",
+            artifact_name="mutation_epilogue",
+        )
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _resize_storage_if_needed=_resize_storage_if_needed,
+        )
+        if any(
+            runtime_metadata.input_info[i].mutates_metadata
+            for i in runtime_metadata.mutated_inp_runtime_indices
+        ):
+            buf.bind(
+                _replay_input_mutation_version_counter=_replay_input_mutation_version_counter
+            )
+        wrote_body = False
+        with buf.indent():
+            for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
+                meta = runtime_metadata.input_info[inpt_idx]
+                if not meta.mutates_data and not meta.mutates_metadata:
+                    continue
+                wrote_body = True
+                oi = f"orig_inputs[{inpt_idx}]"
+                ui = f"updated_inputs[{i}]"
+                if meta.mutates_storage_metadata:
+                    u = buf.fresh_name("_u")
+                    if trace_joint:
+                        buf.writeline(f"{u} = _unwrap_tensoralias({ui})")
                     else:
-                        mut_lines.append(f"    {oi}.copy_({ui})")
-        if len(mut_lines) == 1:
-            mut_lines.append("    pass")
-        mut_source = "\n".join(mut_lines)
+                        buf.writeline(f"{u} = {ui}")
+                    buf.writeline(
+                        "with _replay_input_mutation_version_counter("
+                        f"{oi}, {meta.mutation_version_delta}):"
+                    )
+                    with buf.indent():
+                        if meta.mutation_is_shallow_copy_data:
+                            buf.writeline(
+                                f"with torch.no_grad(): "
+                                f"torch.ops.aten.shallow_copy_data_({oi}, {u})"
+                            )
+                        else:
+                            buf.writeline(f"with torch.no_grad(): {oi}.set_({u})")
+                elif meta.mutates_metadata and not meta.mutates_data:
+                    u = buf.fresh_name("_u")
+                    if trace_joint:
+                        buf.writeline(f"{u} = _unwrap_tensoralias({ui})")
+                    else:
+                        buf.writeline(f"{u} = {ui}")
+                    target_offset = (
+                        f"{oi}.storage_offset()"
+                        if meta.mutation_replay_preserves_storage_offset
+                        else f"{u}.storage_offset()"
+                    )
+                    buf.writeline(
+                        "with _replay_input_mutation_version_counter("
+                        f"{oi}, {meta.mutation_version_delta}):"
+                    )
+                    with buf.indent():
+                        if meta.mutation_replay_resizes_storage:
+                            buf.writeline(
+                                f"_resize_storage_if_needed({oi}, {u}, {target_offset})"
+                            )
+                        if meta.mutations_under_no_grad_or_inference_mode:
+                            buf.writeline("with torch.no_grad():")
+                            with buf.indent():
+                                buf.writeline(
+                                    f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                                )
+                        elif meta.is_leaf:
+                            buf.writeline(f"if {oi}.requires_grad:")
+                            with buf.indent():
+                                buf.writeline("with torch.no_grad():")
+                                with buf.indent():
+                                    buf.writeline(
+                                        f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                                    )
+                            buf.writeline("else:")
+                            with buf.indent():
+                                buf.writeline(
+                                    f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                                )
+                        else:
+                            buf.writeline(
+                                f"{oi}.as_strided_({u}.size(), {u}.stride(), {target_offset})"
+                            )
+                else:
 
-        from .subclass_codegen import _compile_and_exec_source
+                    def emit_copy() -> None:
+                        if meta.is_leaf:
+                            buf.writeline(
+                                f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
+                            )
+                            buf.writeline(f"else: {oi}.copy_({ui})")
+                        else:
+                            has_stream = (
+                                runtime_metadata.mutated_inp_stream_indices is not None
+                                and i < len(runtime_metadata.mutated_inp_stream_indices)
+                                and runtime_metadata.mutated_inp_stream_indices[i]
+                                is not None
+                            )
+                            if has_stream:
+                                msg_name = buf.bind_value(
+                                    "_stream_err",
+                                    "Mutations on inputs with user-specified streams are not yet supported. "
+                                    "See: https://github.com/pytorch/pytorch/issues/172522",
+                                )
+                                buf.writeline(f"raise RuntimeError({msg_name})")
+                            else:
+                                buf.writeline(f"{oi}.copy_({ui})")
 
-        codegen_apply_mutations = _compile_and_exec_source(
-            mut_source, mut_globals, "_apply_mutations", "mutation_epilogue"
-        )
-        import types
+                    if meta.mutates_data and meta.mutates_metadata:
+                        target_offset = (
+                            f"{oi}.storage_offset()"
+                            if meta.mutation_replay_preserves_storage_offset
+                            else f"{ui}.storage_offset()"
+                        )
+                        buf.writeline(
+                            "with _replay_input_mutation_version_counter("
+                            f"{oi}, {meta.mutation_version_delta}):"
+                        )
+                        with buf.indent():
+                            if meta.mutation_replay_resizes_storage:
+                                buf.writeline(
+                                    f"_resize_storage_if_needed({oi}, {ui}, {target_offset})"
+                                )
+                            if (
+                                meta.mutations_hidden_from_autograd
+                                or meta.mutations_under_no_grad_or_inference_mode
+                            ):
+                                buf.writeline("with torch.no_grad():")
+                                with buf.indent():
+                                    buf.writeline(
+                                        f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {target_offset})"
+                                    )
+                                    emit_copy()
+                            else:
+                                buf.writeline(
+                                    f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {target_offset})"
+                                )
+                                emit_copy()
+                    else:
+                        if not meta.mutates_data:
+                            raise AssertionError(
+                                f"expected mutates_data for input {inpt_idx}"
+                            )
+                        emit_copy()
+            if not wrote_body:
+                buf.writeline("pass")
 
-        runtime_epilogue._apply_input_mutations = types.MethodType(  # type: ignore[attr-defined]
-            lambda self, orig_inputs, updated_inputs: codegen_apply_mutations(
-                orig_inputs, updated_inputs
-            ),
-            runtime_epilogue,
-        )
+        codegen_apply_mutations = typing.cast(_EpilogueApplyMutationsFn, buf.build())
 
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import PySourceBuilder
 
     epilogue_args_idx = runtime_epilogue.epilogue_args_idx
     num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -1110,35 +1455,51 @@ def _create_runtime_wrapper(
         + runtime_metadata.num_intermediate_bases
     )
 
-    rw_lines: list[str] = []
-    rw_globals: dict[str, object] = {"torch": torch}
+    buf = PySourceBuilder(
+        "_runtime_wrapper",
+        args="_compiled_fn_, _first_ctx_, _on_before_call_, args",
+        artifact_name="runtime_wrapper_orchestration",
+    )
+    buf.bind(torch=torch)
 
-    rw_lines.append(
-        "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):"
+    _codegen_capture_orig_inputs(buf, epilogue_args_idx)
+    _codegen_validate_input_mutation_storage_capacity(buf, runtime_metadata)
+    graph_handled_input_mutations = tuple(
+        (i, runtime_metadata.input_info[i].mutation_version_delta)
+        for i in runtime_metadata.mutated_graph_handled_indices
     )
-    _codegen_capture_orig_inputs(rw_lines, epilogue_args_idx)
-    _codegen_increment_mutation_versions(
-        rw_lines, rw_globals, keep_input_mutations, runtime_metadata
-    )
+    invocation_indent = 1
+    if graph_handled_input_mutations:
+        buf.add_global(
+            "_replay_graph_input_mutation_versions_",
+            _replay_graph_handled_input_mutation_version_counters,
+        )
+        mutation_args = ", ".join(
+            f"(args[{i}], {mutation_version_delta})"
+            for i, mutation_version_delta in graph_handled_input_mutations
+        )
+        buf.emit(
+            f"with _replay_graph_input_mutation_versions_(({mutation_args},)):",
+            indent=1,
+        )
+        invocation_indent = 2
     _codegen_compiled_fn_invocation(
-        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf,
+        trace_joint,
+        indices_of_inps_to_detach,
+        disable_amp,
+        indent_level=invocation_indent,
     )
     _codegen_epilogue(
-        rw_lines,
-        rw_globals,
+        buf,
         runtime_metadata,
-        runtime_epilogue,
+        codegen_apply_mutations,
+        codegen_alias_fn,
         num_mutated_runtime_inps,
         expected_outs,
     )
-    rw_source = "\n".join(rw_lines)
 
-    _codegen_runtime_wrapper = _compile_and_exec_source(
-        rw_source,
-        rw_globals,
-        "_runtime_wrapper",
-        "runtime_wrapper_orchestration",
-    )
+    _codegen_runtime_wrapper = buf.build()
 
     _inner_compiled_fn = compiled_invoker.compiled_fn
     _first_invocation_ctx = compiled_invoker.first_invocation_ctx
@@ -1225,33 +1586,32 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 f"expected num_outputs_rng_offset == 1, got {runtime_metadata.num_outputs_rng_offset}"
             )
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import PySourceBuilder
 
         offset_index = runtime_metadata.num_forward_returns
-        lines = ["def _functionalized_rng_wrapper(runtime_args):"]
-        lines.append("    seed, offset = _get_rng_state_()")
-        lines.append("    runtime_args.extend([seed, offset])")
-        lines.append("    outs = _compiled_fn_(runtime_args)")
-        lines.append(f"    _set_offset_(outs[{offset_index}])")
-        if self.return_new_outs:
-            lines.append(
-                f"    return outs[:{offset_index}] + outs[{offset_index + 1}:]"
-            )
-        else:
-            lines.append("    return outs")
-        source = "\n".join(lines)
-
-        inner_fn = _compile_and_exec_source(
-            source,
-            {
-                "_compiled_fn_": compiled_fn,
-                "_get_rng_state_": CUDARngStateHelper.get_torch_state_as_tuple,
-                "_set_offset_": CUDARngStateHelper.set_new_offset,
-            },
+        buf = PySourceBuilder(
             "_functionalized_rng_wrapper",
-            "functionalized_rng_wrapper",
-            wrapped_fn=compiled_fn,
+            args="runtime_args",
+            artifact_name="functionalized_rng_wrapper",
         )
+        buf.bind(
+            _compiled_fn_=compiled_fn,
+            _get_rng_state_=CUDARngStateHelper.get_torch_state_as_tuple,
+            _set_offset_=CUDARngStateHelper.set_new_offset,
+        )
+        with buf.indent():
+            buf.writeline("seed, offset = _get_rng_state_()")
+            buf.writeline("runtime_args.extend([seed, offset])")
+            buf.writeline("outs = _compiled_fn_(runtime_args)")
+            buf.writeline(f"_set_offset_(outs[{offset_index}])")
+            if self.return_new_outs:
+                buf.writeline(
+                    f"return outs[:{offset_index}] + outs[{offset_index + 1}:]"
+                )
+            else:
+                buf.writeline("return outs")
+
+        inner_fn = buf.build(wrapped_fn=compiled_fn)
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
 
@@ -1420,7 +1780,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        if self.maybe_subclass_meta is None and not runtime_metadata.act_input_indices:
+        if self.maybe_subclass_meta is None and not runtime_metadata.act_input_paths:
             return compiled_fn
 
         from .subclass_codegen import codegen_subclass_wrapper
@@ -1431,7 +1791,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             out_metas=runtime_metadata.subclass_fw_graph_out_meta,
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
             frozen_inp_indices=self._get_frozen_inp_indices(),
-            act_input_indices=runtime_metadata.act_input_indices,
+            act_input_paths=runtime_metadata.act_input_paths,
         )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
@@ -1450,24 +1810,24 @@ class EffectTokensWrapper(CompilerWrapper):
         if num_tokens == 0:
             return compiled_fn
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import PySourceBuilder
 
-        lines = ["def _effect_tokens_wrapper(args):"]
-        lines.append(f"    new_args = [{', '.join(['None'] * num_tokens)}, *args]")
-        lines.append("    args.clear()")
-        lines.append("    outs = _compiled_fn_(new_args)")
-        lines.append("    if outs is None:")
-        lines.append("        return None")
-        lines.append(f"    return outs[{num_tokens}:]")
-        source = "\n".join(lines)
-
-        inner_fn = _compile_and_exec_source(
-            source,
-            {"_compiled_fn_": compiled_fn},
+        buf = PySourceBuilder(
             "_effect_tokens_wrapper",
-            "effect_tokens_wrapper",
-            wrapped_fn=compiled_fn,
+            args="args",
+            artifact_name="effect_tokens_wrapper",
         )
+        buf.bind(_compiled_fn_=compiled_fn)
+        with buf.indent():
+            buf.writeline(f"new_args = [{', '.join(['None'] * num_tokens)}, *args]")
+            buf.writeline("args.clear()")
+            buf.writeline("outs = _compiled_fn_(new_args)")
+            buf.writeline("if outs is None:")
+            with buf.indent():
+                buf.writeline("return None")
+            buf.writeline(f"return outs[{num_tokens}:]")
+
+        inner_fn = buf.build(wrapped_fn=compiled_fn)
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
 
@@ -1748,20 +2108,17 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         keep_indices = [i for i, keep in enumerate(self.keep_arg_mask) if keep]
         idx_list = ", ".join(f"args[{i}]" for i in keep_indices)
-        source = (
-            f"def inner_fn(args):\n"
-            f"    deduped_args = [{idx_list}]\n"
-            f"    args.clear()\n"
-            f"    return compiled_fn(deduped_args)\n"
-        )
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import PySourceBuilder
 
-        wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(  # type: ignore[assignment]
-            source,
-            {"compiled_fn": compiled_fn},
-            "inner_fn",
-            "dedup_wrapper",
-            wrapped_fn=compiled_fn,
+        buf = PySourceBuilder("inner_fn", args="args", artifact_name="dedup_wrapper")
+        buf.bind(compiled_fn=compiled_fn)
+        with buf.indent():
+            buf.writeline(f"deduped_args = [{idx_list}]")
+            buf.writeline("args.clear()")
+            buf.writeline("return compiled_fn(deduped_args)")
+
+        wrapped_compiled_fn: Callable[..., Any] = buf.build(  # type: ignore[assignment]
+            wrapped_fn=compiled_fn
         )
 
         wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
@@ -1821,6 +2178,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
+    aliased_arg_idx_with_mutations: list[int] = field(default_factory=list)
+    aliased_arg_mutation_version_deltas: list[int] = field(default_factory=list)
     base_groups: dict[int, list[int]] = field(
         default_factory=lambda: collections.defaultdict(list)
     )
@@ -1914,6 +2273,19 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
+        self.aliased_arg_idx_with_mutations = [
+            outer_idx
+            for outer_idx, entry in enumerate(synthetic_base_info)
+            if isinstance(entry, tuple)
+            and (
+                fw_metadata.input_info[outer_idx].mutates_data
+                or fw_metadata.input_info[outer_idx].mutates_metadata
+            )
+        ]
+        self.aliased_arg_mutation_version_deltas = [
+            fw_metadata.input_info[i].mutation_version_delta
+            for i in self.aliased_arg_idx_with_mutations
+        ]
         replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
@@ -1978,7 +2350,20 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 flat_args_descs=flat_args_descs_with_synthetic_bases,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
+                allow_aliased_metadata_mutations=True,
             )(*flat_args_with_synthetic_bases)
+            # The recomputation sees every regenerated alias mutation on the
+            # synthetic base. At runtime those exact logical version deltas are
+            # instead replayed on the original user inputs by this outer
+            # wrapper, so normalize the deliberately hidden inner-base delta
+            # before comparing the rest of the metadata.
+            for base_idx in self.base_groups:
+                ref_fw_metadata.input_info[base_idx] = replace(
+                    ref_fw_metadata.input_info[base_idx],
+                    mutation_version_delta=(
+                        fw_metadata_updated.input_info[base_idx].mutation_version_delta
+                    ),
+                )
             if ref_fw_metadata != fw_metadata_updated:
                 raise AssertionError(
                     f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
@@ -2001,74 +2386,108 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import PySourceBuilder
 
         base_groups = self.base_groups
         other_indices = self.other_arg_indices
 
         num_bases = len(base_groups)
         aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
+        aliased_mut_indices = self.aliased_arg_idx_with_mutations
+        aliased_mut_version_deltas = self.aliased_arg_mutation_version_deltas
         num_meta_mut = len(aliased_meta_mut_indices)
+        num_mut = len(aliased_mut_indices)
 
-        lines: list[str] = ["def _synthetic_base_wrapper(args):"]
-        code_globals: dict[str, object] = {"torch": torch, "_compiled_fn_": compiled_fn}
-
-        lines.append(f"    _bases = [None] * {num_bases}")
-        for base_idx in sorted(base_groups):
-            group = base_groups[base_idx]
-            first_orig = group[0]
-            if len(group) == 1:
-                indices_check = f"args[{first_orig}]._base is not None"
-                base_expr = f"args[{first_orig}]._base"
-            else:
-                indices_str = ", ".join(str(i) for i in group)
-                indices_check = (
-                    f"any(args[_i]._base is not None for _i in [{indices_str}])"
-                )
-                base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
-            lines.append(f"""\
-    if {indices_check}:
-        _bases[{base_idx}] = {base_expr}
-    else:
-        _b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)
-        _b.set_(args[{first_orig}].untyped_storage())
-        _bases[{base_idx}] = _b""")
-
-        other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
-        lines.append(f"    _new_args = _bases + [{other_items}]")
-
-        if num_meta_mut > 0:
-            meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
-            lines.append(f"    _meta_mut = [{meta_items}]")
-
-        lines.append("""\
-    args.clear()
-    _outs = _compiled_fn_(_new_args)""")
-
-        if num_meta_mut > 0:
-            # Handles metadata mutations on inputs that were merged into
-            # synthetic bases (create_synthetic_base_metadata hides these
-            # from the normal tracking by forcing mutates_metadata=False
-            # on the base).  Metadata mutations on non-aliased inputs are
-            # handled separately by _apply_input_mutations in the runtime
-            # epilogue.
-            lines.append(f"""\
-    _mut_inps = _outs[-{num_meta_mut}:]
-    _user_outs = _outs[:-{num_meta_mut}]
-    for _inp, _mi in zip(_meta_mut, _mut_inps):
-        _inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())
-    return _user_outs""")
-        else:
-            lines.append("    return _outs")
-
-        source = "\n".join(lines)
-        inner_fn = _compile_and_exec_source(
-            source,
-            code_globals,
+        buf = PySourceBuilder(
             "_synthetic_base_wrapper",
-            "synthetic_base_wrapper",
-            wrapped_fn=compiled_fn,
+            args="args",
+            artifact_name="synthetic_base_wrapper",
         )
+        buf.bind(torch=torch, _compiled_fn_=compiled_fn)
+        if num_mut > 0:
+            buf.bind(
+                _replay_synthetic_input_mutation_versions_=(
+                    _replay_graph_handled_input_mutation_version_counters
+                )
+            )
+
+        with buf.indent():
+            buf.writeline(f"_bases = [None] * {num_bases}")
+            for base_idx in sorted(base_groups):
+                group = base_groups[base_idx]
+                first_orig = group[0]
+                if len(group) == 1:
+                    indices_check = f"args[{first_orig}]._base is not None"
+                    base_expr = f"args[{first_orig}]._base"
+                else:
+                    indices_str = ", ".join(str(i) for i in group)
+                    indices_check = (
+                        f"any(args[_i]._base is not None for _i in [{indices_str}])"
+                    )
+                    base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
+                buf.writeline(f"if {indices_check}:")
+                with buf.indent():
+                    buf.writeline(f"_bases[{base_idx}] = {base_expr}")
+                buf.writeline("else:")
+                with buf.indent():
+                    buf.writeline(
+                        f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
+                    )
+                    buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
+                    buf.writeline(f"_bases[{base_idx}] = _b")
+
+            other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
+            buf.writeline(f"_new_args = _bases + [{other_items}]")
+
+            if num_meta_mut > 0:
+                meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
+                buf.writeline(f"_meta_mut = [{meta_items}]")
+
+            if num_mut > 0:
+                mutation_items = ", ".join(
+                    f"(args[{i}], {delta})"
+                    for i, delta in zip(
+                        aliased_mut_indices,
+                        aliased_mut_version_deltas,
+                    )
+                )
+                buf.writeline(f"_version_mutations = ({mutation_items},)")
+
+            buf.writeline("args.clear()")
+
+            def emit_call_and_metadata_replay() -> None:
+                buf.writeline("_outs = _compiled_fn_(_new_args)")
+
+                if num_meta_mut > 0:
+                    # Handles metadata mutations on inputs that were merged into
+                    # synthetic bases (create_synthetic_base_metadata hides these
+                    # from the normal tracking by forcing mutates_metadata=False
+                    # on the base). Metadata mutations on non-aliased inputs are
+                    # handled separately by _apply_input_mutations in the runtime
+                    # epilogue.
+                    buf.writeline(f"_mut_inps = _outs[-{num_meta_mut}:]")
+                    buf.writeline(f"_user_outs = _outs[:-{num_meta_mut}]")
+                    buf.writeline("for _inp, _mi in zip(_meta_mut, _mut_inps):")
+                    with buf.indent():
+                        buf.writeline(
+                            "_inp.as_strided_("
+                            "_mi.size(), _mi.stride(), _mi.storage_offset())"
+                        )
+                    buf.writeline("return _user_outs")
+                else:
+                    buf.writeline("return _outs")
+
+            if num_mut > 0:
+                buf.writeline(
+                    "with _replay_synthetic_input_mutation_versions_("
+                    "_version_mutations):"
+                )
+                with buf.indent():
+                    emit_call_and_metadata_replay()
+            else:
+                emit_call_and_metadata_replay()
+
+        inner_fn = buf.build(wrapped_fn=compiled_fn)
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
 
@@ -2188,8 +2607,12 @@ def merge_view_inputs(
             f"expected len(fwd_inputs) == len(mutated_input_info), "
             f"got {len(fwd_inputs)} != {len(mutated_input_info)}"
         )
-    if not [info for info in mutated_input_info if info.mutates_data]:
-        # Return early when there are no mutations.
+
+    if not any(
+        info.mutates_data or info.mutates_metadata for info in mutated_input_info
+    ):
+        # Avoid querying storage for mutation-free inputs. Some tensor layouts,
+        # including sparse tensors, intentionally do not expose one.
         return fwd_inputs, fwd_inputs_descs, None
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
@@ -2200,12 +2623,51 @@ def merge_view_inputs(
     base_args_descs = []
     other_args_descs = []
     for i, (inpt, source) in enumerate(zip(fwd_inputs, fwd_inputs_descs)):
-        if isinstance(inpt, Tensor):
+        if (
+            isinstance(inpt, Tensor)
+            and inpt.layout is torch.strided
+            and not inpt.is_nested
+        ):
             storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
             other_args_descs.append(source)
+    # A combined data-and-metadata mutation changes how that same input
+    # addresses its storage, but synthetic-base view inversion is built from
+    # the input's original metadata. It would scatter the update into the wrong
+    # locations. A metadata-only mutation on a different alias remains
+    # supported by the synthetic-base metadata-mutation epilogue.
+    for aliased_input_indices in storage_ref_to_idx.values():
+        metadata_mutated_indices = [
+            idx
+            for idx in aliased_input_indices
+            if mutated_input_info[idx].mutates_metadata
+        ]
+        size_and_data_mutated_indices = [
+            idx
+            for idx in metadata_mutated_indices
+            if mutated_input_info[idx].mutates_size
+            and mutated_input_info[idx].mutates_data
+        ]
+        if len(aliased_input_indices) > 1 and size_and_data_mutated_indices:
+            raise RuntimeError(
+                "AOTAutograd does not support input size mutations on aliased "
+                f"inputs. Mutated input indices: {size_and_data_mutated_indices}"
+            )
+        combined_mutated_indices = [
+            idx
+            for idx in metadata_mutated_indices
+            if mutated_input_info[idx].mutates_data
+        ]
+        if len(aliased_input_indices) > 1 and combined_mutated_indices:
+            raise RuntimeError(
+                "AOTAutograd does not support input metadata mutations on "
+                f"aliased inputs. Mutated input indices: {combined_mutated_indices}"
+            )
+    if not [info for info in mutated_input_info if info.mutates_data]:
+        # Return early when there are no data mutations.
+        return fwd_inputs, fwd_inputs_descs, None
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
@@ -2607,11 +3069,14 @@ class _AutogradSavedState:
 
         # See Note [Detaching saved tensors in AOTAutograd]
         num_vc_check = len(tensors_saved_with_vc_check)
+        is_graph_input = self.metadata.saved_tensor_is_graph_input
         tensors_to_save = [
-            x.detach() if x._is_view() else x for x in tensors_saved_with_vc_check
+            x if is_graph_input[i] or not x._is_view() else x.detach()
+            for i, x in enumerate(tensors_saved_with_vc_check)
         ]
         tensors_no_vc_check = [
-            x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+            x if is_graph_input[num_vc_check + i] or not x._is_view() else x.detach()
+            for i, x in enumerate(tensors_saved_no_vc_check)
         ]
 
         # dynamic_saved_tensors_idxs has indices relative to all saved tensors
@@ -2642,7 +3107,7 @@ class _AutogradSavedState:
             self.metadata.opaque_objects_saved_for_backwards_slice
         ]
         if not all(
-            is_opaque_type(type(obj)) or isinstance(obj, OpaqueBase)
+            is_custom_class(type(obj)) or isinstance(obj, CustomClassBase)
             for obj in opaque_object_outs
         ):
             raise AssertionError(
@@ -2723,6 +3188,8 @@ class _AutogradForwardEpilogue:
         ]
         ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
         ctx._materialize_non_diff_grads = False
+        _snapshot_external_objects(ctx)
+
         return tuple(raw_returns)
 
 
@@ -2921,7 +3388,7 @@ class _AutogradBackwardCompiler:
                 # we compile the backward lazily at backward runtime, meaning that we will first compile
                 # backward graph N, N-1, ..., 1.
                 # We need to ensure that at the time inductor compiles bw graph N-1, it can access
-                # the corresponding fw_metadta for graph N-1.
+                # the corresponding fw_metadata for graph N-1.
                 #
                 # We do this by stashing a DDPOptimizerContext, which tracks:
                 # - the metadata of all N graphs
@@ -2951,7 +3418,7 @@ def _codegen_backward_prologue(
     maybe_subclass_meta: SubclassMeta | None,
     codegen_unwrap_fn: Callable[..., Any] | None,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import PySourceBuilder
 
     num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
     num_outputs = fw_metadata.num_outputs
@@ -2993,123 +3460,129 @@ def _codegen_backward_prologue(
     )
     num_flat_bw_args_with_grads = len(all_surviving)
 
-    L: list[str] = [
-        "def _backward_prologue("
-        "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args):"
-    ]
-    G: dict[str, object] = {"torch": torch}
-
-    L.append("    stack = torch._C._functorch.peek_interpreter_stack()")
-    L.append("    torch._check(")
-    L.append("        stack is None,")
-    L.append("        lambda: (")
-    L.append(
-        "            \"It looks like you're trying to call a compiled backward "
-        'function within vmap/grad/vjp, "'
+    buf = PySourceBuilder(
+        "_backward_prologue",
+        args="ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args",
+        artifact_name="backward_prologue",
     )
-    L.append(
-        "            \"which isn't supported. Try wrapping vmap inside "
-        'torch.compile, or skip compiling the "'
-    )
-    L.append('            "backward function."')
-    L.append("        ),")
-    L.append("    )")
+    buf.bind(torch=torch)
 
-    if deterministic is not None and not deterministic:
-        L.append("    _gd = torch.are_deterministic_algorithms_enabled()")
-        L.append("    torch._check(not _gd, lambda: (")
-        L.append("        'This compiled backward function is being run with '")
-        L.append("        'torch.use_deterministic_algorithms(True), '")
-        L.append(
-            "        'but it was previously generated during the forward function"
-            " while '"
+    with buf.indent():
+        buf.writeline("stack = torch._C._functorch.peek_interpreter_stack()")
+        buf.writeline(
+            "torch._check(stack is None, lambda: ("
+            "\"It looks like you're trying to call a compiled backward "
+            'function within vmap/grad/vjp, "'
+            " \"which isn't supported. Try wrapping vmap inside "
+            'torch.compile, or skip compiling the "'
+            ' "backward function."),)'
         )
-        L.append("        'torch.use_deterministic_algorithms(False) was set.'))")
 
-    L.append(f"    if len(flat_args) != {expected_grad_outs}:")
-    L.append(
-        f"        raise AssertionError("
-        f"f'expected {expected_grad_outs} grad_outs, "
-        f"got {{len(flat_args)}}')"
-    )
+        if deterministic is not None and not deterministic:
+            buf.writeline("_gd = torch.are_deterministic_algorithms_enabled()")
+            buf.writeline(
+                "torch._check(not _gd, lambda: ("
+                "'This compiled backward function is being run with '"
+                " 'torch.use_deterministic_algorithms(True), '"
+                " 'but it was previously generated during the forward function"
+                " while '"
+                " 'torch.use_deterministic_algorithms(False) was set.'))"
+            )
 
-    if all_surviving:
-        items = ", ".join(f"flat_args[{i}]" for i in all_surviving)
-        L.append(f"    _bw_grads = [{items}]")
-    else:
-        L.append("    _bw_grads = []")
+        buf.writeline(f"if len(flat_args) != {expected_grad_outs}:")
+        with buf.indent():
+            buf.writeline(
+                f"raise AssertionError("
+                f"f'expected {expected_grad_outs} grad_outs, "
+                f"got {{len(flat_args)}}')"
+            )
 
-    L.append("    if isinstance(flat_args, list):")
-    L.append("        flat_args.clear()")
-
-    L.append("    _n_saved = len(ctx_saved_tensors)")
-
-    parts = [
-        "*ctx_symints",
-        "*ctx_saved_tensors",
-        "*ctx_opaque_objects",
-        "*_bw_grads",
-    ]
-    if num_backward_tokens > 0:
-        parts.append(f"*([None] * {num_backward_tokens})")
-    if is_rng_op_functionalized:
-        G["_get_rng_state_"] = CUDARngStateHelper.get_torch_state_as_tuple
-        parts.append("*_get_rng_state_()")
-    L.append(f"    all_args = [{', '.join(parts)}]")
-    L.append("    del ctx_saved_tensors")
-
-    L.append("    _ts = len(ctx_symints) + _n_saved + len(ctx_opaque_objects)")
-    L.append(f"    _te = _ts + {num_flat_bw_args_with_grads}")
-
-    G["_process_tangent_"] = AOTDispatchAutograd.process_runtime_tangent
-    G["_tangent_metas_"] = fw_metadata.subclass_tangent_meta
-    G["_tangent_descs_"] = fw_metadata.traced_tangents_descs
-    G["_compile_id_"] = fw_metadata.compile_id_str
-    G["_stack_traces_"] = fw_metadata.tangent_source_stack_traces or ()
-
-    if has_subclass:
-        G["_chain_"] = itertools.chain.from_iterable
-
-        L.append("    _tangents = all_args[_ts:_te]")
-        L.append(f"    if len(_tangents) != {len(fw_metadata.subclass_tangent_meta)}:")
-        L.append(
-            "        raise RuntimeError("
-            "'The grad inputs should be same number as forward output tangents')"
-        )
-        L.append("    _fpt = list(_chain_(")
-        L.append("        _process_tangent_(t, m, idx, desc, _compile_id_,")
-        L.append("            _stack_traces_[idx] if _stack_traces_ else None)[1]")
-        L.append("        for idx, (t, m, desc) in enumerate(")
-        L.append("            zip(_tangents, _tangent_metas_, _tangent_descs_))))")
-
-        if codegen_unwrap_fn is not None:
-            G["_unwrap_"] = codegen_unwrap_fn
+        if all_surviving:
+            items = ", ".join(f"flat_args[{i}]" for i in all_surviving)
+            buf.writeline(f"_bw_grads = [{items}]")
         else:
-            G["_unwrap_"] = _unwrap_no_symints
-        L.append(
-            "    all_args = _unwrap_(all_args[:_ts]) + _fpt + _unwrap_(all_args[_te:])"
+            buf.writeline("_bw_grads = []")
+
+        buf.writeline("if isinstance(flat_args, list):")
+        with buf.indent():
+            buf.writeline("flat_args.clear()")
+
+        buf.writeline("_n_saved = len(ctx_saved_tensors)")
+
+        parts = [
+            "*ctx_symints",
+            "*ctx_saved_tensors",
+            "*ctx_opaque_objects",
+            "*_bw_grads",
+        ]
+        if num_backward_tokens > 0:
+            parts.append(f"*([None] * {num_backward_tokens})")
+        if is_rng_op_functionalized:
+            buf.bind(_get_rng_state_=CUDARngStateHelper.get_torch_state_as_tuple)
+            parts.append("*_get_rng_state_()")
+        buf.writeline(f"all_args = [{', '.join(parts)}]")
+        buf.writeline("del ctx_saved_tensors")
+
+        buf.writeline("_ts = len(ctx_symints) + _n_saved + len(ctx_opaque_objects)")
+        buf.writeline(f"_te = _ts + {num_flat_bw_args_with_grads}")
+
+        buf.bind(
+            _process_tangent_=AOTDispatchAutograd.process_runtime_tangent,
+            _tangent_metas_=fw_metadata.subclass_tangent_meta,
+            _tangent_descs_=fw_metadata.traced_tangents_descs,
+            _compile_id_=fw_metadata.compile_id_str,
+            _stack_traces_=fw_metadata.tangent_source_stack_traces or (),
         )
-    elif num_flat_bw_args_with_grads > 0:
-        L.append(f"    for j in range({num_flat_bw_args_with_grads}):")
-        L.append("        _i = _ts + j")
-        L.append("        all_args[_i] = _process_tangent_(all_args[_i],")
-        L.append("            _tangent_metas_[j], j, _tangent_descs_[j], _compile_id_,")
-        L.append("            _stack_traces_[j] if _stack_traces_ else None)[0]")
 
-    if has_mutations_in_bw:
-        L.append("    if torch.is_grad_enabled():")
-        L.append("        raise RuntimeError(")
-        L.append(
-            "            'aot_autograd does not support input mutations with "
-            "requires_grad in backward for create_graph=True')"
-        )
+        if has_subclass:
+            buf.bind(_chain_=itertools.chain.from_iterable)
 
-    L.append("    return all_args")
+            buf.writeline("_tangents = all_args[_ts:_te]")
+            buf.writeline(
+                f"if len(_tangents) != {len(fw_metadata.subclass_tangent_meta)}:"
+            )
+            with buf.indent():
+                buf.writeline(
+                    "raise RuntimeError("
+                    "'The grad inputs should be same number as forward output tangents')"
+                )
+            buf.writeline(
+                "_fpt = list(_chain_("
+                "_process_tangent_(t, m, idx, desc, _compile_id_, "
+                "_stack_traces_[idx] if _stack_traces_ else None)[1] "
+                "for idx, (t, m, desc) in enumerate("
+                "zip(_tangents, _tangent_metas_, _tangent_descs_))))"
+            )
 
-    source = "\n".join(L)
-    return _compile_and_exec_source(
-        source, G, "_backward_prologue", "backward_prologue"
-    )
+            if codegen_unwrap_fn is not None:
+                buf.bind(_unwrap_=codegen_unwrap_fn)
+            else:
+                buf.bind(_unwrap_=_unwrap_no_symints)
+            buf.writeline(
+                "all_args = _unwrap_(all_args[:_ts]) + _fpt + _unwrap_(all_args[_te:])"
+            )
+        elif num_flat_bw_args_with_grads > 0:
+            buf.writeline(f"for j in range({num_flat_bw_args_with_grads}):")
+            with buf.indent():
+                buf.writeline("_i = _ts + j")
+                buf.writeline(
+                    "all_args[_i] = _process_tangent_(all_args[_i], "
+                    "_tangent_metas_[j], j, _tangent_descs_[j], _compile_id_, "
+                    "_stack_traces_[j] if _stack_traces_ else None)[0]"
+                )
+
+        if has_mutations_in_bw:
+            buf.writeline("if torch.is_grad_enabled():")
+            with buf.indent():
+                buf.writeline(
+                    "raise RuntimeError("
+                    "'aot_autograd does not support input mutations with "
+                    "requires_grad in backward for create_graph=True')"
+                )
+
+        buf.writeline("return all_args")
+
+    return buf.build()
 
 
 def _codegen_backward_epilogue(
@@ -3117,57 +3590,60 @@ def _codegen_backward_epilogue(
     maybe_subclass_meta: SubclassMeta | None,
     codegen_wrap_fn: Callable[..., Any] | None,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import PySourceBuilder
 
     num_bw_tokens = fw_metadata.num_backward_tokens
     is_rng = fw_metadata.is_rng_op_functionalized
     has_subclass = maybe_subclass_meta is not None
 
     if has_subclass:
-        lines: list[str] = ["def _backward_epilogue(out, make_subclass_override=None):"]
+        args = "out, make_subclass_override=None"
     else:
-        lines = ["def _backward_epilogue(out):"]
-    code_globals: dict[str, object] = {}
-
-    if num_bw_tokens > 0:
-        lines.append(f"    out = out[:-{num_bw_tokens}]")
-
-    if is_rng:
-        if fw_metadata.num_outputs_rng_offset != 1:
-            raise AssertionError(
-                f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
-            )
-        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
-        lines.append("    _oi = len(out) - 1")
-        lines.append("    _set_offset_(out[_oi])")
-        lines.append("    out = out[:_oi] + out[_oi + 1:]")
-
-    lines.append("    out = tuple(out)")
-
-    if has_subclass:
-        code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
-        if (
-            maybe_subclass_meta.grad_input_metas is None
-        ):  # pyrefly: ignore [missing-attribute]
-            raise AssertionError("grad_input_metas must not be None")
-        code_globals["_grad_input_metas_"] = (
-            maybe_subclass_meta.grad_input_metas
-        )  # pyrefly: ignore [missing-attribute]
-        if codegen_wrap_fn is not None:
-            code_globals["_wrap_"] = codegen_wrap_fn
-            lines.append("    if make_subclass_override is None:")
-            lines.append("        return _wrap_(out)")
-        lines.append("    return _wrap_subclasses_(out,")
-        lines.append("        subclass_metas=_grad_input_metas_,")
-        lines.append("        included_subclass_symints=True, is_runtime=True,")
-        lines.append("        make_subclass_override=make_subclass_override)")
-    else:
-        lines.append("    return out")
-
-    source = "\n".join(lines)
-    return _compile_and_exec_source(
-        source, code_globals, "_backward_epilogue", "backward_epilogue"
+        args = "out"
+    buf = PySourceBuilder(
+        "_backward_epilogue", args=args, artifact_name="backward_epilogue"
     )
+
+    with buf.indent():
+        if num_bw_tokens > 0:
+            buf.writeline(f"out = out[:-{num_bw_tokens}]")
+
+        if is_rng:
+            if fw_metadata.num_outputs_rng_offset != 1:
+                raise AssertionError(
+                    f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
+                )
+            buf.bind(_set_offset_=CUDARngStateHelper.set_new_offset)
+            buf.writeline("_oi = len(out) - 1")
+            buf.writeline("_set_offset_(out[_oi])")
+            buf.writeline("out = out[:_oi] + out[_oi + 1:]")
+
+        buf.writeline("out = tuple(out)")
+
+        if has_subclass:
+            buf.bind(_wrap_subclasses_=wrap_tensor_subclasses)
+            if (
+                maybe_subclass_meta.grad_input_metas is None
+            ):  # pyrefly: ignore [missing-attribute]
+                raise AssertionError("grad_input_metas must not be None")
+            buf.bind(
+                _grad_input_metas_=maybe_subclass_meta.grad_input_metas
+            )  # pyrefly: ignore [missing-attribute]
+            if codegen_wrap_fn is not None:
+                buf.bind(_wrap_=codegen_wrap_fn)
+                buf.writeline("if make_subclass_override is None:")
+                with buf.indent():
+                    buf.writeline("return _wrap_(out)")
+            buf.writeline(
+                "return _wrap_subclasses_(out, "
+                "subclass_metas=_grad_input_metas_, "
+                "included_subclass_symints=True, is_runtime=True, "
+                "make_subclass_override=make_subclass_override)"
+            )
+        else:
+            buf.writeline("return out")
+
+    return buf.build()
 
 
 def _codegen_compiled_forward(
@@ -3176,43 +3652,44 @@ def _codegen_compiled_forward(
     disable_amp: bool,
     num_rng: int,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import PySourceBuilder
 
-    lines: list[str] = [
-        "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
-    ]
-    code_globals: dict[str, object] = {
-        "torch": torch,
-        "BackwardState": BackwardState,
-    }
-
-    if backward_state_indices:
-        idx = backward_state_indices[0]
-        lines.append(f"    _bw_state = args[{idx}]")
-        lines.append("    if not isinstance(_bw_state, BackwardState):")
-        lines.append("        raise AssertionError(")
-        lines.append("            f'expected BackwardState, got {type(_bw_state)}')")
-        lines.append("    ctx._compiled_autograd_backward_state = _bw_state")
-
-    if num_rng > 0:
-        lines.append("    args = _rng_add_(ctx, args)")
-
-    if disable_amp:
-        code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-        lines.append("    with _DisableAutocast_():")
-        lines.append("        fw_outs = _compiled_fw_(list(args))")
-        _codegen_normalize_as_list(lines, "fw_outs", indent_level=2)
-    else:
-        lines.append("    fw_outs = _compiled_fw_(list(args))")
-        _codegen_normalize_as_list(lines, "fw_outs", indent_level=1)
-
-    lines.append("    _save_(ctx, fw_outs)")
-    lines.append("    return _finalize_(ctx, fw_outs)")
-
-    source = "\n".join(lines)
-    return _compile_and_exec_source(
-        source, code_globals, "_compiled_forward", "compiled_function_forward"
+    buf = PySourceBuilder(
+        "_compiled_forward",
+        args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
+        artifact_name="compiled_function_forward",
     )
+    buf.bind(torch=torch, BackwardState=BackwardState)
+
+    with buf.indent():
+        if backward_state_indices:
+            idx = backward_state_indices[0]
+            buf.writeline(f"_bw_state = args[{idx}]")
+            buf.writeline("if not isinstance(_bw_state, BackwardState):")
+            with buf.indent():
+                buf.writeline(
+                    "raise AssertionError("
+                    "f'expected BackwardState, got {type(_bw_state)}')"
+                )
+            buf.writeline("ctx._compiled_autograd_backward_state = _bw_state")
+
+        if num_rng > 0:
+            buf.writeline("args = _rng_add_(ctx, args)")
+
+        if disable_amp:
+            buf.bind(_DisableAutocast_=torch._C._DisableAutocast)
+            buf.writeline("with _DisableAutocast_():")
+            with buf.indent():
+                buf.writeline("fw_outs = _compiled_fw_(list(args))")
+                _codegen_normalize_as_list(buf, "fw_outs", indent_level=2)
+        else:
+            buf.writeline("fw_outs = _compiled_fw_(list(args))")
+            _codegen_normalize_as_list(buf, "fw_outs", indent_level=1)
+
+        buf.writeline("_save_(ctx, fw_outs)")
+        buf.writeline("return _finalize_(ctx, fw_outs)")
+
+    return buf.build()
 
 
 def _codegen_compiled_backward(
@@ -3220,67 +3697,72 @@ def _codegen_compiled_backward(
     num_tensors_no_vc_check: int | None,
     inputs_require_grad: bool,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import PySourceBuilder
 
-    lines: list[str] = [
-        "def _compiled_backward("
-        "_flat_args_, _ctx_, _prologue_,"
-        " _rng_add_, _impl_, _epilogue_, _double_bw_):"
-    ]
-    code_globals: dict[str, object] = {
-        "torch": torch,
-        "functools": functools,
-    }
-
-    lines.append("""\
-    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):
-        raise AssertionError(
-            'Compiled backward expects grads as a single mutable list '
-            f'argument, but got {len(_flat_args_)} args. '
-            'Grads must be passed as [grad0, grad1, ...] to allow '
-            'freeing individual grads mid-backward.')
-    grad_args = _flat_args_[0]
-    del _flat_args_""")
-
-    if num_tensors_no_vc_check is not None and num_tensors_no_vc_check > 0:
-        lines.append("    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)")
-    else:
-        lines.append("    _saved = _ctx_.saved_tensors")
-
-    lines.append(
-        "    all_args = _prologue_(_saved, _ctx_.symints,"
-        " _ctx_.opaque_objects, grad_args)"
+    buf = PySourceBuilder(
+        "_compiled_backward",
+        args="_flat_args_, _ctx_, _prologue_,"
+        " _rng_add_, _impl_, _epilogue_, _double_bw_",
+        artifact_name="compiled_function_backward",
     )
-    lines.append("    del _saved")
+    buf.bind(torch=torch, functools=functools)
 
-    if num_rng > 0:
-        lines.append("    _rng_add_(_ctx_, all_args)")
-
-    lines.append("    def impl_fn(double_ctx=None):")
-    lines.append("        out = _impl_(_ctx_, all_args)")
-    lines.append("        return _epilogue_(out)")
-
-    lines.append("    if (torch._C._is_key_in_tls('context')")
-    lines.append(
-        "            and (_cc := torch._C._get_obj_in_tls('context')) is not None):"
-    )
-    lines.append("        impl_fn = functools.partial(_cc.run, impl_fn)")
-
-    if inputs_require_grad:
-        lines.append("    if torch.is_grad_enabled():")
-    else:
-        lines.append("    _ng = torch.is_grad_enabled() and any(")
-        lines.append(
-            "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
+    with buf.indent():
+        buf.writeline(
+            "if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):"
         )
-        lines.append("    if _ng:")
-    lines.append("        return _double_bw_(_ctx_, impl_fn, all_args)")
-    lines.append("    return impl_fn()")
+        with buf.indent():
+            buf.writeline(
+                "raise AssertionError("
+                "'Compiled backward expects grads as a single mutable list '"
+                " f'argument, but got {len(_flat_args_)} args. '"
+                " 'Grads must be passed as [grad0, grad1, ...] to allow '"
+                " 'freeing individual grads mid-backward.')"
+            )
+        buf.writeline("grad_args = _flat_args_[0]")
+        buf.writeline("del _flat_args_")
 
-    source = "\n".join(lines)
-    return _compile_and_exec_source(
-        source, code_globals, "_compiled_backward", "compiled_function_backward"
-    )
+        if num_tensors_no_vc_check is not None and num_tensors_no_vc_check > 0:
+            buf.writeline(
+                "_saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)"
+            )
+        else:
+            buf.writeline("_saved = _ctx_.saved_tensors")
+
+        buf.writeline(
+            "all_args = _prologue_(_saved, _ctx_.symints,"
+            " _ctx_.opaque_objects, grad_args)"
+        )
+        buf.writeline("del _saved")
+
+        if num_rng > 0:
+            buf.writeline("_rng_add_(_ctx_, all_args)")
+
+        buf.writeline("def impl_fn(double_ctx=None):")
+        with buf.indent():
+            buf.writeline("out = _impl_(_ctx_, all_args)")
+            buf.writeline("return _epilogue_(out)")
+
+        buf.writeline(
+            "if (torch._C._is_key_in_tls('context')"
+            " and (_cc := torch._C._get_obj_in_tls('context')) is not None):"
+        )
+        with buf.indent():
+            buf.writeline("impl_fn = functools.partial(_cc.copy().run, impl_fn)")
+
+        if inputs_require_grad:
+            buf.writeline("if torch.is_grad_enabled():")
+        else:
+            buf.writeline(
+                "_ng = torch.is_grad_enabled() and any("
+                "t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
+            )
+            buf.writeline("if _ng:")
+        with buf.indent():
+            buf.writeline("return _double_bw_(_ctx_, impl_fn, all_args)")
+        buf.writeline("return impl_fn()")
+
+    return buf.build()
 
 
 @dataclass
@@ -3360,68 +3842,59 @@ class _AOTDispatchAutogradFunctionFactory:
         num_outputs = fw_metadata.num_outputs
         num_outputs_aliased = fw_metadata.num_outputs_aliased
 
-        _xform_lines = ["def _transform_raw_returns(raw_returns):"]
-        _xform_globals: dict[str, object] = {
-            "TensorAlias": TensorAlias,
-            "torch": torch,
-            "Tensor": Tensor,
-        }
+        from .codegen import PySourceBuilder
 
-        for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
-            info = fw_metadata.input_info[idx]
-            if info.mutates_metadata and not info.mutates_data:
-                _xform_lines.append(
-                    f"    raw_returns[{i}] = TensorAlias(raw_returns[{i}])"
-                )
-
-        if fw_metadata.num_unsafe_view_outputs > 0:
-            for idx in fw_metadata.unsafe_view_out_indices:
-                ri = num_mutated_runtime_inps + idx
-                _xform_lines.append(f"    _o = raw_returns[{ri}]")
-                _xform_lines.append(
-                    f"    raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)"
-                )
-
-        if num_outputs_aliased > 0:
-            for idx in fw_metadata.aliased_out_indices:
-                ri = num_mutated_runtime_inps + idx
-                _xform_lines.append(
-                    f"    raw_returns[{ri}] = TensorAlias(raw_returns[{ri}])"
-                )
-
-        # Non-differentiable output collection: build a list of specific indices
-        # at compile time rather than iterating at runtime.
-        _non_diff_indices: list[int] = []
-        _returns_meta = [
-            x
-            for x in fw_metadata.input_info
-            if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
-        ] + list(fw_metadata.output_info)
-        for i, meta in enumerate(_returns_meta):
-            if i < num_mutated_runtime_inps + num_outputs and not meta.requires_grad:
-                _non_diff_indices.append(i)
-        if _non_diff_indices:
-            checks = " + ".join(
-                f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
-                for i in _non_diff_indices
-            )
-            _xform_lines.append(f"    non_diff = {checks}")
-        else:
-            _xform_lines.append("    non_diff = []")
-        _xform_lines.append("    return non_diff")
-
-        _xform_source = "\n".join(_xform_lines)
-
-        from .subclass_codegen import _compile_and_exec_source
-
-        _codegen_transform_raw_returns: Callable[..., list[Any]] = (
-            _compile_and_exec_source(  # type: ignore[assignment]
-                _xform_source,
-                _xform_globals,
-                "_transform_raw_returns",
-                "compiled_fn_wrapper",
-            )
+        buf = PySourceBuilder(
+            "_transform_raw_returns",
+            args="raw_returns",
+            artifact_name="compiled_fn_wrapper",
         )
+        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
+
+        with buf.indent():
+            for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
+                info = fw_metadata.input_info[idx]
+                if info.mutates_metadata and not info.mutates_data:
+                    buf.writeline(f"raw_returns[{i}] = TensorAlias(raw_returns[{i}])")
+
+            if fw_metadata.num_unsafe_view_outputs > 0:
+                for idx in fw_metadata.unsafe_view_out_indices:
+                    ri = num_mutated_runtime_inps + idx
+                    buf.writeline(f"_o = raw_returns[{ri}]")
+                    buf.writeline(
+                        f"raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)"
+                    )
+
+            if num_outputs_aliased > 0:
+                for idx in fw_metadata.aliased_out_indices:
+                    ri = num_mutated_runtime_inps + idx
+                    buf.writeline(f"raw_returns[{ri}] = TensorAlias(raw_returns[{ri}])")
+
+            # Non-differentiable output collection: build a list of specific indices
+            # at compile time rather than iterating at runtime.
+            _non_diff_indices: list[int] = []
+            _returns_meta = [
+                x
+                for x in fw_metadata.input_info
+                if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
+            ] + list(fw_metadata.output_info)
+            for i, meta in enumerate(_returns_meta):
+                if (
+                    i < num_mutated_runtime_inps + num_outputs
+                    and not meta.requires_grad
+                ):
+                    _non_diff_indices.append(i)
+            if _non_diff_indices:
+                checks = " + ".join(
+                    f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
+                    for i in _non_diff_indices
+                )
+                buf.writeline(f"non_diff = {checks}")
+            else:
+                buf.writeline("non_diff = []")
+            buf.writeline("return non_diff")
+
+        _codegen_transform_raw_returns: Callable[..., list[Any]] = buf.build()  # type: ignore[assignment]
 
         # Monkey-patch forward_epilogue.finalize to use codegen'd transform
         def _codegen_finalize(ctx: Any, fw_outs: Any) -> tuple[Any, ...]:
@@ -3451,6 +3924,8 @@ class _AOTDispatchAutogradFunctionFactory:
                         )
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
+            _snapshot_external_objects(ctx)
+
             return tuple(raw_returns)
 
         forward_epilogue.finalize = _codegen_finalize  # type: ignore[method-assign]
@@ -3565,6 +4040,9 @@ class _AOTDispatchAutogradFunctionFactory:
                         ),
                     )
 
+                for idx, obj in getattr(ctx, "_external_objects", {}).items():
+                    index_to_external_object_weakref[idx] = weakref.ref(obj)
+
                 return call_func_at_runtime_with_args(
                     compiled_bw,
                     all_args,
@@ -3665,7 +4143,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
-        if isinstance(x, FakeTensor):
+        if is_fake_tensor(x):
             if not meta.memory_format:
                 raise AssertionError(
                     "meta.memory_format must not be None for FakeTensor"
@@ -3783,38 +4261,36 @@ class DebugAssertWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        lines = ["def inner_fn(args):"]
-        globals_dict: dict[str, object] = {"compiled_fn": compiled_fn}
-        for i, can_require_grad in enumerate(self.flat_requires_grad):
-            if can_require_grad is None:
-                lines.append(
-                    f"    if isinstance(args[{i}], Tensor):"
-                    f" raise AssertionError("
-                    f"'expected non-Tensor for arg {i}, got Tensor')"
-                )
-            elif not can_require_grad:
-                msg_name = f"_msg_{i}"
-                globals_dict[msg_name] = format_guard_bug_msg(
-                    aot_config,
-                    f"{describe_input(i, aot_config)} would not require grad",
-                )
-                lines.append(
-                    f"    if args[{i}].requires_grad: raise AssertionError({msg_name})"
-                )
-        lines.append("    return compiled_fn(args)")
+        from .codegen import PySourceBuilder
 
-        source = "\n".join(lines)
-        globals_dict["Tensor"] = Tensor
-
-        from .subclass_codegen import _compile_and_exec_source
-
-        return _compile_and_exec_source(
-            source,
-            globals_dict,
-            "inner_fn",
-            "debug_assert_wrapper",
-            wrapped_fn=compiled_fn,
+        buf = PySourceBuilder(
+            "inner_fn", args="args", artifact_name="debug_assert_wrapper"
         )
+        buf.bind(compiled_fn=compiled_fn)
+        with buf.indent():
+            for i, can_require_grad in enumerate(self.flat_requires_grad):
+                if can_require_grad is None:
+                    buf.writeline(
+                        f"if isinstance(args[{i}], Tensor):"
+                        f" raise AssertionError("
+                        f"'expected non-Tensor for arg {i}, got Tensor')"
+                    )
+                elif not can_require_grad:
+                    msg_name = buf.bind_value(
+                        "_msg",
+                        format_guard_bug_msg(
+                            aot_config,
+                            f"{describe_input(i, aot_config)} would not require grad",
+                        ),
+                    )
+                    buf.writeline(
+                        f"if args[{i}].requires_grad: raise AssertionError({msg_name})"
+                    )
+            buf.writeline("return compiled_fn(args)")
+
+        buf.bind(Tensor=Tensor)
+
+        return buf.build(wrapped_fn=compiled_fn)
 
 
 def pre_compile(

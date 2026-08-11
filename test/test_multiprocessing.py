@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     run_tests,
     skipIfRocm,
+    skipIfRocmVersionAtLeast,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -207,8 +208,12 @@ def requires_grad_variable_sharing(queue, ready):
     queue.put(var.requires_grad)
 
 
-def integer_parameter_serialization(iparam):
+def integer_parameter_serialization(queue, done, finish):
+    iparam = queue.get()
     iparam + 1
+    del iparam
+    done.set()
+    finish.wait()
 
 
 def autograd_sharing(queue, ready, master_modified, device, is_parameter):
@@ -464,14 +469,27 @@ class _MultiprocessingTestMixin:
         )
 
         ctx = mp.get_context("spawn")
-        p = ctx.Process(target=integer_parameter_serialization, args=(param,))
+        done = ctx.Event()
+        finish = ctx.Event()
+        queue = ctx.Queue()
+        p = ctx.Process(
+            target=integer_parameter_serialization, args=(queue, done, finish)
+        )
         p.start()
-        p.join()
+        try:
+            queue.put(param)
+            self.assertTrue(done.wait(MAX_WAITING_TIME_IN_SECONDS))
+            del param
+            if torch.device(device).type == "cuda":
+                torch.cuda.ipc_collect()
+        finally:
+            finish.set()
+            p.join(100)
 
         self.assertEqual(
             0,
             p.exitcode,
-            msg=f'Failed to serialize successfully for "{device}" device!',
+            msg=lambda msg: f'{msg}\nFailed to serialize successfully for "{device}" device!',
         )
 
 
@@ -557,7 +575,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         self.assertTrue(t.is_shared())
 
 
-instantiate_device_type_tests(TestMultiprocessingDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
 
 
 @unittest.skipIf(
@@ -629,6 +647,8 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
+    # torch_shm_manager cannot resolve librocprofiler-sdk.so.1 in CI child processes.
+    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
@@ -640,14 +660,17 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
         def queue_put():
@@ -1059,6 +1082,8 @@ if __name__ == "__main__":
     def test_is_shared(self):
         self._test_is_shared()
 
+    # torch_shm_manager cannot resolve librocprofiler-sdk.so.1 in CI child processes.
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_is_shared(self):
         with fs_sharing():
             self._test_is_shared()

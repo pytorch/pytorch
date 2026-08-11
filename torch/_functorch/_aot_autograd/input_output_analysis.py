@@ -24,7 +24,6 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
-from .functional_utils import has_same_metadata
 from .schemas import (
     AOTConfig,
     BackwardSignature,
@@ -170,6 +169,35 @@ def create_synthetic_base_metadata(
             if len(outer_indices) > 1
             else m.input_info[outer_indices[0]].mutates_metadata
         )
+        mutates_size = (
+            False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutates_size
+        )
+        mutation_replay_preserves_storage_offset = (
+            False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutation_replay_preserves_storage_offset
+        )
+        mutation_replay_resizes_storage = (
+            False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutation_replay_resizes_storage
+        )
+        mutation_replay_requires_full_storage = (
+            # Synthetic aliases are regenerated with as_strided fallback view
+            # replay. Metadata recomputation therefore records the same
+            # full-storage requirement on their combined base input.
+            len(outer_indices) > 1
+            or any(
+                m.input_info[x].mutation_replay_requires_full_storage
+                for x in outer_indices
+            )
+        )
+        mutation_replay_overwrites_storage = (
+            len(outer_indices) == 1
+            and m.input_info[outer_indices[0]].mutation_replay_overwrites_storage
+        )
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
         mutations_under_no_grad_or_inference_mode = all(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
@@ -179,6 +207,15 @@ def create_synthetic_base_metadata(
         mutation_inductor_storage_resize = all(
             m.input_info[x].mutation_inductor_storage_resize for x in outer_indices
         )
+        # AOTSyntheticBaseWrapper owns exact version replay for every original
+        # input represented by a synthetic base. The inner base may consolidate
+        # several mutations into one physical graph update, so it must not also
+        # contribute a logical version delta.
+        mutation_version_delta = (
+            0
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutation_version_delta
+        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -187,6 +224,12 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
+            mutates_size=mutates_size,
+            mutation_replay_preserves_storage_offset=mutation_replay_preserves_storage_offset,
+            mutation_replay_resizes_storage=mutation_replay_resizes_storage,
+            mutation_replay_requires_full_storage=mutation_replay_requires_full_storage,
+            mutation_replay_overwrites_storage=mutation_replay_overwrites_storage,
+            mutation_version_delta=mutation_version_delta,
             mutations_hidden_from_autograd=all(
                 m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
             ),
@@ -194,6 +237,11 @@ def create_synthetic_base_metadata(
                 False
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
+            ),
+            mutation_is_shallow_copy_data=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
             ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
@@ -244,24 +292,14 @@ def create_synthetic_base_metadata(
                 else synthetic_base_info_for_output[0]  # type: ignore[index]
             )
         )
-        is_input_replaced_by_synthetic_base_view = (
-            o.base_idx is not None
-            and new_base_idx is not None
-            and isinstance(synthetic_base_info_for_output, tuple)
-            and (
-                outer_args[o.base_idx]._base is not None
-                or not has_same_metadata(
-                    outer_args[o.base_idx], inner_args[new_base_idx]
-                )
-            )
+        # If the original input was merged into a synthetic base, then an
+        # output that was literally that input is now a view of the base.
+        input_merged = o.base_idx is not None and isinstance(
+            synthetic_base_info[o.base_idx], tuple
         )
-        # If OutputType.is_input is remapped to another base, including a
-        # synthetic base replacing the original input view, the output must be
-        # regenerated as an alias of that base.
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input
-            and (o.base_idx != new_base_idx or is_input_replaced_by_synthetic_base_view)
+            if o.output_type == OutputType.is_input and input_merged
             else o.output_type
         )
         existing_output_infos.append(

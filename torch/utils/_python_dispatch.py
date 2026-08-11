@@ -25,7 +25,7 @@ from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_intern
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from torch._opaque_base import OpaqueBase
+    from torch._custom_class_base import CustomClassBase
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -481,7 +481,7 @@ class TraceableWrapperSubclass(Protocol):
 
     @staticmethod
     def __tensor_unflatten__(
-        inner_tensors: Mapping[str, torch.Tensor | OpaqueBase],
+        inner_tensors: Mapping[str, torch.Tensor | CustomClassBase],
         metadata: object,
         outer_size: Sequence[int | torch.SymInt],
         outer_stride: Sequence[int | torch.SymInt],
@@ -612,7 +612,60 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     return sub
 
 
-def _correct_storage_aliasing(func, schema_info, args, outs) -> None:
+def _correct_storage_aliasing(
+    func,
+    schema_info,
+    args,
+    outs,
+) -> None:
+    _correct_storage_aliasing_impl(
+        func,
+        schema_info,
+        args,
+        outs,
+        torch._functionalize_unsafe_set,
+    )
+
+
+def _correct_storage_aliasing_for_functional_tensor(
+    func,
+    schema_info,
+    args,
+    outs,
+) -> None:
+    # Imported locally to avoid the functional_tensor -> _python_dispatch cycle.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    def install_storage(dst, src) -> None:
+        if not isinstance(dst, FunctionalTensor) or not isinstance(
+            src, FunctionalTensor
+        ):
+            raise AssertionError(
+                "FunctionalTensor alias correction requires FunctionalTensor inputs "
+                "and outputs"
+            )
+        if not torch._C._is_alias_of(dst.elem, src.elem):  # type: ignore[attr-defined]
+            raise AssertionError(
+                "FunctionalTensor alias correction requires aliased inner tensors"
+            )
+        torch._functionalize_unsafe_set_storage_for_functional_tensor(dst, src)
+
+    _correct_storage_aliasing_impl(
+        func,
+        schema_info,
+        args,
+        outs,
+        install_storage,
+    )
+
+
+def _correct_storage_aliasing_impl(
+    func,
+    schema_info,
+    args,
+    outs,
+    install_storage,
+) -> None:
     """
     Given: an OpOverload, a SchemaInfo (cached information from torchgen about schema),
     and the inputs/outputs to the OpOverload,
@@ -668,11 +721,11 @@ def _correct_storage_aliasing(func, schema_info, args, outs) -> None:
 
         if isinstance(ret, list):
             for r in ret:
-                torch._functionalize_unsafe_set(r, arg)
+                install_storage(r, arg)
         else:
             if not isinstance(ret, torch.Tensor):
                 raise AssertionError(f"expected torch.Tensor, got {type(ret)}")
-            torch._functionalize_unsafe_set(ret, arg)
+            install_storage(ret, arg)
 
     for arg_idx, return_idx in schema_info.read_only_alias_match_indexes:
         alias_non_inplace_storage(args[arg_idx], outs[return_idx])
@@ -876,7 +929,13 @@ def autograd_would_have_decomposed(
     return not has_backend_registration
 
 
-def return_and_correct_aliasing(func, args, kwargs, out):
+def _return_and_correct_aliasing_impl(
+    func,
+    args,
+    kwargs,
+    out,
+    correct_storage_aliasing,
+):
     """
     This function should be used by wrapper tensor ``__torch_dispatch__`` subclasses
     that would like to work with torch.compile. It ensures that the subclass
@@ -917,8 +976,11 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Fix up the storages of any outs so that they point to the same storage as the input,
     # if func is a view op.
-    _correct_storage_aliasing(
-        func, schema_info, args, (out,) if not isinstance(out, tuple) else out
+    correct_storage_aliasing(
+        func,
+        schema_info,
+        args,
+        (out,) if not isinstance(out, tuple) else out,
     )
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
@@ -973,3 +1035,25 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         ]
     )
     return outs_to_return
+
+
+def return_and_correct_aliasing(func, args, kwargs, out):
+    """Correct aliasing for a wrapper subclass using checked storage installation."""
+    return _return_and_correct_aliasing_impl(
+        func,
+        args,
+        kwargs,
+        out,
+        _correct_storage_aliasing,
+    )
+
+
+def _return_and_correct_aliasing_for_functional_tensor(func, args, kwargs, out):
+    """Correct aliasing for FunctionalTensor's private bookkeeping storage."""
+    return _return_and_correct_aliasing_impl(
+        func,
+        args,
+        kwargs,
+        out,
+        _correct_storage_aliasing_for_functional_tensor,
+    )

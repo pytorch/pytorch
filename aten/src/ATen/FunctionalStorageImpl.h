@@ -2,6 +2,8 @@
 
 #include <ATen/Tensor.h>
 
+#include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace at::functionalization {
@@ -26,8 +28,22 @@ enum class InverseReturnMode {
     return #TYPE;                             \
   }
 
-#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...) \
-  using SerializableTuple = std::tuple<__VA_ARGS__>
+template <class T>
+struct tuple_elements_are_owning;
+
+template <class... Ts>
+struct tuple_elements_are_owning<std::tuple<Ts...>>
+    : std::bool_constant<(std::is_same_v<std::decay_t<Ts>, Ts> && ...)> {};
+
+#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...)                \
+  using SerializableTuple = std::tuple<__VA_ARGS__>;                      \
+  static_assert(                                                          \
+      ::at::functionalization::tuple_elements_are_owning<                 \
+          SerializableTuple>::value,                                      \
+      "FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE elements must be "   \
+      "owning value types (no references or cv-qualifiers); a reference " \
+      "element would dangle in to_serializable_tuple() and in the data "  \
+      "member it initializes.")
 
 // ViewMeta is a class used by the functionalization pass to navigate between
 // a base tensor and a view tensor.
@@ -39,7 +55,7 @@ enum class InverseReturnMode {
 //   FUNCTIONALIZATION_VIEWMETA_NAME(view1_ViewMeta);
 //   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
 //       bool /* reapply_views */,
-//       const std::vector<int64_t>&);
+//       std::vector<int64_t>);
 //
 //   view1_ViewMeta(const SerializableTuple& tpl)
 //       : view1_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
@@ -177,6 +193,65 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   uint64_t mutation_counter() {
     return mutation_counter_;
   }
+  using DataMutationRange = std::pair<c10::SymInt, c10::SymInt>;
+  void record_data_mutation_range(
+      const c10::SymInt& begin_bytes,
+      const c10::SymInt& end_bytes) {
+    data_mutation_ranges_.emplace_back(begin_bytes, end_bytes);
+  }
+  const std::vector<DataMutationRange>& data_mutation_ranges() const {
+    return data_mutation_ranges_;
+  }
+  void mark_data_mutation_carrier() {
+    has_data_mutation_carrier_ = true;
+    data_mutation_carrier_counter_ = mutation_counter_;
+  }
+  bool has_data_mutation_carrier() const {
+    // A later mutation invalidates the certificate until another complete
+    // base is committed. This prevents an unrelated partial write from
+    // inheriting a stale full-carrier marker.
+    return has_data_mutation_carrier_ &&
+        data_mutation_carrier_counter_ == mutation_counter_;
+  }
+  bool had_data_mutation_carrier() const {
+    return has_data_mutation_carrier_;
+  }
+  void mark_data_mutation_requires_full_storage() {
+    data_mutation_requires_full_storage_ = true;
+  }
+  bool data_mutation_requires_full_storage() const {
+    return data_mutation_requires_full_storage_;
+  }
+  void mark_data_mutation_full_overwrite() {
+    has_data_mutation_full_overwrite_ = true;
+    data_mutation_full_overwrite_counter_ = mutation_counter_;
+    metadata_mutation_full_overwrite_counter_ = metadata_mutation_counter_;
+  }
+  bool has_data_mutation_full_overwrite() const {
+    // A later data or metadata mutation can make the final carrier depend on
+    // bytes that the write-only out= operator did not initialize.
+    return has_data_mutation_full_overwrite_ &&
+        data_mutation_full_overwrite_counter_ == mutation_counter_ &&
+        metadata_mutation_full_overwrite_counter_ == metadata_mutation_counter_;
+  }
+  c10::SymIntArrayRef mutation_base_sizes() const {
+    return mutation_base_sizes_;
+  }
+  c10::SymIntArrayRef mutation_base_strides() const {
+    return mutation_base_strides_;
+  }
+  const c10::SymInt& mutation_base_storage_offset() const {
+    return mutation_base_storage_offset_;
+  }
+  const c10::SymInt& mutation_base_storage_nbytes() const {
+    return mutation_base_storage_nbytes_;
+  }
+  ScalarType mutation_base_dtype() const {
+    return mutation_base_dtype_;
+  }
+  Layout mutation_base_layout() const {
+    return mutation_base_layout_;
+  }
   void mark_mutation() {
     mutation_counter_++;
   }
@@ -187,24 +262,72 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     mutation_counter_hidden_from_autograd_++;
   }
 
+  void mark_metadata_mutation(bool under_no_grad_or_inference_mode) {
+    metadata_mutation_counter_++;
+    if (under_no_grad_or_inference_mode) {
+      metadata_mutation_counter_during_no_grad_or_inference_mode_++;
+    }
+  }
+
+  uint64_t metadata_mutation_counter() const {
+    return metadata_mutation_counter_;
+  }
+
+  bool had_metadata_mutation_under_no_grad_or_inference_mode() const {
+    return metadata_mutation_counter_during_no_grad_or_inference_mode_ > 0;
+  }
+
+  // A storage replacement performed by functionalized resize_ keeps all of
+  // the current data but installs a larger FunctionalStorageImpl. Preserve the
+  // logical mutation history so AOTAutograd still observes earlier writes.
+  void inherit_mutation_state(const FunctionalStorageImpl& other) {
+    generation_ = other.generation_;
+    mutation_counter_during_no_grad_or_inference_mode_ =
+        other.mutation_counter_during_no_grad_or_inference_mode_;
+    mutation_counter_ = other.mutation_counter_;
+    mutation_counter_hidden_from_autograd_ =
+        other.mutation_counter_hidden_from_autograd_;
+    data_mutation_ranges_ = other.data_mutation_ranges_;
+    has_data_mutation_carrier_ = other.has_data_mutation_carrier_;
+    data_mutation_carrier_counter_ = other.data_mutation_carrier_counter_;
+    data_mutation_requires_full_storage_ =
+        other.data_mutation_requires_full_storage_;
+    has_data_mutation_full_overwrite_ = other.has_data_mutation_full_overwrite_;
+    data_mutation_full_overwrite_counter_ =
+        other.data_mutation_full_overwrite_counter_;
+    metadata_mutation_full_overwrite_counter_ =
+        other.metadata_mutation_full_overwrite_counter_;
+    // Keep the new storage's root geometry: aliases created after a resize are
+    // relative to that resized base. Only historical mutation state carries
+    // over from the replaced storage.
+    mutation_base_storage_nbytes_ =
+        mutation_base_storage_nbytes_.max(other.mutation_base_storage_nbytes_);
+    metadata_mutation_counter_ = other.metadata_mutation_counter_;
+    metadata_mutation_counter_during_no_grad_or_inference_mode_ =
+        other.metadata_mutation_counter_during_no_grad_or_inference_mode_;
+  }
+
   bool are_all_mutations_under_no_grad_or_inference_mode() const {
-    auto non_autograd_mutations =
+    auto non_autograd_data_mutations =
         mutation_counter_during_no_grad_or_inference_mode_ +
         mutation_counter_hidden_from_autograd_;
     // The <= is because both counters will technically be incremented, if we
     // perform e.g. a triton kernel mutation under no_grad
-    return mutation_counter_ <= non_autograd_mutations;
+    return mutation_counter_ <= non_autograd_data_mutations &&
+        metadata_mutation_counter_ <=
+        metadata_mutation_counter_during_no_grad_or_inference_mode_;
   }
 
   bool are_all_mutations_hidden_from_autograd() const {
     // mutations under no_grad / inference_mode are technically not hidden from
     // autograd - they change the version counter
-    return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
+    return metadata_mutation_counter_ == 0 &&
+        mutation_counter_ <= mutation_counter_hidden_from_autograd_;
   }
 
-  void mark_inductor_storage_resize(c10::SymInt new_size) {
+  void mark_inductor_storage_resize(const c10::SymInt& new_size) {
     inductor_storage_resized_ = true;
-    curr_storage_size_ = std::move(new_size);
+    curr_storage_size_ = new_size;
     inductor_storage_resized_counter_++;
   }
 
@@ -256,7 +379,38 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_counter_hidden_from_autograd_ = 0;
-
+  // Absolute byte intervals conservatively bounding each data write. Keeping
+  // the intervals separate lets AOTAutograd prove that the current input
+  // carries every write without requiring it to cover untouched gaps between
+  // disjoint writes in the underlying storage.
+  std::vector<DataMutationRange> data_mutation_ranges_{};
+  // Auto-functionalization reconstructs and commits a complete storage base,
+  // even when the mutable argument was a view. This marker lets AOTAutograd
+  // distinguish that full updated carrier from an untracked alias write.
+  bool has_data_mutation_carrier_ = false;
+  uint64_t data_mutation_carrier_counter_ = 0;
+  // Explicit as_strided view chains can address storage outside the logical
+  // graph input. A runtime artifact may therefore only replay their nonempty
+  // writes when the input carries its whole physical storage.
+  bool data_mutation_requires_full_storage_ = false;
+  // Native write-only out= kernels produce a complete final tensor without
+  // reading the old output. This certificate permits storage growth over
+  // pre-existing capacity that the original logical input did not expose.
+  bool has_data_mutation_full_overwrite_ = false;
+  uint64_t data_mutation_full_overwrite_counter_ = 0;
+  uint64_t metadata_mutation_full_overwrite_counter_ = 0;
+  // Immutable logical metadata for the root tensor of this functional
+  // storage. Data replacements may install a fresh contiguous, offset-zero
+  // carrier, so write coordinates are reconstructed by replaying the writing
+  // wrapper's view chain from this metadata instead of inspecting that carrier.
+  std::vector<c10::SymInt> mutation_base_sizes_{};
+  std::vector<c10::SymInt> mutation_base_strides_{};
+  c10::SymInt mutation_base_storage_offset_ = 0;
+  c10::SymInt mutation_base_storage_nbytes_ = 0;
+  ScalarType mutation_base_dtype_ = ScalarType::Undefined;
+  Layout mutation_base_layout_ = Layout::Strided;
+  uint64_t metadata_mutation_counter_ = 0;
+  uint64_t metadata_mutation_counter_during_no_grad_or_inference_mode_ = 0;
   // Used to tell if:
   // (1) There were any storage resizes on a graph input
   // (2) The original/curr storage size tell us if these resizes result in a nop

@@ -3,15 +3,17 @@
 import logging
 import operator
 import warnings
+import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, cast
 
 import torch
 import torch.distributed as dist
+import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.distributed.pipelining._utils import (
@@ -126,6 +128,64 @@ class _RecvInfo:
         return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={buffer_shape}, meta={meta_type})"
 
 
+# Cache of per-direction P2P communicators, keyed (weakly) by the PP process
+# group they are derived from. Looped/V schedules construct several stage chunks
+# per rank that share one PP group; they must share the same forward/backward
+# comms (and issue the split_group collective only once) so creation stays
+# consistent and cheap across all ranks. Stage chunks are constructed serially
+# within a rank, so the first miss performs the split and the rest hit the cache.
+# The key is a weakref, so entries are
+# dropped automatically once the parent group is destroyed (e.g. via
+# destroy_process_group / reinitialization), avoiding stale dead communicators.
+_PP_DIRECTION_GROUP_CACHE: "weakref.WeakKeyDictionary[dist.ProcessGroup, tuple[dist.ProcessGroup, dist.ProcessGroup]]" = weakref.WeakKeyDictionary()
+
+
+def _build_p2p_direction_groups(
+    group: dist.ProcessGroup | None,
+) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
+    """Create two communicators over the same ranks as ``group``, one per data-flow
+    direction: ``downstream`` carries traffic flowing ``r -> r+1`` (forward
+    activations) and ``upstream`` carries ``r -> r-1`` (backward gradients).
+
+    Pipeline P2P normally shares a single communicator for both directions, which
+    serializes every send/recv in one FIFO. Coalescing makes a single mixed
+    send+recv batch deadlock-free, but across *separate* batches (pipeline skew,
+    looped / V schedules, skip connections) the shared FIFO can still form a
+    dependency cycle and deadlock. Routing the two directions onto separate
+    communicators / streams removes that cross-batch coupling and restores
+    full-duplex bandwidth.
+
+    Uses ``split_group``, which is collective over ``group``'s own ranks (not the
+    whole world), so it composes with PP as a sub-axis of a larger device mesh.
+    Requires the default process group to be device-bound (e.g.
+    ``init_process_group(..., device_id=...)``), which ``split_group`` needs for
+    NCCL; torchcomms binds the device automatically.
+    """
+    parent = group if group is not None else dist.distributed_c10d._get_default_group()
+    cached = _PP_DIRECTION_GROUP_CACHE.get(parent)
+    if cached is not None:
+        return cached
+
+    split_ranks = [list(range(dist.get_world_size(parent)))]
+    # split_group splits the parent's communicator, so the default process group
+    # must be device-bound (NCCL) -- torchcomms binds the device automatically. If
+    # it is not, split_group raises its own device error.
+    downstream = dist.split_group(
+        parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_downstream"
+    )
+    upstream = dist.split_group(
+        parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_upstream"
+    )
+    # All parent ranks are members of the single split.
+    if not isinstance(downstream, dist.ProcessGroup):
+        raise AssertionError(f"expected dist.ProcessGroup, got {type(downstream)}")
+    if not isinstance(upstream, dist.ProcessGroup):
+        raise AssertionError(f"expected dist.ProcessGroup, got {type(upstream)}")
+    logger.info("Pipeline P2P: using per-direction (downstream/upstream) communicators")
+    _PP_DIRECTION_GROUP_CACHE[parent] = (downstream, upstream)
+    return downstream, upstream
+
+
 class _PipelineStageBase(ABC):
     """Base class for pipeline stages.
 
@@ -166,6 +226,28 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+
+        # Downstream (data flowing r -> r+1: forward activations) and upstream
+        # (r -> r-1: backward gradients) P2P communicators. Auto-enabled when
+        # TorchComms is in use (its split path is always available and the
+        # single-comm FIFO deadlock is most acute there); the config flag
+        # torch.distributed.config.pipeline_per_direction_p2p (env
+        # TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P) force-enables it on other
+        # backends. When disabled both alias ``self.group`` so behavior is
+        # byte-for-byte unchanged.
+        self.p2p_per_direction = (
+            dist_config.pipeline_per_direction_p2p
+            or dist.distributed_c10d._use_torchcomms_enabled()
+        )
+        self._downstream_group: dist.ProcessGroup | None
+        self._upstream_group: dist.ProcessGroup | None
+        if self.p2p_per_direction:
+            self._downstream_group, self._upstream_group = _build_p2p_direction_groups(
+                group
+            )
+        else:
+            self._downstream_group = group
+            self._upstream_group = group
 
         self.dw_builder = dw_builder
 
@@ -349,10 +431,13 @@ class _PipelineStageBase(ABC):
     def _get_recv_ops(
         self,
         recv_infos: tuple[_RecvInfo, ...],
+        group: dist.ProcessGroup | None,
     ) -> list[dist.P2POp]:
         """
         Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
-        Returns a list of ops that correspond to the recv infos.
+        Returns a list of ops that correspond to the recv infos. ``group`` is the
+        direction-specific communicator (downstream vs upstream); it equals
+        ``self.group`` unless per-direction P2P is enabled.
         """
         ops: list[dist.P2POp] = []
         for info in recv_infos:
@@ -361,14 +446,14 @@ class _PipelineStageBase(ABC):
                 continue
             # Skip entries with None buffer (None gradients)
             if info.buffer is None:
-                assert info.tensor_meta is None  # noqa: S101
+                if info.tensor_meta is not None:
+                    raise AssertionError("expected info.tensor_meta to be None")
                 continue
             # At this point, source and buffer are guaranteed non-None
-            assert info.source is not None  # noqa: S101
+            if info.source is None:
+                raise AssertionError("expected info.source to be not None")
             peer_global_rank = self._resolve_peer_global_rank(info.source)
-            ops.append(
-                dist.P2POp(dist.irecv, info.buffer, peer_global_rank, self.group)
-            )
+            ops.append(dist.P2POp(dist.irecv, info.buffer, peer_global_rank, group))
 
         return ops
 
@@ -467,7 +552,7 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
-        return self._get_recv_ops(recv_infos)
+        return self._get_recv_ops(recv_infos, self._downstream_group)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -478,7 +563,7 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
-        return self._get_recv_ops(recv_infos)
+        return self._get_recv_ops(recv_infos, self._upstream_group)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -504,7 +589,12 @@ class _PipelineStageBase(ABC):
                 )
                 peer_global_rank = self._resolve_peer_global_rank(dst)
                 ops.append(
-                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                    dist.P2POp(
+                        dist.isend,
+                        send_tensor,
+                        peer_global_rank,
+                        self._downstream_group,
+                    )
                 )
 
         return ops
@@ -584,7 +674,9 @@ class _PipelineStageBase(ABC):
                 )
                 peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
                 ops.append(
-                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                    dist.P2POp(
+                        dist.isend, send_tensor, peer_global_rank, self._upstream_group
+                    )
                 )
             elif grad is None:
                 zero_grad = _make_tensor_from_meta(grad_meta, self.device).zero_()
@@ -1027,7 +1119,7 @@ class _PipelineStageBase(ABC):
                         "input", bwd_kwargs, last_backward=last_backward
                     )
 
-                # TODO: we dont need to save this, add to dw_runner?
+                # TODO: we don't need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
                     bwd_kwargs["input_values"],
                     param_groups,
@@ -1039,7 +1131,8 @@ class _PipelineStageBase(ABC):
         # Note: grads_input may contain gradients for both args and kwargs (from fwd_cache),
         # Kwargs are local to each stage and don't need gradient transmission.
         # Validate backward output (input gradients) for DTensor metadata
-        assert self._stage_meta.inputs is not None  # noqa: S101
+        if self._stage_meta.inputs is None:
+            raise AssertionError("expected self._stage_meta.inputs to be not None")
         num_fwd_args = len(self._stage_meta.inputs)
         if self._runtime_validate and not self.is_first:
             self._validate_stage_tensors(
@@ -1115,18 +1208,23 @@ class _PipelineStageBase(ABC):
         next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
         prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
 
-        recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
+        # Separate recv buffers per direction: with per-direction P2P the
+        # downstream and upstream recvs run concurrently on different
+        # communicators/streams, so they must not share a buffer (concurrent
+        # writes = data race). The send buffer is only read, so it can be shared.
+        downstream_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
+        upstream_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
         send_tensor = torch.tensor(
             self.stage_index, device=self.device, dtype=torch.float32
         )
-        # forward
+        # downstream traffic (r -> r+1: forward activations) -> downstream comm
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
-                    recv_tensor,
+                    downstream_recv_tensor,
                     group_peer=prev_stage_peer_rank,
-                    group=self.group,
+                    group=self._downstream_group,
                 )
             )
         if not self.is_last:
@@ -1135,27 +1233,27 @@ class _PipelineStageBase(ABC):
                     dist.isend,
                     send_tensor,
                     group_peer=next_stage_peer_rank,
-                    group=self.group,
+                    group=self._downstream_group,
                 )
             )
 
-        # backward
+        # upstream traffic (r -> r-1: backward gradients) -> upstream comm
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
                     group_peer=prev_stage_peer_rank,
-                    group=self.group,
+                    group=self._upstream_group,
                 )
             )
         if not self.is_last:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
-                    recv_tensor,
+                    upstream_recv_tensor,
                     group_peer=next_stage_peer_rank,
-                    group=self.group,
+                    group=self._upstream_group,
                 )
             )
 
@@ -1258,7 +1356,7 @@ class _PipelineStage(_PipelineStageBase):
         # do not support to() method. One needs to do an in-place tensor swap in
         # that case.
         has_meta_param = any(
-            isinstance(p, FakeTensor) or p.is_meta for p in self.submod.parameters()
+            is_fake_tensor(p) or p.is_meta for p in self.submod.parameters()
         )
         if has_meta_param:
             logger.debug("%s Found meta parameters!", self.log_prefix)
@@ -1410,11 +1508,12 @@ class _PipelineStage(_PipelineStageBase):
             src_stage = self.get_stage_index_of_submod(arg_node.name)
 
             # Create metadata directly with correct requires_grad.
+            # Guard for non-float tensors.
             tensor_meta = _TensorMeta(
                 shape=example_value.shape,
                 stride=example_value.stride(),
                 dtype=example_value.dtype,
-                requires_grad=self.has_backward,
+                requires_grad=self.has_backward and example_value.is_floating_point(),
             )
 
             logger.debug(
@@ -1425,7 +1524,7 @@ class _PipelineStage(_PipelineStageBase):
                 tensor_meta.dtype,
             )
             buffer = _make_tensor_from_meta(tensor_meta, self.device)
-            if self.has_backward:
+            if self.has_backward and example_value.is_floating_point():
                 buffer.requires_grad_(True)
 
             return _RecvInfo(
@@ -1516,7 +1615,7 @@ class _PipelineStage(_PipelineStageBase):
                     shape=val.shape,
                     stride=val.stride(),
                     dtype=val.dtype,
-                    requires_grad=self.has_backward,
+                    requires_grad=self.has_backward and val.is_floating_point(),
                 )
             )
         self._stage_meta.outputs = tuple(output_metas)
@@ -1686,6 +1785,9 @@ class PipelineStage(_PipelineStageBase):
         self._fwd_outputs_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
         self._fwd_inputs_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
         self._fwd_kwargs_tensors_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
+        self._metadata_inference_buffer_backup: (
+            list[tuple[torch.Tensor, torch.Tensor]] | None
+        ) = None
 
         # Validate and normalize args to tuples
         inputs = validate_and_normalize_to_tuple(input_args)
@@ -1773,7 +1875,8 @@ class PipelineStage(_PipelineStageBase):
         if self.is_first:
             acc = my_vote_t
         elif self._is_same_rank(self.stage_index - 1):
-            assert received_acc is not None  # noqa: S101
+            if received_acc is None:
+                raise AssertionError("expected received_acc to be not None")
             acc = received_acc * my_vote_t
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index - 1)
@@ -1804,7 +1907,8 @@ class PipelineStage(_PipelineStageBase):
             The global vote result tensor for this stage.
         """
         if self.is_last or self._is_same_rank(self.stage_index + 1):
-            assert received_result is not None  # noqa: S101
+            if received_result is None:
+                raise AssertionError("expected received_result to be not None")
             result = received_result
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index + 1)
@@ -1879,6 +1983,26 @@ class PipelineStage(_PipelineStageBase):
             )
         return local_ones
 
+    def _pre_metadata_inference_backup(self) -> None:
+        """Back up state that dynamic metadata inference must not publish.
+
+        Dynamic metadata inference executes representative real forwards and
+        backwards before the first runtime microbatch. Those executions are
+        allowed to observe module buffers, but they must not publish training
+        state updates such as running counters or routing statistics.
+        """
+        if self._inference_mode != InferenceMode.DYNAMIC:
+            return
+        if self._metadata_inference_buffer_backup is not None:
+            raise RuntimeError(
+                "Metadata inference buffer backup already exists. "
+                "Run _post_metadata_inference_cleanup before backing up again."
+            )
+        self._metadata_inference_buffer_backup = [
+            (buffer, buffer.detach().clone())
+            for _, buffer in self.submod.named_buffers(remove_duplicate=False)
+        ]
+
     def _forward_metadata_inference(
         self,
         args: tuple[torch.Tensor, ...] | _StageForwardMeta | None,
@@ -1907,7 +2031,8 @@ class PipelineStage(_PipelineStageBase):
                     f"got {type(args).__name__}."
                 )
             tensor_args = validate_and_normalize_to_tuple(args)
-            assert tensor_args is not None  # noqa: S101
+            if tensor_args is None:
+                raise AssertionError("expected tensor_args to be not None")
             self._stage_meta.inputs = extract_tensor_metas(tensor_args)
             inference_args = tuple(self._to_tensor(a) for a in tensor_args)
         elif self._is_same_rank(self.stage_index - 1):
@@ -2108,9 +2233,19 @@ class PipelineStage(_PipelineStageBase):
             return None
 
     def _post_metadata_inference_cleanup(self) -> None:
-        """Clean up FSDP side effects (unsharded params, stale grads, stored
-        tensors) after metadata inference with real tensors.
+        """Restore state and clean up side effects from metadata inference.
+
+        Buffer restore is intentionally delayed until after both forward and
+        backward metadata inference. Restoring immediately after forward can
+        bump autograd version counters for buffers saved by the forward graph.
         """
+        buffer_backup = self._metadata_inference_buffer_backup
+        if buffer_backup is not None:
+            with torch.no_grad():
+                for buffer, saved_buffer in buffer_backup:
+                    buffer.copy_(saved_buffer)
+            self._metadata_inference_buffer_backup = None
+
         # Clear stored inference tensors (frees autograd graph + activations)
         self._fwd_outputs_for_bwd_meta = None
         self._fwd_inputs_for_bwd_meta = None

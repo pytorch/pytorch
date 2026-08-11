@@ -77,7 +77,7 @@ class RendezvousStoreInfo:
     ) -> "RendezvousStoreInfo":
         """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
 
-        If master_addr/master_port is knowns (useful when sharing existing tcp store server) use the constructor.
+        If master_addr/master_port is known (useful when sharing existing tcp store server) use the constructor.
 
         Args:
             rank: rank of the current node

@@ -201,13 +201,15 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
   auto itemsize = self.dtype().itemsize();
   auto storage_offset = self.storage_offset();
   auto new_size_bytes = at::detail::computeStorageNbytesContiguous(size, itemsize, storage_offset);
+  auto mutation_storage_nbytes =
+      at::detail::computeStorageNbytesContiguous(size, itemsize);
   auto needs_resize_storage = new_size_bytes > self.storage().nbytes();
 
   if (needs_resize_storage) {
     // If resize_() actually increases the size of the storage, then we need to tell FunctionalTensorWrapper about it.
     // See Note[resize_() in functionalization pass]
     auto func_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-    func_impl->maybe_replace_storage(tmp_output);
+    func_impl->maybe_replace_storage(tmp_output, mutation_storage_nbytes);
     // See the note - we're guaranteed at this point that "self" is *not* a view (and has no outstanding views)
     // So we don't need to treat the output of resize as view tensor.
     return self;

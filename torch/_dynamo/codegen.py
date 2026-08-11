@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, Union
 
 import torch.nn
+from torch._library.opaque_object import is_opaque_constant_type
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils
@@ -46,8 +47,9 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
-from .variables.script_object import TorchScriptObjectVariable
+from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -304,7 +306,16 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
+            # Recompute from the operands at runtime instead of burning in the value
+            self.uses[value] += 1
+            self.call_reconstruct(value)
+            if allow_cache and value in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(value)
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -349,7 +360,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
@@ -368,6 +379,23 @@ class PyCodegen:
 
                 self.add_push_null(gen_fn)
                 output.extend(create_call_function(0, False))
+            elif isinstance(value, CustomClassObjectVariable):
+                try:
+                    py_value = value.as_python_constant()
+                except NotImplementedError:
+                    py_value = None
+
+                if is_opaque_constant_type(type(py_value)):
+                    self.add_push_null(
+                        lambda: self.load_import_from(
+                            "torch._library.fake_class_registry",
+                            "maybe_unwrap_fake_script_object",
+                        )
+                    )
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
+                    output.extend(create_call_function(1, False))
+                else:
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
             else:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
         elif isinstance(value, NNModuleVariable):
@@ -425,13 +453,6 @@ class PyCodegen:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
-
-    def clear_tempvars(self) -> None:
-        for key, var in list(self.tempvars.items()):
-            if var is not None:
-                self._output.append(self.create_delete(var))
-            del self.tempvars[key]
-        self.top_of_stack = None
 
     def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
@@ -521,6 +542,19 @@ class PyCodegen:
 
     def call_method(self, nargs: int) -> None:
         self.extend_output(create_call_method(nargs))
+
+    def create_list_append(self) -> list[Instruction]:
+        # Append TOS to the list at TOS-1, leaving the list on the stack
+        # (same stack effect as LIST_APPEND with arg=1).
+        #
+        # The bare LIST_APPEND opcode does not lock the list and so requires
+        # the target be uniquely owned (refcnt == 1) on free-threaded builds.
+        # Dynamo can't enforce this, so instead use LIST_EXTEND, which does
+        # lock
+        return [
+            create_instruction("BUILD_LIST", arg=1),
+            create_instruction("LIST_EXTEND", arg=1),
+        ]
 
     def create_load_attr(self, name: str) -> Instruction:
         if name not in self.code_options["co_names"]:
@@ -742,7 +776,6 @@ class PyCodegen:
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
-        self.clear_tempvars()
         self.add_pycode(
             f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
         )

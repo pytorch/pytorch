@@ -579,9 +579,14 @@ def do_auto_functionalize(
 
         # We only handle Tensor or List[Tensor] here for now.
         def sync_update(o, orig_arg):
+            mutation_target_is_view = not orig_arg.is_base_tensor()
+            if mutation_target_is_view:
+                ctx.record_data_mutation_range(orig_arg)
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
+            if mutation_target_is_view:
+                ctx.mark_data_mutation_carrier(orig_arg)
 
         orig_arg = normalized_kwargs[name]
 
@@ -619,7 +624,17 @@ class FunctionalCallableWithEpilogue:
 
     def __call__(self, *args, **kwargs):
         # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
-        functionalized = torch.func.functionalize(self.orig_callable)
+        # Python functionalization so mutable custom ops reach auto_functionalized_v2.
+        from torch._subclasses.functional_tensor import (
+            dispatch_functionalize,
+            FunctionalTensorMode,
+        )
+
+        functionalized = dispatch_functionalize(
+            self.orig_callable,
+            FunctionalTensorMode(),
+            propagate_input_mutations=True,
+        )
         if self._boxed_call:
             # Not all callers respect _boxed_call (e.g. reenter_make_fx
             # always calls f(*args)). Detect which convention was used.
@@ -736,9 +751,14 @@ def _do_auto_functionalize_v2_for_out_operator(
     # tuple for multiple.
     results = unwrapped_outs if isinstance(unwrapped_outs, tuple) else (unwrapped_outs,)
     for orig_arg, result in zip(out_arg_originals, results, strict=True):
+        mutation_target_is_view = not orig_arg.is_base_tensor()
+        if mutation_target_is_view:
+            ctx.record_data_mutation_range(orig_arg)
         ctx.replace(orig_arg, result)
         ctx.commit_update(orig_arg)
         ctx.sync(orig_arg)
+        if mutation_target_is_view:
+            ctx.mark_data_mutation_carrier(orig_arg)
 
     return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
 
@@ -759,6 +779,9 @@ def _do_auto_functionalize_v2_for_inplace_operator(
 
     self_arg_name = mutable_args_names[0]
     self_arg = normalized_kwargs[self_arg_name]
+    mutation_target_is_view = not self_arg.is_base_tensor()
+    if mutation_target_is_view:
+        ctx.record_data_mutation_range(self_arg)
 
     # self is both read and written; pass its base for clone analysis
     base = self_arg if get_base(self_arg) is None else get_base(self_arg)
@@ -787,6 +810,8 @@ def _do_auto_functionalize_v2_for_inplace_operator(
     ctx.replace(base, unwrapped_mutated_base)
     ctx.commit_update(base)
     ctx.sync(base)
+    if mutation_target_is_view:
+        ctx.mark_data_mutation_carrier(base)
 
     return ctx.wrap_tensors(unwrapped_result)  # type: ignore[arg-type]
 
@@ -799,17 +824,22 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
 ) -> Any:
     """Handle functionalization for generic mutable operators via the
     auto_functionalized_v2 HOP."""
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
 
     # A list of all bases of mutable args without duplication
     all_bases: list[Any] = []
     all_bases_addresses: list[int] = []
+    bases_with_mutated_views: set[int] = set()
 
     # Map arg_name to the index of its base in all_bases.
     arg_to_base_index: dict[str, Any] = {}
 
     def update_dict(tensor, arg_name, index=None):
         base = tensor if get_base(tensor) is None else get_base(tensor)
+        if not tensor.is_base_tensor():
+            bases_with_mutated_views.add(base._cdata)
 
         def set_result(base_index):
             if index is None:
@@ -828,6 +858,10 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
         arg = normalized_kwargs[arg_name]
         if arg is None:
             continue
+
+        for tensor in pytree.tree_leaves(arg):
+            if isinstance(tensor, FunctionalTensor) and not tensor.is_base_tensor():
+                ctx.record_data_mutation_range(tensor)
 
         if isinstance(arg, list):
             arg_to_base_index[arg_name] = {}
@@ -925,6 +959,8 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
+            if orig_arg._cdata in bases_with_mutated_views:
+                ctx.mark_data_mutation_carrier(orig_arg)
 
         if isinstance(unwrapped_out, torch.Tensor):
             sync_update(unwrapped_out, orig_arg)
@@ -1151,7 +1187,7 @@ def auto_functionalized_v2_proxy(
         # Below code materializes the callable inputs to the hop as graph modules.
         # kwargs may contain general callables, that are not proxable e.g. FunctionWithNoFreeVars
         # this could happen when we auto_functionalize the backward of the hop,
-        # where backward fn is a callablle that wraps forward graph module.
+        # where backward fn is a callable that wraps forward graph module.
         # This function materialize the callable args according to the schema of the hop.
 
         # We cannot materialize the callables in kwargs directly because the inputs to callable
