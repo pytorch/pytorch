@@ -9,16 +9,23 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+)
 
 
 if dist.is_available():
     from torch.distributed._functional_collectives import (
+        _remapped_batch_p2p_ops,
         all_gather_single,
         all_to_all_single_autograd,
+        traceable_collective_remaps,
         wait_tensor,
     )
     from torch.distributed.device_mesh import init_device_mesh
+
+    traceable_collective_remaps[dist.batch_isend_irecv] = _remapped_batch_p2p_ops
 
 
 def normalize_graph(gm):
@@ -27,6 +34,8 @@ def normalize_graph(gm):
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributed(DynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Use FakeProcessGroup to run tests on a single process
@@ -232,6 +241,8 @@ instantiate_parametrized_tests(TestFakeDistributed)
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2P(DynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=2)
@@ -446,6 +457,8 @@ instantiate_parametrized_tests(TestFakeDistributedP2P)
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2PSubgroup(DynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Regression test: on a sub-group, the functional P2P helpers must pass a
     # GROUP-LOCAL peer rank to the _c10d_functional ops (which, like the eager
     # ProcessGroup send/recv path, expect a group-local rank). Previously a
