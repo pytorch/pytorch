@@ -86,6 +86,64 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         aot_result = aot_mod(*args)
         self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
 
+    def test_LSTM_compile_training_cpu(self):
+        # https://github.com/pytorch/pytorch/issues/158007
+        # torch.compile with nn.LSTM must work end-to-end including backward.
+        # The MKLDNN path on CPU produces a workspace tensor that must survive
+        # AOTAutograd's no_grad forward partition.
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=10, hidden_size=20, num_layers=2, batch_first=True
+                )
+                self.fc = torch.nn.Linear(20, 5)
+
+            def forward(self, x):
+                output, (hn, cn) = self.lstm(x)
+                return self.fc(output[:, -1, :])
+
+        mod = LSTMModel()
+        x = torch.randn(4, 8, 10)
+
+        compiled = torch.compile(mod, backend="inductor")
+        compiled_result = compiled(x)
+        compiled_result.sum().backward()
+
+        torch._dynamo.reset()
+        eager_result = mod(x)
+        self.assertEqual(compiled_result.shape, eager_result.shape)
+        self.assertIsNotNone(mod.lstm.weight_ih_l0.grad)
+
+    def test_LSTM_no_graph_breaks(self):
+        # allow_rnn=True should produce zero graph breaks for LSTM.
+        mod = torch.nn.LSTM(
+            input_size=10, hidden_size=20, num_layers=1, batch_first=True
+        )
+        mod.eval()
+        x = torch.randn(2, 5, 10)
+
+        explanation = torch._dynamo.explain(mod)(x)
+        self.assertEqual(explanation.graph_break_count, 0)
+
+    def test_flatten_parameters_no_graph_break(self):
+        # flatten_parameters() must not cause a graph break during compilation.
+        class LSTMWithFlatten(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(10, 20, batch_first=True)
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                return self.lstm(x)
+
+        mod = LSTMWithFlatten()
+        mod.eval()
+        x = torch.randn(2, 5, 10)
+
+        explanation = torch._dynamo.explain(mod)(x)
+        self.assertEqual(explanation.graph_break_count, 0)
+
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301
         def fn(param, y):
