@@ -78,6 +78,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import is_symbolic
 from torch.library import _scoped_library
 from torch.nn import functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
@@ -8910,6 +8911,438 @@ for dtype in (torch.int32, torch.int64):
             self.assertEqual(
                 out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
             )
+
+    @skip_if_gpu_halide
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_remove_no_ops_expanded_zero(self):
+        from torch._inductor.fx_passes.joint_graph import constant_fold_uniform_value
+
+        get_attr_zero = torch.tensor([0.0], device=self.device)
+
+        def add_expanded_zero(x):
+            zero = torch.full((1, x.shape[1]), 0.0, dtype=x.dtype, device=x.device)
+            return x + zero.expand(x.shape)
+
+        def add_get_attr_expanded_zero(x):
+            return x + get_attr_zero.expand_as(x)
+
+        def add_shared_expanded_zero(x):
+            zero = torch.full((1, x.shape[1]), 0.0, dtype=x.dtype, device=x.device)
+            expanded = zero.expand(x.shape)
+            expanded_again = zero.expand(x.shape)
+            return x + expanded + expanded_again
+
+        def expanded_zero_output(x):
+            zero = torch.full((1, x.shape[1]), 0.0, dtype=x.dtype, device=x.device)
+            return zero.expand(x.shape)
+
+        def dynamic_expanded_zero_output(x):
+            zero = torch.full(
+                (1, 1, x.shape[-2], x.shape[-1]),
+                0.0,
+                dtype=x.dtype,
+                device=x.device,
+            )
+            return zero.expand(x.shape)
+
+        def dynamic_internal_as_strided_zero(x):
+            zero = torch.full(
+                (50 * x.shape[0],),
+                0.0,
+                dtype=x.dtype,
+                device=x.device,
+            )
+            zero_view = torch.as_strided(
+                zero,
+                (x.shape[0], 2),
+                (50, 1),
+            )
+            return torch.cat((x, zero_view), dim=1)
+
+        def oversized_as_strided_zero_output(x):
+            zero = torch.full((100,), 0.0, dtype=x.dtype, device=x.device)
+            return torch.as_strided(zero, (2, 2), (50, 1))
+
+        def same_device_put_sliced_zero_output(x):
+            zero = torch.full((100,), 0.0, dtype=x.dtype, device=x.device)
+            return torch.ops.prims.device_put.default(zero[10:14], x.device)
+
+        def independent_transposed_zero_outputs(x):
+            first = torch.full((3, 4), 0.0, dtype=x.dtype, device=x.device).t()
+            second = torch.full((3, 4), 0.0, dtype=x.dtype, device=x.device).t()
+            return x.sin(), first, second
+
+        def pinned_transposed_zero_output(x):
+            return torch.full(
+                (3, 4),
+                0.0,
+                dtype=x.dtype,
+                device=x.device,
+                pin_memory=True,
+            ).t()
+
+        x = torch.randn((2, 4), device=self.device)
+
+        for fn in (add_expanded_zero, add_shared_expanded_zero):
+            gm = make_fx(fn)(x)
+            constant_fold_uniform_value(gm)
+            gm.graph.lint()
+            self.assertFalse(
+                any(
+                    node.op == "call_function" and node.target is aten.add.Tensor
+                    for node in gm.graph.nodes
+                )
+            )
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out, source_codes = run_and_get_code(opt_fn, x)
+            self.assertEqual(out, fn(x))
+            if self.device == "cpu":
+                FileCheck().check_not("cpp_fused").run(source_codes[0])
+            else:
+                FileCheck().check_not("triton.jit").run(source_codes[0])
+
+        gm = make_fx(add_get_attr_expanded_zero)(x)
+        constant_fold_uniform_value(gm)
+        gm.graph.lint()
+        self.assertFalse(
+            any(
+                node.op == "call_function" and node.target is aten.add.Tensor
+                for node in gm.graph.nodes
+            )
+        )
+
+        for fn in (
+            expanded_zero_output,
+            oversized_as_strided_zero_output,
+            same_device_put_sliced_zero_output,
+        ):
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out, _ = run_and_get_code(opt_fn, x)
+            expected = fn(x)
+            self.assertEqual(out, expected)
+            self.assertEqual(out.stride(), expected.stride())
+            self.assertEqual(
+                out.untyped_storage().nbytes(), expected.untyped_storage().nbytes()
+            )
+
+        device_put_cases = [(same_device_put_sliced_zero_output, 10, 100)]
+        if self.device != "cpu" or torch.cuda.is_available():
+            target_device = torch.device("cpu" if self.device != "cpu" else "cuda")
+
+            def cross_device_put_sliced_zero_output(x):
+                zero = torch.full((100,), 0.0, dtype=x.dtype, device=x.device)
+                return torch.ops.prims.device_put.default(zero[10:14], target_device)
+
+            device_put_cases.append((cross_device_put_sliced_zero_output, 0, 4))
+
+            def cross_device_put_stepped_zero_output(x):
+                zero = torch.full((100,), 0.0, dtype=x.dtype, device=x.device)
+                return torch.ops.prims.device_put.default(zero[10:30:2], target_device)
+
+            device_put_cases.append((cross_device_put_stepped_zero_output, 0, 10))
+
+        for fn, expected_offset, expected_storage_numel in device_put_cases:
+            expected = fn(x)
+            gm = make_fx(fn)(x)
+            constant_fold_uniform_value(gm)
+            gm.graph.lint()
+            gm.recompile()
+            out = gm(x)
+            self.assertEqual(out, expected)
+            self.assertEqual(out.stride(), expected.stride())
+            self.assertEqual(out.storage_offset(), expected_offset)
+            self.assertEqual(
+                out.untyped_storage().nbytes(),
+                expected_storage_numel * out.element_size(),
+            )
+
+        alias_input = torch.randn((4, 3), device=self.device, requires_grad=True)
+        opt_fn = torch.compile(
+            independent_transposed_zero_outputs,
+            backend="inductor",
+            fullgraph=True,
+        )
+        _, first, second = opt_fn(alias_input)
+        self.assertFalse(torch._C._is_alias_of(first, second))
+        first.add_(1)
+        self.assertEqual(second, torch.zeros_like(second))
+
+        if self.device == "cpu" and torch.cuda.is_available():
+            opt_fn = torch.compile(
+                pinned_transposed_zero_output,
+                backend="inductor",
+                fullgraph=True,
+            )
+            out = opt_fn(x)
+            expected = pinned_transposed_zero_output(x)
+            self.assertTrue(out.is_pinned())
+            self.assertEqual(out.stride(), expected.stride())
+            self.assertEqual(
+                out.untyped_storage().nbytes(), expected.untyped_storage().nbytes()
+            )
+
+        opt_fn = torch.compile(
+            dynamic_expanded_zero_output,
+            backend="inductor",
+            fullgraph=True,
+            dynamic=True,
+        )
+        for shape in (
+            (2, 4, 16, 32),
+            (3, 2, 12, 24),
+            (0, 4, 16, 32),
+            (2, 0, 16, 32),
+        ):
+            x = torch.randn(shape, device=self.device)
+            out = opt_fn(x)
+            expected = dynamic_expanded_zero_output(x)
+            self.assertEqual(out, expected)
+            self.assertEqual(out.stride(), expected.stride())
+            self.assertEqual(
+                out.untyped_storage().nbytes(), expected.untyped_storage().nbytes()
+            )
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            opt_fn = torch.compile(
+                dynamic_internal_as_strided_zero,
+                backend="inductor",
+                fullgraph=True,
+                dynamic=True,
+            )
+            for shape in ((2, 2), (0, 2)):
+                x = torch.randn(shape, device=self.device)
+                self.assertEqual(opt_fn(x), dynamic_internal_as_strided_zero(x))
+
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_zero_bias_proof_preserves_values(self):
+        def mutated_bias(q, k, v):
+            bias = torch.full(
+                (1, 1, q.shape[-2], k.shape[-2]),
+                0.0,
+                dtype=q.dtype,
+                device=q.device,
+            )
+            bias[..., 0, :] = -torch.inf
+            bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        def dtype_view_bias(q, k, v):
+            bias = torch.full(
+                (q.shape[-2], k.shape[-2]),
+                -0.0,
+                dtype=torch.float32,
+                device=q.device,
+            )
+            bias = bias.view(torch.int32).to(q.dtype)
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        q = torch.randn((1, 2, 8, 16), device=self.device, dtype=torch.float16)
+        k = torch.randn((1, 2, 8, 16), device=self.device, dtype=torch.float16)
+        v = torch.randn((1, 2, 8, 16), device=self.device, dtype=torch.float16)
+
+        for fn in (mutated_bias, dtype_view_bias):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+                self.assertEqual(opt_fn(q, k, v), fn(q, k, v), atol=2e-4, rtol=1e-2)
+
+    @requires_gpu()
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_FLASH_ATTENTION and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+        "Does not support flash and efficient attention",
+    )
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_expanded_zero_bias_uses_flash(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn(q, k, v):
+            with sdpa_kernel(
+                [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION],
+                set_priority=True,
+            ):
+                bias = torch.full(
+                    (1, 1, q.shape[-2], k.shape[-2]),
+                    0.0,
+                    dtype=q.dtype,
+                    device=q.device,
+                )
+                bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+                return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        q = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+
+        bias = torch.zeros((2, 4, 16, 16), device=self.device, dtype=q.dtype)
+        flash_params = torch.backends.cuda.SDPAParams(q, k, v, None, 0.0, False, False)
+        efficient_params = torch.backends.cuda.SDPAParams(
+            q, k, v, bias, 0.0, False, False
+        )
+        if not (
+            torch.backends.cuda.can_use_flash_attention(flash_params)
+            and torch.backends.cuda.can_use_efficient_attention(efficient_params)
+        ):
+            raise unittest.SkipTest("SDPA inputs do not support both fused backends")
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        out, source_codes = run_and_get_code(opt_fn, q, k, v)
+        self.assertEqual(out, fn(q, k, v), atol=2e-4, rtol=1e-2)
+
+        source_code = "\n".join(source_codes)
+        self.assertIn(
+            "torch.ops.aten._scaled_dot_product_flash_attention.default", source_code
+        )
+        self.assertNotIn(
+            "torch.ops.aten._scaled_dot_product_efficient_attention.default",
+            source_code,
+        )
+
+    @requires_gpu()
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_FLASH_ATTENTION and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+        "Does not support flash and efficient attention",
+    )
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_expanded_zero_bias_preserves_backend_policy(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def body(q, k, v):
+            bias = torch.full(
+                (1, 1, q.shape[-2], k.shape[-2]),
+                0.0,
+                dtype=q.dtype,
+                device=q.device,
+            )
+            bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        def efficient_only(q, k, v):
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                return body(q, k, v)
+
+        def efficient_first(q, k, v):
+            with sdpa_kernel(
+                [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION],
+                set_priority=True,
+            ):
+                return body(q, k, v)
+
+        q = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        bias = torch.zeros((2, 4, 16, 16), device=self.device, dtype=q.dtype)
+        params = torch.backends.cuda.SDPAParams(q, k, v, bias, 0.0, False, False)
+        if not torch.backends.cuda.can_use_efficient_attention(params):
+            raise unittest.SkipTest("SDPA inputs do not support efficient attention")
+
+        for fn in (efficient_only, efficient_first):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+                out, source_codes = run_and_get_code(opt_fn, q, k, v)
+                self.assertEqual(out, fn(q, k, v), atol=2e-4, rtol=1e-2)
+
+                source_code = "\n".join(source_codes)
+                self.assertIn(
+                    "torch.ops.aten._scaled_dot_product_efficient_attention.default",
+                    source_code,
+                )
+                self.assertNotIn(
+                    "torch.ops.aten._scaled_dot_product_flash_attention.default",
+                    source_code,
+                )
+
+    @requires_gpu()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support flash attention",
+    )
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_expanded_zero_bias_flash_head_dim_padding(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn(q, k, v):
+            with sdpa_kernel(
+                [
+                    SDPBackend.FLASH_ATTENTION,
+                    SDPBackend.EFFICIENT_ATTENTION,
+                    SDPBackend.MATH,
+                ],
+                set_priority=True,
+            ):
+                bias = torch.full(
+                    (1, 1, q.shape[-2], k.shape[-2]),
+                    0.0,
+                    dtype=q.dtype,
+                    device=q.device,
+                )
+                bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+                return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        q = torch.randn((2, 4, 16, 100), device=self.device, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 100), device=self.device, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 100), device=self.device, dtype=torch.float16)
+        params = torch.backends.cuda.SDPAParams(q, k, v, None, 0.0, False, False)
+        if not torch.backends.cuda.can_use_flash_attention(params):
+            raise unittest.SkipTest("SDPA inputs do not support flash attention")
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        out, source_codes = run_and_get_code(opt_fn, q, k, v)
+        self.assertEqual(out, fn(q, k, v), atol=2e-4, rtol=1e-2)
+        self.assertIn(
+            "torch.ops.aten._scaled_dot_product_flash_attention.default",
+            "\n".join(source_codes),
+        )
+
+    @requires_gpu()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem efficient attention",
+    )
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_expanded_zero_bias_nonzero_dropout_stays_efficient(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn(q, k, v):
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                bias = torch.full(
+                    (1, 1, q.shape[-2], k.shape[-2]),
+                    0.0,
+                    dtype=q.dtype,
+                    device=q.device,
+                )
+                bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=bias, dropout_p=0.5
+                )
+
+        q = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        bias = torch.zeros((2, 4, 16, 16), device=self.device, dtype=q.dtype)
+        params = torch.backends.cuda.SDPAParams(q, k, v, bias, 0.5, False, False)
+        if not torch.backends.cuda.can_use_efficient_attention(params):
+            raise unittest.SkipTest("SDPA inputs do not support efficient attention")
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        torch.manual_seed(1234)
+        expected = fn(q, k, v)
+        torch.manual_seed(1234)
+        out, source_codes = run_and_get_code(opt_fn, q, k, v)
+        self.assertEqual(out, expected, atol=2e-4, rtol=1e-2)
+
+        source_code = "\n".join(source_codes)
+        self.assertIn(
+            "torch.ops.aten._scaled_dot_product_efficient_attention.default",
+            source_code,
+        )
+        self.assertNotIn(
+            "torch.ops.aten._scaled_dot_product_flash_attention.default", source_code
+        )
 
     def test_remove_noop_copy(self):
         def fn(x, y):

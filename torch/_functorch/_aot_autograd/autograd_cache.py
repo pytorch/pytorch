@@ -551,6 +551,21 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             if torch.is_autocast_enabled(device_type):
                 self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
+        # Composite SDPA selects and decomposes a backend while AOTAutograd is
+        # tracing.  Preserve every global selector input that can change the
+        # resulting graph, including the relative order of enabled backends.
+        self.sdpa_runtime_state = {
+            "priority_order": tuple(torch._C._get_sdp_priority_order()),
+            "cudnn": torch._C._get_cudnn_sdp_enabled(),
+            "flash": torch._C._get_flash_sdp_enabled(),
+            "fa3": torch._C._get_fa3_sdp_enabled(),
+            "mem_efficient": torch._C._get_mem_efficient_sdp_enabled(),
+            "math": torch._C._get_math_sdp_enabled(),
+            "math_allow_fp16_bf16_reduction": torch._C._get_math_sdp_allow_fp16_bf16_reduction(),
+            "overrideable": torch._C._get_overrideable_sdp_enabled(),
+            "rocm_fa": str(torch._C._get_rocm_fa_preferred_backend()),
+            "deterministic_warn_only": torch.is_deterministic_algorithms_warn_only_enabled(),
+        }
         self.autograd_config = config.save_config()
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)

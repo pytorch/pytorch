@@ -53,7 +53,13 @@ from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.nn import functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM80OrLater,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -3345,6 +3351,77 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(out_fp16_2.dtype, torch.float16)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @requires_triton()
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_FLASH_ATTENTION and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+        "requires flash and efficient attention",
+    )
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "compile_threads": 1,
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_sdpa_kernel_cache_distinguishes_policy(self):
+        def fn(q, k, v):
+            bias = torch.full(
+                (1, 1, q.shape[-2], k.shape[-2]),
+                0.0,
+                dtype=q.dtype,
+                device=q.device,
+            )
+            bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        q = torch.randn((2, 4, 16, 64), device=GPU_TYPE, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=GPU_TYPE, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.zeros((2, 4, 16, 16), device=GPU_TYPE, dtype=q.dtype)
+        flash_params = torch.backends.cuda.SDPAParams(q, k, v, None, 0.0, False, False)
+        efficient_params = torch.backends.cuda.SDPAParams(
+            q, k, v, bias, 0.0, False, False
+        )
+        if not (
+            torch.backends.cuda.can_use_flash_attention(flash_params)
+            and torch.backends.cuda.can_use_efficient_attention(efficient_params)
+        ):
+            raise unittest.SkipTest("SDPA inputs do not support both fused backends")
+
+        def compile_with_policy(backends):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            with sdpa_kernel(backends, set_priority=True):
+                output = compiled(q, k, v)
+            stats = counters["aot_autograd"]
+            return output, (
+                stats["autograd_cache_miss"],
+                stats["autograd_cache_hit"],
+            )
+
+        flash_first = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        efficient_first = [
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+        ]
+
+        with fresh_cache():
+            flash_out, stats = compile_with_policy(flash_first)
+            self.assertEqual(stats, (1, 0))
+
+            efficient_out, stats = compile_with_policy(efficient_first)
+            self.assertEqual(stats, (1, 0))
+            self.assertEqual(flash_out, efficient_out, atol=2e-4, rtol=1e-2)
+
+            _, stats = compile_with_policy(SDPBackend.EFFICIENT_ATTENTION)
+            self.assertEqual(stats, (1, 0))
+
+            _, stats = compile_with_policy(flash_first)
+            self.assertEqual(stats, (0, 1))
 
     @unittest.skipIf(not HAS_GPU, "requires accelerator")
     @functorch_config.patch({"enable_autograd_cache": True})

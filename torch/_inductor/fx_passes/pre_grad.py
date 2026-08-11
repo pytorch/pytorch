@@ -59,6 +59,149 @@ fuse_split_linear_add_pass = PatternMatcherPass(
 fuse_chunk_squeeze_cat_pass = PatternMatcherPass(
     pass_name="fuse_chunk_squeeze_cat_pass",
 )
+
+
+_UNIFORM_VALUE_PRESERVING_METHODS = frozenset(
+    OrderedSet(
+        [
+            "clone",
+            "contiguous",
+            "expand",
+            "expand_as",
+            "flatten",
+            "permute",
+            "reshape",
+            "squeeze",
+            "t",
+            "to",
+            "transpose",
+            "unsqueeze",
+        ]
+    )
+)
+
+
+def _is_uniform_zero_tensor(
+    node: object,
+    user: torch.fx.Node,
+    seen: OrderedSet[torch.fx.Node] | None = None,
+) -> bool:
+    if not isinstance(node, torch.fx.Node):
+        return False
+
+    if seen is None:
+        seen = OrderedSet()
+    if node in seen:
+        return False
+    seen.add(node)
+    if len(node.users) != 1 or user not in node.users:
+        # Before functionalization, another user can mutate this tensor or an
+        # alias.  A single-use provenance chain cannot be mutated out of band.
+        return False
+
+    if node.op == "call_method":
+        if node.target == "new_zeros":
+            return True
+        if node.target == "new_full":
+            fill_value = node.args[2] if len(node.args) > 2 else None
+            return isinstance(fill_value, (int, float)) and float(fill_value) == 0.0
+        if node.target in _UNIFORM_VALUE_PRESERVING_METHODS and node.args:
+            return _is_uniform_zero_tensor(node.args[0], node, seen)
+        return False
+
+    if node.op != "call_function":
+        return False
+
+    target = node.target
+    aten = torch.ops.aten
+    if target in (
+        torch.zeros,
+        torch.zeros_like,
+        aten.zeros.default,
+        aten.zeros_like.default,
+    ):
+        return True
+
+    if target in (
+        torch.full,
+        torch.full_like,
+        aten.full.default,
+        aten.full_like.default,
+    ):
+        fill_value = node.args[1] if len(node.args) > 1 else None
+        return isinstance(fill_value, (int, float)) and float(fill_value) == 0.0
+
+    value_preserving_packets = (
+        aten.alias,
+        aten.as_strided,
+        aten.clone,
+        aten.contiguous,
+        aten.expand,
+        aten.flatten,
+        aten.permute,
+        aten.reshape,
+        aten.squeeze,
+        aten.t,
+        aten.transpose,
+        aten.unsqueeze,
+    )
+    if (
+        isinstance(target, torch._ops.OpOverload)
+        and target.overloadpacket in value_preserving_packets
+        and node.args
+    ):
+        return _is_uniform_zero_tensor(node.args[0], node, seen)
+
+    return False
+
+
+def remove_zero_bias_from_scaled_dot_product_attention(
+    graph: torch.fx.Graph,
+) -> None:
+    """Remove a provably zero additive SDPA mask before backend selection."""
+    sdpa_targets = (
+        torch._C._nn.scaled_dot_product_attention,
+        torch.ops.aten.scaled_dot_product_attention.default,
+    )
+    for node in graph.nodes:
+        if node.op != "call_function" or node.target not in sdpa_targets:
+            continue
+
+        attn_mask = node.args[3] if len(node.args) > 3 else node.kwargs.get("attn_mask")
+        dropout_p = (
+            node.args[4] if len(node.args) > 4 else node.kwargs.get("dropout_p", 0.0)
+        )
+        is_causal = (
+            node.args[5] if len(node.args) > 5 else node.kwargs.get("is_causal", False)
+        )
+        if (
+            not isinstance(attn_mask, torch.fx.Node)
+            or type(dropout_p) not in (int, float)
+            or dropout_p != 0.0
+            or is_causal is not False
+            or not _is_uniform_zero_tensor(attn_mask, node)
+        ):
+            continue
+
+        mask_meta = attn_mask.meta.get("val", attn_mask.meta.get("example_value"))
+        if (
+            not isinstance(mask_meta, torch.Tensor)
+            or not mask_meta.dtype.is_floating_point
+            or mask_meta.requires_grad
+        ):
+            continue
+
+        if len(node.args) > 3:
+            args = list(node.args)
+            args[3] = None
+            node.args = tuple(args)
+        else:
+            kwargs = dict(node.kwargs)
+            kwargs["attn_mask"] = None
+            node.kwargs = kwargs
+        counters["inductor"]["remove_zero_bias_sdpa"] += 1
+
+
 remove_reshape_pass = PatternMatcherPass(
     pass_name="remove_reshape_pass",
 )
@@ -418,6 +561,10 @@ def pre_grad_passes(
             GraphTransformObserver(gm, "apply_gumbel_max_trick_pass").apply_graph_pass(
                 apply_gumbel_max_trick_pass.apply
             )
+
+        GraphTransformObserver(
+            gm, "remove_zero_bias_from_scaled_dot_product_attention"
+        ).apply_graph_pass(remove_zero_bias_from_scaled_dot_product_attention)
 
     for pre_grad_custom_pass in get_custom_graph_passes(config.pre_grad_custom_pass):
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(

@@ -16,11 +16,16 @@ from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
+from torch._prims_common import (
+    compute_required_storage_length,
+    is_non_overlapping_and_dense_or_false,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
     statically_known_true,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -304,6 +309,11 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
+        self.constant_storage_lengths: dict[torch.fx.Node, int | torch.SymInt] = {}
+        self.constant_storage_offsets: dict[
+            torch.fx.Node, int | torch.SymInt | None
+        ] = {}
+        self.constant_storage_pin_memory: dict[torch.fx.Node, bool] = {}
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
@@ -383,10 +393,126 @@ class UniformValueConstantFolder(ConstantFolder):
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         return True
 
+    def _is_view_node(self, node: torch.fx.Node) -> bool:
+        return isinstance(node.target, torch._ops.OpOverload) and (
+            node.target.overloadpacket in self.view_op_packets
+            or node.target.overloadpacket in self.indexing_op_packets
+        )
+
+    def _is_same_device_put(self, node: torch.fx.Node) -> bool:
+        if node.target is not prims.device_put.default:
+            return False
+
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            return False
+        source_val = source.meta.get("val")
+        output_val = node.meta.get("val")
+        return (
+            isinstance(source_val, torch.Tensor)
+            and isinstance(output_val, torch.Tensor)
+            and source_val.device == output_val.device
+        )
+
+    @staticmethod
+    def _symint_arg(value: Any) -> int | torch.SymInt | None:
+        if isinstance(value, torch.fx.Node):
+            value = value.meta.get("val")
+        return value if isinstance(value, (int, torch.SymInt)) else None
+
+    def _view_storage_offset(
+        self,
+        node: torch.fx.Node,
+        source_offset: int | torch.SymInt | None,
+    ) -> int | torch.SymInt | None:
+        if source_offset is None:
+            return None
+        if not isinstance(node.target, torch._ops.OpOverload):
+            raise AssertionError(f"expected OpOverload, got {type(node.target)}")
+
+        if node.target.overloadpacket is aten.as_strided:
+            storage_offset = (
+                node.args[3]
+                if len(node.args) > 3
+                else node.kwargs.get("storage_offset")
+            )
+            if storage_offset is None:
+                return source_offset
+            return self._symint_arg(storage_offset)
+
+        if node.target.overloadpacket is not aten.slice:
+            return source_offset
+
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            return None
+        source_val = source.meta.get("val")
+        if not isinstance(source_val, torch.Tensor):
+            return None
+
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim", 0)
+        start = node.args[2] if len(node.args) > 2 else node.kwargs.get("start")
+        if not isinstance(dim, int):
+            return None
+        if dim < 0:
+            dim += source_val.dim()
+        if not 0 <= dim < source_val.dim():
+            return None
+
+        start = self._symint_arg(start) if start is not None else 0
+        if start is None:
+            return None
+        dim_size = source_val.shape[dim]
+        if statically_known_true(start >= 0):
+            start = torch.sym_min(start, dim_size)
+        elif statically_known_true(start < 0):
+            start = torch.sym_max(start + dim_size, 0)
+        else:
+            return None
+        return source_offset + start * source_val.stride(dim)
+
+    def _alias_source_storage_metadata(
+        self, node: torch.fx.Node, tensor: torch.Tensor
+    ) -> tuple[int | torch.SymInt, int | torch.SymInt | None]:
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(f"expected fx.Node, got {type(source)}")
+
+        if source in self.constant_storage_lengths:
+            return (
+                self.constant_storage_lengths[source],
+                self.constant_storage_offsets[source],
+            )
+        # ConstantFolder intentionally never calls add_node_replacement for
+        # get_attr nodes, so initialize their storage metadata from the real
+        # single-element constant returned by _deduce_value.
+        if source.op != "get_attr":
+            raise AssertionError(f"missing storage metadata for {source.format_node()}")
+        return (
+            tensor.untyped_storage().nbytes() // tensor.element_size(),
+            tensor.storage_offset(),
+        )
+
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
         self.node_replacements_shapes[node] = node.meta["val"].shape
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
+        if self._is_view_node(node) or self._is_same_device_put(node):
+            storage_length, storage_offset = self._alias_source_storage_metadata(
+                node, tensor
+            )
+            self.constant_storage_lengths[node] = storage_length
+            self.constant_storage_offsets[node] = (
+                self._view_storage_offset(node, storage_offset)
+                if self._is_view_node(node)
+                else storage_offset
+            )
+        else:
+            self.constant_storage_lengths[node] = functools.reduce(
+                operator.mul, node.meta["val"].shape, 1
+            )
+            self.constant_storage_offsets[node] = 0
+        self.constant_storage_pin_memory[node] = tensor.is_pinned()
 
     def insert_placerholder_values(self, env: dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
@@ -417,6 +543,19 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # handle device_put op
         if node.target == prims.device_put.default:
+            source = node.args[0]
+            source_val = (
+                source.meta.get("val") if isinstance(source, torch.fx.Node) else None
+            )
+            if not self._is_same_device_put(node) and (
+                not isinstance(source_val, torch.Tensor)
+                or not is_non_overlapping_and_dense_or_false(source_val)
+            ):
+                # Cross-device Tensor.to() compacts layouts with holes or
+                # overlap, but device_put's fake metadata retains the input
+                # strides.  Leave those copies intact rather than reconstruct
+                # them from metadata that does not describe the eager output.
+                return self.unknown_value
             return super(ConstantFolder, self).run_node(node)
 
         # constructors ops
@@ -443,10 +582,7 @@ class UniformValueConstantFolder(ConstantFolder):
             return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
-        if hasattr(node.target, "overloadpacket") and (
-            node.target.overloadpacket in self.view_op_packets
-            or node.target.overloadpacket in self.indexing_op_packets
-        ):
+        if self._is_view_node(node):
             if not isinstance(node.args[0], torch.fx.Node):
                 raise AssertionError(f"expected fx.Node, got {type(node.args[0])}")
             return self.env[node.args[0]]
@@ -498,6 +634,13 @@ def _has_self_referential_shape(
     return False
 
 
+def _is_direct_graph_output(gm: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
+    for output_node in gm.graph.find_nodes(op="output"):  # type: ignore[operator, union-attr]
+        if node in pytree.tree_leaves(output_node.args):
+            return True
+    return False
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
     with torch.utils._python_dispatch._disable_current_modes():
@@ -531,16 +674,25 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         for node in cf.node_replacements:
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
+        def replace_symint(value: int | torch.SymInt) -> int | torch.fx.Node | None:
+            if isinstance(value, torch.SymInt):
+                return cf.symint_nodes.get(value)
+            return value
+
+        def replace_symints(
+            values: Sequence[int | torch.SymInt],
+        ) -> list[int | torch.fx.Node] | None:
+            replaced = [replace_symint(value) for value in values]
+            if any(value is None for value in replaced):
+                return None
+            return typing.cast(list[int | torch.fx.Node], replaced)
+
         for node, value in node_replacements.items():
-            # we don't have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
-            # hasn't shown up to be important yet
             if "val" not in node.meta:
                 # This can only happen in AOTI
                 continue
 
             fake_tensor = node.meta["val"]
-            if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
-                continue
 
             # TODO - not sure about lossy uint->python value->uint conversions
             if fake_tensor.dtype in (
@@ -551,7 +703,15 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 continue
 
-            if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
+            is_direct_graph_output = _is_direct_graph_output(gm, node)
+            is_contiguous = fake_tensor.is_contiguous(
+                memory_format=torch.contiguous_format
+            )
+            requires_as_strided = is_direct_graph_output or not is_contiguous
+            if (
+                constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1
+                and is_direct_graph_output
+            ):
                 continue
 
             with graph.inserting_after(node):
@@ -578,29 +738,103 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 ):
                     continue
 
-                shapes = [
-                    cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
-                    for s in node_replacements_shapes[node]
-                ]
+                shapes = replace_symints(node_replacements_shapes[node])
+                if shapes is None:
+                    continue
 
                 # Check if any shape depends on a symint that was computed from
                 # the node being replaced - this would create a cycle
                 if _has_self_referential_shape(shapes, node):
                     continue
 
+                dense_numel = functools.reduce(operator.mul, fake_tensor.shape, 1)
+                size_oblivious_symbol = (
+                    isinstance(dense_numel, torch.SymInt)
+                    and torch.fx.experimental._config.backed_size_oblivious
+                )
+                if requires_as_strided and (
+                    size_oblivious_symbol or not statically_known_true(dense_numel != 0)
+                ):
+                    # The required-storage formula can become negative if a
+                    # noncontiguous symbolic dimension is zero at runtime, and
+                    # an empty graph output's backing storage is observable.
+                    # Size-oblivious symbols retain positive SymPy assumptions,
+                    # so they need an explicit conservative check.
+                    continue
+
+                full_shapes = shapes
+                full_meta_val = None
+                view_meta_val = None
+                as_strided_args = None
+                if requires_as_strided:
+                    strides = replace_symints(fake_tensor.stride())
+                    tracked_storage_offset = cf.constant_storage_offsets[node]
+                    if tracked_storage_offset is None:
+                        continue
+                    storage_offset = replace_symint(tracked_storage_offset)
+                    if strides is None or storage_offset is None:
+                        continue
+
+                    required_storage_len = (
+                        cf.constant_storage_lengths[node]
+                        if is_direct_graph_output
+                        else compute_required_storage_length(
+                            fake_tensor.shape,
+                            fake_tensor.stride(),
+                            typing.cast(int, tracked_storage_offset),
+                        )
+                    )
+
+                    full_storage_len = replace_symint(required_storage_len)
+                    if full_storage_len is None:
+                        with graph.inserting_before(node):
+                            full_storage_len = graph.materialize_symint(
+                                required_storage_len
+                            )
+                    full_shapes = [full_storage_len]
+                    full_meta_shape = (required_storage_len,)
+
+                    full_meta_val = fake_tensor.new_empty(full_meta_shape)
+                    view_meta_val = torch.as_strided(
+                        full_meta_val,
+                        fake_tensor.shape,
+                        fake_tensor.stride(),
+                        tracked_storage_offset,
+                    )
+
+                    as_strided_args = (shapes, strides, storage_offset)
+
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
                     aten.full.default,
-                    args=(shapes, value),
+                    args=(full_shapes, value),
                     kwargs={
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
                         "device": fake_tensor.device,
-                        "pin_memory": node.kwargs.get("pin_memory", False),
+                        "pin_memory": cf.constant_storage_pin_memory[node],
                     },
                 )
 
+                if as_strided_args is not None:
+                    if full_meta_val is None or view_meta_val is None:
+                        continue
+                    new_node.meta["val"] = full_meta_val
+                    new_node.meta["tensor_meta"] = _extract_tensor_metadata(
+                        full_meta_val
+                    )
+                    with graph.inserting_after(new_node):
+                        new_node = graph.call_function(
+                            aten.as_strided.default,
+                            args=(new_node, *as_strided_args),
+                        )
+
                 new_node.meta.update(node.meta)
+                if view_meta_val is not None:
+                    new_node.meta["val"] = view_meta_val
+                    new_node.meta["tensor_meta"] = _extract_tensor_metadata(
+                        view_meta_val
+                    )
                 node.replace_all_uses_with(new_node)
                 graph.erase_node(node)
 
