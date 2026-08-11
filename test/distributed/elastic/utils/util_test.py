@@ -8,11 +8,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import datetime
+import socket
 from multiprocessing.pool import ThreadPool
 from unittest import mock
 
 import torch.distributed as dist
 import torch.distributed.elastic.utils.store as store_util
+from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -251,6 +253,21 @@ class StoreUtilTest(TestCase):
 
 
 class UtilTest(TestCase):
+    @mock.patch("torch.distributed.elastic.utils.api.socket.getaddrinfo")
+    @mock.patch("torch.distributed.elastic.utils.api.socket.socket")
+    def test_get_socket_with_port_continues_after_socket_creation_failure(
+        self, socket_mock, getaddrinfo_mock
+    ):
+        first_addr = (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 0))
+        second_addr = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))
+        getaddrinfo_mock.return_value = [first_addr, second_addr]
+        usable_socket = mock.Mock()
+        socket_mock.side_effect = [OSError("unsupported address family"), usable_socket]
+
+        self.assertIs(get_socket_with_port(), usable_socket)
+        usable_socket.bind.assert_called_once_with(("localhost", 0))
+        usable_socket.listen.assert_called_once_with(0)
+
     def test_get_logger_different(self):
         logger1 = get_logger("name1")
         logger2 = get_logger("name2")
