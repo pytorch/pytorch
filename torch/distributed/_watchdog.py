@@ -67,9 +67,8 @@ __all__ = [
 
 
 def _default_timeout_callback() -> None:
-    logger.error("Watchdog timeout -- dumping all thread stack traces and aborting")
+    logger.error("Watchdog timeout -- dumping all thread stack traces")
     faulthandler.dump_traceback()
-    os.abort()
 
 
 @dataclass
@@ -146,7 +145,7 @@ class _Watchdog:
             "TORCH_WATCHDOG_STUCK_ACTION", "log"
         ).lower()
         self._timeout_action = os.environ.get(
-            "TORCH_WATCHDOG_TIMEOUT_ACTION", "log"
+            "TORCH_WATCHDOG_TIMEOUT_ACTION", "abort"
         ).lower()
 
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
@@ -273,7 +272,7 @@ class _Watchdog:
         except Exception:
             logger.exception("Exception in %s timeout callback (id=%d)", kind, mid)
 
-        if self._timeout_action == "abort":
+        if callback is _default_timeout_callback and self._timeout_action == "abort":
             logger.error("Timeout action is 'abort', calling os.abort()")
             os.abort()
 
