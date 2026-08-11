@@ -157,6 +157,8 @@ def _nvgemm_source_fingerprint() -> str:
         / "kernel/vendored_templates/cutedsl/wrappers/dense_gemm_efc_kernel.py",
         inductor_dir
         / "kernel/vendored_templates/cutedsl/wrappers/dense_blockscaled_gemm_kernel.py",
+        inductor_dir / "codegen/cutedsl/cutedsl_op_overrides.py",
+        inductor_dir / "kernel/gemm_epilogue_codegen.py",
     )
     digest = hashlib.sha256()
     for source in sources:
@@ -781,7 +783,8 @@ def _update_reuse_args_tensors(
     runtime_reduce = args_kwargs.get("local_reduce") if args_kwargs else None
     for field, output in args.local_reduce.tensor_items():
         if output is not None:
-            assert runtime_reduce is not None  # noqa: S101
+            if runtime_reduce is None:
+                raise AssertionError("expected runtime local-reduction arguments")
             output._runtime_tensor = getattr(runtime_reduce, field)
     return True
 
@@ -849,6 +852,13 @@ def _nvgemm_run(
     swap_ab: bool = False,
 ):
     if swap_ab and len(input_tensors) >= 2:
+        import torch
+
+        reduction = variant_kwargs.get("local_reduce") if variant_kwargs else None
+        if isinstance(reduction, GemmReductionArguments) and reduction.enabled:
+            raise NotImplementedError(
+                "NVGEMM swap_ab does not support fused local reductions"
+            )
         a, b = input_tensors[0], input_tensors[1]
         if len(input_tensors) >= 4:
             sa, sb = input_tensors[2], input_tensors[3]
@@ -860,8 +870,6 @@ def _nvgemm_run(
         # buffer / copy (the kernel handles column-major C).
         out = out.t()
         if epilogue_args is not None:
-            import torch
-
             for name, value in epilogue_args.tensors.items():
                 if isinstance(value, torch.Tensor) and value.ndim == 2:
                     transposed = value.t()
@@ -1169,7 +1177,8 @@ def _compose_bias_into_epilogue(
     the cutlass epilogue tracer) and rewrite the fused body to read a new
     ``biased = accum + bias`` value instead, adding ``bias`` as an aux input.
     """
-    assert epilogue.source is not None  # noqa: S101
+    if epilogue.source is None:
+        raise AssertionError("expected fused epilogue source")
     lines = epilogue.source.splitlines()
     def_line = lines[0]
     body = lines[1:]
@@ -1381,8 +1390,14 @@ class NVUniversalGemmKernel(Kernel):
         code.writeline(f"def {self.kernel_name}_main({params_str}):")
         with code.indent():
             feed_main = self.local_reduce is not None and self.local_reduce.feeds_main
+            epilogue_d = self.epilogue.renames.get("D")
+            view_gemm_out = feed_main or (
+                self.epilogue.source
+                and output_buffers
+                and epilogue_d == output_buffers[0]
+            )
             gemm_out = "out_ptr0"
-            if feed_main:
+            if view_gemm_out:
                 a_name, b_name = input_tensor_names[:2]
                 code.writeline(
                     f"gemm_out = out_ptr0.view(*{a_name}.shape[:-2], "
@@ -1395,7 +1410,7 @@ class NVUniversalGemmKernel(Kernel):
             aux_tensors: list[str] = []
             if self.epilogue.source:
                 epilogue_kwargs = self._render_epilogue_kwargs()
-                if feed_main:
+                if view_gemm_out:
                     epilogue_kwargs = epilogue_kwargs.replace(
                         "D=out_ptr0", "D=gemm_out"
                     )

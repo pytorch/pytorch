@@ -3077,11 +3077,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // reset log prefix to include group_desc
   logPrefix_ = createLogPrefix();
 
-#ifdef NCCL_COMM_DESCRIPTION
-  // Pass process group name and description to NCCL communicator
-  std::string commDesc = pg_desc_ + ':' + pg_uid_;
-  options_->config.commDesc = strdup(commDesc.c_str());
-#endif // NCCL_COMM_DESCRIPTION
+#ifdef NCCL_HAS_COMM_NAME
+  // Pass process group description and name to the NCCL communicator so the
+  // NCCL profiler (and NCCL Inspector) can recover the group semantics without
+  // scanning Python frames. NCCL config has no commDesc field, so use commName.
+  if (options_->config.commName == nullptr) {
+    std::string commName = pg_desc_ + ':' + pg_uid_;
+    options_->config.commName = strdup(commName.c_str());
+  }
+#endif // NCCL_HAS_COMM_NAME
 
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;

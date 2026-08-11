@@ -56,6 +56,7 @@ from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
+from torch._native.ops.sum import inner_tree_plan
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -1397,11 +1398,16 @@ def get_reduction_combine_fn(
 
 @ir_dataclass
 class Reduction(Loops):
+    r"""IR node representing a reduction over one or more iteration dimensions."""
+
     reduction_ranges: Sequence[_IntLike]
     reduction_type: ReductionType
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
+    # Exact eager tile; rblock 1 is the split final stage.
+    strict_sum_multirow: bool = False
+    strict_sum_rblock: int | None = None
 
     def __str__(self) -> str:
         return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
@@ -1463,6 +1469,8 @@ class Reduction(Loops):
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
+            strict_sum_multirow=self.strict_sum_multirow,
+            strict_sum_rblock=self.strict_sum_rblock,
         )
 
     @staticmethod
@@ -1751,6 +1759,8 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
+        *,
+        strict_sum: bool = False,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -1797,7 +1807,81 @@ class Reduction(Loops):
                 ranges=list(ranges),
             )
 
-        if reduction_numel == 1:
+        strict_split = None
+        strict_sum_multirow = False
+        strict_sum_rblock = None
+        if strict_sum and reduction_hint in (
+            ReductionHint.DEFAULT,
+            ReductionHint.INNER,
+        ):
+            num_outputs = sympy_product(ranges)
+            if V.graph.sizevars.all_unbacked_explicitly_hinted(
+                [reduction_numel, num_outputs]
+            ):
+                guarded_reduction_numel = V.graph.sizevars.guard_int(reduction_numel)
+                vector_size = inner_tree_plan.vec_size(src_dtype.itemsize)
+                num_batches_ub = ceildiv(guarded_reduction_numel, 32 * vector_size)
+                int32_max = 2**31 - 1
+                indexing_safe = (
+                    guarded_reduction_numel <= int32_max
+                    and V.graph.sizevars.evaluate_expr(
+                        sympy.And(
+                            sympy.Gt(num_outputs, 0),
+                            sympy.Le(num_outputs, int32_max),
+                            sympy.Le(num_outputs * num_batches_ub, int32_max),
+                        ),
+                        fallback_value=False,
+                    )
+                )
+                if indexing_safe:
+                    strict_split = 1
+                    strict_sum_multirow = (
+                        guarded_reduction_numel
+                        <= vector_size * inner_tree_plan._K_MULTIROW_MAX_LOADS
+                    )
+                    if strict_sum_multirow:
+                        num_loads = ceildiv(guarded_reduction_numel, vector_size)
+                        num_loads = 1 << (num_loads - 1).bit_length()
+                        strict_sum_rblock = num_loads * vector_size
+                    else:
+                        params = inner_tree_plan.compute_inner_tree_params(
+                            guarded_reduction_numel,
+                            1,
+                            vector_size,
+                        )
+                        strict_sum_rblock = params.batch_total_elements
+                        if (
+                            params.num_batches > inner_tree_plan._K_TWO_KERNEL_THRESHOLD
+                            and guarded_reduction_numel % strict_sum_rblock == 0
+                        ):
+                            strict_split = params.num_batches
+        strict_sum = strict_split is not None
+
+        if strict_sum_multirow:
+            if strict_sum_rblock is None:
+                raise AssertionError("strict multirow sum requires a reduction block")
+            actual_reduction_numel = reduction_numel
+            original_inner_fn = inner_fn
+            default = cls.default_value(reduction_type, dst_dtype)
+
+            def padded_inner_fn(
+                index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+            ) -> OpsValue:
+                (rindex,) = reduction_index
+
+                index_dtype = dtype_from_size(actual_reduction_numel)
+                mask = ops.lt(
+                    ops.index_expr(rindex, index_dtype),
+                    ops.index_expr(actual_reduction_numel, index_dtype),
+                )
+                body = functools.partial(original_inner_fn, index, reduction_index)
+                return ops.masked(mask, body, default)
+
+            inner_fn = cast(Callable[..., Any], padded_inner_fn)
+            reduction_ranges = [sympy.Integer(strict_sum_rblock)]
+            reduction_numel = sympy.Integer(strict_sum_rblock)
+
+        if reduction_numel == 1 and not strict_sum:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
@@ -1819,6 +1903,7 @@ class Reduction(Loops):
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
+            and not strict_sum
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -1834,17 +1919,20 @@ class Reduction(Loops):
             )
 
         # triton doesn't support reduce to single element well, so break it up
-        hint, split = cls.num_splits(
-            device,
-            dst_dtype,
-            src_dtype,
-            inner_fn,
-            ranges,
-            reduction_ranges,
-            reduction_type,
-            reduction_numel,
-            input_node,
-        )
+        if strict_split is None:
+            hint, split = cls.num_splits(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                reduction_numel,
+                input_node,
+            )
+        else:
+            hint, split = ReductionHint.INNER, strict_split
 
         def _maybe_increase_split(split: int) -> int:
             # don't apply min_num_split constraint for static shape case.
@@ -1855,7 +1943,8 @@ class Reduction(Loops):
             else:
                 return split
 
-        split = _maybe_increase_split(split)
+        if strict_split is None:
+            split = _maybe_increase_split(split)
 
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
@@ -1898,6 +1987,7 @@ class Reduction(Loops):
                 split,
                 reduction_hint,
                 input_node,
+                strict_sum=strict_sum,
             )
 
             # Find the reduction that get split
@@ -1952,6 +2042,8 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
+                strict_sum_multirow=strict_sum_multirow,
+                strict_sum_rblock=strict_sum_rblock,
             )
         )
         return out
@@ -2138,6 +2230,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
+        strict_sum: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2160,6 +2253,7 @@ class Reduction(Loops):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
+            strict_sum=strict_sum,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -2188,6 +2282,7 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
+                strict_sum_rblock=1 if strict_sum else None,
             )
         )
 
@@ -2204,6 +2299,8 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         input_node: IRNode | None = None,
+        *,
+        strict_sum: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2235,6 +2332,7 @@ class Reduction(Loops):
             reduction_type,
             split,
             reduction_hint,
+            strict_sum,
         )
 
     @classmethod
@@ -5468,6 +5566,8 @@ class ComputedBuffer(OperationBuffer):
                 reduction_type=old_data.reduction_type,
                 src_dtype=old_data.src_dtype,
                 reduction_hint=old_data.reduction_hint,
+                strict_sum_multirow=old_data.strict_sum_multirow,
+                strict_sum_rblock=old_data.strict_sum_rblock,
             )
             self.data = new_data
             # this layout does not matter since we skip tl.store
@@ -6402,8 +6502,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-        assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101
+        if not isinstance(caller, NVUniversalGemmCaller):
+            raise AssertionError(f"expected NVUniversalGemmCaller, got {type(caller)}")
+        if self.layout != caller.layout:
+            raise AssertionError("Expected self.layout == caller.layout")
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -6421,9 +6523,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-        assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.get_size() == caller.layout.size  # noqa: S101
-        assert self.get_stride() == caller.layout.stride  # noqa: S101
+        if not isinstance(caller, NVUniversalGemmCaller):
+            raise AssertionError(f"expected NVUniversalGemmCaller, got {type(caller)}")
+        if self.get_size() != caller.layout.size:
+            raise AssertionError("Expected self.get_size() == caller.layout.size")
+        if self.get_stride() != caller.layout.stride:
+            raise AssertionError("Expected self.get_stride() == caller.layout.stride")
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller

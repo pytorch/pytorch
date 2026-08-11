@@ -124,6 +124,15 @@ class GemmReductionCompileConfig:
     def primary_constexprs(self) -> tuple[Any, ...]:
         return self._common_constexprs() + self._primary_callbacks()
 
+    def blockscaled_primary_constexprs(self) -> tuple[Any, ...]:
+        args = self.args
+        return (
+            args.group,
+            args.axis,
+            args.feeds_main,
+            *self._primary_callbacks(),
+        )
+
     def constexprs(self) -> tuple[Any, ...]:
         return (
             *self._common_constexprs(),

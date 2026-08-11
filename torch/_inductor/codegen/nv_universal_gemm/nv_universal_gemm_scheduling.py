@@ -112,6 +112,16 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
 
     @staticmethod
+    def _uses_swap_ab(ir_node: Any) -> bool:
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return ir_node.swap_ab
+        return (
+            isinstance(ir_node, MultiTemplateBuffer)
+            and isinstance(ir_node._render_caller, NVUniversalGemmCaller)
+            and ir_node._render_caller.swap_ab
+        )
+
+    @staticmethod
     def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
         """Check if a node is an NVGEMM template SchedulerNode."""
         if not isinstance(node, SchedulerNode):
@@ -151,7 +161,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         min_tile_n: int = 0,
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
-        assert isinstance(node, SchedulerNode)  # noqa: S101
+        if not isinstance(node, SchedulerNode):
+            raise AssertionError(f"expected SchedulerNode, got {type(node)}")
         ir_node = node.node
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
@@ -324,8 +335,19 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             variant == GemmVariant.SCALED_GEMM for variant in variants
         )
         reduction_plan = epilogue_program.reduction_plan
-        if reduction_plan is not None and not all(
-            variant.supports_reduction(reduction_plan) for variant in variants
+        direct_softmax = (
+            scaled_epilogue
+            and self._fragment_local_softmax_output(epilogue_program) is not None
+        )
+        if reduction_plan is not None and self._uses_swap_ab(ir_node):
+            log.debug("NVGEMM swap_ab does not support fused local reductions")
+            return False
+        if (
+            reduction_plan is not None
+            and not direct_softmax
+            and not all(
+                variant.supports_reduction(reduction_plan) for variant in variants
+            )
         ):
             return False
 
@@ -380,7 +402,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     )
                     return False
                 read_size = read_buf.get_size()
-                if not read_size or len(read_size) > len(gemm_size):
+                if len(read_size) > len(gemm_size):
                     log.debug(
                         "NVGEMM epilogue fusion: read buffer %s has unsupported rank",
                         rd.name,
@@ -391,6 +413,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     gemm_size,
                     [1, gemm_size[1]],
                     [gemm_size[0], 1],
+                    [1] * len(gemm_size),
                 )
                 if not any(
                     V.graph.sizevars.statically_known_list_equals(padded_size, shape)
@@ -485,6 +508,18 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             for scheduler_node in node.get_nodes()
         )
 
+    def has_nvgemm_bool_output(self, node: BaseSchedulerNode) -> bool:
+        if not self.has_bool_output(node):
+            return False
+        is_template = self.is_nv_universal_gemm_template(node)
+        if is_template or self.is_nv_universal_gemm_fused_template(node):
+            return True
+        return any(
+            isinstance(producer := V.graph.try_get_buffer(read.name), Buffer)
+            and self._has_nvgemm_choice(producer)
+            for read in node.read_writes.reads
+        )
+
     def can_fuse_reduction_chain(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -572,11 +607,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
         candidate_nodes = node2.get_nodes()
         reduction_partition = combined_program.reduction_partition
-        reduction_candidate = reduction_partition.region_for(candidate_nodes)
         if not (reduction_partition.intersects(candidate_nodes) or feed_main_ordered):
             return False
-        if reduction_candidate is not None:
-            return True
         template_snode = next(
             node
             for node in node1.get_nodes()
@@ -585,6 +617,26 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         return self._can_fuse_epilogue_impl(
             cast(SchedulerNode, template_snode), epilogue_nodes, node2
         )
+
+    @staticmethod
+    def _fragment_local_softmax_output(
+        program: NVGemmEpilogueProgram,
+    ) -> str | None:
+        plan = program.reduction_plan
+        if (
+            plan is None
+            or plan.reduction_type != "online_softmax"
+            or not plan.feeds_main
+            or plan.axis != 1
+            or plan.group != 4
+            or plan.reduction_output is not None
+            or plan.feed_output is None
+            or plan.secondary_feed_output is not None
+            or plan.consumer_fn is not None
+            or program.pointwise_nodes
+        ):
+            return None
+        return plan.feed_output
 
     @staticmethod
     def _schedule_reduction_plan(
@@ -698,18 +750,21 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             [n.get_name() for n in epilogue_nodes] if epilogue_nodes else [],
             [n.get_name() for n in prologue_nodes] if prologue_nodes else [],
         )
-        assert self.is_nv_universal_gemm_template(template_node), (  # noqa: S101
-            "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
-        )
-        assert not prologue_nodes, (  # noqa: S101
-            "NVIDIA Universal GEMM doesn't support prologue fusion yet"
-        )
+        if not self.is_nv_universal_gemm_template(template_node):
+            raise AssertionError(
+                "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
+                "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
+            )
+        if prologue_nodes:
+            raise AssertionError(
+                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+            )
 
         template_node = cast(SchedulerNode, template_node)
 
         original_ir_node = template_node.node
-        assert isinstance(original_ir_node, Buffer)  # noqa: S101
+        if not isinstance(original_ir_node, Buffer):
+            raise AssertionError(f"expected Buffer, got {type(original_ir_node)}")
         original_buffer_name = original_ir_node.get_name()
 
         epilogue_program = self._lower_epilogue(original_ir_node, epilogue_nodes)
@@ -728,13 +783,29 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             scheduler = V.graph.scheduler
             try:
                 reduction_plan = self._schedule_reduction_plan(epilogue_program)
+                softmax_output = (
+                    self._fragment_local_softmax_output(epilogue_program)
+                    if ctb.variant == GemmVariant.SCALED_GEMM
+                    else None
+                )
+                if softmax_output is not None:
+                    if reduction_plan is None:
+                        raise AssertionError("expected softmax reduction plan")
+                    lowered_epilogue = LoopIRCuteDSLCodegen.online_softmax(
+                        softmax_output,
+                        reduction_plan.group,
+                        EPILOGUE_FN_NAME,
+                    )
+                    reduction_plan = None
+                    feeds_main = False
                 finalizers = epilogue_program.reduction_partition.finalizers
                 if finalizers:
                     if len(finalizers) != 1:
                         raise NotImplementedError(
                             "NVGEMM supports one generated reduction finalizer"
                         )
-                    assert reduction_plan is not None  # noqa: S101
+                    if reduction_plan is None:
+                        raise AssertionError("expected generated reduction plan")
                     finalizer = finalizers[0]
                     reduction_plan = dataclasses.replace(
                         reduction_plan,
@@ -745,7 +816,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         ),
                     )
                 if feeds_main:
-                    assert reduction_plan is not None  # noqa: S101
+                    if reduction_plan is None:
+                        raise AssertionError("expected feed-main reduction plan")
                     primary_output = reduction_plan.primary_output
                     lowered_epilogue = GemmEpiloguePlan(
                         writes=(primary_output,),
@@ -824,7 +896,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 log_fn("NVGEMM epilogue codegen failed unexpectedly: %s", e)
                 raise
 
-        assert ctb.make_kernel_render is not None  # noqa: S101
+        if ctb.make_kernel_render is None:
+            raise AssertionError("expected ctb.make_kernel_render to be not None")
         kernel, render = ctb.make_kernel_render(
             ctb,
             epilogue=lowered_epilogue,
@@ -966,7 +1039,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     "NVGEMM epilogue", "supported pointwise lowering"
                 ) from exc
 
-        assert isinstance(generated, NVGemmGeneratedSource)  # noqa: S101
+        if not isinstance(generated, NVGemmGeneratedSource):
+            raise AssertionError(
+                f"expected NVGemmGeneratedSource, got {type(generated)}"
+            )
         src_code = generated.source.replace(
             str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
         )
