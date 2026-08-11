@@ -1784,8 +1784,8 @@ def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
 
 def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
-    low = 2
-    high = 10
+    low = 2 if dtype != torch.bool else 0
+    high = 10 if dtype != torch.bool else 2
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         sample.kwargs.setdefault('device', device)
@@ -1795,8 +1795,8 @@ def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(low, high, sample.input.shape, *sample.args, **sample.kwargs)
 
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
-    low = 2
-    high = 10
+    low = 2 if dtype != torch.bool else 0
+    high = 10 if dtype != torch.bool else 2
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         # With high
@@ -2662,6 +2662,22 @@ def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **
     for s1, s2, s3 in tensor_shapes:
         tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
         yield SampleInput(tensors)
+
+def sample_inputs_hypot(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
+
+    if dtype.is_floating_point and not requires_grad:
+        # Regression case for https://github.com/pytorch/pytorch/issues/192507
+        # Extreme and infinite values make the gradient ill-defined, so this
+        # sample is only used for forward-mode testing.
+        big = torch.finfo(dtype).max
+        lhs = torch.tensor(
+            [big, 1.0, big, -big, 1.0, float('inf'), -float('inf')],
+            device=device, dtype=dtype)
+        rhs = torch.tensor(
+            [1.0, big, big, 1.0, -big, float('nan'), float('nan')],
+            device=device, dtype=dtype)
+        yield SampleInput(lhs, args=(rhs,))
 
 def error_inputs_hstack_dstack_vstack(op, device):
     make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
@@ -14120,6 +14136,7 @@ op_db: list[OpInfo] = [
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -14150,14 +14167,11 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
-               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -14188,10 +14202,6 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
-               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -16051,8 +16061,20 @@ op_db: list[OpInfo] = [
                    'TestOperators', 'test_jvpvjp', device_type="cuda"
                ),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_jvpvjp', device_type="xpu"
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=4e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_vjp', device_type="xpu"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_grad', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -16069,6 +16091,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
                    'TestOperators', 'test_grad', device_type="cuda",
                    active_if=TEST_WITH_ROCM,
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
@@ -19122,8 +19148,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     BinaryUfuncInfo('polar',
-                    dtypes=floating_types(),
-                    dtypesIfMPS=floating_types_and(torch.float16),
+                    dtypes=floating_types_and(torch.half),
                     # this function is undefined if 'abs' values are <0
                     supports_forward_ad=True,
                     lhs_make_tensor_kwargs=dict(low=0),
@@ -19862,7 +19887,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('randint',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
            dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.complex64, torch.bool),
            op=lambda *args, **kwargs:
                wrapper_set_seed(torch.randint, *args, **kwargs),
@@ -19892,7 +19917,7 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.float32, torch.int64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('randint_like',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.randint_like, inp, *args, **kwargs),
            supports_out=False,
@@ -20369,6 +20394,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     BinaryUfuncInfo('hypot',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
                     dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_hypot,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False),
@@ -20391,6 +20417,12 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
                # Align dtypes with CUDA for fallback ops
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='xpu'),
+           ),
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_operator', device_type="xpu",
+               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
