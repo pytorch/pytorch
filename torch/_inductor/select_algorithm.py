@@ -4949,9 +4949,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def addmm_unique_example_inputs_layout_preserving():
             additional_example_inputs = {}
-            for input_node, layout_node in zip(
-                input_nodes, layout_preserving_input_nodes
-            ):
+            for input_node, layout_node in zip(input_nodes, layout_input_nodes):
                 layout_name = layout_node.get_name()
                 if layout_name in unique_example_inputs:
                     continue
@@ -4960,8 +4958,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                additional_example_inputs[layout_name] = global_tensor[0].contiguous()
+                if global_tensor.shape[0] == 0:
+                    # No row to copy, and the 1D bias does not depend on M.
+                    bias = cls.benchmark_example_value(layout_node, hint_override)
+                else:
+                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                    bias = global_tensor[0].contiguous()
+                additional_example_inputs[layout_name] = bias
 
             return {
                 **unique_example_inputs,
@@ -4976,7 +4979,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
             None,
         )
-        layout_preserving_input_nodes = input_nodes
+        layout_input_nodes = input_nodes
         unique_example_inputs_layout_preserving = unique_example_inputs
 
         if layout_preserving_choice is not None:
@@ -4985,7 +4988,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     "layout_preserving_choice.input_nodes length must match input_nodes: "
                     f"{len(layout_preserving_choice.input_nodes)} != {len(input_nodes)}"
                 )
-            layout_preserving_input_nodes = layout_preserving_choice.input_nodes
+            layout_input_nodes = layout_preserving_choice.input_nodes
 
             if (
                 cls._is_extern(layout_preserving_choice)
@@ -4997,7 +5000,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         example_inputs = list(unique_example_inputs.values())
         example_inputs_layout_preserving = []
-        for i, input_node in enumerate(layout_preserving_input_nodes):
+        for i, input_node in enumerate(layout_input_nodes):
             input_tensor = unique_example_inputs_layout_preserving[
                 input_node.get_name()
             ]
