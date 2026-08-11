@@ -174,16 +174,22 @@ c10::intrusive_ptr<Backend::Options> tryGetOptions(
 }
 
 // Whether a CUDA graph capture (or the equivalent on another accelerator) is
-// active on the stream this op will be issued on. Asked through the device
-// guard impl so the hook stays device agnostic; a device type with no impl
-// registered simply has no capture concept.
-bool streamIsCapturing(std::optional<c10::Device> device) {
-  if (!device || device->is_cpu()) {
+// active on the stream an op on this device would be issued on. Asked through
+// the device guard impl so the hook stays device agnostic.
+//
+// Both ways of answering false here are positive facts, not guesses: a device
+// type with no guard impl registered has no capture mechanism at all, and a
+// device whose current stream cannot even be obtained -- CUDA linked in but no
+// visible GPU, say -- has no stream for a capture to be running on. "I do not
+// know which device to ask" is a different answer and is not expressed here;
+// see captureActive.
+bool streamIsCapturing(c10::Device device) {
+  if (device.is_cpu() || !c10::impl::hasDeviceGuardImpl(device.type())) {
     return false;
   }
   try {
-    auto* guard_impl = c10::impl::getDeviceGuardImpl(device->type());
-    return guard_impl->getStream(*device).is_capturing();
+    auto* guard_impl = c10::impl::getDeviceGuardImpl(device.type());
+    return guard_impl->getStream(device).is_capturing();
   } catch (const std::exception&) {
     return false;
   }
@@ -217,7 +223,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     hook->pg_->registerCompletionHook(
         hook->hook_id_, [weak](const CompletionHookArgs& args) {
           if (auto self = weak.lock()) {
-            self->onCompletion(args);
+            self->retireCompleted(args.work, args.duration_ms);
           }
         });
     hook->push_completion_ = true;
@@ -336,6 +342,35 @@ const FlightRecorderHook::BackendTarget& FlightRecorderHook::targetFor(
   return default_target_;
 }
 
+std::optional<bool> FlightRecorderHook::captureActive(
+    std::optional<c10::Device> device) const {
+  if (device) {
+    return streamIsCapturing(*device);
+  }
+  // barrier() is the one op that reaches the hook with no tensors: Ops.cpp
+  // binds a dummy tensor to pick the dispatch key and does not forward it, so
+  // the device it was dispatched on is invisible here. It did go to one of the
+  // group's own backends though, and that is enough to answer this question --
+  // if none of the devices the group serves is on a capturing stream, then
+  // neither is this op, whichever of them it went to. For the usual
+  // single-device group that is one query, on CUDA for a CUDA group.
+  //
+  // Not getBoundDeviceId(): it is only set when init_process_group was given a
+  // device_id, so it answers nothing for the groups that hit this, and its
+  // index names the bound device rather than the one the calling thread is
+  // capturing on. The unset index used here resolves to the current device,
+  // which is where the capture is.
+  if (targets_.empty()) {
+    return std::nullopt;
+  }
+  for (const auto& [type, target] : targets_) {
+    if (streamIsCapturing(c10::Device(type))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 FlightRecorderHook::~FlightRecorderHook() {
   remove();
 }
@@ -381,18 +416,22 @@ void FlightRecorderHook::remove() {
   inflight.clear();
 }
 
-void FlightRecorderHook::onCompletion(const CompletionHookArgs& args) {
-  // Runs on whichever thread the backend established completion on, usually its
-  // watchdog. Only the map lookup happens under mutex_; the recorder call does
-  // not, for the same reason onPre's does not -- see the lock-order note.
+void FlightRecorderHook::retireCompleted(
+    const Work* work,
+    std::optional<float> duration) {
+  // From the completion hook this runs on whichever thread the backend
+  // established completion on, usually its watchdog. Only the map lookup
+  // happens under mutex_; the recorder call does not, for the same reason
+  // onPre's does not -- see the lock-order note.
   InflightOp op;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto id_it = work_ids_.find(args.work);
+    auto id_it = work_ids_.find(work);
     if (id_it == work_ids_.end()) {
-      // Not one of ours: an op recorded by a natively recording backend, one
+      // Not one of ours -- an op recorded by a natively recording backend, one
       // issued under a graph capture, one already evicted, or one from before
-      // this hook was attached.
+      // this hook was attached -- or already retired, since erasing the entry
+      // here is what claims it and only one caller can win that.
       return;
     }
     auto op_id = id_it->second;
@@ -403,13 +442,27 @@ void FlightRecorderHook::onCompletion(const CompletionHookArgs& args) {
     }
     op = std::move(it->second);
     inflight_.erase(it);
-    // The hook only hears about successful completion, so this is the last op
-    // known to have finished.
+    // Only successful completion gets here, so this is the last op known to
+    // have finished.
     pg_status_->lastCompletedSeq = op_id;
     pg_status_->lastCompletedWorkName = std::string(hookOpName(op.name));
   }
   op.recorder->retire_completed(
-      op.trace_id.id, op.trace_id.reset_epoch, args.duration_ms);
+      op.trace_id.id, op.trace_id.reset_epoch, duration);
+}
+
+std::optional<float> FlightRecorderHook::workDuration(const Work& work) {
+  if (!work_can_time_.load(std::memory_order_relaxed)) {
+    return std::nullopt;
+  }
+  try {
+    return work.getDuration();
+  } catch (const std::exception&) {
+    // Refused because the backend does not time collectives, which is a
+    // property of the backend and not of the op -- so ask no further op.
+    work_can_time_.store(false, std::memory_order_relaxed);
+    return std::nullopt;
+  }
 }
 
 void FlightRecorderHook::onPre(const PreHookArgs& args) {
@@ -423,15 +476,21 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   if (!recorder->enabled_) {
     return;
   }
-  if (streamIsCapturing(device)) {
-    // Nothing is recorded under an active graph capture. The collective does
-    // not run here, it runs at replay, and its Work cannot be polled: querying
-    // a CUDA event recorded on a capturing stream does not merely fail, it
-    // invalidates the capture, which then surfaces from cudaStreamEndCapture
-    // nowhere near this code. An entry we could never observe would read as a
-    // collective that never finished, i.e. as a hang. Stock ProcessGroupNCCL
-    // skips recording under capture too (initWork's record flag follows
-    // whether the work can be enqueued for the watchdog).
+  // Not recorded under an active graph capture, nor when the hook cannot
+  // establish that there is none. The collective does not run here, it runs at
+  // replay, and its Work cannot be polled: querying a CUDA event recorded on a
+  // capturing stream does not merely fail, it invalidates the capture, which
+  // then surfaces from cudaStreamEndCapture nowhere near this code. An entry we
+  // could never observe would also read as a collective that never finished,
+  // i.e. as a hang. Stock ProcessGroupNCCL skips recording under capture too
+  // (initWork's record flag follows whether the work can be enqueued for the
+  // watchdog).
+  //
+  // So "unknown" defaults to "capturing": recording costs the user's graph,
+  // while not recording costs one entry in the trace. That default only bites a
+  // group that reports no device types at all, which cannot serve a collective
+  // through the c10d ops in the first place.
+  if (captureActive(device).value_or(true)) {
     return;
   }
   InflightOp op;
@@ -613,7 +672,7 @@ void FlightRecorderHook::onAbort() {
 void FlightRecorderHook::onPost(const PostHookArgs& args) {
   InflightOp retire_at_issue;
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     auto it = inflight_.find(args.op_id);
     if (it == inflight_.end()) {
       // Nothing was recorded for this op -- the backend records natively, the
@@ -627,6 +686,17 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
       // it names the op by this Work.
       it->second.work = args.work;
       work_ids_[args.work.get()] = args.op_id;
+      lock.unlock();
+      // A completion established before that registration found no mapping and
+      // retired nothing, leaving a finished collective reading "scheduled" for
+      // ever, so ask the Work rather than wait for a push that has been and
+      // gone. isSuccess() as well: isCompleted() is true for failed and
+      // timed-out work too, which stays un-retired so a dump keeps saying it
+      // was never seen to finish (Hooks.hpp). Asked with the lock dropped,
+      // since isCompleted() calls into the backend -- see the lock-order note.
+      if (args.work->isCompleted() && args.work->isSuccess()) {
+        retireCompleted(args.work.get(), workDuration(*args.work));
+      }
       return;
     }
     // Either there is no handle a completion could name (the hook contract

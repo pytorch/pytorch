@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -1229,9 +1230,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // collective. They are invoked from the dispatcher kernels (Ops.cpp) rather
   // than here, so they fire wherever a c10d op is dispatched -- including
   // replay of a captured graph that re-dispatches the op directly. See
-  // Hooks.hpp.
-  std::unordered_map<int64_t, PreHook> preHooks_;
-  std::unordered_map<int64_t, PostHook> postHooks_;
+  // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
+  // observe another hook's state (or be observed by it) picks its id instead of
+  // depending on an unspecified traversal.
+  std::map<int64_t, PreHook> preHooks_;
+  std::map<int64_t, PostHook> postHooks_;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
   std::atomic<int64_t> hookOpIdCounter_{0};
 
