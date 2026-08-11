@@ -13,7 +13,7 @@ import enum
 import sys
 import types
 import typing
-from functools import partial
+from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
 import torch
@@ -121,15 +121,21 @@ def binop_type_error(
     )
 
 
+@lru_cache(maxsize=256)
+def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
+    """Get all type slots for a type (cached)."""
+    return get_type_slots(obj_type)
+
+
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given sq slot."""
-    seq_slots, _, _, _ = get_type_slots(obj_type)
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
     return has_slot(seq_slots, slot)
 
 
 def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given mp slot."""
-    _, map_slots, _, _ = get_type_slots(obj_type)
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
     return has_slot(map_slots, slot)
 
 
@@ -175,7 +181,7 @@ type_implements_mp_length = partial(
 
 def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the nb slot."""
-    _, _, number_slots, _ = get_type_slots(obj_type)
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
     return has_slot(number_slots, slot)
 
 
@@ -266,30 +272,30 @@ type_implements_nb_inplace_matrix_multiply = partial(
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
-    _, _, _, type_slot = get_type_slots(obj_type)
+    _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
 
 
 def type_implements_tp_iternext(obj_type: type) -> bool:
-    _, _, _, type_slot = get_type_slots(obj_type)
+    _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
 def type_implements_tp_repr(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_repr slot."""
-    _, _, _, type_slot = get_type_slots(obj_type)
+    _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_REPR)
 
 
 def type_implements_tp_str(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_str slot."""
-    _, _, _, type_slot = get_type_slots(obj_type)
+    _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_STR)
 
 
 def type_implements_tp_call(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_call slot."""
-    _, _, _, type_slot = get_type_slots(obj_type)
+    _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_CALL)
 
 
