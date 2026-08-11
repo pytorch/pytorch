@@ -118,8 +118,6 @@ class TestFormatUtils(DTensorTestBase):
         self.assertEqual(sd["model"], model.state_dict())
 
 
-instantiate_device_type_tests(
-    TestFormatUtils, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestFormatUtils, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
