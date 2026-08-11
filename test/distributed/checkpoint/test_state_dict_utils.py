@@ -390,8 +390,6 @@ class TestStateDictUtilsOnCUDA(DTensorTestBase):
         gc.collect()
 
 
-instantiate_device_type_tests(
-    TestStateDictUtils, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestStateDictUtils, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
