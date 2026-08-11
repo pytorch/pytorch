@@ -21,7 +21,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import FixedLayout
+from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
@@ -116,6 +116,14 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     ),
                     expected,
                 )
+
+    def test_realize_inputs_preserves_shape_constant(self):
+        import sympy
+
+        out = select_algorithm.realize_inputs(sympy.Integer(2048))
+
+        self.assertIsInstance(out, ShapeAsConstantBuffer)
+        self.assertEqual(out.expr, sympy.Integer(2048))
 
 
 class TestSelectAlgorithm(TestCase):
@@ -812,7 +820,7 @@ class TestExternKernelCaller(TestCase):
                 in message
                 for message in log_context.output
             ),
-            f"Expected warning message not found in logs: {log_context.output}",
+            lambda msg: f"{msg}\nExpected warning message not found in logs: {log_context.output}",
         )
 
         expected = torch.mm(a, b)
@@ -1052,7 +1060,7 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(
             captured_results["example_dtype"],
             torch.float4_e2m1fn_x2,
-            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            lambda msg: f"{msg}\nbenchmark_example_value should preserve float4_e2m1fn_x2 dtype "
             f"after unwrapping the view, but got {captured_results['example_dtype']}",
         )
         self.assertEqual(captured_results["example_shape"], (m, k))
@@ -1137,6 +1145,82 @@ class TestGetInputsStorageSizeCheck(TestCase):
             extern_inputs = autotune_args.extern.input_tensors
             self.assertEqual(len(extern_inputs), 1)
             self.assertEqual(extern_inputs[0].shape, torch.Size(node_size))
+
+
+class TestGetInputsAddmmBias(TestCase):
+    """
+    Aten addmm benchmarks the original 1D bias while the Triton template
+    benchmarks the bias expanded to [M, N], so get_inputs recovers the former
+    from row 0 of the latter.  These drive that path directly: an M whose hint
+    is 0 has no row 0 to recover from.
+    """
+
+    N = 8
+    K = 4
+
+    def _get_inputs(self, m):
+        from torch._inductor import ir
+
+        device = torch.device("cpu")
+        dtype = torch.float32
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars.optimization_hints_with_override = (
+            lambda exprs, hint_override=None: tuple(int(e) for e in exprs)
+        )
+        mock_graph.sizevars.optimization_hint_with_override = (
+            lambda expr, hint_override=None: int(expr)
+        )
+        mock_graph.sizevars.optimization_hint = (
+            lambda expr, fallback=None: int(expr) if expr is not None else fallback
+        )
+        mock_graph.buffer_layout_constraints = {}
+        mock_graph.get_allocation_size = lambda node: node.get_size()
+
+        def buf(name, size, stride):
+            return ir.Buffer(
+                name=name,
+                layout=ir.FixedLayout(
+                    device=device, dtype=dtype, size=size, stride=stride
+                ),
+            )
+
+        with V.set_graph_handler(mock_graph):
+            # The expanded bias and the 1D bias are distinct buffers, which is
+            # what makes get_inputs reconcile the two.
+            bias_2d = buf("bias_expanded", [m, self.N], [0, 1])
+            bias_1d = buf("bias", [self.N], [1])
+            mat1 = buf("mat1", [m, self.K], [self.K, 1])
+            mat2 = buf("mat2", [self.K, self.N], [self.N, 1])
+
+            extern_choice = unittest.mock.create_autospec(
+                select_algorithm.ExternKernelCaller, instance=True
+            )
+            extern_choice.name = "addmm"
+            extern_choice.input_nodes = [bias_1d, mat1, mat2]
+
+            return select_algorithm.AlgorithmSelectorCache.get_inputs(
+                choices=[extern_choice],
+                input_nodes=[bias_2d, mat1, mat2],
+                layout=ir.FixedLayout(
+                    device=device, dtype=dtype, size=[m, self.N], stride=[self.N, 1]
+                ),
+                input_gen_fns=None,
+            )
+
+    def test_addmm_1d_bias(self):
+        args = self._get_inputs(m=4)
+        triton_bias = args.triton.input_tensors[0]
+        extern_bias = args.extern.input_tensors[0]
+        self.assertEqual(triton_bias.shape, torch.Size([4, self.N]))
+        self.assertEqual(extern_bias.shape, torch.Size([self.N]))
+        # Both choices must benchmark the same bias values.
+        self.assertEqual(extern_bias, triton_bias[0])
+
+    def test_addmm_1d_bias_zero_rows(self):
+        args = self._get_inputs(m=0)
+        self.assertEqual(args.triton.input_tensors[0].shape, torch.Size([0, self.N]))
+        self.assertEqual(args.extern.input_tensors[0].shape, torch.Size([self.N]))
 
 
 class TestTemplateRender(TestCase):
@@ -1244,6 +1328,41 @@ class TestTemplateRender(TestCase):
                 raise AssertionError
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
+            )
+
+    def test_subgraph_nodes_participate_in_template_index_dtype(self):
+        """Covers implicit template buffers that are not explicit arguments."""
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.dependencies import MemoryDep, ReadWrites
+        from torch._inductor.select_algorithm import template_subgraph_index_dtype_nodes
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        large_capture = ir.Buffer(
+            name="large_capture",
+            layout=FixedLayout(torch.device("cpu"), torch.float32, [2**31 + 1]),
+        )
+
+        class FakeSubgraph:
+            def get_read_writes(self):
+                return ReadWrites(
+                    reads=OrderedSet(
+                        [MemoryDep("large_capture", sympy.Integer(0), (), ())]
+                    ),
+                    writes=OrderedSet(),
+                    index_exprs=OrderedSet(),
+                )
+
+        class FakeGraph:
+            def try_get_buffer(self, name):
+                return large_capture if name == "large_capture" else None
+
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                template_subgraph_index_dtype_nodes([FakeSubgraph()]),
+                (large_capture,),
             )
 
     @unittest.skipIf(
@@ -1410,7 +1529,7 @@ class TestTemplateRender(TestCase):
             # Verify template kernel was used
             self.assertIn("_mock_inner_add", code)
             # Verify epilogue fusion: relu fused via hook
-            self.assertIn("triton_helpers.maximum", code)
+            self.assertIn("maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
 

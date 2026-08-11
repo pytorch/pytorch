@@ -42,7 +42,7 @@ def _compile_submod(
 
     for inp_node in sub_node.all_input_nodes[
         1:
-    ]:  # exlucde the graph module input to torch.ops.higher_order.invoke_subgraph
+    ]:  # exclude the graph module input to torch.ops.higher_order.invoke_subgraph
         if hasattr(inp_node, "meta") and "val" in inp_node.meta:
             fake_inputs.append(inp_node.meta["val"])
         else:
@@ -154,7 +154,7 @@ def _recursive_compile_invoke_subgraph_nodes(
     for node in gm.graph.find_nodes(op="get_attr"):
         if _needs_inductor_compile(node):
             # If the get_attr itself is marked for compile, the outer graph will
-            # take care of it. If we dont do that, we end up with nested
+            # take care of it. If we don't do that, we end up with nested
             # regional inductor compiles that do not work well.
             continue
         submod = getattr(gm, node.target)

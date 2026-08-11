@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: rocm", "module: xpu"]
 # @generated DO NOT EDIT MANUALLY
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
@@ -47,22 +48,114 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: lf
+
+  # Computes the manylinux builder image tag suffix + registry host at runtime,
+  # feeding the job-level `container:` directives (resolved before any step runs):
+  #   - release-candidate tag (v1.2.3-rc4): suffix = "-<.ci/docker tree hash>",
+  #     host = "" -> the reproducible image binary-docker-build pinned on Docker
+  #     Hub.
+  #   - ciflow/binaries PR test: the PR builds its own .ci/docker and
+  #     binary-docker-build pushes the content-addressed image to ECR, so
+  #     suffix = "-<hash>" and host = the ECR host. Because build-manywheel-images
+  #     runs in parallel on the same PR, this job WAITS (polls ECR) until those
+  #     images are pushed before the build/test jobs start pulling them.
+  #   - otherwise (nightly branch, etc.): skipped; outputs read blank -> Docker
+  #     Hub floating tag, unchanged.
+  get-docker-tag:
+    # Runs on tag pushes only (release candidates + ciflow/binaries). On branch
+    # (nightly) runs it is skipped and its outputs read blank, so the floating
+    # Docker Hub tag is used.
+    if: ${{ github.repository_owner == 'pytorch' && github.ref_type == 'tag' }}
+    name: get-docker-tag
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
+      docker_registry_host: ${{ steps.calc.outputs.docker_registry_host }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+      - name: Calculate docker image suffix and registry host
+        id: calc
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=""
+          registry_host=""
+          if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries* ]]; then
+            # PR test run: the content-addressed image lives in ECR.
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+            registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
+          elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
+            # Release candidate: pin the Docker Hub image.
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+          fi
+          echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
+          echo "docker_registry_host=${registry_host}" >> "${GITHUB_OUTPUT}"
+      # ciflow/binaries only: the builder images are pushed to ECR by
+      # build-manywheel-images / build-almalinux-images, which run concurrently
+      # on the same PR. Log in (read-only) and wait for the content-addressed
+      # tags to appear before the build/test jobs try to pull them.
+      - name: Login to ECR
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
+      - name: Wait for content-addressed builder image in ECR
+        if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
+        env:
+          DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Drop the leading dash: "-<hash>" -> "<hash>".
+          tree_hash="${DOCKER_IMAGE_SUFFIX#-}"
+          # build-manywheel-images builds and pushes all variants together, so
+          # wait on a single representative image as the readiness signal.
+          repo="pytorch/manylinux2_28-builder"
+          tag="cpu-${tree_hash}"
+          echo "Waiting for ${repo}:${tag} to be pushed to ECR by build-manywheel-images..."
+          # Poll every 5 min, up to 60 min.
+          deadline=$(( SECONDS + 60 * 60 ))
+          until aws ecr describe-images \
+              --region us-east-1 \
+              --repository-name "${repo}" \
+              --image-ids imageTag="${tag}" >/dev/null 2>&1; do
+            if (( SECONDS > deadline )); then
+              echo "ERROR: timed out (60 min) waiting for ${repo}:${tag} in ECR." >&2
+              echo "Is build-manywheel-images / build-almalinux-images still running or did it fail?" >&2
+              exit 1
+            fi
+            echo "  not in ECR yet (build-manywheel-images still running); retrying in 5 min..."
+            sleep 300
+          done
+          echo "Found ${repo}:${tag}"
 
   manywheel-cpu-build:
     name: manywheel-cpu-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag]
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cpu
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cpu
       GPU_ARCH_VERSION: ""
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -74,7 +167,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -135,24 +231,24 @@ jobs:
 
   manywheel-cuda-cu126-build:
     name: manywheel-cuda-cu126-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag]
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cuda12.6
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda12_6"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -160,7 +256,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -221,24 +320,24 @@ jobs:
 
   manywheel-cuda-cu130-build:
     name: manywheel-cuda-cu130-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag]
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cuda13.0
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda13.0
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda13_0"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -246,7 +345,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -307,24 +409,24 @@ jobs:
 
   manywheel-cuda-cu132-build:
     name: manywheel-cuda-cu132-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory.ephemeral"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag]
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
-      image: pytorch/manylinux2_28-builder:cuda13.2
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu132
       GPU_ARCH_VERSION: "13.2"
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda13.2
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda13_2"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -332,7 +434,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -391,24 +496,104 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda13_2/*
 
+  manywheel-cuda-cu134-build:
+    name: manywheel-cuda-cu134-build
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag]
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    timeout-minutes: 280
+    container:
+      image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.4${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: manywheel
+      DESIRED_CUDA: cu134
+      GPU_ARCH_VERSION: "13.4"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.4${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
+      BUILD_NAME_PREFIX: "manywheel-py"
+      BUILD_NAME_SUFFIX: "-cuda13_4"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+    steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
+          submodules: recursive
+          show-progress: false
+      - name: Populate binary env
+        shell: bash
+        run: |
+          export PYTORCH_FINAL_PACKAGE_DIR="${RUNNER_TEMP}/artifacts"
+          mkdir -p "${PYTORCH_FINAL_PACKAGE_DIR}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${PYTORCH_FINAL_PACKAGE_DIR}" >> "${GITHUB_ENV}"
+          bash .ci/pytorch/binary_populate_env.sh
+      - name: Build all wheels
+        shell: bash
+        run: |
+          # shellcheck disable=SC1091
+          source "${BINARY_ENV_FILE}"
+          bash .ci/manywheel/build_all.sh
+      # One artifact per built Python -- names must match what the test/upload
+      # matrix below downloads.
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_10-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_11-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_12-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_13-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_14-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_14t-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_15-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda13_4/*
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: manywheel-py3_15t-cuda13_4
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda13_4/*
+
   manywheel-build:
     name: ${{ matrix.build_name }}-build
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [get-label-type, get-docker-tag]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_10-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
           - desired_python: "3.10"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -419,6 +604,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.10"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_10-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.10"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -426,16 +620,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_10-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.11"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_11-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.11"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -446,6 +631,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_11-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.11"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -453,16 +647,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_11-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.12"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_12-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.12"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -473,6 +658,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.12"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_12-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.12"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -480,16 +674,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_12-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.13"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_13-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.13"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -500,6 +685,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_13-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.13"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -507,16 +701,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_13-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.14"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_14-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.14"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -527,6 +712,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_14-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.14"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -534,16 +728,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.14t"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_14t-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.14t"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -554,6 +739,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14t"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_14t-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.14t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -561,16 +755,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14t-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.15"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_15-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.15"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -581,6 +766,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.15"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_15-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.15"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -588,16 +782,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_15-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
-          - desired_python: "3.15t"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_15t-rocm7_1"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
           - desired_python: "3.15t"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -608,6 +793,15 @@ jobs:
             timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.15t"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_15t-rocm7_14"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==7.14.*"
+          - desired_python: "3.15t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
@@ -615,7 +809,7 @@ jobs:
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_15t-xpu"
             timeout_minutes: 280
-            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.0.0 | intel-cmplr-lib-ur==2026.0.0 | intel-cmplr-lic-rt==2026.0.0 | intel-sycl-rt==2026.0.0 | oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.0.0 | onemkl-sycl-blas==2026.0.0 | onemkl-sycl-dft==2026.0.0 | onemkl-sycl-lapack==2026.0.0 | onemkl-sycl-rng==2026.0.0 | onemkl-sycl-sparse==2026.0.0 | dpcpp-cpp-rt==2026.0.0 | intel-opencl-rt==2026.0.0 | mkl==2026.0.0 | intel-openmp==2026.0.0 | tbb==2023.0.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==0.17.0 | pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
+            pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2026.1.0 | intel-cmplr-lib-ur==2026.1.0 | intel-cmplr-lic-rt==2026.1.0 | intel-sycl-rt==2026.1.0 | oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2026.1.0 | onemkl-sycl-blas==2026.1.0 | onemkl-sycl-dft==2026.1.0 | onemkl-sycl-lapack==2026.1.0 | onemkl-sycl-rng==2026.1.0 | onemkl-sycl-sparse==2026.1.0 | dpcpp-cpp-rt==2026.1.0 | intel-opencl-rt==2026.1.0 | mkl==2026.1.0 | intel-openmp==2026.1.0 | tbb==2023.1.0 | tcmlib==1.5.0 | umf==1.1.0 | intel-pti==1.0.1 | pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -623,10 +817,11 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.docker_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.12xlarge.memory.ephemeral
+      runs_on: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}
       use_container_directive: true
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
@@ -638,8 +833,8 @@ jobs:
 
   manywheel-test:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-cpu-build, manywheel-cuda-cu126-build, manywheel-cuda-cu130-build, manywheel-cuda-cu132-build]
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag, manywheel-cpu-build, manywheel-cuda-cu126-build, manywheel-cuda-cu130-build, manywheel-cuda-cu132-build, manywheel-cuda-cu134-build]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -652,7 +847,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_10-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.10"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -660,7 +855,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_10-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.10"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -668,7 +863,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_10-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.10"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -676,7 +871,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_10-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.10"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_10-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -684,7 +887,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_11-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.11"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -692,7 +895,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_11-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.11"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -700,7 +903,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_11-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.11"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -708,7 +911,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_11-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.11"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_11-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.12"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -716,7 +927,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_12-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.12"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -724,7 +935,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_12-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.12"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -732,7 +943,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_12-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.12"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -740,7 +951,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_12-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.12"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_12-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.13"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -748,7 +967,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_13-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.13"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -756,7 +975,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_13-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.13"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -764,7 +983,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_13-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.13"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -772,7 +991,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_13-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.13"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_13-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.14"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -780,7 +1007,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_14-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.14"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -788,7 +1015,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_14-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.14"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -796,7 +1023,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_14-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.14"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -804,7 +1031,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.14"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_14-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -812,7 +1047,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_14t-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.14t"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -820,7 +1055,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_14t-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.14t"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -828,7 +1063,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_14t-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.14t"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -836,7 +1071,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14t-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.14t"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_14t-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.15"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -844,7 +1087,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_15-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.15"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -852,7 +1095,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_15-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.15"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -860,7 +1103,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_15-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.15"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -868,7 +1111,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_15-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.15"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_15-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.15t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -876,7 +1127,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_15t-cpu"
-            runs_on: "linux.4xlarge"
+            runs_on: "l-x86iavx512-16-128"
           - desired_python: "3.15t"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -884,7 +1135,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_15t-cuda12_6"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.15t"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
@@ -892,7 +1143,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_15t-cuda13_0"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
           - desired_python: "3.15t"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
@@ -900,7 +1151,15 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_15t-cuda13_2"
-            runs_on: "linux.g4dn.4xlarge.nvidia.gpu"
+            runs_on: "l-x86iavx512-29-115-t4"
+          - desired_python: "3.15t"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_15t-cuda13_4"
+            runs_on: "l-x86iavx512-29-115-t4"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -908,7 +1167,8 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.docker_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-binary-manywheel
@@ -921,20 +1181,13 @@ jobs:
 
   manywheel-test-rocm:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag, manywheel-build]
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
-            docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_10-rocm7_1"
           - desired_python: "3.10"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -942,13 +1195,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_10-rocm7_2"
-          - desired_python: "3.11"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.10"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_11-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_10-rocm7_14"
           - desired_python: "3.11"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -956,13 +1209,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_11-rocm7_2"
-          - desired_python: "3.12"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.11"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_12-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_11-rocm7_14"
           - desired_python: "3.12"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -970,13 +1223,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_12-rocm7_2"
-          - desired_python: "3.13"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.12"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_13-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_12-rocm7_14"
           - desired_python: "3.13"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -984,13 +1237,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_13-rocm7_2"
-          - desired_python: "3.14"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.13"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_14-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_13-rocm7_14"
           - desired_python: "3.14"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -998,13 +1251,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_14-rocm7_2"
-          - desired_python: "3.14t"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.14"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_14t-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_14-rocm7_14"
           - desired_python: "3.14t"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1012,13 +1265,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_14t-rocm7_2"
-          - desired_python: "3.15"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.14t"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_15-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_14t-rocm7_14"
           - desired_python: "3.15"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1026,13 +1279,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_15-rocm7_2"
-          - desired_python: "3.15t"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
+          - desired_python: "3.15"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
             gpu_arch_type: "rocm"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_15t-rocm7_1"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_15-rocm7_14"
           - desired_python: "3.15t"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1040,6 +1293,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_15t-rocm7_2"
+          - desired_python: "3.15t"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_15t-rocm7_14"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1047,14 +1307,16 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
+      # ROCm test runners have no ECR pull credentials, so ROCm stays on the
+      # Docker Hub image (excluded from the content-addressed ECR path).
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 
   manywheel-test-xpu:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag, manywheel-build]
     uses: ./.github/workflows/_binary-test-xpu-linux.yml
     strategy:
       fail-fast: false
@@ -1114,6 +1376,8 @@ jobs:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
+      # XPU test runners have no ECR pull credentials, so XPU stays on the
+      # Docker Hub image (excluded from the content-addressed ECR path).
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
@@ -1124,7 +1388,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: [manywheel-build, manywheel-cpu-build, manywheel-cuda-cu126-build, manywheel-cuda-cu130-build, manywheel-cuda-cu132-build, manywheel-test, manywheel-test-rocm, manywheel-test-xpu]
+    needs: [get-docker-tag, manywheel-build, manywheel-cpu-build, manywheel-cuda-cu126-build, manywheel-cuda-cu130-build, manywheel-cuda-cu132-build, manywheel-cuda-cu134-build, manywheel-test, manywheel-test-rocm, manywheel-test-xpu]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -1159,12 +1423,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_10-cuda13_2"
           - desired_python: "3.10"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_10-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_10-cuda13_4"
           - desired_python: "3.10"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1172,6 +1436,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_10-rocm7_2"
+          - desired_python: "3.10"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_10-rocm7_14"
           - desired_python: "3.10"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1208,12 +1479,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_11-cuda13_2"
           - desired_python: "3.11"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_11-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_11-cuda13_4"
           - desired_python: "3.11"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1221,6 +1492,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_11-rocm7_2"
+          - desired_python: "3.11"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_11-rocm7_14"
           - desired_python: "3.11"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1257,12 +1535,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_12-cuda13_2"
           - desired_python: "3.12"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_12-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_12-cuda13_4"
           - desired_python: "3.12"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1270,6 +1548,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_12-rocm7_2"
+          - desired_python: "3.12"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_12-rocm7_14"
           - desired_python: "3.12"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1306,12 +1591,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_13-cuda13_2"
           - desired_python: "3.13"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_13-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_13-cuda13_4"
           - desired_python: "3.13"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1319,6 +1604,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_13-rocm7_2"
+          - desired_python: "3.13"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_13-rocm7_14"
           - desired_python: "3.13"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1355,12 +1647,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14-cuda13_2"
           - desired_python: "3.14"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_14-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_14-cuda13_4"
           - desired_python: "3.14"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1368,6 +1660,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_14-rocm7_2"
+          - desired_python: "3.14"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_14-rocm7_14"
           - desired_python: "3.14"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1404,12 +1703,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14t-cuda13_2"
           - desired_python: "3.14t"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_14t-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_14t-cuda13_4"
           - desired_python: "3.14t"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1417,6 +1716,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_14t-rocm7_2"
+          - desired_python: "3.14t"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_14t-rocm7_14"
           - desired_python: "3.14t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1453,12 +1759,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_15-cuda13_2"
           - desired_python: "3.15"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_15-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_15-cuda13_4"
           - desired_python: "3.15"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1466,6 +1772,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_15-rocm7_2"
+          - desired_python: "3.15"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_15-rocm7_14"
           - desired_python: "3.15"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1502,12 +1815,12 @@ jobs:
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_15t-cuda13_2"
           - desired_python: "3.15t"
-            desired_cuda: "rocm7.1"
-            gpu_arch_version: "7.1"
-            gpu_arch_type: "rocm"
+            desired_cuda: "cu134"
+            gpu_arch_version: "13.4"
+            gpu_arch_type: "cuda"
             docker_image: "manylinux2_28-builder"
-            docker_image_tag_prefix: "rocm7.1"
-            build_name: "manywheel-py3_15t-rocm7_1"
+            docker_image_tag_prefix: "cuda13.4"
+            build_name: "manywheel-py3_15t-cuda13_4"
           - desired_python: "3.15t"
             desired_cuda: "rocm7.2"
             gpu_arch_version: "7.2"
@@ -1515,6 +1828,13 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_15t-rocm7_2"
+          - desired_python: "3.15t"
+            desired_cuda: "rocm7.14"
+            gpu_arch_version: "7.14"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm7.14"
+            build_name: "manywheel-py3_15t-rocm7_14"
           - desired_python: "3.15t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
@@ -1529,7 +1849,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
     secrets:
@@ -1541,8 +1861,10 @@ jobs:
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    needs: [manywheel-build]
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -1555,6 +1877,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cpu"
             build_name: "libtorch-cpu-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cpu"
           - desired_cuda: "cu126"
             gpu_arch_type: "cuda"
             gpu_arch_version: "12.6"
@@ -1562,6 +1886,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda12_6"
             build_name: "libtorch-cuda12_6-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda12.6"
           - desired_cuda: "cu130"
             gpu_arch_type: "cuda"
             gpu_arch_version: "13.0"
@@ -1569,6 +1895,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda13_0"
             build_name: "libtorch-cuda13_0-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.0"
           - desired_cuda: "cu132"
             gpu_arch_type: "cuda"
             gpu_arch_version: "13.2"
@@ -1576,13 +1904,17 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda13_2"
             build_name: "libtorch-cuda13_2-shared-with-deps-release"
-          - desired_cuda: "rocm7.1"
-            gpu_arch_type: "rocm"
-            gpu_arch_version: "7.1"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.2"
+          - desired_cuda: "cu134"
+            gpu_arch_type: "cuda"
+            gpu_arch_version: "13.4"
             libtorch_variant: "shared-with-deps"
             libtorch_config: "release"
-            source_wheel_build_name: "manywheel-py3_10-rocm7_1"
-            build_name: "libtorch-rocm7_1-shared-with-deps-release"
+            source_wheel_build_name: "manywheel-py3_10-cuda13_4"
+            build_name: "libtorch-cuda13_4-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.4"
           - desired_cuda: "rocm7.2"
             gpu_arch_type: "rocm"
             gpu_arch_version: "7.2"
@@ -1590,10 +1922,23 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-rocm7_2"
             build_name: "libtorch-rocm7_2-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm7.2"
+          - desired_cuda: "rocm7.14"
+            gpu_arch_type: "rocm"
+            gpu_arch_version: "7.14"
+            libtorch_variant: "shared-with-deps"
+            libtorch_config: "release"
+            source_wheel_build_name: "manywheel-py3_10-rocm7_14"
+            build_name: "libtorch-rocm7_14-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm7.14"
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
     steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -1604,24 +1949,31 @@ jobs:
         name: Download Wheel Artifact
         with:
           name: ${{ matrix.source_wheel_build_name }}
-          path: "${{ runner.temp }}/wheel_artifact/"
+          path: "${{ github.workspace }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
+          # In container jobs the github.workspace context is the host path; the
+          # mount is at $GITHUB_WORKSPACE. Use the env var so run steps and the
+          # translated download/upload action paths resolve to the same dir.
+          mkdir -p "${GITHUB_WORKSPACE}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --wheel-dir "${GITHUB_WORKSPACE}/wheel_artifact" \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
+      - name: Smoke test extracted libtorch
+        run: |
+          python3 .ci/libtorch/smoke_test_extract_libtorch.py \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
-          path: "${{ runner.temp }}/libtorch_output/"
+          path: "${{ github.workspace }}/libtorch_output/"
 
   libtorch-upload:
     name: ${{ matrix.build_name }}-upload
@@ -1659,18 +2011,24 @@ jobs:
             libtorch_variant: "shared-with-deps"
             libtorch_config: "release"
             build_name: "libtorch-cuda13_2-shared-with-deps-release"
-          - desired_cuda: "rocm7.1"
-            gpu_arch_type: "rocm"
-            gpu_arch_version: "7.1"
+          - desired_cuda: "cu134"
+            gpu_arch_type: "cuda"
+            gpu_arch_version: "13.4"
             libtorch_variant: "shared-with-deps"
             libtorch_config: "release"
-            build_name: "libtorch-rocm7_1-shared-with-deps-release"
+            build_name: "libtorch-cuda13_4-shared-with-deps-release"
           - desired_cuda: "rocm7.2"
             gpu_arch_type: "rocm"
             gpu_arch_version: "7.2"
             libtorch_variant: "shared-with-deps"
             libtorch_config: "release"
             build_name: "libtorch-rocm7_2-shared-with-deps-release"
+          - desired_cuda: "rocm7.14"
+            gpu_arch_type: "rocm"
+            gpu_arch_version: "7.14"
+            libtorch_variant: "shared-with-deps"
+            libtorch_config: "release"
+            build_name: "libtorch-rocm7_14-shared-with-deps-release"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch

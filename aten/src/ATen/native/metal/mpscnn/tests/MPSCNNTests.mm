@@ -120,7 +120,7 @@ void PRINT_TENSOR(std::string name, const at::Tensor& tensor) {
     for (int i = 0; i < t.numel(); ++i) {
       NSString* sf =
           [NSString stringWithFormat:@"%.2f", t.data_ptr<float>()[i]];
-      str += sf.UTF8String;
+      str += sf.UTF8String ?: "";
       str += ", ";
     }
     std::cout << str << std::endl;
