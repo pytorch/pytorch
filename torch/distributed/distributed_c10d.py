@@ -729,6 +729,38 @@ def _nccl2_options(
     return backend_options
 
 
+def _eager_connect_nccl2(
+    backend: C10DBackend, opts: _DistributedBackendOptions
+) -> C10DBackend:
+    if opts.enable_reconfigure:
+        return backend
+
+    process_group = opts.process_group
+    if process_group is None:
+        raise AssertionError("nccl2 requires a parent process group")
+    device = process_group.bound_device_id
+    if device is None:
+        if torch.cuda.is_initialized():
+            device_index = torch.cuda.current_device()
+        elif "LOCAL_RANK" in os.environ:
+            device_index = get_node_local_rank()
+        else:
+            device_count = torch.cuda.device_count()
+            if device_count == 0:
+                raise RuntimeError("nccl2 requires at least one CUDA device")
+            global_rank = (
+                opts.global_ranks_in_group[opts.group_rank]
+                if opts.global_ranks_in_group
+                else opts.group_rank
+            )
+            device_index = global_rank % device_count
+        device = torch.device("cuda", device_index)
+        process_group.bound_device_id = device
+
+    backend.eager_connect_single_device(device)
+    return backend
+
+
 def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> C10DBackend:
@@ -747,7 +779,10 @@ def _create_nccl2_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
-    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
+    backend = ProcessGroupNCCL2(
+        opts.store, opts.group_rank, opts.group_size, pg_options
+    )
+    return _eager_connect_nccl2(backend, opts)
 
 
 def _create_nccl_lazy_process_group(
@@ -768,9 +803,10 @@ def _create_nccl_lazy_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
-    return ProcessGroupNCCLLazy(
+    backend = ProcessGroupNCCLLazy(
         opts.store, opts.group_rank, opts.group_size, pg_options
     )
+    return _eager_connect_nccl2(backend, opts)
 
 
 def _create_ucc_process_group(
