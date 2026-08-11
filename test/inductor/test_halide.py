@@ -14,9 +14,18 @@ from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads, run_and_get_code
-from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_CI,
+    IS_MACOS,
+    IS_WINDOWS,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU
-from torch.utils._triton import has_triton
 
 
 if IS_WINDOWS and IS_CI:
@@ -69,7 +78,9 @@ def make_halide(cls):
 
 
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
-class HalideTests(TestCase):
+class HalideTestsGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_codecache(self):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
@@ -215,42 +226,6 @@ class HalideTests(TestCase):
         fn(a, b, c)
         self.assertEqual(c, a + b)
 
-    @unittest.skipUnless(has_triton(), "requires triton")
-    def test_random_consistency(self):
-        seed = 1234
-        shape = (3, 3)
-        dtype = torch.float32
-
-        for (rand_fn,) in itertools.product(
-            (
-                functools.partial(torch.rand, shape, dtype=dtype, device="cuda"),
-                functools.partial(torch.randn, shape, dtype=dtype, device="cuda"),
-                functools.partial(
-                    torch.randint,
-                    -1000,
-                    1000,
-                    size=shape,
-                    dtype=torch.int64,
-                    device="cuda",
-                ),
-            )
-        ):
-
-            @torch.compile(backend="inductor", options={"cuda_backend": "halide"})
-            def get_rand_halide():
-                return rand_fn()
-
-            @torch.compile(backend="inductor", options={"cuda_backend": "triton"})
-            def get_rand_triton():
-                return rand_fn()
-
-            torch.manual_seed(seed)
-            halide_output = get_rand_halide()
-            torch.manual_seed(seed)
-            triton_output = get_rand_triton()
-
-        self.assertEqual(halide_output, triton_output)
-
     def test_compile_options(self):
         @torch.compile(
             backend="inductor",
@@ -291,6 +266,50 @@ class HalideTests(TestCase):
 
         self.assertEqual(result, expected)
         self.assertEqual(x, expected)
+
+
+@unittest.skipUnless(HAS_HALIDE, "requires halide")
+class HalideTestsCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_capabilities(Capability.lib.triton)
+    def test_random_consistency(self, device):
+        seed = 1234
+        shape = (3, 3)
+        dtype = torch.float32
+
+        for (rand_fn,) in itertools.product(
+            (
+                functools.partial(torch.rand, shape, dtype=dtype, device=device),
+                functools.partial(torch.randn, shape, dtype=dtype, device=device),
+                functools.partial(
+                    torch.randint,
+                    -1000,
+                    1000,
+                    size=shape,
+                    dtype=torch.int64,
+                    device=device,
+                ),
+            )
+        ):
+
+            @torch.compile(backend="inductor", options={"cuda_backend": "halide"})
+            def get_rand_halide():
+                return rand_fn()
+
+            @torch.compile(backend="inductor", options={"cuda_backend": "triton"})
+            def get_rand_triton():
+                return rand_fn()
+
+            torch.manual_seed(seed)
+            halide_output = get_rand_halide()
+            torch.manual_seed(seed)
+            triton_output = get_rand_triton()
+
+        self.assertEqual(halide_output, triton_output)
+
+
+instantiate_device_type_tests(HalideTestsCuda, globals(), only_for="cuda")
 
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
