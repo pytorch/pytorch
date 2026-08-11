@@ -47,7 +47,13 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
@@ -1109,6 +1115,33 @@ class TestNoComm(MultiProcessTestCase):
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
 
+
+class TestFlattenOptimStateDict(TestCase):
+    @parametrize("momentum", [0.0, 0.9])
+    def test_flattened_osd_sgd(self, momentum: float) -> None:
+        model = nn.Sequential(
+            nn.Linear(2, 2, bias=False),
+            nn.Linear(2, 2, bias=False),
+        )
+        optim = torch.optim.SGD(model.parameters(), lr=0.1, momentum=momentum)
+        model(torch.randn(2, 2)).sum().backward()
+        optim.step()
+        optim.zero_grad()
+
+        opts = StateDictOptions(flatten_optimizer_state_dict=True)
+        osd = get_optimizer_state_dict(model, optim, options=opts)
+        has_state_keys = any(k.startswith("state.") for k in osd)
+        if momentum == 0.0:
+            self.assertFalse(has_state_keys)
+        else:
+            self.assertTrue(has_state_keys)
+
+        new_optim = torch.optim.SGD(model.parameters(), lr=0.1, momentum=momentum)
+        set_optimizer_state_dict(model, new_optim, osd, options=opts)
+        self.assertEqual(optim.state_dict(), new_optim.state_dict())
+
+
+instantiate_parametrized_tests(TestFlattenOptimStateDict)
 
 if __name__ == "__main__":
     run_tests()

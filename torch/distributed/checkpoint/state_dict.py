@@ -863,10 +863,14 @@ def _unflatten_optim_state_dict(
                 if not param.requires_grad:
                     continue
 
+                param_state = optim.state.get(param)
+                if not param_state:
+                    continue
+
                 # Reconstruct state for this parameter
                 # pyrefly: ignore [unsupported-operation]
                 state[fqn] = {}
-                for state_name in optim.state[param]:
+                for state_name in param_state:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
 
                     if flattened_state_key not in state_dict:
