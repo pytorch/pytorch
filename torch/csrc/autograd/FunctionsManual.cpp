@@ -4685,18 +4685,29 @@ static Tensor masked_fmap(
 Tensor linalg_det_jvp(
     const Tensor& dA,
     const Tensor& det,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool use_A_T) {
   // (d det)_A(E) = tr(A^{-1}E)*det
   // We use that the determinant is C^1 to approximate the gradient of singular
-  // inputs Since we never differentiate over forward AD, we don't need to deal
-  // with further gradients, as we do in grad_backward
-  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
-  auto LU_ =
-      LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
-  auto AinvE =
-      at::linalg_lu_solve(LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  // inputs.
+  // Recompute A^{-1}dA via linalg_solve when the result may be differentiated
+  // again, so autograd sees the dependence of A^{-1} on A (cf. the analogous
+  // branch in linalg_det_backward). The subclass check makes every functorch
+  // transform take this branch: the primal here still carries a functorch wrapper,
+  // which is indistinguishable from a pending higher-order differentiation.
+  // Plain forward-mode AD (make_dual without functorch) reaches the fast saved-LU path below.
+  Tensor AinvE;
+  if (A.requires_grad() || areAnyTensorSubclassLike({A, dA})) {
+    AinvE = at::linalg_solve(A, dA);
+  } else {
+    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    auto LU_ =
+        LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+    AinvE = at::linalg_lu_solve(
+        LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  }
   return AinvE.diagonal(0, -2, -1).sum(-1) * det;
 }
 
@@ -4782,13 +4793,19 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     const Tensor& LU,
     const Tensor& pivots,
     const Tensor& dA,
+    const Tensor& A,
     const Tensor& sign,
     const bool use_A_T) {
   // No need to handle the singular case separately as we do in det since
   // this function is not differentiable on singular matrices
-  auto trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
-                     .diagonal(0, -2, -1)
-                     .sum(-1);
+  Tensor trAinvE;
+  if (A.requires_grad() || areAnyTensorSubclassLike({A, dA})) {
+    trAinvE = at::linalg_solve(A, dA).diagonal(0, -2, -1).sum(-1);
+  } else {
+    trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
+                  .diagonal(0, -2, -1)
+                  .sum(-1);
+  }
   if (LU.is_complex()) {
     auto i = c10::complex<double>{0.0, 1.0};
     return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
@@ -6512,16 +6529,17 @@ Tensor linalg_solve_jvp(
     const Tensor& dA,
     const Tensor& dB,
     const Tensor& X,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool left) {
   at::NoTF32Guard disable_tf32;
   // For left=True (left=False is analogous)
-  // dX = A^{-1}(dB - dAX)
+  // dX = A^{-1}(dB - dA X)
 
   // [NumPy compat] Case where the rhs is a vector.
   // We denote with an underscore vectors that have been converted to matrices
-  // by `unsqueeze(-1)`
+  // by unsqueeze(-1)
   const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
   const auto vector_to_matrix = [vector_case](const Tensor& X) {
     return vector_case ? X.unsqueeze(-1) : X;
@@ -6536,7 +6554,12 @@ Tensor linalg_solve_jvp(
   auto X_ = vector_to_matrix(X);
   auto dB_ = vector_to_matrix(dB);
   auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
-  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
+  Tensor dX_;
+  if (A.requires_grad() || areAnyTensorSubclassLike({A, dA, dB})) {
+    dX_ = at::linalg_solve(A, dB_ - R_, left);
+  } else {
+    dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
+  }
   return matrix_to_vector(dX_);
 }
 
