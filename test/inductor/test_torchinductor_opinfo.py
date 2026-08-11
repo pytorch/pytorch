@@ -1425,11 +1425,8 @@ if NEXTAFTER_IN_RANGE:
     instantiate_device_type_tests(TestInductorNextafter, globals(), allow_xpu=True)
 
 
-@wrapper_noop_set_seed_decorator
-# Keep the OpInfo test body in a reusable template so other Inductor backend
-# test modules can instantiate backend-specific subclasses. Classes passed to
-# instantiate_device_type_tests must define their test methods directly, so
-# subclasses should rebind test_comprehensive from this template.
+# Keep the OpInfo test body reusable so other Inductor backends can select
+# their own operator set without duplicating the implementation.
 class InductorOpInfoTemplate(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1457,25 +1454,7 @@ class InductorOpInfoTemplate(TestCase):
     check_model = check_model
     check_model_gpu = check_model_gpu
 
-    @suppress_warnings
-    @skipCUDAMemoryLeakCheckIf(
-        True
-    )  # inductor kernels failing this test intermittently
-    @skipIf(not has_triton(), "Skipped! Triton not found", device_type=("cuda", "xpu"))
-    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
-    @skipCPUIf(IS_MACOS, "Skipped under macOS")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @skipIfTorchDynamo("Test uses dynamo already")
-    @skipIfCrossRef
-    @_ops(op_db[START:END])
-    @skipOps(test_skips_or_fails)
-    @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
-    @torch._inductor.config.patch(
-        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
-    )
-    @torch._inductor.config.patch("shape_padding", False)
-    @collection_decorator
-    def test_comprehensive(self, device, dtype, op):
+    def _test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
 
         torch._dynamo.reset()
@@ -1738,8 +1717,43 @@ class InductorOpInfoTemplate(TestCase):
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
 
 
-class TestInductorOpInfo(InductorOpInfoTemplate):
-    test_comprehensive = InductorOpInfoTemplate.test_comprehensive
+def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
+    @wrapper_noop_set_seed_decorator
+    class TestInductorOpInfo(InductorOpInfoTemplate):
+        @suppress_warnings
+        @skipCUDAMemoryLeakCheckIf(
+            True
+        )  # inductor kernels failing this test intermittently
+        @skipIf(
+            not has_triton(), "Skipped! Triton not found", device_type=("cuda", "xpu")
+        )
+        @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+        @skipCPUIf(IS_MACOS, "Skipped under macOS")
+        @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+        @skipIfTorchDynamo("Test uses dynamo already")
+        @skipIfCrossRef
+        @ops_decorator
+        @skip_ops_decorator
+        @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+        @torch._inductor.config.patch(
+            {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+        )
+        @torch._inductor.config.patch("shape_padding", False)
+        @collection_decorator
+        def test_comprehensive(self, device, dtype, op):
+            return self._test_comprehensive(device, dtype, op)
+
+    # TrackedInputIter hashes the test qualname to seed OpInfo sample inputs.
+    TestInductorOpInfo.test_comprehensive.__qualname__ = (
+        "TestInductorOpInfo.test_comprehensive"
+    )
+    return TestInductorOpInfo
+
+
+TestInductorOpInfo = make_inductor_opinfo_cls(
+    ops_decorator=_ops(op_db[START:END]),
+    skip_ops_decorator=skipOps(test_skips_or_fails),
+)
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
