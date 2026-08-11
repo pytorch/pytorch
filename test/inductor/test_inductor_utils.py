@@ -10,16 +10,15 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 from torch.autograd import DeviceType
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
-
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
 
 
 class FakeKinetoEvent:
@@ -77,25 +76,8 @@ class FakeProfilerEvent:
         self.cpu_children = cpu_children or []
 
 
-class TestBench(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        x = torch.rand(1024, 10).to(device_type).half()
-        w = torch.rand(512, 10).to(device_type).half()
-        cls._bench_fn = staticmethod(
-            functools.partial(torch.nn.functional.linear, x, w)
-        )
-
-    def test_benchmarker(self):
-        res = benchmarker.benchmark_gpu(self._bench_fn)
-        log.warning("do_bench result: %s", res)
-        self.assertGreater(res, 0)
-
-    def test_do_bench_using_profiling(self):
-        res = do_bench_using_profiling(self._bench_fn)
-        log.warning("do_bench_using_profiling result: %s", res)
-        self.assertGreater(res, 0)
+class TestBenchGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_do_bench_profile_result_uses_linked_device_events(self):
         profiler_events = [
@@ -197,5 +179,40 @@ class TestBench(TestCase):
             )
 
 
+instantiate_parametrized_tests(TestBenchGeneric)
+
+
+class TestBenchAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        x = torch.rand(1024, 10).to(device).half()
+        w = torch.rand(512, 10).to(device).half()
+        cls._bench_fn = staticmethod(
+            functools.partial(torch.nn.functional.linear, x, w)
+        )
+
+    def test_benchmarker(self, device):
+        res = benchmarker.benchmark_gpu(self._bench_fn)
+        log.warning("do_bench result: %s", res)
+        self.assertGreater(res, 0)
+
+    def test_do_bench_using_profiling(self, device):
+        res = do_bench_using_profiling(self._bench_fn)
+        log.warning("do_bench_using_profiling result: %s", res)
+        self.assertGreater(res, 0)
+
+
+instantiate_device_type_tests(
+    TestBenchAccelerator,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+)
+
+
 if __name__ == "__main__":
-    run_tests(device_type)
+    run_tests()
