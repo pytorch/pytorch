@@ -85,13 +85,14 @@ class DenseSparseParams(nn.Module):
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(TestCase):
-    # These tests check how FSDP propagates spmd_types annotations, which is
-    # bookkeeping the device never participates in: the process group is the
-    # fake backend and every mesh below is built on "cpu". Nothing here reads
-    # or writes accelerator memory, so the class is GENERIC rather than
-    # ACCELERATOR, and it is deliberately not passed to
+    # These tests check how FSDP propagates spmd_types annotations. The
+    # process group is the fake backend and every mesh below is hard-coded to
+    # "cpu" rather than derived from whatever accelerator is present, so this
+    # is CPU-specific by construction, not device-agnostic framework logic --
+    # GENERIC is for things like the Dynamo dispatcher that do not reference
+    # any device at all. It is deliberately not passed to
     # `instantiate_device_type_tests` -- there is no device to parametrize on.
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
     @classmethod
     def setUpClass(cls):
