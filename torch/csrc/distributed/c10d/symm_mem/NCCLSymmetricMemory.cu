@@ -505,7 +505,7 @@ NCCLCftHandle NCCLSymmetricMemory::get_peer_cft_handle(int peer) {
   return NCCLCftHandle{le_id, le_offset};
 #else
   TORCH_CHECK(
-      false, "NCCL host-side CFT is not supported. Requires NCCL >= 2.32.0");
+      false, "NCCL host-side CFT is not supported. Requires NCCL >= 2.31.2");
 #endif
 }
 
@@ -523,7 +523,7 @@ NCCLCftHandle NCCLSymmetricMemory::get_multimem_cft_handle() {
   return NCCLCftHandle{le_id, le_offset};
 #else
   TORCH_CHECK(
-      false, "NCCL host-side CFT is not supported. Requires NCCL >= 2.32.0");
+      false, "NCCL host-side CFT is not supported. Requires NCCL >= 2.31.2");
 #endif
 }
 
