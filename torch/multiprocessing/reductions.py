@@ -623,6 +623,10 @@ def reduce_storage(storage):
 
 
 def init_reductions():
+    # torch.cuda is already imported before torch.multiprocessing, but torch.xpu is not,
+    # so import it explicitly here to ensure torch.xpu.Event is available for IPC registration.
+    import torch.xpu
+
     ipc_event_classes = [torch.cuda.Event, torch.xpu.Event]
     for event_cls in ipc_event_classes:
         reduction.register(event_cls, reduce_event)

@@ -781,35 +781,6 @@ print(torch.xpu.is_initialized())
         ):
             handle = e6.ipc_handle()
 
-    def test_event_multiprocess(self):
-        event = torch.xpu.Event(enable_timing=False, interprocess=True)
-        self.assertTrue(event.query())
-
-        def _event_multiprocess_child(event, p2c, c2p):
-            c2p.put(0)  # notify parent child is ready
-            p2c.get()  # wait for record in parent
-            event.synchronize()
-            c2p.put(1)  # notify parent synchronization is done
-
-        ctx = mp.get_context("spawn")
-        p2c = ctx.SimpleQueue()
-        c2p = ctx.SimpleQueue()
-        p = ctx.Process(
-            target=_event_multiprocess_child,
-            args=(event, p2c, c2p),
-        )
-        p.start()
-
-        c2p.get()  # wait for until child process is ready
-        torch.xpu._sleep(50000000)  # spin for about 50 ms
-        event.record()
-        p2c.put(0)  # notify child event is recorded
-
-        self.assertFalse(event.query())
-        c2p.get()  # wait for synchronization in child
-        self.assertTrue(event.query())
-        p.join()
-
     def test_event_handle_importer(self):
         e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
@@ -832,7 +803,7 @@ print(torch.xpu.is_initialized())
         p.start()
 
         c2p.get()  # wait for child to become ready
-        torch.xpu._sleep(50000000)  # spin for about 50 ms
+        torch.xpu._sleep(500_000_000)  # spin for about 500 ms
         e0.record()
         p2c.put(0)  # notify child event is recorded
 
@@ -849,7 +820,7 @@ print(torch.xpu.is_initialized())
             stream = torch.xpu.Stream()
             with stream:
                 e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
-                torch.xpu._sleep(50000000)  # spin for about 50 ms
+                torch.xpu._sleep(50_000_000)  # spin for about 500 ms
                 e1.record()
                 c2p.put(0)
                 # wait for parent process finished synchronization before
@@ -871,6 +842,35 @@ print(torch.xpu.is_initialized())
         e0.synchronize()
         self.assertTrue(e0.query())
         p2c.put(0)
+        p.join()
+
+    def test_event_multiprocess(self):
+        event = torch.xpu.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(event.query())
+
+        def _event_multiprocess_child(event, p2c, c2p):
+            c2p.put(0)  # notify parent child is ready
+            p2c.get()  # wait for record in parent
+            event.synchronize()
+            c2p.put(1)  # notify parent synchronization is done
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=_event_multiprocess_child,
+            args=(event, p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for until child process is ready
+        torch.xpu._sleep(50_000_000)  # spin for about 500 ms
+        event.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(event.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(event.query())
         p.join()
 
     def test_device_context_manager(self):
