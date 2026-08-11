@@ -2352,6 +2352,15 @@ class SchedulerNode(BaseSchedulerNode):
     def clear_loop_body_dependent_caches(self, need_clear_tiling_cache: bool) -> None:
         self.clear_read_writes_dependent_caches()
         self.pointwise_read_writes.clear_cache(self)
+        self.reduction_read_writes.clear_cache(self)
+        self._get_atomic_add_buffers.clear_cache(self)
+        self.has_side_effects.clear_cache(self)
+        self.can_codegen_in_low_precision.clear_cache(self)
+        self.can_codegen_without_upcasts.clear_cache(self)
+        self.get_read_write_buffers_sizes.clear_cache(self)
+        self.get_read_buffer_sizes.clear_cache(self)
+        self.get_write_buffer_sizes.clear_cache(self)
+        self._get_estimated_runtime.clear_cache(self)
 
         if need_clear_tiling_cache:
             from .codegen.simd import SIMDScheduling
@@ -2451,8 +2460,10 @@ class SchedulerNode(BaseSchedulerNode):
             return
         if not isinstance(self.node, ir.ComputedBuffer):
             raise AssertionError("expected self.node to be an ir.ComputedBuffer")
+        self._before_loop_state_mutation()
         with self.node.with_original_inner_fn():
             self._compute_attrs()
+        self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
@@ -4352,6 +4363,8 @@ class Scheduler:
             distributed_autotune.schedule(self)
             self.compute_ancestors()
 
+        self.refine_split_reductions_for_pointwise_fusion()
+
         # Stream assignments must be populated BEFORE fusion
         # to prevent fusing nodes across stream boundaries
         self.node_to_stream: dict[BaseSchedulerNode, int] = {}
@@ -5621,6 +5634,199 @@ class Scheduler:
             self.buff_to_mempool[buf] = mempool
         if mempool is not None:
             self._mempool_nodes = True
+
+    def refine_split_reductions_for_pointwise_fusion(self) -> None:
+        """
+        Rebuild split reductions with scheduler-observed pointwise tiling hints.
+
+        Reduction splitting normally happens before scheduling, so a full reduction
+        can pick a flat split count that is incompatible with pointwise tiling over
+        the same input.  Use scheduler-visible pointwise iteration ranges as split
+        hints, then let the normal fusion pass align the loop order.
+        """
+        for node in self.nodes:
+            if not isinstance(node, SchedulerNode):
+                continue
+            if not isinstance(node.node, ir.ComputedBuffer):
+                continue
+            split_buffer = node.node
+            if (
+                node.has_strict_sum()
+                or split_buffer._split_size is None
+                or split_buffer._original_inner_fn is None
+                or split_buffer._original_ranges is None
+                or split_buffer._original_reduction_ranges is None
+                or not isinstance(split_buffer.data, ir.Reduction)
+            ):
+                continue
+            if self._split_reduction_is_recursive(split_buffer):
+                fusion_log.debug("skip recursively split reduction %s", node.get_name())
+                continue
+
+            split_hints = self._split_reduction_pointwise_hints(node)
+            fusion_log.debug(
+                "split reduction %s pointwise split hints: %s",
+                node.get_name(),
+                split_hints,
+            )
+            if not split_hints:
+                continue
+
+            final_node = self._split_reduction_final_node(node)
+            if final_node is None:
+                continue
+            final_buffer = final_node.node
+            if not isinstance(final_buffer, ir.ComputedBuffer):
+                raise AssertionError("expected final_buffer to be an ir.ComputedBuffer")
+
+            reduction_numel = V.graph.sizevars.simplify(
+                sympy_product(split_buffer._original_reduction_ranges)
+            )
+            new_hint, new_split = ir.Reduction.num_splits(
+                split_buffer.get_device_or_error(),
+                final_buffer.get_dtype(),
+                split_buffer.data.src_dtype,
+                split_buffer._original_inner_fn,
+                split_buffer._original_ranges,
+                split_buffer._original_reduction_ranges,
+                split_buffer.data.reduction_type,
+                reduction_numel,
+                input_node=split_buffer._original_input_node,
+                split_hints=split_hints,
+            )
+            if not isinstance(new_split, int) or new_split <= 1:
+                fusion_log.debug(
+                    "split reduction %s keeps split %s with hints %s",
+                    node.get_name(),
+                    new_split,
+                    split_hints,
+                )
+                continue
+
+            original_split = split_buffer.data.ranges[
+                len(split_buffer._original_ranges)
+            ]
+            if V.graph.sizevars.statically_known_equals(original_split, new_split):
+                fusion_log.debug(
+                    "split reduction %s keeps split count %s with hints %s",
+                    node.get_name(),
+                    original_split,
+                    split_hints,
+                )
+                continue
+
+            original_dependencies = (
+                _real_dep_names(node.read_writes.reads),
+                _real_dep_names(node.read_writes.writes),
+                _real_dep_names(final_node.read_writes.reads),
+                _real_dep_names(final_node.read_writes.writes),
+            )
+            node._before_loop_state_mutation()
+            final_node._before_loop_state_mutation()
+            split_buffer.realign_reduction_split(
+                final_buffer,
+                new_split,
+                new_hint,
+            )
+            node.recompute_size_and_body()
+            final_node.recompute_size_and_body()
+            updated_dependencies = (
+                _real_dep_names(node.read_writes.reads),
+                _real_dep_names(node.read_writes.writes),
+                _real_dep_names(final_node.read_writes.reads),
+                _real_dep_names(final_node.read_writes.writes),
+            )
+            if updated_dependencies != original_dependencies:
+                raise AssertionError(
+                    "realigning a reduction split changed its dependencies: "
+                    f"{original_dependencies} != {updated_dependencies}"
+                )
+            node.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
+            final_node.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
+            fusion_log.debug(
+                "split reduction %s realigned from %s to %s using hints %s",
+                node.get_name(),
+                original_split,
+                new_split,
+                split_hints,
+            )
+
+    def _split_reduction_final_node(self, node: SchedulerNode) -> SchedulerNode | None:
+        outputs = node.get_outputs()
+        if len(outputs) != 1 or len(outputs[0].users) != 1:
+            return None
+        final_node = outputs[0].users[0].node
+        if not isinstance(final_node, SchedulerNode):
+            return None
+        if not isinstance(final_node.node, ir.ComputedBuffer):
+            return None
+        if not isinstance(final_node.node.data, ir.Reduction):
+            return None
+        if final_node.node._split_size is not None:
+            return None
+        if not isinstance(node.node, ir.ComputedBuffer):
+            return None
+        if final_node.node.get_read_names() != OrderedSet([node.node.get_name()]):
+            return None
+        return final_node
+
+    @staticmethod
+    def _split_reduction_is_recursive(split_buffer: ir.ComputedBuffer) -> bool:
+        for read_name in split_buffer.get_read_names():
+            read_buffer = V.graph.name_to_buffer.get(read_name)
+            if (
+                isinstance(read_buffer, ir.ComputedBuffer)
+                and read_buffer._split_size is not None
+            ):
+                return True
+        return False
+
+    def _split_reduction_pointwise_hints(self, node: SchedulerNode) -> list[int]:
+        if not isinstance(node.node, ir.ComputedBuffer):
+            raise AssertionError("expected node.node to be an ir.ComputedBuffer")
+        if node.node._original_ranges is None:
+            raise AssertionError("expected node.node._original_ranges is not None")
+        if node.node._original_reduction_ranges is None:
+            raise AssertionError(
+                "expected node.node._original_reduction_ranges is not None"
+            )
+        reduction_numel = sympy_product(node.node._original_ranges) * sympy_product(
+            node.node._original_reduction_ranges
+        )
+        hints: OrderedSet[int] = OrderedSet()
+        for other_node in self.nodes:
+            if other_node is node:
+                continue
+            if (
+                not isinstance(other_node, SchedulerNode)
+                or other_node.is_reduction()
+                or other_node.is_template()
+                or node.get_device() != other_node.get_device()
+            ):
+                continue
+            if not isinstance(other_node.node, ir.ComputedBuffer):
+                continue
+            if (
+                node.node.get_stream_idx() != other_node.node.get_stream_idx()
+                or node.node.get_mempool() != other_node.node.get_mempool()
+            ):
+                continue
+            if not MixOrderReduction.has_common_read(node, other_node):
+                continue
+            if not V.graph.sizevars.statically_known_equals(
+                sympy_product(other_node.get_ranges()[0]),
+                reduction_numel,
+            ):
+                continue
+
+            prefix: sympy.Expr | int = 1
+            for value in other_node.get_ranges()[0][:-1]:
+                prefix *= value
+                hint = V.graph.sizevars.optimization_hint(prefix, fallback=0)
+                if hint > 1:
+                    hints.add(hint)
+
+        return list(hints)
 
     def _any_atomic_add(self, node_list: Sequence[BaseSchedulerNode]) -> bool:
         return any(

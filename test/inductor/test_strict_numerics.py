@@ -292,6 +292,28 @@ class StrictNumericsTest(TestCase):
         elif kind == "multi_output":
             self.assertEqual(eager[0], result[0])
 
+    def test_tiled_pointwise_sibling_preserves_strict_sum(self, device):
+        M, N = 2048, 4096
+        x = torch.randn(1, M * N, device=device)
+
+        def fn(z):
+            y = z.sum(1)
+            tiled = z.view(M, N) / 10.0
+            tiled_t = tiled.t().contiguous().t()
+            return y, tiled, tiled_t
+
+        eager = fn(x)
+        result, code = self._run(
+            fn,
+            x,
+            loop_ordering_after_fusion=True,
+            split_reductions=True,
+            **{"triton.mix_order_reduction": True},
+        )
+        self._assert_bitwise_equal(eager[0], result[0])
+        self.assertEqual(eager[1:], result[1:])
+        self.assertEqual(code.count(INNER_TREE_CALL), 2)
+
     def test_combo_kernel_preserves_strict_sum_blocks(self, device):
         args = (
             torch.randn(8, 12000, device=device),

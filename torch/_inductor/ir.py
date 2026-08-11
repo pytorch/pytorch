@@ -1484,6 +1484,7 @@ class Reduction(Loops):
         reduction_type: ReductionType | Literal["scan"],
         reduction_numel: Expr,
         input_node: IRNode | None = None,
+        split_hints: Sequence[int] | None = None,
     ) -> tuple[ReductionHint, _IntLike]:
         """
         Choose the reduction hint and split count from shape and input stride information.
@@ -1529,7 +1530,11 @@ class Reduction(Loops):
 
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
+        warp_size = props.warp_size_or_default
         min_elements_per_thread = 32
+        max_elements_per_thread = 512
+        num_warps = 8
+        num_threads = warp_size * num_warps
         if should_split:
             inner_reduction_splits: Callable[[int, int], int] = functools.partial(
                 V.choices.reduction_split_factor, device, inner_reduction=True
@@ -1547,9 +1552,66 @@ class Reduction(Loops):
 
             outer_reduction_splits = inner_reduction_splits
 
+        def split_aligned_with_reduction_ranges(split: _IntLike) -> _IntLike:
+            if (
+                not _is_static(split)
+                or int(split) <= 1
+                or numel_hint != 1
+                or not all(_is_static(r) for r in reduction_ranges)
+                or not split_hints
+            ):
+                return split
+
+            reduction_dims = [int(r) for r in reduction_ranges]
+            if any(dim <= 0 for dim in reduction_dims):
+                return split
+
+            reduction_numel_from_ranges = functools.reduce(
+                operator.mul, reduction_dims, 1
+            )
+            if reduction_numel_from_ranges != reduction_numel_hint:
+                return split
+
+            split_int = int(split)
+            # Eliminating a separate full-tensor read can outweigh some loss
+            # in standalone reduction efficiency, so tolerate blocks 8x
+            # smaller or 2x larger than the usual per-thread work range.  The
+            # ratio bound below keeps the fusion hint from overwhelming the
+            # device split heuristic.
+            min_block_size = num_threads * min_elements_per_thread // 8
+            max_block_size = num_threads * max_elements_per_thread * 2
+
+            best_split = split_int
+            best_ratio = float("inf")
+            valid_prefixes = OrderedSet[int]()
+            prefix = 1
+            for dim in reduction_dims[:-1]:
+                prefix *= dim
+                valid_prefixes.add(prefix)
+
+            for hint in split_hints:
+                if hint <= 1:
+                    continue
+                if hint not in valid_prefixes:
+                    continue
+                if reduction_numel_from_ranges % hint != 0:
+                    continue
+                block_size = reduction_numel_from_ranges // hint
+                if not (min_block_size <= block_size <= max_block_size):
+                    continue
+
+                ratio = max(hint, split_int) / min(hint, split_int)
+                # Bound both fanout increases and decreases from alignment.
+                if ratio <= 16 and ratio < best_ratio:
+                    best_split = hint
+                    best_ratio = ratio
+
+            return best_split
+
         # easy cases
         if numel_hint == 1:
             split = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            split = split_aligned_with_reduction_ranges(split)
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
@@ -1992,7 +2054,7 @@ class Reduction(Loops):
 
             # Find the reduction that get split
             split_reduction = None
-            if config.triton.mix_order_reduction and isinstance(out, TensorBox):
+            if isinstance(out, TensorBox):
 
                 def _find_split_reduction(
                     cur_node: TensorBox,
@@ -2030,6 +2092,7 @@ class Reduction(Loops):
                 split_reduction._original_inner_fn = inner_fn
                 split_reduction._original_ranges = ranges
                 split_reduction._original_reduction_ranges = reduction_ranges
+                split_reduction._original_input_node = input_node
             return out
 
         out = TensorBox.create(
@@ -5540,6 +5603,7 @@ class ComputedBuffer(OperationBuffer):
     _original_inner_fn: Callable[..., Any] | None = None
     _original_ranges: Sequence[_IntLike] | None = None
     _original_reduction_ranges: Sequence[_IntLike] | None = None
+    _original_input_node: IRNode | None = None
 
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
@@ -5557,17 +5621,11 @@ class ComputedBuffer(OperationBuffer):
         old_data = self.data
         old_layout = self.layout
         try:
-            new_data = Reduction(
-                device=old_data.device,
-                dtype=old_data.dtype,
+            new_data = self._replace_reduction(
+                old_data,
                 inner_fn=self._original_inner_fn,
                 ranges=self._original_ranges,
                 reduction_ranges=self._original_reduction_ranges,
-                reduction_type=old_data.reduction_type,
-                src_dtype=old_data.src_dtype,
-                reduction_hint=old_data.reduction_hint,
-                strict_sum_multirow=old_data.strict_sum_multirow,
-                strict_sum_rblock=old_data.strict_sum_rblock,
             )
             self.data = new_data
             # this layout does not matter since we skip tl.store
@@ -5578,10 +5636,140 @@ class ComputedBuffer(OperationBuffer):
                 self._original_ranges,
             )
             self.get_default_sizes_body.clear_cache(self)
+            cast(Any, self.get_free_symbol_uses).clear_cache(self)
             yield
         finally:
             self.data = old_data
             self.layout = old_layout
+            self.get_default_sizes_body.clear_cache(self)
+            cast(Any, self.get_free_symbol_uses).clear_cache(self)
+
+    @staticmethod
+    def _replace_reduction(source: Reduction, **changes: Any) -> Reduction:
+        target = dataclasses.replace(source, **changes)
+        for attr in ("origins", "traceback", "annotations"):
+            target._post_init_setattr(attr, copy.copy(getattr(source, attr)))
+        for attr in ("origin_node", "stream_idx", "mempool"):
+            target._post_init_setattr(attr, getattr(source, attr))
+        return target
+
+    def realign_reduction_split(
+        self,
+        final_buffer: ComputedBuffer,
+        split: int,
+        reduction_hint: ReductionHint,
+    ) -> None:
+        """Rebuild both stages of a split reduction while preserving buffer identity."""
+        if not isinstance(self.data, Reduction):
+            raise AssertionError(f"expected split reduction, got {type(self.data)}")
+        if not isinstance(final_buffer.data, Reduction):
+            raise AssertionError(
+                f"expected final reduction, got {type(final_buffer.data)}"
+            )
+        if self._original_inner_fn is None:
+            raise AssertionError("expected original reduction inner function")
+        if self._original_ranges is None:
+            raise AssertionError("expected original reduction ranges")
+        if self._original_reduction_ranges is None:
+            raise AssertionError("expected original reduction ranges")
+        if split <= 1:
+            raise AssertionError(f"expected split > 1, got {split}")
+
+        old_split_data = self.data
+        old_final_data = final_buffer.data
+        if (
+            old_split_data.strict_sum_rblock is not None
+            or old_final_data.strict_sum_rblock is not None
+        ):
+            raise AssertionError("strict reductions must keep their prescribed split")
+
+        if self.name is None:
+            raise AssertionError("expected split reduction to have a name")
+        if final_buffer.get_read_names() != OrderedSet([self.name]):
+            raise AssertionError(
+                "expected final reduction to only read the split buffer"
+            )
+        if old_split_data.reduction_type != old_final_data.reduction_type:
+            raise AssertionError("expected both reduction stages to have the same type")
+        if (
+            self.get_dtype() != old_split_data.dtype
+            or final_buffer.get_dtype() != old_final_data.dtype
+            or self.get_device() != final_buffer.get_device()
+        ):
+            raise AssertionError("expected reduction data to match its buffer metadata")
+        if not isinstance(
+            self.layout, FixedLayout
+        ) or not V.graph.sizevars.statically_known_equals(self.layout.offset, 0):
+            raise AssertionError(
+                "expected the split reduction to have an owning layout"
+            )
+
+        def same_ranges(left: Sequence[_IntLike], right: Sequence[_IntLike]) -> bool:
+            return len(left) == len(right) and all(
+                V.graph.sizevars.statically_known_equals(a, b)
+                for a, b in zip(left, right)
+            )
+
+        if (
+            len(old_final_data.reduction_ranges) != 1
+            or len(old_split_data.ranges) != len(self._original_ranges) + 1
+            or not same_ranges(old_split_data.ranges[:-1], self._original_ranges)
+            or not same_ranges(old_split_data.reduction_ranges, [self._split_size])
+            or not same_ranges(old_final_data.ranges, self._original_ranges)
+            or not same_ranges(
+                old_final_data.reduction_ranges, [old_split_data.ranges[-1]]
+            )
+        ):
+            raise AssertionError("expected a direct two-stage split reduction")
+
+        device = self.get_device_or_error()
+        dst_dtype = final_buffer.get_dtype()
+        reduction_numel = sympy_product(self._original_reduction_ranges)
+        block_size = FloorDiv(reduction_numel + (split - 1), split)
+        wrapper_fn = Reduction._multilayer_wrap_loader(
+            self._original_inner_fn,
+            self._original_reduction_ranges,
+            reduction_numel,
+            split,
+            block_size,
+            Reduction.default_value(old_split_data.reduction_type, dst_dtype),
+            self._original_input_node,
+        )
+
+        new_split_data = self._replace_reduction(
+            old_split_data,
+            inner_fn=wrapper_fn,
+            ranges=[*self._original_ranges, split],
+            reduction_ranges=[block_size],
+            reduction_hint=reduction_hint,
+        )
+        new_split_layout = FlexibleLayout(
+            device=device,
+            dtype=old_split_data.dtype,
+            size=new_split_data.get_size(),
+            is_pinned=self.get_is_pinned(),
+        ).as_fixed()
+
+        final_hint = Reduction._multilayer_second_step_hint(
+            split,
+            V.graph.sizevars.optimization_hint(sympy_product(self._original_ranges)),
+            reduction_hint,
+        )
+        new_final_data = self._replace_reduction(
+            old_final_data,
+            reduction_ranges=[split],
+            reduction_hint=final_hint,
+        )
+
+        # Commit both stages together after all validation and construction succeeds.
+        self.data = new_split_data
+        self.layout = new_split_layout
+        self._split_size = block_size
+        final_buffer.data = new_final_data
+        self.get_default_sizes_body.clear_cache(self)
+        cast(Any, self.get_free_symbol_uses).clear_cache(self)
+        final_buffer.get_default_sizes_body.clear_cache(final_buffer)
+        cast(Any, final_buffer.get_free_symbol_uses).clear_cache(final_buffer)
 
     @staticmethod
     @contextlib.contextmanager

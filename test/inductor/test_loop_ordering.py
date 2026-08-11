@@ -1,8 +1,10 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import copy
 import os
 import unittest
+from types import SimpleNamespace
 from unittest import mock, skipUnless
 
 import numpy as np
@@ -13,7 +15,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import config as inductor_config, ir, metrics
+from torch._inductor import config as inductor_config, dependencies, ir, metrics
 from torch._inductor.codegen.simd import MemoryCoalescing, SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
@@ -1338,6 +1340,200 @@ class LoopOrderingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+    def _check_fuse_split_reduction_with_tiled_pw(
+        self,
+        f,
+        shape,
+        *,
+        check_sum_origin=False,
+        transposed_input=False,
+        full_tensor_accesses=3,
+    ):
+        if transposed_input:
+            if len(shape) != 2:
+                raise AssertionError(
+                    "transposed input requires a two-dimensional shape"
+                )
+            x = torch.randn(shape[1], shape[0], device=GPU_TYPE).T
+        else:
+            x = torch.randn(*shape, device=GPU_TYPE)
+        actual = f(x)
+        opt_f = torch.compile(f)
+        if check_sum_origin:
+            expected, code = run_and_get_code(opt_f, x)
+            self.assertGreaterEqual(
+                "\n".join(code).count("Original ATen: [aten.sum"), 2
+            )
+        else:
+            expected = opt_f(x)
+        self.assertTrue(same(actual, expected, tol=1e-3))
+
+        # The first split-reduction level should share the pointwise tiling,
+        # so it can fuse with both pointwise outputs. The second reduction
+        # level remains a separate scalar reduction.
+        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(
+            x.nbytes * full_tensor_accesses
+            + (int(np.prod(shape[:-1])) * 2 + 1) * x.itemsize,
+            metrics.num_bytes_accessed,
+        )
+
+    @inductor_config.patch("triton.mix_order_reduction", False)
+    def test_fuse_split_reduction_with_tiled_pw(self):
+        def f(x):
+            y = torch.sum(x)
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        self._check_fuse_split_reduction_with_tiled_pw(
+            f, (2048, 4096), check_sum_origin=True
+        )
+
+    def test_fuse_split_reduction_with_tiled_pw_transposed_input(self):
+        def f(x):
+            y = torch.sum(x)
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        dense_reindex_calls = []
+        check_dense_reindex = ir.Reduction.check_for_split_dense_dim_reindexing
+
+        def record_dense_reindex(reduction_numel, input_node):
+            dense_index = check_dense_reindex(reduction_numel, input_node)
+            dense_reindex_calls.append((input_node, dense_index))
+            return dense_index
+
+        with mock.patch.object(
+            ir.Reduction,
+            "check_for_split_dense_dim_reindexing",
+            side_effect=record_dense_reindex,
+        ):
+            self._check_fuse_split_reduction_with_tiled_pw(
+                f,
+                (4096, 4096),
+                transposed_input=True,
+                full_tensor_accesses=2,
+            )
+
+        # The second call rebuilds the first reduction stage after scheduling.
+        # It must retain the input layout so the transposed input stays coalesced.
+        self.assertGreaterEqual(len(dense_reindex_calls), 2)
+        self.assertTrue(
+            all(
+                node is not None and dense_index == 0
+                for node, dense_index in dense_reindex_calls
+            )
+        )
+
+    def test_split_reduction_pointwise_hint_eligibility(self):
+        M, N = 2048, 4096
+        checked = False
+
+        def f(x):
+            y = x.sum()
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        def check_candidates(nodes):
+            nonlocal checked
+            split = next(
+                n
+                for n in nodes
+                if isinstance(n.node, ir.ComputedBuffer)
+                and n.node._original_ranges is not None
+            )
+            pointwise = next(
+                n for n in nodes if not n.is_reduction() and n.get_ranges()[0] == [M, N]
+            )
+            self.assertIsInstance(pointwise.node, ir.ComputedBuffer)
+
+            def hints(candidate):
+                scheduler = SimpleNamespace(nodes=[split, candidate])
+                return Scheduler._split_reduction_pointwise_hints(scheduler, split)
+
+            self.assertEqual(hints(pointwise), [M])
+            with mock.patch.object(
+                pointwise,
+                "get_ranges",
+                return_value=([16, 64, 8192], []),
+            ):
+                self.assertEqual(hints(pointwise), [16, 1024])
+            common = next(
+                dep
+                for dep in pointwise.read_writes.reads
+                if isinstance(dep, dependencies.MemoryDep)
+            )
+
+            def clone_with(reads, writes):
+                candidate = copy.copy(pointwise)
+                read_writes = pointwise.read_writes
+                candidate.read_writes = dependencies.ReadWrites(
+                    OrderedSet(reads),
+                    OrderedSet(writes),
+                    read_writes.index_exprs,
+                    read_writes.range_vars,
+                    read_writes.var_ranges,
+                )
+                return candidate
+
+            # A same-name write and ordering-only dependencies are not shared reads.
+            self.assertEqual(
+                hints(clone_with([], [*pointwise.read_writes.writes, common])), []
+            )
+            self.assertEqual(
+                hints(
+                    clone_with(
+                        [dependencies.WeakDep(common.name, "fake", is_fake=True)],
+                        pointwise.read_writes.writes,
+                    )
+                ),
+                [],
+            )
+            self.assertEqual(
+                hints(
+                    clone_with(
+                        [dependencies.StarDep(common.name)],
+                        pointwise.read_writes.writes,
+                    )
+                ),
+                [],
+            )
+
+            with mock.patch.object(pointwise.node, "get_stream_idx", return_value=123):
+                self.assertEqual(hints(pointwise), [])
+            with mock.patch.object(
+                pointwise.node, "get_mempool", return_value=(123, 0)
+            ):
+                self.assertEqual(hints(pointwise), [])
+
+            checked = True
+            return nodes
+
+        with inductor_config.patch({"_pre_fusion_custom_pass": check_candidates}):
+            self._check_fuse_split_reduction_with_tiled_pw(f, (M, N))
+        self.assertTrue(checked)
+
+    def test_fuse_split_reduction_with_pw_producer_and_tiled_pw(self):
+        def f(x):
+            y = x.abs().max()
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        self._check_fuse_split_reduction_with_tiled_pw(f, (2048, 4096))
+
+    def test_fuse_split_reduction_with_smaller_aligned_prefix(self):
+        def f(x):
+            y = torch.sum(x)
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        self._check_fuse_split_reduction_with_tiled_pw(f, (512, 16384))
 
     def test_factored_vs_expanded_pw_numel_in_fused_group(self):
         """
