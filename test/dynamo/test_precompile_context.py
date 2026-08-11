@@ -1,4 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import functools
+from unittest import skipIf
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -9,14 +12,24 @@ from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-@functorch_config.patch({"enable_autograd_cache": True})
-@torch._dynamo.config.patch(
-    {"caching_precompile": True}
-)  # Requires bundledaotautograd cache for now
+def with_precompile_patches(func):
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @torch._dynamo.config.patch({"caching_precompile": True})
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 class PrecompileContextTests(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         """
         Reset all counters and caches before each unit test
@@ -25,8 +38,9 @@ class PrecompileContextTests(InductorTestCase):
         # Clear PrecompileContext cache artifacts
         PrecompileContext.clear()
 
-    @requires_triton()
-    def test_basic(self):
+    @skipIf(not HAS_TRITON, "requires triton")
+    @with_precompile_patches
+    def test_basic(self, device):
         """
         Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
         """
@@ -37,7 +51,7 @@ class PrecompileContextTests(InductorTestCase):
         compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
-        x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(10, device=device, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
         self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
@@ -45,15 +59,16 @@ class PrecompileContextTests(InductorTestCase):
         cache_entries, _ = PrecompileContext.create_cache_entries()
         self.assertEqual(len(cache_entries), 1)
 
-    @requires_triton()
-    def test_serialize_by_key(self):
+    @skipIf(not HAS_TRITON, "requires triton")
+    @with_precompile_patches
+    def test_serialize_by_key(self, device):
         def simple_function(x):
             return x.sin() + x.cos()
 
         compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
-        x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(10, device=device, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
         self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
@@ -71,8 +86,9 @@ class PrecompileContextTests(InductorTestCase):
         if len(result) != 1:
             raise AssertionError(f"Expected len(result) == 1, got {len(result)}")
 
-    @requires_triton()
-    def test_editable(self):
+    @skipIf(not HAS_TRITON, "requires triton")
+    @with_precompile_patches
+    def test_editable(self, device):
         """
         Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
         """
@@ -83,7 +99,7 @@ class PrecompileContextTests(InductorTestCase):
         compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
-        x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(10, device=device, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
         self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
@@ -114,6 +130,9 @@ class PrecompileContextTests(InductorTestCase):
             )
         entry = next(iter(aot_autograd_artifacts.values())).content
         self.assertEqual(entry._my_private_field, 42)
+
+
+instantiate_device_type_tests(PrecompileContextTests, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
