@@ -15,7 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
@@ -469,7 +469,7 @@ def _check_input_constraints_for_graph(
     unification_map: dict[sympy.Symbol, Any] = {}
     for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
-        if isinstance(node_val, FakeTensor):
+        if is_fake_tensor(node_val):
             if not isinstance(arg, torch.Tensor):
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be a tensor, but got {type(arg)}",

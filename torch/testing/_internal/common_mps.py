@@ -95,6 +95,8 @@ if torch.backends.mps.is_available():
             "istft",
             "item",
             "kron",
+            "linalg.cholesky",
+            "linalg.cholesky_ex",
             "linalg.cond",
             "linalg.cross",
             "linalg.diagonal",
@@ -109,6 +111,7 @@ if torch.backends.mps.is_available():
             "linalg.norm",
             "linalg.normsubgradients_at_zero",
             "linalg.pinvhermitian",
+            "linalg.polar",
             "linalg.svd",
             "linalg.svdvals",
             "linalg.vander",
@@ -370,7 +373,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "put": None,
             "frexp": None,
-            "geqrf": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -378,7 +380,6 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
             "linalg.matrix_sqrth": None,
-            "linalg.polar": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
                 torch.int16,
@@ -555,7 +556,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
-            "nn.functional.relu": [torch.bool],
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
                 torch.int16,
@@ -662,16 +662,6 @@ if torch.backends.mps.is_available():
             # logcumsumexp on complex inputs disagrees with CPU at branch
             # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
             "logcumsumexp": [torch.complex64],
-            # Random ops: `test_output_match` / `test_output_grad_match` route
-            # these to a metadata + summary-stats comparator
-            # (`_assert_random_op_match`) since MPS and CPU consume independent
-            # Philox streams. The xfail entries that used to live here are
-            # gone with the comparator; if a new test under
-            # `mps_ops_modifier` needs them, add a per-test skip locally.
-            # `randint(to>1, dtype=bool)` errors at the CPU op itself with
-            # "to - 1 is out of bounds for bool" - not a comparator issue.
-            "randint": [torch.bool],
-            "randint_like": [torch.bool],
             # `nn.functional.dropout` keeps a complex64 entry because the
             # MPS dropout kernel doesn't support complex inputs at all (the
             # shape comparison would fail to even run).
@@ -867,9 +857,7 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
-            # No MPS kernel for linalg_polar.out; the grad test still runs the
-            # forward leg, which raises NotImplementedError on MPS.
-            "linalg.polar": None,
+            "geqrf": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device

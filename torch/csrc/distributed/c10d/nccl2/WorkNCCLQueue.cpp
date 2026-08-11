@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 namespace c10d::nccl2 {
@@ -22,7 +24,9 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked() {
       WorkNCCL::WorkStatus status = work->checkStatus();
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
-        // Work is completed, remove it from the work queue
+        // Tensor references must be released by a caller thread, not by the
+        // watchdog that runs garbageCollect().
+        completed_work_queue_.push(std::move(work_queue.front()));
         work_queue.pop();
         // Continue to the next element in the queue
       } else if (
@@ -63,7 +67,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   // as defensive programming, just in case someone moves the thread join order
   // later.  The cost of the lock itself should be small on modern linux systems
   // (uncontended locks are typically just an atomic operation).
-  std::lock_guard<std::mutex> lock(work_queues_mutex_);
+  std::unique_lock<std::mutex> lock(work_queues_mutex_);
 
   // Initialize the status to COMPLETED to cover the case where the queue is
   // empty
@@ -82,6 +86,9 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   // NOTE: finalize MUST return without holding references to any work object,
   // otherwise it may leak object and cause side effects.
   stream_work_queues_.clear();
+  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue;
+  completed_work_queue.swap(completed_work_queue_);
+  lock.unlock();
 
   return status;
 }
@@ -89,9 +96,15 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
 void WorkNCCLQueue::enqueueWork(
     c10::intrusive_ptr<WorkNCCL> work,
     cudaStream_t stream) {
-  // Add work to stream's queue after events have been recorded
-  std::lock_guard<std::mutex> lock(work_queues_mutex_);
-  stream_work_queues_[stream].push(std::move(work));
+  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue;
+  {
+    std::lock_guard<std::mutex> lock(work_queues_mutex_);
+    completed_work_queue.swap(completed_work_queue_);
+    // Add work to stream's queue after events have been recorded
+    stream_work_queues_[stream].push(std::move(work));
+  }
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

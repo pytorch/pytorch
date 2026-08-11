@@ -29,7 +29,8 @@ from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -453,7 +454,7 @@ AOT_COUNTER = itertools.count()
 # However, Inductor does not want the concept of tokens in the final generated
 # code's input and output. Since changing the graph signature inside of inductor
 # is difficult, after generating the forward graph, we will run a pass to
-# remove the tokens from the inputgenerate the following graph for Inductor, where
+# remove the tokens from the input and generate the following graph for Inductor, where
 # the tokens are created and sunk within the graph, rather than as inputs and
 # outputs:
 #
@@ -587,7 +588,11 @@ def create_aot_state(
                     "aot_collect_metadata", log_pt2_compile_event=True
                 )
 
-            with dynamo_timed_ctx, ctx:
+            with (
+                dynamo_timed_ctx,
+                ctx,
+                torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+            ):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     flat_args_descs=flat_args_descs,
@@ -997,8 +1002,9 @@ def prepare_aot_config(
 
     dynamic_shapes = False
     for x in full_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is not None:
+            dynamic_shapes = fake_mode.shape_env is not None
             break
 
     aot_config = AOTConfig(

@@ -19,7 +19,7 @@ def get_tensor_symint(tensor, *, coeff=1):
 
     # NB: Only FakeTensor is associated with a memo
     tensor = mb_unwrap_functional_tensor(tensor)
-    if isinstance(tensor, FakeTensor):
+    if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return tensor.get_nested_int(coeff=coeff)
 
     global _tensor_id_counter
@@ -356,7 +356,7 @@ class NestedTensor(torch.Tensor):
         # Alternatively, we could make it the caller's responsibility to
         # cache it. But this heuristic seems simple enough.
         ragged_source = offsets if lengths is None else lengths
-        if isinstance(ragged_source, FakeTensor):
+        if isinstance(ragged_source, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             ragged_size = outer_size[ragged_idx]
             ragged_source.nested_int_memo = ragged_size
 

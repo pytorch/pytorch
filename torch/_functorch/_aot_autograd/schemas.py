@@ -17,8 +17,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake
+from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch._subclasses import FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
@@ -516,6 +516,9 @@ class ViewAndMutationMeta:
 
     # Number of opaque objects saved for backward
     num_opaque_objects_saved_for_bw: int | None = None
+
+    # Whether each saved tensor is also a graph input.
+    saved_tensor_is_graph_input: list[bool] = field(default_factory=list)
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -698,8 +701,7 @@ class ViewAndMutationMeta:
         # Eventually, we should kill this and replace with real backward guards.
         # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
         self.output_types = [
-            torch.Tensor if isinstance(x, FakeTensor) else type(x)
-            for x in self.traced_tangents
+            torch.Tensor if is_fake_tensor(x) else type(x) for x in self.traced_tangents
         ]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
@@ -1244,7 +1246,7 @@ class AOTState:
 
     # Whether or not we need to handle autograd when doing graph capture and
     # compilation.  Although the calling convention for non-autograd graph
-    # capture in AOTAutograd is simple and can be relied upon, the autograph
+    # capture in AOTAutograd is simple and can be relied upon, the autograd
     # capture calling convention is quite complicated and in general you are
     # only expected to pass to aot_stage2_compile to process.
     needs_autograd: bool
