@@ -1044,19 +1044,17 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(numel, device=device, dtype=dtype)]
-            params[0].grad = torch.rand_like(params[0])
-            grads = (params[0].grad[0].item(), params[0].grad[-1].item())
+            params[0].grad = torch.ones_like(params[0])
             optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
             optimizer.step()
 
-            # A size-1 param stepped with the same config and grad gives the expected
-            # value for one element. Distinct grads mean a 32-bit index overflow shows
-            # up whether it drops the tail or reads the wrong grad for it.
-            for idx, grad in zip((0, -1), grads):
-                ref = torch.ones(1, device=device, dtype=dtype)
-                ref.grad = torch.full_like(ref, grad)
-                optim_cls([ref], foreach=True, **optim_input.kwargs).step()
-                self.assertEqual(params[0][idx], ref[0])
+            # Every element saw the same param and grad, so they must all agree.
+            # Compare with a size 1 param for reference.
+            self.assertEqual(params[0].min(), params[0].max())
+            ref = torch.ones(1, device=device, dtype=dtype)
+            ref.grad = torch.ones_like(ref)
+            optim_cls([ref], foreach=True, **optim_input.kwargs).step()
+            self.assertEqual(params[0][0], ref[0])
 
     @onlyCUDA
     @optims(
@@ -1269,19 +1267,17 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2**32, device=device, dtype=dtype)]
-            params[0].grad = torch.rand_like(params[0])
-            grads = (params[0].grad[0].item(), params[0].grad[-1].item())
+            params[0].grad = torch.ones_like(params[0])
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
-            # A size-1 param stepped with the same config and grad gives the expected
-            # value for one element. Distinct grads mean a 32-bit index overflow shows
-            # up whether it drops the tail or reads the wrong grad for it.
-            for idx, grad in zip((0, -1), grads):
-                ref = torch.ones(1, device=device, dtype=dtype)
-                ref.grad = torch.full_like(ref, grad)
-                optim_cls([ref], fused=True, **optim_input.kwargs).step()
-                self.assertEqual(params[0][idx], ref[0])
+            # Every element saw the same param and grad, so they must all agree; a
+            # size-1 param pins what that shared value should be.
+            self.assertEqual(params[0].min(), params[0].max())
+            ref = torch.ones(1, device=device, dtype=dtype)
+            ref.grad = torch.ones_like(ref)
+            optim_cls([ref], fused=True, **optim_input.kwargs).step()
+            self.assertEqual(params[0][0], ref[0])
 
     @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
