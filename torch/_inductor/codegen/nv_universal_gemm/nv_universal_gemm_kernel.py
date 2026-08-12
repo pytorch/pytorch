@@ -63,7 +63,7 @@ def _local_reduce_source_constant(field: str) -> str:
     return f"_LOCAL_REDUCE_{field.removesuffix('_fn').upper()}_FN_SRC"
 
 
-def _normalize_scalar_epilogue_tensor(value: Any, permute=None) -> Any:
+def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
     import torch
 
     if not isinstance(value, torch.Tensor):
@@ -75,6 +75,8 @@ def _normalize_scalar_epilogue_tensor(value: Any, permute=None) -> Any:
         value = value.permute(permute)
     if is_scalar:
         value = value.expand(8, 1).contiguous()
+    elif not value.is_contiguous():
+        value = value.contiguous()
     return value
 
 
@@ -140,8 +142,12 @@ class CuTeDSLEpilogueArguments:
 
         import torch
 
+        input_names = self.epilogue_fn.schema.inputs
         for name, value in self.tensors.items():
-            value = _normalize_scalar_epilogue_tensor(value, permute)
+            if name in input_names:
+                value = _normalize_epilogue_input_tensor(value, permute)
+            elif isinstance(value, torch.Tensor) and permute is not None:
+                value = value.permute(permute)
             if isinstance(value, torch.Tensor):
                 self.tensors[name] = TensorWrapper(value)
 
@@ -763,9 +769,13 @@ def _update_reuse_args_tensors(
         args.out.tensor._runtime_tensor = out
     epilogue = getattr(args, "epilogue", None)
     if epilogue is not None:
+        input_names = epilogue.epilogue_fn.schema.inputs
         for name, wrapper in epilogue.tensors.items():
             val = epilogue_args.tensors[name]
-            wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
+            runtime_tensor = getattr(val, "runtime_tensor", val)
+            if name in input_names:
+                runtime_tensor = _normalize_epilogue_input_tensor(runtime_tensor)
+            wrapper._runtime_tensor = runtime_tensor
     runtime_reduce = args_kwargs.get("local_reduce") if args_kwargs else None
     for field, output in args.local_reduce.tensor_items():
         if output is not None:
