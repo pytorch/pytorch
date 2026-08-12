@@ -2036,7 +2036,7 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_compare_cpu",
-                device_type="cuda",
+                active_if=(not TEST_XPU),
             ),
             # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
             DecorateInfo(
