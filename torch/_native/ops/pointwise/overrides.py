@@ -114,6 +114,7 @@ def _supported(t, dtypes) -> bool:
         and t.numel() > 0
         and not t.is_neg()
         and not t.is_conj()
+        and cap.dlpack_offset_ok(t)
         and not cap.is_traced(t)
     )
 
@@ -274,6 +275,7 @@ def _make_cond(row: PointwiseDef, variant):
                 and tgt.is_contiguous()
                 and tgt.device == ref.device
                 and K._is_16b_aligned(tgt)
+                and cap.dlpack_offset_ok(tgt)
                 and not cap.is_traced(tgt)
             ):
                 return False
@@ -602,6 +604,8 @@ def _copy_cond(self, src, non_blocking=False):
         return False
     if not K._is_16b_aligned(self):
         return False
+    if not cap.dlpack_offset_ok(self):
+        return False
     # An EMPTY destination is a no-op for aten but a zero-element grid for us
     # (cudaErrorInvalidConfiguration, or an invalid cute layout when the shape has a 0
     # extent). _conv_serveable only rejects an empty SOURCE, and copy_ broadcasts, so a
@@ -649,6 +653,7 @@ def _fill_cond(self, value):
         and self.numel() > 0
         and not self.is_neg()
         and not self.is_conj()
+        and cap.dlpack_offset_ok(self)
         and not cap.is_traced(self)
         and cap.device_ok(self)
         and cap.on_current_device(self)
@@ -720,6 +725,7 @@ def _range_out_serveable(out) -> bool:
         and out.numel() > 0
         and not out.is_neg()
         and not out.is_conj()
+        and cap.dlpack_offset_ok(out)
         and not cap.is_traced(out)
         and cap.device_ok(out)
         and cap.on_current_device(out)
