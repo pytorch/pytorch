@@ -69,7 +69,13 @@ Tensor quantize_per_tensor_tensor_qparams(
     const Tensor& scale,
     const Tensor& zero_point,
     ScalarType dtype) {
-  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
+  TORCH_CHECK_VALUE(
+      !scale.is_complex(), "quantize_per_tensor: scale must be real-valued");
+  TORCH_CHECK_VALUE(
+      !zero_point.is_complex(),
+      "quantize_per_tensor: zero_point must be real-valued");
+  auto quantizer = make_per_tensor_affine_quantizer(
+      scale.item().toDouble(), zero_point.item().toLong(), dtype);
   return quantizer->quantize(self);
 }
 

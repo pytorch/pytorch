@@ -150,6 +150,17 @@ class TestQuantizedTensor(TestCase):
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         self.assertTrue(torch.equal(x_q, y_q))
 
+    def test_quantize_per_tensor_rejects_complex_qparams(self):
+        x = torch.randn(2, 2)
+        with self.assertRaisesRegex(ValueError, "scale must be real-valued"):
+            torch.quantize_per_tensor(
+                x, torch.tensor(1 + 0j), torch.tensor(0), torch.qint8
+            )
+        with self.assertRaisesRegex(ValueError, "zero_point must be real-valued"):
+            torch.quantize_per_tensor(
+                x, torch.tensor(1.0), torch.tensor(0 + 0j), torch.qint8
+            )
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
