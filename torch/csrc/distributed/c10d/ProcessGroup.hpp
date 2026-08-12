@@ -190,6 +190,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     }
   }
 
+  // Experimental. Forward a temporary timeout extension to every backend.
+  virtual void addEphemeralTimeout(const std::chrono::milliseconds& timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->addEphemeralTimeout(timeout);
+    }
+  }
+
   int64_t incrementSplitCount() {
     return splitCounter_++;
   }
@@ -510,7 +517,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Gathers a single tensor inputBuffer from every rank into a single flat
   // outputBuffer on the root rank. Single-tensor analog of gather.
-  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const GatherOptions& opts = GatherOptions()) {
@@ -537,6 +545,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10d::register_work(outputBuffer, work);
     }
     return work;
+  }
+
+  // Deprecated: use gather_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::gather_into_tensor is deprecated, use gather_single instead.")
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    return gather_single(outputBuffer, inputBuffer, opts);
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
