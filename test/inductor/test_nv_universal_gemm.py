@@ -1846,11 +1846,11 @@ class TestNVUniversalGemmHeuristics(TestCase):
     def test_reduction_consumer_materializes_builtin_finalizer(self):
         import dataclasses
 
-        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
-            MaterializedTensorSSAReduction,
-        )
         from torch._inductor.kernel import gemm_epilogue_codegen
         from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.gemm_epilogue_codegen import (
+            MaterializedTensorSSAReduction,
+        )
 
         reduction = MaterializedTensorSSAReduction(
             "reduce",
