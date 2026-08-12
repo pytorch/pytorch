@@ -3,13 +3,15 @@
 Native DSL ops compile device kernels lazily on first call. Those compiles
 are the dominant first-call latency, and a silent cache miss is a common
 "why is this slow again?" question. This module surfaces both, with no
-runtime cost when neither ``TORCH_LOGS`` nor structured tracing is enabled.
+runtime cost unless ``TORCH_LOGS=+native_dsl_compile`` is set. That artifact
+is off by default to avoid log spew: these wrappers sit on the compile
+*cache*, so they run on every op call, cache hits included.
 
-Two sinks, both fed by a single :class:`CompileEvent`:
+Two sinks, both gated on that artifact and fed by a single
+:class:`CompileEvent`:
 
-* The ``native_dsl`` logger (``TORCH_LOGS=+native_dsl``): a one-line
-  human-readable summary per compile -- outcome, wall time, and running
-  hit/miss totals.
+* The ``native_dsl_compile`` artifact logger: a one-line human-readable
+  summary per compile -- outcome, wall time, and running hit/miss totals.
 * ``trace_structured`` artifacts (tlparse): a JSON record per compile, for
   production jobs where only the structured trace is retrievable.
 
@@ -57,10 +59,11 @@ capture Inductor's unrelated Triton compiles).
 from __future__ import annotations
 
 import functools
-import logging
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING, TypeVar
+
+import torch._logging
 
 
 if TYPE_CHECKING:
@@ -79,11 +82,12 @@ __all__ = [
     "instrumented_triton_cache",
 ]
 
-log = logging.getLogger(__name__)
-
-# tlparse artifact name. The "artifact" envelope (see trace_structured_artifact)
-# is the well-supported transport; the name lets tlparse group these events.
+# tlparse artifact name, and the TORCH_LOGS switch gating both sinks. The
+# "artifact" envelope (see trace_structured_artifact) is the well-supported
+# transport; the name lets tlparse group these events.
 _ARTIFACT_NAME = "native_dsl_compile"
+
+log = torch._logging.getArtifactLogger(__name__, _ARTIFACT_NAME)
 
 R = TypeVar("R")
 
@@ -113,28 +117,27 @@ class CompileEvent:
 
 
 def _listening() -> bool:
-    """True if either sink would record an event.
+    """True if the ``native_dsl_compile`` artifact is enabled.
 
     Lets the wrapper skip all instrumentation work (cache sampling, timing,
     key formatting, event construction) on the hot path when nothing is
     listening -- important because the CuTeDSL wrapper sits on the compile
     *cache* and so runs on every op call, cache hits included.
 
-    Mirrors the gates the sinks apply internally: the logger on its effective
-    level, and structured tracing on ``trace_log.handlers`` (the documented
-    "is tracing enabled" idiom, also used by ``trace_structured`` itself).
-    """
-    from torch._logging._internal import trace_log
+    Both sinks share this one gate; tlparse emission cannot be left to
+    ``trace_structured``'s internal ``trace_log.handlers`` check, which is
+    true in any job collecting a structured trace.
 
-    return log.isEnabledFor(logging.INFO) or bool(trace_log.handlers)
+    ``log_state`` is read off the module because ``TORCH_LOGS`` parsing
+    rebinds it.
+    """
+    from torch._logging import _internal
+
+    return _internal.log_state.is_artifact_enabled(_ARTIFACT_NAME)
 
 
 def _emit(event: CompileEvent) -> None:
-    """Fan the event out to the native_dsl logger and tlparse.
-
-    Both sinks self-gate (logging on level, trace_structured on
-    ``trace_log.handlers``), so this is cheap when nothing is listening.
-    """
+    """Fan the event out to the artifact logger and tlparse."""
     log.info(
         "%s [%s] %s in %.1fms (key=%s, cache hits=%d misses=%d)",
         event.op,
@@ -183,7 +186,7 @@ def _format_key(args: tuple, kwargs: dict, key_fn: Callable | None) -> str:
 
 def _make_wrapper(
     fn: Callable[..., R],
-    op: str,
+    op: str | Callable[..., str],
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
@@ -225,9 +228,19 @@ def _make_wrapper(
                 outcome = "error"
             else:
                 outcome = "compiled" if compiled else "cache_hit"
+            if callable(op):
+                # A label callback must never change the wrapped fn's outcome:
+                # this runs in the finally block, so a raised exception would
+                # mask the real result/error. Fall back to a safe label.
+                try:
+                    op_label = op(*args, **kwargs)
+                except Exception:
+                    op_label = "<op-label-error>"
+            else:
+                op_label = op
             _emit(
                 CompileEvent(
-                    op=op,
+                    op=op_label,
                     dsl=dsl,
                     outcome=outcome,
                     compiled=compiled,
@@ -264,14 +277,18 @@ def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
 
 
 def instrument_cutedsl_compile(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
 
     Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``.
+        op: Operator symbol being compiled for, e.g. ``"aten::topk"``. May
+            instead be a callable receiving the wrapped function's arguments
+            and returning the label per call; if that callable raises, the
+            label falls back to ``"<op-label-error>"`` without changing the
+            wrapped function's result or exception.
         key_fn: Optional callable with the wrapped function's signature
             returning a short string describing the compile key for logs.
             Defaults to a repr of the args/kwargs.
@@ -466,7 +483,7 @@ def instrument_helion_kernel(
 
 
 def instrumented_cutedsl_cache(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
