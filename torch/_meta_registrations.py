@@ -942,6 +942,12 @@ def meta__cslt_sparse_mm(
             raise AssertionError(
                 f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
             )
+        if is_fp8_input_type and torch.version.hip and out_dtype != torch.float32:
+            # Match the eager TORCH_CHECK in _cslt_sparse_mm_impl so compile
+            # rejects at trace time what eager rejects at call time.
+            raise AssertionError(
+                f"out_dtype must be float32 for fp8 inputs on ROCm, got {out_dtype}"
+            )
     if out_dtype is None and is_fp8_input_type and torch.version.hip:
         # hipSparseLt only produces fp32 for fp8 inputs, so _cslt_sparse_mm
         # forces the result dtype to fp32 when out_dtype is omitted.

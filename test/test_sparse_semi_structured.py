@@ -1838,6 +1838,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         dense_result = torch.mm(A_fp8.to(torch.float32), B_fp8.to(torch.float32))
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-1, atol=1e-1)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
         "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
