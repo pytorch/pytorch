@@ -442,10 +442,9 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 14)
-    def test_pyobject_dtype_roundtrip(self, device):
-        import libtorch_agn_2_14 as libtorch_agnostic
-
-        for dtype in (
+    @parametrize(
+        "dtype",
+        [
             torch.float32,
             torch.float64,
             torch.bfloat16,
@@ -453,26 +452,28 @@ class TestLibtorchAgnostic(TestCase):
             torch.bool,
             torch.complex64,
             torch.float8_e4m3fn,
-        ):
-            out = libtorch_agnostic._interop.dtype_roundtrip(dtype)
-            # torch.dtype objects are singletons.
-            self.assertIs(out, dtype)
+        ],
+    )
+    def test_pyobject_dtype_roundtrip(self, device, dtype):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.dtype_roundtrip(dtype)
+        # torch.dtype objects are singletons.
+        self.assertIs(out, dtype)
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 14)
-    def test_pyobject_device_roundtrip(self, device):
+    # "cuda" (no index) must not come back as cuda:0; constructing the
+    # device objects needs no GPU.
+    @parametrize("roundtrip_device", ["cpu", "meta", "cuda", "cuda:1"])
+    def test_pyobject_device_roundtrip(self, device, roundtrip_device):
         import libtorch_agn_2_14 as libtorch_agnostic
 
-        for dev in (
-            torch.device("cpu"),
-            torch.device("meta"),
-            torch.device("cuda"),  # no index: must not come back as cuda:0
-            torch.device("cuda", 1),  # constructing the object needs no GPU
-        ):
-            out = libtorch_agnostic._interop.device_roundtrip(dev)
-            self.assertIsInstance(out, torch.device)
-            self.assertEqual(out, dev)
-            self.assertEqual(out.index, dev.index)
+        dev = torch.device(roundtrip_device)
+        out = libtorch_agnostic._interop.device_roundtrip(dev)
+        self.assertIsInstance(out, torch.device)
+        self.assertEqual(out, dev)
+        self.assertEqual(out.index, dev.index)
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 14)
