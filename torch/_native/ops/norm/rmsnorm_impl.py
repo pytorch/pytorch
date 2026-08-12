@@ -61,10 +61,9 @@ def _row_tile_elems(device: torch.device, n: int) -> int:
 
 def _fwd_fits_smem(input: torch.Tensor, n: int) -> bool:
     # Fwd smem holds one row tile of x (rmsnorm.py sX).
-    return (
-        _row_tile_elems(input.device, n) * input.element_size()
-        <= _smem_budget_bytes(input.device)
-    )
+    return _row_tile_elems(
+        input.device, n
+    ) * input.element_size() <= _smem_budget_bytes(input.device)
 
 
 def _bwd_fits_smem(input: torch.Tensor, grad_out: torch.Tensor, n: int) -> bool:
