@@ -149,6 +149,18 @@ class NormOps:
             return cute.math.exp(cute.math.log(s) / self.acc(self.p))
 
 
+@cute.jit
+def _welford_denom(acc_dtype, nf, correction):
+    # var/std divisor, CLAMPED AT ZERO like aten: `correction >= n` must divide by 0
+    # (-> +inf, which is what aten returns and what the numpy-reference tests expect
+    # after their inf->nan mapping), NOT by a negative number. Unclamped, a
+    # correction larger than the reduced extent returned a NEGATIVE variance.
+    # `nf` is a runtime value, so this is a select, not a python max().
+    d = nf - acc_dtype(correction)
+    z = acc_dtype(0.0)
+    return d if d > z else z  # noqa: FURB136 -- builtin max()/min() do not lower
+
+
 class WelfordOps:
     # acc = (mean, m2, nf) all in the accumulator dtype.
     #   reduce  = ONLINE (Welford) update of a single element.
@@ -206,7 +218,7 @@ class WelfordOps:
         mean, m2, nf = acc
         if const_expr(self.return_mean):
             return mean
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         if const_expr(self.take_sqrt):
             return cute.math.sqrt(var)
         return var
@@ -772,7 +784,7 @@ class VarMeanOps(WelfordOps):
     @cute.jit
     def project(self, acc, n):
         mean, m2, nf = acc
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
 

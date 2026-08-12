@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, Union
 
 import torch.nn
+from torch._library.opaque_object import is_opaque_constant_type
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils
@@ -46,6 +47,7 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
@@ -304,7 +306,16 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
+            # Recompute from the operands at runtime instead of burning in the value
+            self.uses[value] += 1
+            self.call_reconstruct(value)
+            if allow_cache and value in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(value)
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -368,6 +379,23 @@ class PyCodegen:
 
                 self.add_push_null(gen_fn)
                 output.extend(create_call_function(0, False))
+            elif isinstance(value, CustomClassObjectVariable):
+                try:
+                    py_value = value.as_python_constant()
+                except NotImplementedError:
+                    py_value = None
+
+                if is_opaque_constant_type(type(py_value)):
+                    self.add_push_null(
+                        lambda: self.load_import_from(
+                            "torch._library.fake_class_registry",
+                            "maybe_unwrap_fake_script_object",
+                        )
+                    )
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
+                    output.extend(create_call_function(1, False))
+                else:
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
             else:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
         elif isinstance(value, NNModuleVariable):
