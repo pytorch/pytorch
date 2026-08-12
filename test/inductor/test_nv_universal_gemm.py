@@ -380,6 +380,26 @@ class TestNVUniversalGemm(TestCase):
         args.local_reduce = GemmReductionArguments()
         self.assertTrue(operator._supports(args))
 
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
+    def test_vendored_dense_efc_replacement_has_unique_names(self):
+        from cutlass import Float32
+        from cutlass.operators.arguments import GemmArguments
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _args_query_candidates,
+        )
+
+        a = torch.empty(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.empty(64, 128, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty(128, 128, device="cuda", dtype=torch.bfloat16)
+        args = GemmArguments(a, b, out, accumulator_type=Float32)
+        major, minor = torch.cuda.get_device_capability()
+        kernels = _args_query_candidates(args, major * 10 + minor, efc_only=True)
+        names = [kernel.metadata.operator_name for kernel in kernels]
+
+        self.assertTrue(names)
+        self.assertEqual(len(names), len(set(names)))
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
@@ -1010,6 +1030,9 @@ class TestNVUniversalGemmHeuristics(TestCase):
             primary_output="out",
         )
         self.assertTrue(GemmVariant.GEMM.supports_reduction(plan))
+        non_power_of_two = dataclasses.replace(plan, group=3)
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(non_power_of_two))
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(non_power_of_two))
         wide_consumer = dataclasses.replace(
             plan,
             group=64,
@@ -1686,6 +1709,24 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 result = heuristics.filter_kernels(kernels, inputs, count=10)
                 self.assertEqual(len(result), 3)
 
+    def test_filter_kernels_deduplicates_heuristic_configs(self):
+        heuristics = NVUniversalGemmHeuristics()
+        kernel = self._create_mock_kernel(128, 128, 64, 1, 1)
+        kernel.metadata.operator_name = "kernel"
+        config = HeuristicConfig(128, 128, 64, 1, 1, 4, 1, 64, 64, 32, 0.003)
+
+        with (
+            patch.object(heuristics, "should_run", return_value=True),
+            patch.object(
+                heuristics, "_get_heuristic_configs", return_value=[config, config]
+            ),
+        ):
+            result = heuristics.filter_kernels(
+                [kernel], self._create_mock_inputs(), count=2
+            )
+
+        self.assertEqual(result, [kernel])
+
 
 @unittest.skipIf(
     not (
@@ -2114,6 +2155,35 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("VendoredDenseGemmEFCOperator", code)
         self.assertIn("group=16", code)
         self.assertIn(f"feeds_main={feeds_main}", code)
+
+    @parametrize("chunked", (False, True))
+    def test_flex_gemm_generic_output_contraction_falls_back(self, chunked):
+        m, n, k = 128, 128, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue(acc):
+            value = acc.float()
+            if chunked:
+                gate, up = value.chunk(2, dim=-1)
+            else:
+                pairs = value.view(m, n, 2)
+                gate, up = pairs[..., 0], pairs[..., 1]
+            return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, _, epilogue_fused = self._compile_and_check(
+            fn, a, b, expected_kernels=2
+        )
+        self.assertEqual(result, epilogue(a @ b), atol=2e-2, rtol=2e-2)
+        self.assertFalse(epilogue_fused)
 
     @parametrize(
         "case",
@@ -2990,25 +3060,30 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         # Random packed FP4 operands can produce NaNs in the reference GEMM.
         self.assertEqual(result, fn(a, b, scale_a, scale_b, *biases), equal_nan=True)
 
-    @parametrize("bias_shape", ((1,), (1, 1)))
+    @parametrize(
+        "bias_shape",
+        ((), (1,), (1, 1)),
+        name_fn=lambda shape: "scalar" if not shape else "x".join(map(str, shape)),
+    )
     def test_scaled_mm_unit_dim_broadcast_epilogue_fusion(self, bias_shape):
-        m, n, k = 1, 128, self.K
+        m, n, k = self.M, self.N, self.K
         packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+        a = torch.zeros(m, packed_k, device="cuda", dtype=torch.uint8).view(
             torch.float4_e2m1fn_x2
         )
-        b = b.T
+        b = (
+            torch.zeros(n, packed_k, device="cuda", dtype=torch.uint8)
+            .view(torch.float4_e2m1fn_x2)
+            .T
+        )
         padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+        scale_a = torch.ones(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
             torch.float8_e4m3fn
         )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+        scale_b = torch.ones(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
             torch.float8_e4m3fn
         )
-        bias = torch.randn(bias_shape, device="cuda", dtype=torch.bfloat16)
+        bias = torch.full(bias_shape, 2.0, device="cuda", dtype=torch.bfloat16)
 
         def fn(a, b, scale_a, scale_b, bias):
             result = torch._scaled_mm(
@@ -3025,6 +3100,27 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         )
         self.assertTrue(epilogue_fused)
         self.assertEqual(result, fn(a, b, scale_a, scale_b, bias))
+
+    def test_scaled_mm_strided_column_epilogue_fusion(self):
+        m, n, k = self.M, self.N, self.K
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        bias = torch.randn(m * 2, 1, device="cuda", dtype=torch.bfloat16)[::2]
+
+        def fn(a, b, scale_a, scale_b, bias):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return result + bias
+
+        result, _, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, bias
+        )
+        self.assertEqual(result, fn(a, b, scale_a, scale_b, bias), equal_nan=True)
+        self.assertTrue(epilogue_fused)
 
     @parametrize(
         "case",
@@ -3150,6 +3246,63 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, fn(*args))
         self.assertIn("output=", code)
         self.assertIn("out_ptr1", code)
+
+    @parametrize("scaled", (False, True))
+    @parametrize("axis", (0, 1))
+    def test_grouped_reduce_non_power_of_two_falls_back(self, scaled, axis):
+        m = n = 96
+        group = 3
+        if scaled:
+            k = 512
+            args = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        else:
+            k = 64
+            args = (
+                torch.randn(m, k, device="cuda", dtype=torch.bfloat16),
+                torch.randn(k, n, device="cuda", dtype=torch.bfloat16),
+            )
+
+        def fn(*args):
+            if scaled:
+                a, b, scale_a, scale_b = args
+                result = torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+            else:
+                a, b = args
+                result = a @ b
+            grouped = (
+                result.float().view(m // group, group, n)
+                if axis == 0
+                else result.float().view(m, n // group, group)
+            )
+            return result, grouped.sum(1 if axis == 0 else -1)
+
+        result, code, _ = self._compile_and_check(fn, *args, expected_kernels=2)
+        self.assertEqual(result, fn(*args), equal_nan=True)
+        self.assertNotIn("group=3", code)
+
+    def test_scaled_mm_compact_grouped_n_reduce_output(self):
+        m, n, k, group = 128, 32, 512, 32
+        args = _make_nvfp4_scaled_mm_inputs(m, n, k)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return result.float().view(m, 1, group).sum(-1)
+
+        result, code, _ = self._compile_and_check(fn, *args)
+        self.assertEqual(result, fn(*args), equal_nan=True)
+        self.assertIn("output=", code)
 
     @parametrize(
         "case",
