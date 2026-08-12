@@ -817,6 +817,19 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             return True
 
+        # MPS convolution_backward is roughly an order of magnitude slower on
+        # channels_last inputs than on contiguous ones at common shapes, so a
+        # training graph pays that penalty for every convolution. Forward
+        # convolution on MPS is faster with channels_last, so inference keeps
+        # the heuristics below. https://github.com/pytorch/pytorch/issues/192551
+        if not is_inference and all(
+            n.args[idx].meta["val"].device.type == "mps"
+            for n in conv_nodes
+            for idx in [0, 1]
+        ):
+            log.debug("Skip layout opt for MPS training graph")
+            return False
+
         # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224

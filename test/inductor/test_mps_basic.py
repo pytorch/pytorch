@@ -195,6 +195,27 @@ class MPSBasicTests(TestCase):
             check_gradient=True,
         )
 
+    def test_layout_opt_skipped_for_conv_training(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192551:
+        # MPS convolution_backward is much slower on channels_last inputs, so
+        # layout optimization must stay off for training graphs while staying
+        # available for inference graphs.
+        from torch._inductor.graph import GraphLowering
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, w):
+            return torch.ops.aten.convolution.default(
+                x, w, None, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
+            )
+
+        # channels > 64 so no other decide_layout_opt heuristic fires
+        x = torch.rand(8, 128, 32, 32, device=self.device)
+        w = torch.rand(128, 128, 3, 3, device=self.device)
+        gm = make_fx(fn)(x, w)
+
+        self.assertFalse(GraphLowering.decide_layout_opt(gm, is_inference=False))
+        self.assertTrue(GraphLowering.decide_layout_opt(gm, is_inference=True))
+
     def test_cholesky(self):
         def fn(x):
             return (
