@@ -16027,7 +16027,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
-        'arange', 'linspace',
+        'arange', 'linspace', 'logspace',
         'special.xlog1py',
 
         # CPU accumulates sequantially, but GPU does in parallel
