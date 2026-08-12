@@ -37,7 +37,7 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
     skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
-    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    IS_PPC, IS_ARM64, IS_RISCV64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
@@ -13799,7 +13799,10 @@ if __name__ == '__main__':
             expected_max_ulp_diff = 8
             if dtype == torch.float32:
                 if "cpu" in device:
-                    expected_input_grad_max_ulp_diff = 384  # x86_64 149
+                    if IS_RISCV64:
+                        expected_input_grad_max_ulp_diff = 512  # riscv64 426
+                    else:
+                        expected_input_grad_max_ulp_diff = 384  # x86_64 149
                     expected_weight_grad_max_ulp_diff = 160  # x86_64 58
                 elif "mps" in device:
                     expected_input_grad_max_ulp_diff = 128  # 37
