@@ -11,24 +11,14 @@
 #include <torch/headeronly/util/shim_utils.h>
 
 // Header-only helpers converting between Python objects (passed as raw
-// PyObject* / void*) and their torch::stable equivalents: torch.Tensor <->
-// torch::stable::Tensor, torch.dtype <-> ScalarType, torch.device <->
-// torch::stable::Device. These are libtorch-only to link against, but require
-// libtorch_python to be loaded at runtime (see the Python interop shims section
-// in torch/csrc/stable/c/shim.h). The GIL must be held by the caller.
+// PyObject* / void*) and their torch::stable equivalents. These are
+// libtorch-only to link against, but require libtorch_python to be loaded at
+// runtime (see the Python interop shims section in torch/csrc/stable/c/shim.h).
+// The GIL must be held by the caller.
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
-
-// Whether py_obj is a Python torch.Tensor (or a subclass). A cheap probe for
-// callers that want to type-check before tensor_from_pyobject (which errors on
-// non-tensors).
-inline bool is_tensor_pyobject(void* py_obj) {
-  bool ret = false;
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_is_tensor_pyobject(py_obj, &ret));
-  return ret;
-}
 
 // Wrap a Python torch.Tensor (PyObject* passed as void*) as a stable Tensor
 // that shares its underlying TensorImpl.
@@ -46,6 +36,19 @@ inline void* tensor_to_pyobject(const Tensor& t, void* py_type = nullptr) {
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_tensor_to_pyobject(t.get(), py_type, &raw));
   return raw;
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
+// Whether py_obj is a Python torch.Tensor (or a subclass). A probe for callers
+// that want to type-check before tensor_from_pyobject (which errors on
+// non-tensors).
+inline bool is_tensor_pyobject(void* py_obj) {
+  bool ret = false;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_is_tensor_pyobject(py_obj, &ret));
+  return ret;
 }
 
 // The dtype/device helpers below translate codes through the stable enum
@@ -92,6 +95,6 @@ inline void* device_to_pyobject(const Device& device) {
   return raw;
 }
 
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

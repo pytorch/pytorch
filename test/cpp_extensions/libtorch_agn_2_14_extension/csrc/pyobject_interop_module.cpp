@@ -5,11 +5,12 @@
 #include <torch/csrc/stable/tensor.h>
 
 // Importable (abi3) module functions that exercise the use case for the
-// PyObject<->Tensor/dtype/device stable shims: a raw PyObject arrives straight
-// from Python (no dispatcher boxing), so the GIL is naturally held. This is how
-// a consumer (e.g. a python-registered custom op) would actually call the
-// *_from_pyobject / *_to_pyobject helpers. The module links only libtorch; the
-// conversion is serviced by the vtable that libtorch_python registers.
+// PyObject<->Tensor stable shims: a raw PyObject arrives straight from Python
+// (no dispatcher boxing), so the GIL is naturally held. This is how a consumer
+// (e.g. a python-registered custom op) would actually call tensor_from_pyobject
+// / tensor_to_pyobject. The module links only libtorch; the conversion is
+// serviced by
+// the vtable that libtorch_python registers.
 
 using torch::stable::Tensor;
 
@@ -64,83 +65,10 @@ PyObject* pyobject_sum(PyObject* /*self*/, PyObject* obj) {
   }
 }
 
-// Whether obj is a torch.Tensor (or a subclass), via the stable probe.
-PyObject* is_tensor(PyObject* /*self*/, PyObject* obj) {
-  try {
-    return PyBool_FromLong(torch::stable::is_tensor_pyobject(obj));
-  } catch (const std::exception& e) {
-    if (!PyErr_Occurred()) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    }
-    return nullptr;
-  }
-}
-
-// PyObject -> ScalarType -> PyObject; torch.dtype objects are singletons, so
-// the result is the input object.
-PyObject* dtype_roundtrip(PyObject* /*self*/, PyObject* obj) {
-  try {
-    auto dtype = torch::stable::dtype_from_pyobject(obj);
-    return static_cast<PyObject*>(torch::stable::dtype_to_pyobject(dtype));
-  } catch (const std::exception& e) {
-    if (!PyErr_Occurred()) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    }
-    return nullptr;
-  }
-}
-
-// PyObject -> stable Device -> PyObject.
-PyObject* device_roundtrip(PyObject* /*self*/, PyObject* obj) {
-  try {
-    auto device = torch::stable::device_from_pyobject(obj);
-    return static_cast<PyObject*>(torch::stable::device_to_pyobject(device));
-  } catch (const std::exception& e) {
-    if (!PyErr_Occurred()) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    }
-    return nullptr;
-  }
-}
-
-// Returns the tensor's dtype as a Python torch.dtype, going through the stable
-// Tensor accessors end to end.
-PyObject* tensor_dtype(PyObject* /*self*/, PyObject* obj) {
-  try {
-    Tensor t = torch::stable::tensor_from_pyobject(obj);
-    return static_cast<PyObject*>(
-        torch::stable::dtype_to_pyobject(t.scalar_type()));
-  } catch (const std::exception& e) {
-    if (!PyErr_Occurred()) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    }
-    return nullptr;
-  }
-}
-
-// Returns the tensor's device as a Python torch.device.
-PyObject* tensor_device(PyObject* /*self*/, PyObject* obj) {
-  try {
-    Tensor t = torch::stable::tensor_from_pyobject(obj);
-    return static_cast<PyObject*>(
-        torch::stable::device_to_pyobject(t.device()));
-  } catch (const std::exception& e) {
-    if (!PyErr_Occurred()) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    }
-    return nullptr;
-  }
-}
-
 PyMethodDef methods[] = {
     {"pyobject_roundtrip", pyobject_roundtrip, METH_O, nullptr},
     {"pyobject_to_type", pyobject_to_type, METH_VARARGS, nullptr},
     {"pyobject_sum", pyobject_sum, METH_O, nullptr},
-    {"is_tensor", is_tensor, METH_O, nullptr},
-    {"dtype_roundtrip", dtype_roundtrip, METH_O, nullptr},
-    {"device_roundtrip", device_roundtrip, METH_O, nullptr},
-    {"tensor_dtype", tensor_dtype, METH_O, nullptr},
-    {"tensor_device", tensor_device, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {

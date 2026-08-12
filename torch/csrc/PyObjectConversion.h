@@ -8,10 +8,9 @@
 
 // Indirection that lets the libtorch-only Python-interop stable shims call into
 // code that only libtorch_python can provide (THPVariable_* &co) without
-// libtorch (or the user extension) linking libtorch_python. Today this backs
-// PyObject <-> Tensor/dtype/device conversion; other conversions between Python
-// objects and libtorch types that need libtorch_python can be added as further
-// methods.
+// libtorch (or the user extension) linking libtorch_python. Conversions
+// between Python objects and libtorch types that need libtorch_python are
+// added here as methods.
 //
 // This mirrors c10's PyInterpreterVTable: an abstract interface declared in the
 // lower library, a no-op default that errors, and a concrete implementation
@@ -35,9 +34,9 @@ namespace torch::detail {
 struct TORCH_API PyObjectConversionInterface {
   virtual ~PyObjectConversionInterface() = default;
 
-  // Whether obj is a Python torch.Tensor (or a subclass). A cheap probe for
-  // callers that want to type-check before tensor_from_pyobject (which errors
-  // on non-tensors). The GIL must be held.
+  // Whether obj is a Python torch.Tensor (or a subclass). A probe for callers
+  // that want to type-check before tensor_from_pyobject (which errors on
+  // non-tensors). The GIL must be held.
   virtual bool is_tensor_pyobject(PyObject* obj) const = 0;
 
   // Unpack a Python torch.Tensor (PyObject*) into an at::Tensor that shares the
