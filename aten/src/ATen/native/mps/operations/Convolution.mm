@@ -153,16 +153,11 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
 // bandwidth for this permutation, 2-4x slower than the flat kernel.
 static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
   using namespace mps;
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-  const int64_t output_channels = weight.size(0);
-  const int64_t input_channels_per_group = weight.size(1);
-  const int64_t kernel_depth = weight.size(2);
-  const int64_t kernel_height = weight.size(3);
-  const int64_t kernel_width = weight.size(4);
-  const auto [min_stride, max_stride] = std::minmax_element(weight.strides().begin(), weight.strides().end());
-  if (weight.numel() == 0 || weight.numel() > kInt32Max || *max_stride > kInt32Max || *min_stride < -kInt32Max) {
-    return weight.permute({2, 3, 4, 1, 0}).contiguous();
-  }
+  const auto output_channels = weight.size(0);
+  const auto input_channels_per_group = weight.size(1);
+  const auto kernel_depth = weight.size(2);
+  const auto kernel_height = weight.size(3);
+  const auto kernel_width = weight.size(4);
   auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
                           weight.options());
   ConvWeightPermuteParams params;
