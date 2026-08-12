@@ -71,10 +71,11 @@ def _temporary_env(updates):
                         "has_k_tail": has_k_tail,
                     },
                 )
-                assert param is not None, (
-                    f"unsupported FlyDSL GEMM shape/config: M={GEMM_M}, N={GEMM_N}, "
-                    f"K={GEMM_K}, tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
-                )
+                if param is None:
+                    raise RuntimeError(
+                        f"unsupported FlyDSL GEMM shape/config: M={GEMM_M}, N={GEMM_N}, "
+                        f"K={GEMM_K}, tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
+                    )
                 _gemm_param = param
     ensure_flydsl_cache_dir()
     compile_args = (

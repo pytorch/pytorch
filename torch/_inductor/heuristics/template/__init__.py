@@ -16,7 +16,6 @@ from . import (
     base,
     contiguous_mm,
     decompose_k,
-    flydsl,
     nv_universal_gemm,
     registry,
     tlx,

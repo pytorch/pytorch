@@ -498,7 +498,7 @@ class TestFlyDSLTemplate(TestCase):
         autotune_in_subproc=True,
     )
     def test_flydsl_autotune_transposed_rhs_uses_view_tensor(self):
-        from torch._inductor.template_heuristics import flydsl as flydsl_heuristics
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
