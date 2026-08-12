@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, decorateIf, skipIfXpu
 )
 from torch.testing._internal.common_device_type import \
-    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+    (Capability, HPUTestBase, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
@@ -556,6 +556,41 @@ if __name__ == '__main__':
 
 
 instantiate_device_type_tests(TestTesting, globals())
+
+
+class TestHPUCapabilityRegistration(TestCase):
+    def test_distributed_capability_keys_and_inheritance(self):
+        capabilities = HPUTestBase._capabilities()
+
+        self.assertIn(Capability.lib.safetensors, capabilities[Capability.lib])
+        self.assertEqual(
+            set(capabilities[Capability.distributed]),
+            {
+                Capability.distributed.backend,
+                Capability.distributed.fsdp,
+            },
+        )
+
+    def test_distributed_capabilities_follow_backend_availability(self):
+        try:
+            for available in (True, False):
+                with self.subTest(available=available), unittest.mock.patch(
+                    "torch.testing._internal.common_device_type._distributed_backend_available",
+                    return_value=available,
+                ) as backend_available:
+                    HPUTestBase.get_capabilities.cache_clear()
+                    capabilities = HPUTestBase.get_capabilities()
+
+                    self.assertEqual(
+                        capabilities[Capability.distributed.backend], available
+                    )
+                    self.assertEqual(
+                        capabilities[Capability.distributed.fsdp], available
+                    )
+                    self.assertEqual(backend_available.call_count, 2)
+                    backend_available.assert_called_with("hpu")
+        finally:
+            HPUTestBase.get_capabilities.cache_clear()
 
 
 class TestFrameworkUtils(TestCase):

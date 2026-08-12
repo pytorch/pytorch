@@ -1123,6 +1123,23 @@ class HPUTestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
 
     @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                }
+            }
+        )
+        return capabilities
+
+    @classmethod
     def get_primary_device(cls):
         return cls.primary_device
 
