@@ -160,16 +160,17 @@ static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
   const auto kernel_width = weight.size(4);
   auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
                           weight.options());
-  ConvWeightPermuteParams params;
-  params.output_channels = static_cast<int32_t>(output_channels);
-  params.input_channels_per_group = static_cast<int32_t>(input_channels_per_group);
-  params.kernel_height = static_cast<int32_t>(kernel_height);
-  params.kernel_width = static_cast<int32_t>(kernel_width);
-  params.output_channel_stride = static_cast<int32_t>(weight.stride(0));
-  params.input_channel_stride = static_cast<int32_t>(weight.stride(1));
-  params.depth_stride = static_cast<int32_t>(weight.stride(2));
-  params.height_stride = static_cast<int32_t>(weight.stride(3));
-  params.width_stride = static_cast<int32_t>(weight.stride(4));
+  const ConvWeightPermuteParams params{
+      .output_channels = static_cast<uint32_t>(output_channels),
+      .input_channels_per_group = static_cast<uint32_t>(input_channels_per_group),
+      .kernel_height = static_cast<uint32_t>(kernel_height),
+      .kernel_width = static_cast<uint32_t>(kernel_width),
+      .output_channel_stride = static_cast<uint32_t>(weight.stride(0)),
+      .input_channel_stride = static_cast<uint32_t>(weight.stride(1)),
+      .depth_stride = static_cast<uint32_t>(weight.stride(2)),
+      .height_stride = static_cast<uint32_t>(weight.stride(3)),
+      .width_stride = static_cast<uint32_t>(weight.stride(4)),
+  };
   auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(weight)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
