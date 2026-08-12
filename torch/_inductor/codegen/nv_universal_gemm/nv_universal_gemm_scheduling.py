@@ -312,7 +312,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 return False
 
         if not feeds_main:
-            for s_node in epilogue_program.evt_nodes:
+            for s_node in epilogue_program.pointwise_nodes:
                 node = cast(ComputedBuffer, s_node.node)
                 if not isinstance(node.data, Pointwise):
                     log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
@@ -344,7 +344,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             [s_node.get_name() for s_node in all_scheduler_nodes]
         )
         epilogue_inputs: OrderedSet[str] = OrderedSet()
-        for s_node in epilogue_program.evt_nodes:
+        for s_node in epilogue_program.pointwise_nodes:
             for rd in s_node.read_writes.reads:
                 if rd.name in internal_names:
                     continue
@@ -411,11 +411,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             trial_removed_buffers.add(ir_node.get_name())
         try:
             trial_reads: list[str] = []
-            evt_nodes = epilogue_program.evt_nodes
-            if evt_nodes:
+            pointwise_nodes = epilogue_program.pointwise_nodes
+            if pointwise_nodes:
                 trial_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                     ir_node.get_name(),
-                    list(evt_nodes),
+                    list(pointwise_nodes),
                     trial_removed_buffers,
                 )
                 trial_reads = list(trial_epilogue.reads)
@@ -476,12 +476,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             for read in node.read_writes.reads
         )
 
-    def can_fuse_reduction_chain(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        # Keep standalone chains materialized until the NVGEMM template owns them.
-        return False
-
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -490,8 +484,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             and isinstance(node.node.data, Reduction)
             for node in node1.get_nodes()
         )
-        if has_reduction and self.can_fuse_reduction_chain(node1, node2):
-            return 0
         if not has_reduction:
             node1_ir = node1.node if isinstance(node1, SchedulerNode) else None
             if self._has_nvgemm_choice(node1_ir) and any(
@@ -752,7 +744,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         GEMM_ACCUMULATOR_ARG_NAME: original_buffer_name,
                         "D": primary_output,
                     }
-                evt_nodes = epilogue_program.evt_nodes
+                pointwise_nodes = epilogue_program.pointwise_nodes
                 fused_buffer_names: OrderedSet[str] = OrderedSet(
                     n.get_name() for n in epilogue_nodes
                 )
@@ -763,10 +755,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 ):
                     removed_buffers_with_gemm.add(original_buffer_name)
 
-                if evt_nodes:
+                if pointwise_nodes:
                     evt_buffers = [
                         node.node
-                        for node in evt_nodes
+                        for node in pointwise_nodes
                         if isinstance(node.node, ComputedBuffer)
                     ]
                     try:
@@ -779,7 +771,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     except NotImplementedError:
                         lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                             original_buffer_name,
-                            list(evt_nodes),
+                            list(pointwise_nodes),
                             removed_buffers_with_gemm,
                             fn_name=EPILOGUE_FN_NAME,
                             as_standalone_function=True,
@@ -975,7 +967,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
 
                 raise CantSplit("NVGEMM epilogue", "supported EVT") from exc
 
-        assert isinstance(generated, NVGemmGeneratedSource)  # noqa: S101
+        if not isinstance(generated, NVGemmGeneratedSource):
+            raise AssertionError(
+                f"expected NVGemmGeneratedSource, got {type(generated)}"
+            )
         src_code = generated.source.replace(
             str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
         )
