@@ -14,8 +14,14 @@ from torch.distributed.checkpoint._async_process_executor import (
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_win32
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     retry_on_connect_failures,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -110,8 +116,13 @@ class TestStorageWriter(StorageWriter):
 class TestAsyncProcessExecutor(DTensorTestBase):
     """Test suite for async checkpoint process executor error handling using public APIs."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
-    def test_checkpoint_save_failure_continues_serving(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_checkpoint_save_failure_continues_serving(self, device) -> None:
         """Test that checkpoint save failure doesn't exit process, continues serving."""
 
         test_state_dict = {
@@ -169,6 +180,12 @@ class TestAsyncProcessExecutor(DTensorTestBase):
 
 
 class TestAsyncProcessExecutorPrefixStore(TestCase):
+    # Builds its own process group with `backend=dist.Backend.GLOO` and a
+    # single rank, not from whatever accelerator is present, so it is tied to
+    # a specific device by construction rather than exercising this device's
+    # accelerator path.
+    hw_classification = HardwareClassification.CPU
+
     @skip_if_win32()
     @retry_on_connect_failures
     def test_checkpoint_save_with_prefix_store_enabled(self) -> None:
@@ -213,8 +230,13 @@ class TestAsyncProcessExecutorPrefixStore(TestCase):
 class TestProcessGroupInitInfo(DTensorTestBase):
     """Test suite for _ProcessGroupInitInfo."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
-    def test_process_group_init_info_with_default_pg(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_process_group_init_info_with_default_pg(self, device) -> None:
         """Test that ProcessGroupInitInfo correctly initializes."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("DCP_USE_PREFIX_STORE", None)
@@ -228,7 +250,10 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             self.assertEqual(pg_init_info.use_prefix_store, False)
 
     @with_comms
-    def test_process_group_init_info_with_prefix_store_env_var(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_process_group_init_info_with_prefix_store_env_var(self, device) -> None:
         """Test that ProcessGroupInitInfo handles DCP_USE_PREFIX_STORE environment variable."""
 
         # Flag enabled, addr/port correctly defined
@@ -268,7 +293,10 @@ class TestProcessGroupInitInfo(DTensorTestBase):
                 pg_init_info = _ProcessGroupInitInfo()
 
     @with_comms
-    def test_process_group_init_info_without_prefix_store_env_var(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_process_group_init_info_without_prefix_store_env_var(self, device) -> None:
         """Test that ProcessGroupInitInfo defaults to not using prefix store."""
 
         # Env var set to 0
@@ -300,7 +328,10 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             self.assertFalse(pg_init_info.use_prefix_store)
 
     @with_comms
-    def test_process_group_init_info_gc_env_vars(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_process_group_init_info_gc_env_vars(self, device) -> None:
         """Test that ProcessGroupInitInfo correctly reads GC-related environment variables."""
 
         # Test with both GC env vars enabled
@@ -350,5 +381,7 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             self.assertFalse(pg_init_info.disable_manual_gc)
 
 
+instantiate_device_type_tests(TestAsyncProcessExecutor, globals(), except_for="cpu")
+instantiate_device_type_tests(TestProcessGroupInitInfo, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
