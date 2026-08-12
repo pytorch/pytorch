@@ -60,29 +60,6 @@ class TestCheckpointReader(TestCase):
         )
         torch.save(self.state_dict, checkpoint_file)
 
-    def move_tensors_to_device(self, state_dict: Any, device: str) -> Any:
-        """
-        Recursively move all tensors in a nested dictionary to the target device.
-
-        Args:
-            state_dict (dict): A dictionary potentially containing nested dictionaries and tensors.
-            device (str): The target device string.
-
-        Returns:
-            dict: A new dictionary with all tensors moved to the target device.
-        """
-        if isinstance(state_dict, dict):
-            return {
-                key: self.move_tensors_to_device(value, device)
-                for key, value in state_dict.items()
-            }
-        elif isinstance(state_dict, list):
-            return [self.move_tensors_to_device(item, device) for item in state_dict]
-        elif isinstance(state_dict, torch.Tensor):
-            return state_dict.to(device) if device == "cpu" else state_dict.cpu()
-        else:
-            return state_dict
-
     def deep_compare(self, obj1: Any, obj2: Any) -> bool:
         if isinstance(obj1, dict) and isinstance(obj2, dict):
             if obj1.keys() != obj2.keys():
@@ -257,7 +234,7 @@ class TestCheckpointReaderDevice(TestCase):
 
     def test_read_with_map_location(self, device):
         reader = CheckpointReader(rank_info=self.rank_info)
-        map_location = device if device != "cpu" else "cpu"
+        map_location = torch.device(device).type
         read_state_dict, _ = reader.read(
             self.checkpoint_path, map_location=map_location
         )
@@ -278,7 +255,6 @@ class TestCheckpointReaderDevice(TestCase):
 instantiate_device_type_tests(
     TestCheckpointReaderDevice,
     globals(),
-    except_for=("cpu",),
 )
 
 if __name__ == "__main__":
