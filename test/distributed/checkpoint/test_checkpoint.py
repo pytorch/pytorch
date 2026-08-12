@@ -363,7 +363,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_save(state_dict, coordinator=1, fail_set_up_storage_writer=[1])
         self._test_save(state_dict, coordinator=1, fail_finish=[1])
 
-    def test_save_error_handling_no_dist(self) -> None:
+    def test_save_error_handling_no_dist(self, device) -> None:
         state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
 
         self.assertFalse(dist.is_initialized())
@@ -407,7 +407,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, coordinator=3, fail_read_data_async=[2])
         self._test_load(state_dict, coordinator=1, fail_prepare_global_plan=[1])
 
-    def test_load_error_handling_no_dist(self) -> None:
+    def test_load_error_handling_no_dist(self, device) -> None:
         state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
         self._test_load(state_dict)
         self._test_load(state_dict, fail_set_up_storage_reader=[0])
