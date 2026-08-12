@@ -710,10 +710,10 @@ class TestHopPrintDTensor(DTensorTestBase):
         return 4
 
     @with_comms
-    def test_print_dtensor_basic(self):
+    def test_print_dtensor_basic(self, device):
         """Sharded DTensor prints local shard on all ranks."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(8, dtype=torch.float, device=device)
         local_shard = full_tensor.chunk(self.world_size)[self.rank]
         dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
@@ -731,10 +731,10 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(output, expected)
 
     @with_comms
-    def test_print_dtensor_replicate(self):
+    def test_print_dtensor_replicate(self, device):
         """Replicated DTensor prints full tensor on all ranks."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.tensor([1.0, 2.0, 3.0], device=self.device_type)
+        full_tensor = torch.tensor([1.0, 2.0, 3.0], device=device)
         dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
 
         def f(x):
@@ -758,10 +758,10 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(compiled_output, expected)
 
     @with_comms
-    def test_print_dtensor_format_str(self):
+    def test_print_dtensor_format_str(self, device):
         """Test both positional and keyword sharded DTensor args in format strings."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(4, dtype=torch.float, device=device)
         local_shard = full_tensor.chunk(self.world_size)[self.rank]
         dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
@@ -783,10 +783,10 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(kw_output, f"[rank {self.rank}] kw: {local_shard}\n")
 
     @with_comms
-    def test_print_dtensor_mixed_args(self):
+    def test_print_dtensor_mixed_args(self, device):
         """Mix sharded DTensor and scalar args in a single print call."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(4, dtype=torch.float, device=device)
         local_shard = full_tensor.chunk(self.world_size)[self.rank]
         dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
@@ -800,10 +800,10 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(output, f"[rank {self.rank}] dt: {local_shard} scalar: 42\n")
 
     @with_comms
-    def test_print_dtensor_multiple_prints(self):
+    def test_print_dtensor_multiple_prints(self, device):
         """Multiple sharded DTensor prints with intermediate computations."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(4, dtype=torch.float, device=device)
         local_shard = full_tensor.chunk(self.world_size)[self.rank]
         dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
@@ -825,10 +825,10 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(output, expected)
 
     @with_comms
-    def test_print_dtensor_kwargs(self):
+    def test_print_dtensor_kwargs(self, device):
         """Sharded DTensor print with kwargs."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(4, dtype=torch.float, device=device)
         local_shard = full_tensor.chunk(self.world_size)[self.rank]
         dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
@@ -846,10 +846,10 @@ class TestHopPrintDTensor(DTensorTestBase):
 
     @with_comms
     @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_print_dtensor_inductor_output_code(self):
+    def test_print_dtensor_inductor_output_code(self, device):
         """Verify inductor generated code contains print for replicated DTensor."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(8, dtype=torch.float, device=device)
         dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
 
         def f(x):
@@ -875,10 +875,10 @@ class TestHopPrintDTensor(DTensorTestBase):
 
     @with_comms
     @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_print_dtensor_compiled_sharded(self):
+    def test_print_dtensor_compiled_sharded(self, device):
         """Verify compiled sharded DTensor prints match eager output per rank."""
         device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
+        full_tensor = torch.arange(8, dtype=torch.float, device=device)
         local_shard = full_tensor.chunk(self.world_size)[self.rank]
         dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
