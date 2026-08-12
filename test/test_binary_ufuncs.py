@@ -25,12 +25,11 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyNativeDeviceTypes,
-    onlyOn,
     OpDTypes,
     ops,
     precisionOverride,
-    skipCPUIf,
     skipCUDAIfNotRocm,
     skipIf,
     skipMeta,
@@ -1375,7 +1374,7 @@ class TestBinaryUfuncsDevice(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
-    @skipCPUIf(True, "test compares accelerator division implementations")
+    @onlyAccelerator
     @dtypes(torch.float, torch.bfloat16)
     def test_division_by_scalar(self, device, dtype):
         num = torch.rand(1024, device=device, dtype=dtype)
@@ -1387,7 +1386,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
     # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message
-    @skipCPUIf(True, "test requires distinct CPU and accelerator devices")
+    @onlyAccelerator
     def test_cross_device_inplace_error_msg(self, device):
         a = torch.tensor(2.0)
         b = torch.tensor(2.0, device=device)
@@ -1880,7 +1879,7 @@ class TestBinaryUfuncsDevice(TestCase):
             for tensor in tensors:
                 self._test_pow(base, tensor)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_device_tensor_pow_scalar_tensor(self, device):
         device_tensors = [
             torch.randn((3, 3), device=device),
@@ -1894,7 +1893,7 @@ class TestBinaryUfuncsDevice(TestCase):
         for base, exp in product(device_tensors, scalar_tensors):
             self._test_pow(base, exp)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_cpu_tensor_pow_device_scalar_tensor(self, device):
         device_tensors = [
             torch.tensor(5.0, device=device_type),
@@ -2032,7 +2031,7 @@ class TestBinaryUfuncsDevice(TestCase):
     # binary operation, and that device "scalars" cannot be used in the same
     # binary operation as non-scalar CPU tensors.
     @deviceCountAtLeast(2)
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_cross_device_binary_ops(self, devices):
         vals = (1.0, (2.0,))
         cpu_tensor = torch.randn(2, 2)
@@ -2069,7 +2068,7 @@ class TestBinaryUfuncsDevice(TestCase):
     # in a binary operation in conjunction with a Tensor on all
     # available devices
     @deviceCountAtLeast(2)
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_binary_op_scalar_device_unspecified(self, devices):
         scalar_val = torch.tensor(1.0)
         for default_device in devices:
@@ -2518,7 +2517,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     torch.ones(1, device=device, dtype=dtypes[0]),
                 )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_maximum_minimum_cross_device(self, device):
         a = torch.tensor((1, 2, -1))
         b = torch.tensor((3, 0, 4), device=device)
@@ -3755,7 +3754,7 @@ class TestBinaryUfuncsDevice(TestCase):
             ):
                 input.heaviside_(values)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_heaviside_cross_device(self, device):
         x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         y = torch.tensor(0)
@@ -4221,7 +4220,7 @@ class TestBinaryUfuncsDevice(TestCase):
             lambda: torch.add(m1, m1, out=m2),
         )
 
-    @skipCPUIf(True, "test covers accelerator half precision")
+    @onlyAccelerator
     def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
         for op, y, alpha in (
@@ -4962,7 +4961,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
