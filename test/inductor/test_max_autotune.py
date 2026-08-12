@@ -1970,8 +1970,19 @@ class TestMaxAutotune(TestCase):
                     lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
                 )
 
-                out, code = run_and_get_code(compiled_func, a, b)
-                out.backward()
+                def fwd_bwd():
+                    out = compiled_func(a, b)
+                    out.backward()
+                    return out
+
+                # The mock only affects autotuning choices, so the backward has
+                # to be compiled (not served from the AOTAutograd/FX caches)
+                # inside this block for the choice to show up in the code. Both
+                # passes are captured together because the backward is only
+                # compiled once .backward() runs.
+                torch._dynamo.reset()
+                with fresh_cache():
+                    out, code = run_and_get_code(fwd_bwd)
 
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                     "triton_.*_fused_.*.run"
