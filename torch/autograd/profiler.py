@@ -152,8 +152,12 @@ class profile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -260,6 +264,15 @@ class profile:
             warn(
                 "profiler_metrics and profiler_measure_per_kernel are deprecated "
                 "and ignored. These options will be removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if with_modules:
+            warn(
+                "with_modules is deprecated and will be removed in a future release. "
+                "It only collects data for TorchScript models, which are themselves "
+                "deprecated, and does nothing in eager mode. Use with_stack=True, "
+                "which records nn.Module events for eager models.",
                 FutureWarning,
                 stacklevel=2,
             )
