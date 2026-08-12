@@ -12,7 +12,7 @@ import unittest
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
-from functools import cache, partial, wraps
+from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
@@ -424,12 +424,13 @@ class DeviceTypeTestBase(TestCase):
     # Returns the capability map used by @requires_capabilities.
     # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
     # declare supported capabilities grouped by namespace. This method flattens
-    # the nested map, evaluates the support checks, and caches the result.
+    # the nested map and evaluates the support checks.
     @classmethod
-    @cache
     def get_capabilities(cls) -> dict[str, bool]:
         return {
-            k: fn() for sub in cls._capabilities().values() for k, fn in sub.items()
+            k: bool(fn())
+            for sub in cls._capabilities().values()
+            for k, fn in sub.items()
         }
 
     # Returns a nested capability map grouped by namespace.
@@ -933,18 +934,21 @@ class XPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
+        from torch.testing._internal.common_xpu import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        )
         from torch.utils._triton import has_triton
 
         return {
             Capability.dtype: {
                 Capability.dtype.fp8: lambda: True,
-                Capability.dtype.bf16: lambda: False,
+                Capability.dtype.bf16: lambda: True,
             },
             Capability.lib: {
                 Capability.lib.triton: lambda: has_triton(),
             },
             Capability.attention: {
-                Capability.attention.flash_attention: lambda: True,
+                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
                 Capability.attention.mem_efficient_attention: lambda: True,
             },
         }
@@ -1201,6 +1205,49 @@ def get_desired_device_type_test_bases(
     )
 
 
+def requires_capabilities(*caps: str):
+    """Declare that a test method requires device capabilities.
+
+    Wraps the test to call ``type(self).get_capabilities()`` at runtime
+    and skip if any required capability is unsupported by the device.
+
+    Raises AssertionError if a capability is not declared in the
+    device's ``_capabilities()`` map.
+    """
+    caps_set = set(caps)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            device_caps = type(self).get_capabilities()
+
+            unsupported = set()
+            missing = set()
+            for c in caps_set:
+                if c in device_caps:
+                    if not device_caps[c]:
+                        unsupported.add(c)
+                else:
+                    missing.add(c)
+
+            if missing:
+                raise AssertionError(
+                    f"Device '{type(self).device_type}' has not declared capabilities: "
+                    f"{', '.join(sorted(missing))}. "
+                    f"Add them to {type(self).__name__}._capabilities()."
+                )
+            if unsupported:
+                raise unittest.SkipTest(
+                    f"Device '{type(self).device_type}' has unsupported capabilities: "
+                    f"{', '.join(sorted(unsupported))}"
+                )
+            return fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class. This function should be used instead of
@@ -1209,44 +1256,6 @@ def get_desired_device_type_test_bases(
 #
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
-
-
-def requires_capabilities(*caps: str):
-    """Declare that a test method requires device capabilities.
-
-    Wraps the test to call ``type(self).get_capabilities()`` at runtime
-    and skip if any required capability is missing.
-    """
-    caps_set = set(caps)
-
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(self, *args, **kwargs):
-            caps = type(self).get_capabilities()
-
-            unsupported = set()
-            missing = set()
-            for c in caps_set:
-                if c in caps:
-                    if not caps[c]:
-                        unsupported.add(c)
-                else:
-                    missing.add(c)
-
-            if missing:
-                raise unittest.SkipTest(
-                    f"Missing capabilities on device '{type(self).device_type}': "
-                    f"{', '.join(sorted(missing))}"
-                )
-            if unsupported:
-                raise unittest.SkipTest(
-                    f"Unsupported capabilities: {', '.join(sorted(unsupported))}"
-                )
-            return fn(self, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 def instantiate_device_type_tests(
