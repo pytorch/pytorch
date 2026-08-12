@@ -2560,17 +2560,8 @@ class SIMDScheduling(BaseScheduling):
         # The scheduler-global map also contains later mutations and would
         # collapse distinct temporal versions inside this legality check.
         epilogue_node_set = OrderedSet(epilogue_nodes)
-        nested_reduction = scheduler.NestedReduction
-        outputs_unread = nested_reduction._sub_parent_epilogue_outputs_unread(
+        outputs_unread = scheduler.NestedReduction._sub_parent_epilogue_outputs_unread(
             nodes, epilogue_node_set
-        )
-        # The pre-consolidation leaf gate included StarDep and WeakDep names
-        # before the MemoryDep-only planner could accept the fusion.
-        parent_source_names = OrderedSet(
-            dep.name
-            for node in nodes
-            if node.is_reduction()
-            for dep in node.read_writes.reads
         )
         group_mismatch = any(
             not node.is_reduction()
@@ -2581,15 +2572,7 @@ class SIMDScheduling(BaseScheduling):
             )
             for node in nodes
         )
-        parent_sources_are_free = nested_reduction._sub_parent_siblings_are_source_free(
-            nodes,
-            epilogue_node_set,
-            parent_numel,
-            parent_source_names,
-        )
-        leaf_violation = (
-            not outputs_unread or group_mismatch or not parent_sources_are_free
-        )
+        leaf_violation = not outputs_unread or group_mismatch
         if leaf_violation:
             return _SubParentFusion.REJECT
         return (

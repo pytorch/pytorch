@@ -76,6 +76,8 @@ class Dep(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
+    r"""A memory access dependency indexed over an iteration domain."""
+
     # pyrefly: ignore [bad-override]
     name: str
     # pyrefly: ignore [bad-override]

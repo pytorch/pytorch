@@ -633,10 +633,6 @@ class NestedReduction:
 
         has_reduction = False
         parent_source_names: OrderedSet[str] = OrderedSet()
-        # TODO(#190595): Also accept sources written by preceding pointwise stages.
-        # This requires proving that the write has one normalized full-resolution
-        # index and materializing that value for the derived-domain epilogue;
-        # standalone codegen currently materializes reduction inputs only.
         for node in scheduler_nodes:
             if node.is_reduction():
                 has_reduction = True
@@ -670,13 +666,6 @@ class NestedReduction:
             return None
         if check_leaves and not cls._sub_parent_epilogue_outputs_unread(
             scheduler_nodes, epilogue_node_set
-        ):
-            return None
-        if check_leaves and not cls._sub_parent_siblings_are_source_free(
-            scheduler_nodes,
-            epilogue_node_set,
-            numel,
-            parent_source_names,
         ):
             return None
         return StagedReductionPlan(
@@ -827,7 +816,7 @@ class NestedReduction:
         fused_buffer_names = OrderedSet.union(
             *(node.get_buffer_names() for node in (*parent_nodes, *epilogue_nodes))
         )
-        # External derived-domain reads need an index that can be normalized.
+        # Derived-domain reads need an index that can be normalized.
         if any(
             not isinstance(dep, MemoryDep) and dep.name not in fused_buffer_names
             for node in epilogue_nodes
@@ -835,16 +824,7 @@ class NestedReduction:
         ):
             return None
 
-        internal_source_names = parent_source_names & fused_buffer_names
-        if any(
-            dep.name in internal_source_names
-            for node in epilogue_nodes
-            for dep in node.read_writes.reads
-        ):
-            return None
-        external_source_names = parent_source_names - fused_buffer_names
-
-        def source_indices_in_domain(
+        def normalized_source_read_indices(
             nodes: Sequence[SchedulerNode],
             source_names: OrderedSet[str],
             var_names: tuple[sympy.Symbol, sympy.Symbol],
@@ -872,15 +852,15 @@ class NestedReduction:
         x = sympy_index_symbol("_sub_parent_x")
         parent_r = sympy_index_symbol("_sub_parent_r")
         child_r = sympy_index_symbol("_sub_parent_child_r")
-        child_indices = source_indices_in_domain(
+        child_indices = normalized_source_read_indices(
             epilogue_nodes,
-            external_source_names,
+            parent_source_names,
             (x, child_r),
             (parent_numel, child_rnumel),
         )
         if child_indices is None:
             return None
-        parent_indices = source_indices_in_domain(
+        parent_indices = normalized_source_read_indices(
             parent_nodes,
             OrderedSet(child_indices),
             (x, parent_r),
@@ -940,33 +920,6 @@ class NestedReduction:
                 continue
             for dep in node.read_writes.reads:
                 if dep.name in epilogue_output_names:
-                    return False
-        return True
-
-    @staticmethod
-    def _sub_parent_siblings_are_source_free(
-        nodes: Sequence[BaseSchedulerNode],
-        epilogue_node_set: OrderedSet[SchedulerNode],
-        numel: sympy.Expr,
-        source_names: OrderedSet[str],
-    ) -> bool:
-        """Whether parent-output-resolution siblings avoid the source buffers.
-
-        Siblings at ``(numel, 1)`` run after the reduction loop, where the split
-        tile is no longer live. Letting one read a source would force the
-        materialization to outlive the loop.
-        """
-        for node in nodes:
-            if node in epilogue_node_set or node.is_reduction():
-                continue
-            _, (node_numel, node_rnumel) = node.group
-            if not (
-                V.graph.sizevars.statically_known_equals(node_numel, numel)
-                and V.graph.sizevars.statically_known_equals(node_rnumel, 1)
-            ):
-                continue
-            for dep in node.read_writes.reads:
-                if dep.name in source_names:
                     return False
         return True
 
