@@ -3850,16 +3850,21 @@ def set_tracing_context_output_strides(
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                fakify_first_call = False
-                if ctx := torch._guards.TracingContext.try_get():
-                    fakify_first_call = ctx.fakify_first_call
 
                 def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
-                    if fakify_first_call:
+                    # Keep the stride symbolic; evaluate_symexpr collapses it to
+                    # the first input's hint, which then gets frozen into the
+                    # backward graph's saved-activation placeholder.
+                    #
+                    # deserialize_symexpr binds every symbol in backed_var_to_val
+                    # via int(val) and raises when a value is itself symbolic
+                    # (nested tensors). Those graphs keep the old behaviour.
+                    try:
                         return shape_env.deserialize_symexpr(e)
-                    return shape_env.evaluate_symexpr(e)
+                    except TypeError:
+                        return shape_env.evaluate_symexpr(e)
 
                 context.output_strides.append(
                     tuple(map_expr(e) for e in exprs)  # type: ignore[misc]

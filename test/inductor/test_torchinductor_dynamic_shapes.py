@@ -370,6 +370,40 @@ class TestInductorDynamic(DynamicShapesTestCase):
         )
         self.assertEqual(fn(arg0_test, arg1_test), compiled_fn(arg0_test, arg1_test))
 
+    # pad_dynamic_shapes is off by default and is what lets inductor pad a
+    # symbolically-shaped buffer at all; comprehensive_padding is on by default
+    # but is env-controlled, so pin it too.
+    @torch._inductor.config.patch(comprehensive_padding=True, pad_dynamic_shapes=True)
+    def test_saved_activation_symbolic_stride_backward(self, device):
+        # A saved activation's stride must stay symbolic under dynamic shapes.
+        # Without the fix it freezes at the first input's hint (128*112 =
+        # 14336) and the n=96 pass dies in the backward's assert_size_stride
+        # with `stride 24576==14336 at dim=0`.
+        #
+        # The setup is load-bearing. The saved activation must be a computed
+        # intermediate so inductor owns its layout -- a graph input's layout is
+        # fixed by the caller and can never diverge. The innermost dim must be
+        # misaligned (98 pads to 128) so inductor's layout moves off the
+        # contiguous stride the backward placeholder assumes, which is what
+        # makes the restride fire. And the outer stride must depend on a
+        # dynamic dim, so the freeze is observable at a second size.
+        def fn(x, w):
+            h = torch.tanh(x).permute(0, 2, 1)
+            return (h @ w).sum()
+
+        cfn = self.compile_fn(fn)
+        for n in (56, 96):
+            x = torch.randn(2, 2 * n, 98, device=device, requires_grad=True)
+            w = torch.randn(2, 2 * n, 128, device=device, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_()
+            w_ref = w.detach().clone().requires_grad_()
+
+            cfn(x, w).backward()
+            fn(x_ref, w_ref).backward()
+
+            self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(w.grad, w_ref.grad)
+
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
