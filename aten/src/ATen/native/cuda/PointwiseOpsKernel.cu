@@ -167,8 +167,7 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
     #else
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
         auto alpha = value.to<scalar_t>();
-        gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c)
-        __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+        gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
           return a + alpha * (b / c);
         });
       });
@@ -179,8 +178,7 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       // and do math in fp32 for better accuracy.
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto alpha = value.to<accscalar_t>();
-      gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c)
-      __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+      gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
         //return a + alpha * (b / static_cast<accscalar_t>(c));
         return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::divides<accscalar_t>());
       });
