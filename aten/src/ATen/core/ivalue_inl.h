@@ -429,6 +429,7 @@ struct TORCH_API TupleElements {
 
   // Note: this implementation is not exception safe
   TupleElements& operator=(const TupleElements& rhs) {
+    if (this == &rhs) { return *this; }
     if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
       elementsVector_ = rhs.elementsVector_;
     } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
@@ -463,6 +464,7 @@ struct TORCH_API TupleElements {
   }
 
   TupleElements& operator=(TupleElements&& rhs) noexcept {
+    if (this == &rhs) { return *this; }
     if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
       elementsVector_ = std::move(rhs.elementsVector_);
     } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
