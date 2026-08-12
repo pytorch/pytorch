@@ -350,9 +350,25 @@ def _softshrink(x, lambd):
 
 
 @cute.jit
-def _logit(x):
-    # log(x/(1-x)); eps=None (the only overload we register) -> no clamping.
-    return cute.math.log(x / (x.__class__(1.0) - x))
+def _logit(x, eps):
+    # log(z/(1-z)) where z is x clamped to [eps, 1-eps]. aten's logit_kernel_cuda uses a
+    # NEGATIVE eps as the "no clamping" sentinel (the omitted-arg case), which the row's
+    # optional_defaults supplies -- so this one body serves both overloads.
+    one = x.__class__(1.0)
+    z = x.__class__(0.0)
+    # A negative eps must leave x untouched. Rather than branch on eps (a runtime scalar,
+    # so the DSL needs a select) pick clamp bounds that cannot bite: x itself. A literal
+    # -inf/+inf is not an option -- 1.0/0.0 folds at trace time and raises.
+    neg = eps < z
+    lo = x if neg else eps
+    hi = x if neg else one - eps
+    # EXACTLY aten's nested ternary, `x < lo ? lo : (x > hi ? hi : x)`, not a sequential
+    # clamp-low-then-clamp-high. The two differ when the bounds CROSS (eps > 0.5 gives
+    # lo > hi, e.g. eps=0.6 -> [0.6, 0.4]): aten returns lo and never re-clamps, while
+    # applying hi afterwards would pull the result back down and flip the sign of the log.
+    # A nan input takes neither branch (both comparisons are false) and so propagates.
+    zc = lo if x < lo else (hi if x > hi else x)  # noqa: FURB136 -- min() does not lower
+    return cute.math.log(zc / (one - zc))
 
 
 # ---- rounding / sign (DEFAULT promotion; output dtype follows input) ----
@@ -740,6 +756,41 @@ def _identity(x):
     # Pure dtype cast: the kernel's load-side packed convert to the COMPUTE dtype
     # (= the target dtype) IS the conversion; the store is then a no-op cast.
     return x
+
+
+# ---- nullary (nin == 0): no input; the value comes from scalars, or from the INDEX ----
+
+
+@cute.jit
+def _fill(value):
+    # No input to read, so the kernel calls fn(*consts) with no loaded values and this
+    # just returns the broadcast scalar. Backs aten's fill_ and everything built on it
+    # (full / zeros / ones / full_like, all of which lower to empty() + fill_).
+    return value
+
+
+@cute.jit
+def _arange(ind, start, step):
+    # start + step*ind, the value form of aten's arange_cuda_out. `ind` is the thread's
+    # flat output index (the kernel's with_index mode, aten's gpu_kernel_with_index).
+    return start + step * ind.to(start.__class__)
+
+
+@cute.jit
+def _linspace(ind, start, end, step, halfway, last):
+    # aten's linspace_cuda_out, INCLUDING its halfway split: the first half steps FORWARD
+    # from `start`, the second half BACKWARD from `end`
+    #   ind < halfway -> start + step*ind
+    #   else          -> end - step*(steps - 1 - ind)
+    # That is not an optimization. It is what pins BOTH endpoints exactly (stepping forward
+    # throughout would drift by accumulated rounding and miss `end`), so it is reproduced
+    # here -- verified: first/last are exact for every dtype and step count tested.
+    # `last` is steps-1, precomputed on the host. All arithmetic is in the fp32+ compute
+    # dtype; narrowing happens only on the store.
+    f = ind.to(start.__class__)
+    fwd = start + step * f
+    bwd = end - step * (last - f)
+    return fwd if ind < halfway else bwd
 
 
 @cute.jit

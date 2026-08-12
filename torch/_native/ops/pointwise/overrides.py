@@ -79,13 +79,22 @@ def _is_wrapped_scalar(t) -> bool:
     return isinstance(t, torch.Tensor) and t.dim() == 0 and t.device.type == "cpu"
 
 
+def _device_ref(ins):
+    # The operand whose device the call runs on: the first that is NOT a coerced python
+    # number. Returns None if every operand is one (nothing to compute on). aten places
+    # the wrapped scalar in slot 0 for the reflected overloads (rsub.Scalar,
+    # remainder.Scalar_Tensor, xlogy.Scalar_Self, bitwise_*.Scalar_Tensor), so slot 0 is
+    # not a safe device reference.
+    return next((t for t in ins if not _is_wrapped_scalar(t)), None)
+
+
 def _localize_scalars(ins):
     # Move coerced-number operands onto the tensor operands' device. Cheap (a 4/8-byte
     # H2D of a 0-d tensor) and done once per call, before the kernel wraps operands.
-    dev = next((t.device for t in ins if not _is_wrapped_scalar(t)), None)
-    if dev is None:
+    ref = _device_ref(ins)
+    if ref is None:
         return ins
-    return tuple(t.to(dev) if _is_wrapped_scalar(t) else t for t in ins)
+    return tuple(t.to(ref.device) if _is_wrapped_scalar(t) else t for t in ins)
 
 
 def _supported(t, dtypes) -> bool:
@@ -115,13 +124,13 @@ def _scalars(row: PointwiseDef, args, kwargs, compute=None):
     # alpha=2)). Missing -> the row's aten default (row.scalar_defaults, aligned with
     # row.scalars; unset -> 1, the add/sub-alpha convention). Tuple in row.scalars order.
     #
-    # OPTIONAL scalars (row.optional_scalars) may be omitted or passed as None
-    # independently, and their fill-in comes from row.optional_defaults[name](compute)
-    # because it depends on the compute dtype (an omitted nan_to_num posinf is that
-    # dtype's max, an omitted clamp bound its infinity). `compute` is None while the
-    # cond runs (promotion is not resolved yet); an optional slot then reports None,
-    # which the cond only needs for its is-it-complex check.
+    # A name in row.optional_defaults is an aten `Scalar?`/`float?` the caller may omit
+    # INDEPENDENTLY, and its fill-in is a callable of the RESULT dtype rather than a fixed
+    # value (an omitted nan_to_num posinf is that dtype's max, an omitted clamp bound its
+    # infinity). `dtype` is None while the cond runs (promotion is not resolved yet); an
+    # optional slot then reports None, which the cond only needs for its is-complex check.
     pos = args[row.nin :]
+    opt = row.optional_defaults or {}
     out = []
     for i, name in enumerate(row.scalars):
         if name in kwargs and kwargs[name] is not None:
@@ -130,9 +139,8 @@ def _scalars(row: PointwiseDef, args, kwargs, compute=None):
         if i < len(pos) and pos[i] is not None:
             out.append(pos[i])
             continue
-        if name in row.optional_scalars:
-            fill = (row.optional_defaults or {}).get(name)
-            out.append(fill(compute) if (fill and compute is not None) else None)
+        if name in opt:
+            out.append(opt[name](compute) if compute is not None else None)
             continue
         out.append(row.scalar_defaults[i] if row.scalar_defaults else 1)
     return tuple(out)
@@ -222,7 +230,15 @@ def _make_cond(row: PointwiseDef, variant):
         ins = args[: row.nin]
         if len(ins) < row.nin or not all(_supported(t, dtypes) for t in ins):
             return False
-        if not (cap.device_ok(ins[0]) and cap.on_current_device(ins[0])):
+        # The DEVICE reference must be a real device operand, not simply operand 0. aten
+        # puts the coerced scalar FIRST for the reflected overloads -- rsub.Scalar is
+        # `at::sub(wrapped_scalar, self)`, and remainder.Scalar_Tensor / xlogy.Scalar_Self
+        # are declared that way -- so anchoring on ins[0] tested a 0-d CPU tensor for
+        # CUDA-ness and declined every such call (measured: `1.0 - t` fired nothing).
+        ref = _device_ref(ins)
+        if ref is None:  # every operand is a coerced scalar -> nothing to compute on
+            return False
+        if not (cap.device_ok(ref) and cap.on_current_device(ref)):
             return False
         if any(isinstance(s, complex) for s in _scalars(row, args, kwargs)):
             return False
@@ -235,9 +251,7 @@ def _make_cond(row: PointwiseDef, variant):
         # _scalar_arg_coercer wraps x*2.0's 2.0 at the weak-promotion dtype); the impl
         # moves it onto the device. A dim>0 CPU tensor is a genuine cross-device call
         # and still declines.
-        if any(
-            t.device != ins[0].device and not _is_wrapped_scalar(t) for t in ins[1:]
-        ):
+        if any(t.device != ref.device and not _is_wrapped_scalar(t) for t in ins):
             return False
         if not _layouts_serveable(ins):
             return False  # gapped operand set the rowvec path can't serve -> aten
@@ -258,10 +272,19 @@ def _make_cond(row: PointwiseDef, variant):
             if not (
                 isinstance(tgt, torch.Tensor)
                 and tgt.is_contiguous()
-                and tgt.device == ins[0].device
+                and tgt.device == _device_ref(ins).device
                 and K._is_16b_aligned(tgt)
                 and not cap.is_traced(tgt)
             ):
+                return False
+            # _run_into stores each element AT THE TARGET's dtype, so the target dtype
+            # must be one the kernel can lower -- can_cast alone is not enough. A real
+            # result safe-casts into a COMPLEX out (can_cast(f64, c128) is True), and
+            # aten allows it, but we have no complex store: `torch.add(f64, f64,
+            # out=c128)` reached _build_plan and raised KeyError('torch.complex128').
+            # (_CONV_SRC_DTYPES, not _CONV_DTYPES: bool is a legitimate .out target for
+            # the comparison rows, which store a bool result.)
+            if tgt.dtype not in _CONV_SRC_DTYPES:
                 return False
             # Safe-cast gate: promotion result must fit the target dtype (else aten raises).
             _, result_dtype = _result_dtypes(
@@ -350,7 +373,8 @@ def _make_impl(row: PointwiseDef, variant):
         if variant.out_from == "alloc":
             _, _, promo_out = _promo(in_dtypes, promotion)
             return [
-                torch.empty(bshape, device=ins[0].device, dtype=d) for d in promo_out
+                torch.empty(bshape, device=_device_ref(ins).device, dtype=d)
+                for d in promo_out
             ]
         if variant.out_from == "out_kw":
             out = kwargs["out"]
@@ -595,6 +619,209 @@ def _copy_impl(self, src, non_blocking=False):
     return _run_conversion("copy_", src, self)
 
 
+# ---------------------------------------------------------------------------
+# fill_: the NULLARY (nin == 0) case. No input tensor at all -- the value is a Scalar and
+# the caller's `self` is both the shape/device/layout source and the destination. This is
+# the shape the constructors need: aten's full/zeros/ones are all
+# CompositeExplicitAugograd wrappers that lower to empty() + fill_(), so overriding fill_
+# serves the whole family without a row per constructor.
+_FILL_DTYPES = _SUPPORTED + _INT_DTYPES
+
+
+def _fill_cond(self, value):
+    # A python number or 0-d tensor value; a >0-d value tensor is fill_.Tensor's job and
+    # aten raises for it, so decline. Same layout/alignment/lazy-metadata gates as the
+    # other in-place overrides -- with no input to speak for it, `self` carries them all.
+    #
+    # Gates are CAPABILITY only: every target we can compute correctly is served. Layout is
+    # NOT gated -- a contiguous, aligned target takes the vectorized path and anything else
+    # (transposed, strided, unaligned) falls to the strided route, which bakes the real
+    # layout and is correct for all of them. numel > 0 is a genuine limit (an empty tensor
+    # is a zero-element grid launch, and a 0-extent cute layout is invalid), as is the
+    # neg/conj bit (lazy metadata; see _supported).
+    if isinstance(value, torch.Tensor) and value.dim() != 0:
+        return False
+    if isinstance(value, complex):
+        return False
+    return (
+        isinstance(self, torch.Tensor)
+        and self.dtype in _FILL_DTYPES
+        and self.numel() > 0
+        and not self.is_neg()
+        and not self.is_conj()
+        and not cap.is_traced(self)
+        and cap.device_ok(self)
+        and cap.on_current_device(self)
+    )
+
+
+def _fill_impl(self, value):
+    # compute == the target dtype: there is no promotion to do (aten casts the Scalar to
+    # self's dtype), and no input to convert.
+    v = value.item() if isinstance(value, torch.Tensor) else value
+    # Compute in the OPMATH dtype (fp32 for a half target), not the target dtype: a
+    # Float16/BFloat16 scalar cannot cross the tvm-ffi arg boundary ("Unsupported argument
+    # type: Float16"), and the store-side cast to self.dtype is what aten does anyway.
+    # This mirrors the table path, whose compute is always the fp32 opmath type for halves.
+    compute = (
+        torch.float32 if self.dtype in (torch.float16, torch.bfloat16) else self.dtype
+    )
+    # The OUTPUT's layout must be in the key. For an op with inputs, operand shape/stride
+    # carries it, but a nullary op has none -- and the plan bakes shape-dependent choices
+    # (the ept/vec_bits config, and the strided path's baked layout), so a plan built for
+    # (4096,) cannot serve (7,). The scalar VALUE stays out: it is a runtime kernel arg.
+    key = (
+        "fill_",
+        (),
+        ((self.shape, self.stride()),),
+        (self.dtype,),
+        (),
+        compute,
+        (K._is_16b_aligned(self),),
+    )
+    # Box the value in the COMPUTE cute dtype, as the table path does via _promo's `ct`.
+    # Passing the raw python float instead silently narrows it to the DSL's default width
+    # (fp64 1e20 came back as its fp32 neighbour, 1.00000002e20).
+    ct = _L.torch2cute[compute]
+    K.run(
+        ops.get_fn("_fill"),
+        key,
+        0,  # nin
+        1,  # nout
+        (ct(v),),
+        _L.torch2cute[compute],
+        compute,
+        [],  # no inputs
+        (self.dtype,),
+        out=[self],
+    )
+    return self
+
+
+# ---------------------------------------------------------------------------
+# Range factories: nullary AND index-consuming. Each element's value is a function of its
+# FLAT INDEX alone, which is what aten expresses with gpu_kernel_with_index -- so these
+# ride the same nin == 0 plumbing as fill_ plus the kernel's `with_index` flag.
+#
+# We override only the .out forms (arange.start_out / linspace.out), because those are the
+# ones carrying an explicit `CUDA:` dispatch; the functional arange/linspace are
+# CompositeExplicitAutograd wrappers that size the result and then call straight into
+# these, so overriding the .out form serves both. Crucially, all of aten's SIZE logic
+# (compute_arange_size's double-precision ceil, the resize + mismatch warning) runs in that
+# C++ wrapper before we are reached -- `out` arrives already correctly sized, so we
+# reproduce only the value kernel and never re-derive a length.
+_RANGE_DTYPES = _SUPPORTED + _INT_DTYPES
+
+
+def _range_out_serveable(out) -> bool:
+    return (
+        isinstance(out, torch.Tensor)
+        and out.dtype in _RANGE_DTYPES
+        and out.numel() > 0
+        and not out.is_neg()
+        and not out.is_conj()
+        and not cap.is_traced(out)
+        and cap.device_ok(out)
+        and cap.on_current_device(out)
+    )
+
+
+def _range_compute(dtype):
+    # aten computes arange in acc_type<scalar_t, true> -- fp32 for a half output, and the
+    # dtype itself otherwise. Half consts also cannot cross the tvm-ffi boundary (see
+    # _fill_impl), so this doubles as that fix.
+    return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+
+
+def _arange_out_cond(start, end, step=1, *, out=None):
+    if any(isinstance(s, complex) for s in (start, end, step)):
+        return False
+    return _range_out_serveable(out)
+
+
+def _arange_out_impl(start, end, step=1, *, out=None):
+    compute = _range_compute(out.dtype)
+    ct = _L.torch2cute[compute]
+    key = (
+        "arange.start_out",
+        (),
+        ((out.shape, out.stride()),),
+        (out.dtype,),
+        (),
+        compute,
+        (K._is_16b_aligned(out),),
+    )
+    K.run(
+        ops.get_fn("_arange"),
+        key,
+        0,
+        1,
+        (ct(start), ct(step)),
+        ct,
+        compute,
+        [],
+        (out.dtype,),
+        out=[out],
+        with_index=True,
+    )
+    return out
+
+
+def _linspace_out_cond(start, end, steps, *, out=None):
+    if any(isinstance(s, complex) for s in (start, end)):
+        return False
+    # steps 0/1 are aten's own special cases (empty result / fill_ with start) and never
+    # reach a with-index kernel; let the C++ wrapper keep handling them.
+    if not isinstance(steps, int) or steps < 2:
+        return False
+    return _range_out_serveable(out)
+
+
+def _linspace_out_impl(start, end, steps, *, out=None):
+    # COMPUTE IN FP32 for every narrow output (halves and integers alike); the store does
+    # the only narrowing. aten instead runs the whole expression in scalar_t, so a HALF
+    # output can differ from us by a ULP -- that is aten carrying less precision, not us
+    # being wrong, and matching it would mean deliberately rounding intermediates to fp16,
+    # exactly the loss the fp32-compute rule exists to prevent. fp32/fp64 are bit-exact.
+    #
+    # The one conversion that is SEMANTIC rather than precision: aten casts start/end to
+    # scalar_t BEFORE deriving the step, which TRUNCATES for an integer output, so
+    # linspace(2.5, 3.5, 3, dtype=int32) steps 2 -> 3 and yields [2, 2, 3], not [2, 3, 3].
+    # That changes which values exist, so reproduce it.
+    if not out.dtype.is_floating_point:
+        start, end = int(start), int(end)
+    compute = (
+        out.dtype if out.dtype in (torch.float32, torch.float64) else torch.float32
+    )
+    ct = _L.torch2cute[compute]
+    step = (float(end) - float(start)) / (steps - 1)
+    key = (
+        "linspace.out",
+        (),
+        ((out.shape, out.stride()),),
+        (out.dtype,),
+        (steps,),
+        compute,
+        (K._is_16b_aligned(out),),
+    )
+    K.run(
+        ops.get_fn("_linspace"),
+        key,
+        0,
+        1,
+        # halfway is compared against the Int64 index, so it must be Int64 too; `last`
+        # (steps-1) participates in the float arithmetic, so it takes the compute dtype.
+        (ct(start), ct(end), ct(step), _L.Int64(steps // 2), ct(steps - 1)),
+        ct,
+        compute,
+        [],
+        (out.dtype,),
+        out=[out],
+        with_index=True,
+    )
+    return out
+
+
 def register_pointwise_overrides() -> None:
     # One PointwiseDef row -> up to len(POINTWISE_VARIANTS) aten overrides (functional /
     # .out / in-place), all sharing the canonical _run_into kernel. A variant aten does
@@ -618,3 +845,12 @@ def register_pointwise_overrides() -> None:
         "aten", "_to_copy", "CUDA", cond=_to_copy_cond, impl=_to_copy_impl
     )
     cu.register_op_override("aten", "copy_", "CUDA", cond=_copy_cond, impl=_copy_impl)
+    cu.register_op_override(
+        "aten", "fill_.Scalar", "CUDA", cond=_fill_cond, impl=_fill_impl
+    )
+    cu.register_op_override(
+        "aten", "arange.start_out", "CUDA", cond=_arange_out_cond, impl=_arange_out_impl
+    )
+    cu.register_op_override(
+        "aten", "linspace.out", "CUDA", cond=_linspace_out_cond, impl=_linspace_out_impl
+    )
