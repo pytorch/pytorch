@@ -233,6 +233,25 @@ class TestAllowMarker(unittest.TestCase):
         source = "// @allow-raw-throw: .\nthrow Foo();\n"
         self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
 
+    def test_doxygen_comment_marker(self) -> None:
+        for comment in ("/** @allow-raw-throw: r */", "//! @allow-raw-throw: r"):
+            with self.subTest(comment=comment):
+                self.assertEqual(names(f"{comment}\nthrow Foo();\n"), [])
+
+    def test_marker_inside_a_macro_body(self) -> None:
+        # A line continuation is the only way to write a multi-line macro, so
+        # it must not count as code sharing the marker's line.
+        source = (
+            "#define M(x)                      \\\n"
+            "  /* @allow-raw-throw: reason */  \\\n"
+            "  throw Foo(x)\n"
+        )
+        self.assertEqual(names(source), [])
+
+    def test_marker_must_have_its_own_line(self) -> None:
+        source = "int x = 1; // @allow-raw-throw: sneaky\nthrow Foo();\n"
+        self.assertEqual(names(source), ["orphaned-allow-raw-throw", "raw-throw"])
+
     def test_marker_in_string_is_not_a_marker(self) -> None:
         source = 'const char* s = "@allow-raw-throw: x";\nthrow Foo();\n'
         self.assertEqual(names(source), ["raw-throw"])
@@ -256,6 +275,19 @@ class TestAllowMarker(unittest.TestCase):
     def test_marker_above_a_wrapped_throw(self) -> None:
         source = "// @allow-raw-throw: reason\nthrow(\n    Foo());\n"
         self.assertEqual(names(source), [])
+
+
+class TestMalformedLiterals(unittest.TestCase):
+    def test_malformed_raw_string_does_not_blank_the_file(self) -> None:
+        source = 'const char* p = R"x";\nthrow Foo();\n'
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_unterminated_raw_string_stops_at_the_line(self) -> None:
+        source = 'auto s = R"(abc\nthrow Foo();\n'
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_exception_specification_is_not_a_rethrow(self) -> None:
+        self.assertEqual(names("void f() throw();\n"), ["raw-throw"])
 
 
 class TestReplacementMacro(unittest.TestCase):

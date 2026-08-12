@@ -69,7 +69,9 @@ _THROW = re.compile(r"\bthrow\b")
 _WORD = re.compile(r"[A-Za-z]")
 # The marker has to be the whole point of its comment. Prose that merely
 # mentions it - as the docs for this linter do - must not license anything.
-_MARKER_LINE = re.compile(rf"^\s*(?://+|/\*)\s*{re.escape(MARKER)}\b(?P<rest>.*)")
+_MARKER_LINE = re.compile(
+    rf"^\s*(?://+!?|/\*+!?|\*)\s*{re.escape(MARKER)}\b(?P<rest>.*)"
+)
 
 
 def scan_source(text: str) -> tuple[str, str]:
@@ -126,16 +128,19 @@ def scan_source(text: str) -> tuple[str, str]:
             prefix_start = i
             while prefix_start > 0 and _IDENT_CHARS.match(text[prefix_start - 1]):
                 prefix_start -= 1
+            end = None
             if text[prefix_start:i] in _RAW_STRING_PREFIXES:
-                open_paren = text.find("(", i + 1)
-                if open_paren != -1:
-                    terminator = ")" + text[i + 1 : open_paren] + '"'
-                    close = text.find(terminator, open_paren + 1)
-                    end = n if close == -1 else close + len(terminator)
-                    blank(code, i, end)
-                    i = end
-                    continue
-            end = _end_of_quoted(text, i, '"')
+                delimiter = _raw_string_delimiter(text, i)
+                if delimiter is not None:
+                    terminator = ")" + delimiter + '"'
+                    close = text.find(terminator, i + len(delimiter) + 2)
+                    if close != -1:
+                        end = close + len(terminator)
+            if end is None:
+                # Not a well-formed raw string, or one that is never
+                # terminated. Fall back to the line-bounded scan so a malformed
+                # literal cannot blank the rest of the file.
+                end = _end_of_quoted(text, i, '"')
             blank(code, i, end)
             i = end
             continue
@@ -158,6 +163,18 @@ def scan_source(text: str) -> tuple[str, str]:
         i += 1
 
     return "".join(code), "".join(comments)
+
+
+def _raw_string_delimiter(text: str, quote: int) -> str | None:
+    """The d-char sequence of the raw string opening at `quote`, or None if this
+    is not a well-formed raw string. The standard caps the delimiter at 16
+    characters and excludes whitespace, parentheses and backslash."""
+    for j in range(quote + 1, min(quote + 18, len(text))):
+        if text[j] == "(":
+            return text[quote + 1 : j]
+        if text[j] in ' ()\\"\n\r\t\v\f':
+            return None
+    return None
 
 
 def _is_continued(text: str, newline: int) -> bool:
@@ -286,12 +303,19 @@ def check_source(path: str, text: str) -> list[LintMessage]:
     # trailing marker would silently cover the *next* line's throw.
     licensed: set[int] = set()
     messages = []
+    code_lines = code.split("\n")
     for lineno, comment in enumerate(comments.split("\n"), 1):
         marker = _MARKER_LINE.search(comment)
         if marker is None:
             continue
+        # The marker gets a line to itself, so that it cannot trail a throw (and
+        # appear to license the next one) or hide at the end of a line of code.
+        # A trailing `\` is a line continuation, not code, so that a marker can
+        # sit inside a multi-line macro body - which is the only placement
+        # available there.
+        alone = not code_lines[lineno - 1].strip().rstrip("\\").strip()
         target = lineno + 1
-        if lineno in throw_lines or target not in throw_lines:
+        if not alone or target not in throw_lines:
             messages.append(
                 message(
                     lineno,
