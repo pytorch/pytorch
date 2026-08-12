@@ -164,8 +164,8 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 #endif
     } else {
       TORCH_CHECK(
-          !flag & EventFlag::INTERPROCESS,
-          "Event must be reusable to support IPC")
+          !(flag & EventFlag::INTERPROCESS),
+          "Event must be reusable to support IPC");
       // Delete the event previously recorded.
       if (xpu_event)
         delete xpu_event;
@@ -243,7 +243,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = xpu_end_event->get_profiling_info<command_end>();
     uint64_t start_time_ns = xpu_start_event->get_profiling_info<command_end>();
-    // Return the eplased time in milliseconds.
+    // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
@@ -290,6 +290,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const DeviceIndex device_index,
       const std::string& handle_string) const override {
 #if SYCL_COMPILER_VERSION >= 20260200
+    TORCH_CHECK(
+        *event == nullptr,
+        "Event must be nullptr to reconstruct from IPC handle.");
     DeviceIndex current_device =
         device_index == -1 ? c10::xpu::current_device() : device_index;
     bool reusable = c10::xpu::get_raw_device(current_device)
@@ -302,10 +305,10 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     xpu_event =
         new sycl::event(sycl::ext::oneapi::experimental::ipc::event::open(
             handle_data, c10::xpu::get_device_context()));
+    *event = reinterpret_cast<void*>(xpu_event);
 #else
     TORCH_CHECK(false, "Event IPC requires SYCL compiler 2026.2 or later.");
 #endif
-    }
   }
 
   // Stream-related functions
