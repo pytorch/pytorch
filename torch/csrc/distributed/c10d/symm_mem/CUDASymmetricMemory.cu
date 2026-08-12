@@ -76,6 +76,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
     std::vector<void*> buffers,
     std::vector<void*> signal_pads,
+    void* mc_signal_pad_addr,
     HandleType mc_handle,
     void* mc_addr,
     size_t buffer_size,
@@ -86,6 +87,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     : alloc_refs_(std::move(alloc_refs)),
       buffers_(std::move(buffers)),
       signal_pads_(std::move(signal_pads)),
+      mc_signal_pad_addr_(mc_signal_pad_addr),
       mc_handle_(mc_handle),
       mc_addr_(mc_addr),
       buffer_size_(buffer_size),
@@ -184,39 +186,27 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  barrier_kernel<<<
-      1,
-      max(at::cuda::warp_size(), world_size_),
-      0,
-      at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
-      channel,
-      rank_,
-      world_size_,
-      timeout_ms);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-static __global__ void put_signal_kernel(
-    uint32_t** signal_pads,
-    int dst_rank,
-    int channel,
-    int rank,
-    int world_size,
-    size_t timeout_ms) {
-  if (threadIdx.x == 0) {
-    bool success = try_put_signal<std::memory_order_release>(
-        signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
-    if (!success) {
-      printf(
-          "[FATAL] CUDASymmetricMemory::put_signal: rank %d failed to send signal "
-          "to rank %d on channel %d after %lu microseconds\n",
-          rank,
-          dst_rank,
-          channel,
-          timeout_ms);
-      trap();
-    }
+  if (get_multicast_ptr() != nullptr) {
+    multimem_barrier_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        static_cast<uint32_t*>(pai_->signal_pads_[rank_]),
+        static_cast<uint32_t*>(pai_->mc_signal_pad_addr_),
+        channel,
+        rank_,
+        world_size_,
+        timeout_ms);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    barrier_kernel<<<
+        1,
+        max(at::cuda::warp_size(), world_size_),
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
+        reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+        channel,
+        rank_,
+        world_size_,
+        timeout_ms);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -225,6 +215,7 @@ void CUDASymmetricMemory::put_signal(
     int channel,
     size_t timeout_ms) {
   check_channel(channel, world_size_, get_signal_pad_size());
+  check_rank(dst_rank, world_size_);
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -254,39 +245,12 @@ void CUDASymmetricMemory::put_signal(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-static __global__ void wait_signal_kernel(
-    uint32_t** signal_pads,
-    int src_rank,
-    int channel,
-    int rank,
-    int world_size,
-    size_t timeout_ms) {
-  if (threadIdx.x == 0) {
-    bool success = try_wait_signal<std::memory_order_acquire>(
-        signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
-    if (!success) {
-      printf(
-          "[FATAL] CUDASymmetricMemory::wait_signal rank %d failed to receive signal "
-          "from rank %d on channel %d after %lu microseconds\n",
-          rank,
-          src_rank,
-          channel,
-          timeout_ms);
-#if !defined(USE_ROCM)
-      __trap();
-#else
-      assert(0);
-#endif
-    }
-  }
-  __threadfence_system();
-}
-
 void CUDASymmetricMemory::wait_signal(
     int src_rank,
     int channel,
     size_t timeout_ms) {
   check_channel(channel, world_size_, get_signal_pad_size());
+  check_rank(src_rank, world_size_);
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -916,8 +880,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
         signal_pads[r], handles[r], block->block_size, block->device_idx));
   }
 
-  // The multicast mapping mirrors the block layout, so the data buffer lives at
-  // buffer_offset within it; get_multicast_ptr() adds the per-handle offset.
+  // The multicast mapping mirrors the block layout: the signal pad is at the
+  // base and the data buffer lives at buffer_offset within it.
+  void* mc_signal_pad_addr = mc_addr;
   void* mc_buffer_addr = mc_addr != nullptr
       ? static_cast<char*>(mc_addr) + block->buffer_offset
       : nullptr;
@@ -926,6 +891,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       std::move(alloc_refs),
       std::move(buffers),
       std::move(signal_pads),
+      mc_signal_pad_addr,
       mc_handle,
       mc_buffer_addr,
       block->buffer_size,
