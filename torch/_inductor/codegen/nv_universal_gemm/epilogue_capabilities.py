@@ -3,6 +3,7 @@
 import dataclasses
 
 from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
     GemmReductionArguments,
     GemmReductionDescriptor,
     GemmReductionPlan,
@@ -103,7 +104,7 @@ DENSE_GEMM_REDUCTION_CAPABILITIES = NVGemmReductionCapabilities(
     m_axis_feed_main_secondary_kinds=frozenset(
         ("normalize_sum_affine", "normalize_sum_reverse_affine", "sum_mul_affine")
     ),
-    max_n_axis_consumer_group=32,
+    max_n_axis_consumer_group=GEMM_REDUCTION_FRAGMENT_WIDTH,
 )
 
 

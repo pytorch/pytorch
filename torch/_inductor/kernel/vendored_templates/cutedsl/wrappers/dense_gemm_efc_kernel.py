@@ -8,7 +8,6 @@ from typing import Any
 from cutlass.operators.arch import TargetSm  # noqa: TC002
 from cutlass.operators.arguments import GemmArguments
 from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
-from cutlass.operators.fusion import trace_in_out
 from cutlass.operators.fusion.library import ActivationOp
 from cutlass.operators.providers.cutedsl.evt import common_efc
 from cutlass.operators.providers.cutedsl.evt.converter import (
@@ -26,9 +25,13 @@ from cutlass.operators.status import Status
 from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
     DENSE_GEMM_REDUCTION_CAPABILITIES,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
+    GemmReductionDescriptor,
+)
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmReductionCompileConfig,
+    get_cutedsl_epilogue_schema,
     materialize_epilogue_function,
 )
 
@@ -56,11 +59,15 @@ def _direct_cutedsl_epilogue(metadata):
     """Adapt generated CuTeDSL source to EFC's accumulator and parameter API."""
 
     epilogue_source = metadata.epilogue.epilogue_fn
-    inputs, outputs = trace_in_out(epilogue_source)
-    inputs = ["accum", *inputs] if "accum" not in inputs else inputs
+    schema = get_cutedsl_epilogue_schema(epilogue_source)
+    if schema is None:
+        raise AssertionError("expected a direct CuTeDSL epilogue schema")
+    inputs = schema.inputs
+    outputs = schema.outputs
     parameter_names = metadata.epilogue.parameter_names
     tensors = metadata.epilogue.tensors
     output_shape = tuple(tensors[outputs[-1]].shape)
+    scalar_broadcast_names = schema.scalar_broadcast_names
 
     def source_mode_map(name):
         shape = tuple(tensors[name].shape)
@@ -144,7 +151,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         OpToCuteImplStr.setdefault(ActivationOp.Identity, lambda value: value)
         if metadata.epilogue is None:
             epilogue_op = EFCConverter.identity_efc
-        elif metadata.epilogue.traced_epilogue is None:
+        elif get_cutedsl_epilogue_schema(metadata.epilogue.epilogue_fn) is not None:
             epilogue_op = _direct_cutedsl_epilogue(metadata)
         else:
             epilogue_op = EFCConverter.convert(
@@ -173,7 +180,8 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         # has no EVT DAG, so bypass only the parent's EVT-specific validation.
         status = (
             CuteDslOperator._supports(self, args, target_sm)
-            if epilogue is not None and getattr(epilogue, "_is_direct_cutedsl", False)
+            if epilogue is not None
+            and get_cutedsl_epilogue_schema(epilogue.epilogue_fn) is not None
             else super()._supports(args, target_sm)
         )
         if not status:
@@ -189,10 +197,21 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         if group <= 1 or group > max_group:
             return Status.fail("Dense EFC local reduction group exceeds its tile")
         descriptor = GemmReductionDescriptor.parse(reduction.reduction_type)
-        if axis == 1 and group > 32 and descriptor.kind == "mean":
+        if (
+            axis == 1
+            and group > GEMM_REDUCTION_FRAGMENT_WIDTH
+            and descriptor.kind == "mean"
+        ):
             return Status.fail("Dense EFC cross-fragment mean is unsupported")
-        if reduction.feeds_main and axis == 0 and self.cta_tile_n > 32:
-            return Status.fail("Dense M-axis feed-main requires a 32-column tile")
+        if (
+            reduction.feeds_main
+            and axis == 0
+            and self.cta_tile_n > GEMM_REDUCTION_FRAGMENT_WIDTH
+        ):
+            return Status.fail(
+                "Dense M-axis feed-main requires a "
+                f"{GEMM_REDUCTION_FRAGMENT_WIDTH}-column tile"
+            )
         if not DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(reduction):
             return Status.fail("Unsupported dense EFC local reduction contract")
         return status
