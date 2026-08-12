@@ -145,7 +145,6 @@ class _Watchdog:
         poll_interval: float | None = None,
         health_interval: float | None = None,
         stuck_action: str | None = None,
-        timeout_action: str | None = None,
     ) -> None:
         self._poll_interval = (
             poll_interval
@@ -159,9 +158,6 @@ class _Watchdog:
         )
         self._stuck_action = (
             stuck_action or os.environ.get("TORCH_WATCHDOG_STUCK_ACTION", "log")
-        ).lower()
-        self._timeout_action = (
-            timeout_action or os.environ.get("TORCH_WATCHDOG_TIMEOUT_ACTION", "abort")
         ).lower()
 
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
@@ -184,12 +180,10 @@ class _Watchdog:
         self._health_thread.start()
 
         logger.info(
-            "Watchdog started (poll=%.1fs, health=%.1fs, "
-            "stuck_action=%s, timeout_action=%s)",
+            "Watchdog started (poll=%.1fs, health=%.1fs, stuck_action=%s)",
             self._poll_interval,
             self._health_interval,
             self._stuck_action,
-            self._timeout_action,
         )
 
     def _run_loop(self) -> None:
@@ -288,8 +282,8 @@ class _Watchdog:
         except Exception:
             logger.exception("Exception in %s timeout callback (id=%d)", kind, mid)
 
-        if callback is _default_timeout_callback and self._timeout_action == "abort":
-            logger.error("Timeout action is 'abort', calling os.abort()")
+        if callback is _default_timeout_callback:
+            logger.error("Default timeout callback fired, calling os.abort()")
             os.abort()
 
     def _health_watchdog_loop(self) -> None:
@@ -388,7 +382,6 @@ def init(
     poll_interval: float | None = None,
     health_interval: float | None = None,
     stuck_action: str | None = None,
-    timeout_action: str | None = None,
 ) -> None:
     """Configure and start the watchdog.
 
@@ -400,12 +393,11 @@ def init(
         poll_interval: Seconds between CUDA event polls (env: TORCH_WATCHDOG_POLL_INTERVAL_SECS, default 1.0).
         health_interval: Seconds between health pings (env: TORCH_WATCHDOG_HEALTH_INTERVAL_SECS, default 30.0).
         stuck_action: Action when event loop is stuck: "log", "abort", or "exit" (env: TORCH_WATCHDOG_STUCK_ACTION, default "log").
-        timeout_action: Action on timeout: "abort" or "log" (env: TORCH_WATCHDOG_TIMEOUT_ACTION, default "abort").
 
     Example::
         from torch.distributed._watchdog import init
 
-        init(poll_interval=0.5, timeout_action="abort")
+        init(poll_interval=0.5)
     """
     global _watchdog
     old: _Watchdog | None = None
@@ -415,7 +407,6 @@ def init(
             poll_interval=poll_interval,
             health_interval=health_interval,
             stuck_action=stuck_action,
-            timeout_action=timeout_action,
         )
     if old is not None:
         old.shutdown()
