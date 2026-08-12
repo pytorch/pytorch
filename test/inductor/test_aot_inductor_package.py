@@ -223,6 +223,26 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    def test_int64_floor_divide_tensor_constant_divisor(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.divisor = torch.tensor(3, dtype=torch.int64)
+
+            def forward(self, x):
+                return torch.floor_divide(x, self.divisor)
+
+        example_inputs = (
+            torch.tensor([-5, -1, 0, 7, 8], dtype=torch.int64, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_custom_output_type_missing_pytree_registration_error(self):
         if self.device != "cpu" or self.package_cpp_only:
             raise unittest.SkipTest("Only needs one CPU Python package variant")

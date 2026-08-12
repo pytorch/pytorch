@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
   cmd << "lsof -p " << getpid() << " | grep .so";
   std::cout << "Loaded .so:" << std::endl;
   std::cout << cmd.str() << std::endl;
-  std::system(std::move(cmd).str().c_str());
+  std::system(cmd.str().c_str());
 # endif
 
   return 0;

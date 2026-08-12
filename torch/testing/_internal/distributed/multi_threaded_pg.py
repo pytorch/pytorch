@@ -31,7 +31,7 @@ Lots of missing collectives.
 Collectives validation.
 Make timeout robust by making collectives respect the test deadline.
 Make tests robust by making collectives interruptible.
-We need some synchronization around cleanup to ensure that timedout ranks don't cause spurious failures.
+We need some synchronization around cleanup to ensure that timed out ranks don't cause spurious failures.
 
 """
 
@@ -545,7 +545,9 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
+dist.Backend.register_backend(
+    "threaded", _create_threaded_pg, devices=["cpu", "cuda", "xpu"]
+)
 
 
 @dataclass
