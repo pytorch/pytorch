@@ -108,6 +108,13 @@ def _decode_offset(linear, vals, npairs):
     # out of bounds. The returned offset indexes a flat gmem tensor, which expects a
     # 64-bit offset.
     rem = cutlass.Int64(linear)
+    if npairs == 0:
+        # No runs at all: the operand collapsed to a single element, so every lane maps
+        # to flat offset 0. Reached via a 1-ELEMENT reduce-all (TI coalesces a (1,)
+        # input to zero pairs) -- e.g. torch.histc on a 1-element tensor, which computes
+        # aminmax internally. Without this, `vals[4 * (npairs - 1) + 3]` indexed
+        # `vals[-1]` on an empty list and raised IndexError during kernel build.
+        return cutlass.Int64(0)
     if npairs == 1:
         return rem * vals[3]
     off = cutlass.Int64(0)
@@ -561,6 +568,23 @@ def _oneshot_ok(x):
     return x.shape[-1] * x.element_size() <= _SMEM_BUDGET
 
 
+def _as_shape(out, out_shape):
+    # Give the fast kernels' flat output its final n-D shape WITHOUT leaving the
+    # result a view. The fast row/col kernels allocate their own 1-D buffer, so a
+    # plain `.reshape(out_shape)` returns a view whose `_base` is that buffer --
+    # aten reductions never alias, and the difference is observable: OpInfo's
+    # python-ref tests compare view-ness and flagged `_refs.cumsum` (which reduces
+    # a `where`-masked tensor) as "torch does not return a view, reference does".
+    # `_as_shape` reshapes in place when it can so the buffer IS the result.
+    if tuple(out.shape) == tuple(out_shape):
+        return out
+    reshaped = out.reshape(out_shape)
+    if reshaped._base is None:
+        return reshaped
+    out.resize_(out_shape)
+    return out
+
+
 def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     # Fast path for reduction of the CONTIGUOUS last dim of a 2D problem. Sub-paths;
     # returns the result tuple, or None if not handled:
@@ -636,13 +660,13 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
             x2 = x.reshape(math.prod(out_shape), red_n)
             fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
             if fast is not None:
-                return tuple(o.reshape(out_shape) for o in fast)
+                return tuple(_as_shape(o, out_shape) for o in fast)
         elif kind == "col":
             from . import kernel_col as cv
 
             x2 = x.reshape(red_n, math.prod(out_shape))
             out = cv.reduce_col(trait, trait_key, x2, out_dtypes[0])
-            return (out.reshape(out_shape),)
+            return (_as_shape(out, out_shape),)
 
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
     num_o = max(1, math.prod(out_shape))  # blocks (kept coordinates)
@@ -771,4 +795,4 @@ def reduce_all(
     part_dtypes = tuple(p.dtype for p in parts)
     s2_key = ("all2", trait_key, out_dtype, part_dtypes) + s2.cache_sig
     _launch(s2, s2_key, parts, [out])
-    return out.reshape(())
+    return _as_shape(out, ())
