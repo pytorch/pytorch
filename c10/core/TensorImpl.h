@@ -264,7 +264,8 @@ struct C10_API FakeTensorMode {
         allow_meta_(allow_meta),
         prefer_device_type_(prefer_device_type) {}
 
-  // record the real constant a fake tensor was created from
+  // record the real constant a fake tensor was created from; the constant is
+  // stored on the fake's ExtraMeta so it dies with the tensor
   void set_constant(
       const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
       c10::intrusive_ptr<c10::TensorImpl> constant,
@@ -275,24 +276,15 @@ struct C10_API FakeTensorMode {
       c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
-  // remove entry from tensor_to_constant_ and constant_storage_mapping_; called
-  // in ExtraMeta's destructor
-  void remove_constant(c10::ExtraMeta* extra_meta);
 
-  // key = the fake tensor's ExtraMeta, value = the real constant tensor's impl.
-  // Keyed by ExtraMeta (not TensorImpl) so ~ExtraMeta can clear this entry on
-  // destruction, without having to touch the TensorImpl destructor (which has a
-  // much bigger blast radius).
-  std::unordered_map<c10::ExtraMeta*, c10::intrusive_ptr<c10::TensorImpl>>
-      tensor_to_constant_;
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
   std::unordered_map<
       c10::StorageImpl*,
       std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
       constant_storage_mapping_;
-  // protecting the two constant tracking maps tensor_to_constant_ and
-  // constant_storage_mapping
+  // protects constant_storage_mapping_ and the ExtraMeta::fake_constant_ fields
+  // it indexes
   mutable std::mutex constant_mutex_;
 };
 
@@ -304,14 +296,17 @@ struct C10_API ExtraMeta {
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
   // The real tensor this fake shadows, when propagate_real_tensors is on.
-  std::shared_ptr<at::Tensor> real_tensor_ = nullptr;
-  // set when this fake tensor has a tracked constant in
-  // fake_tensor_mode_->tensor_to_constant_.
-  bool has_fake_constant_ = false;
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
+  // The real constant this fake was created from (via
+  // FakeTensorMode::set_constant), or null. Owned here so it dies with the
+  // tensor; TensorImpl::release_resources drops it at strong-refcount 0.
+  // Deliberately NOT copied: a cloned ExtraMeta belongs to a different
+  // (unregistered) fake tensor.
+  c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
 
   ExtraMeta() = default;
-  // erases this fake tensor's entry from fake_tensor_mode_ so it never outlives
-  // the tensor; defined out-of-line since it calls into FakeTensorMode.
+  // defined out-of-line (= default) because members like fake_constant_ /
+  // backend_meta_ hold intrusive_ptrs to types incomplete at this point.
   ~ExtraMeta();
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
@@ -1537,11 +1532,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
-  void set_real_tensor(std::shared_ptr<at::Tensor> real) {
+  void set_real_tensor(c10::intrusive_ptr<c10::TensorImpl> real) {
     get_extra_meta().real_tensor_ = std::move(real);
   }
 
-  std::shared_ptr<at::Tensor> real_tensor() const {
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor() const {
     if (!extra_meta_) {
       return nullptr;
     }
