@@ -1113,6 +1113,72 @@ class TestMPS(TestCaseMPS):
         torch.mps.synchronize()
         self.assertEqual(t.cpu(), torch.full((1_000_000,), 3.0))
 
+    # Test that `MPSAllocator::waitForEvents` waits on all events that were
+    # created with `MPSAllocator::recordStream`, not just the most recent one.
+    #
+    # The strategy is to create and record two workloads on different streams
+    # that operate on the same input tensor, force the second one to complete
+    # before the first one, and then check that `waitForEvents` still waits
+    # until after we commit the first one.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    def test_stream_record_stream_wait(self, stream1, stream2):
+        s1 = self._get_stream_by_name(stream1)
+        s2 = self._get_stream_by_name(stream2)
+        if s1.stream_id == s2.stream_id:
+            self.skipTest("test requires two distinct streams")
+
+        t = torch.zeros(500, device="mps")
+        torch.mps.synchronize()
+
+        # Empty the cache to prevent any chance that this test falls into
+        # `alloc_buffer_block`'s `release_cached_buffers` call later in the
+        # test, which would commit and wait on all streams, silently completing
+        # `s1` before the test explicitly commits it.
+        torch.mps.empty_cache()
+
+        # Create a workload on `s1` and record it on `t`, but don't commit it
+        # yet, to prevent its completion until later. It won't actually get
+        # committed until we sync the stream.
+        with torch.mps.stream(s1):
+            tmp1 = t + 0
+        t.record_stream(s1)
+
+        # Create a workload on `s2` and record it on `t`, then commit and wait
+        # for it.
+        with torch.mps.stream(s2):
+            tmp2 = t + 0
+        t.record_stream(s2)
+        s2.synchronize()
+
+        # Create a separate thread to start waiting for any outstanding events
+        # on `t`'s pointer. Initially, it will be stuck waiting since we haven't
+        # committed any work for `s1` yet.
+        started_waiting = threading.Event()
+        finished_waiting = threading.Event()
+        ptr = t.data_ptr()
+
+        def waiter():
+            started_waiting.set()
+            torch._C._mps_allocator_waitForEvents([ptr])
+            finished_waiting.set()
+
+        thread = threading.Thread(target=waiter)
+        thread.start()
+        started_waiting.wait()
+
+        # Even after sleeping for a significant time, the waiter thread should
+        # not be finished yet since we still haven't committed `s1`.
+        self.assertFalse(finished_waiting.wait(0.25))
+
+        # Now commit `s1` so that it starts to run and the waiter thread can
+        # finish, since it was only waiting on the uncommitted `s1`'s work.
+        s1.synchronize()
+        thread.join()
+        # Double check that the waiter thread reported that it successfully
+        # completed waiting on the events.
+        self.assertTrue(finished_waiting.is_set())
+
     # Tests that autograd's backward pass respects the current stream when
     # `Tensor.backward` is called
     @parametrize("stream", ["default", "pool"])
@@ -17568,6 +17634,23 @@ class TestMetalLibrary(TestCaseMPS):
         kernel = lib.nchw_to_nhwc_float_16_64_false_false
         kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
+
+    def test_conv_weight_to_dhwio_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        oc, ic, kd, kh, kw = 5, 3, 2, 2, 4
+        weight = torch.randn(oc, ic, kd, kh, kw, device="mps")
+        # contiguous, permuted, and width-sliced source strides
+        for source in (
+            weight,
+            weight.permute(2, 3, 4, 1, 0).contiguous().permute(4, 3, 0, 1, 2),
+            torch.randn(oc, ic, kd, kh, 2 * kw, device="mps")[..., ::2],
+        ):
+            destination = torch.empty(kd, kh, kw, ic, oc, dtype=source.dtype, device="mps")
+            params = [oc, ic, kh, kw, *source.stride()]
+            lib.conv_weight_to_dhwio_float(source, destination, params,
+                                           threads=(oc, ic, kd * kh), group_size=(oc, 1, 1), arg_casts="int32")
+            self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
