@@ -1630,30 +1630,22 @@ class FxGraphHashDetails:
                 ):
                     self.cudagraph_annotation = annotation
 
-        # The bucket_all_gathers_fx post-grad pass and the overlap scheduling
-        # pass both embed the distributed rank as a compile-time constant in
-        # the traced graph (narrow offset into the packed all-gather buffer).
-        # Since the cache key is computed before post_grad_passes run, we must
-        # include the rank to prevent cross-rank cache collisions.
+        # Post-grad passes (bucket_all_gathers_fx, enable_overlap_scheduling)
+        # embed dist.get_rank() as a compile-time narrow offset into the packed
+        # all-gather buffer. The cache key is computed before these passes run,
+        # so we include rank to prevent cross-rank collisions.
         #
-        # Note: this uses the global rank, which is conservative-correct
-        # (unique per process) but over-fragments for HSDP/TP where ranks
-        # sharing a group rank generate identical code. It also applies to all
-        # graphs in a job (including pure-compute graphs with no collectives)
-        # when these configs are process-wide. Narrowing to graphs that
-        # actually contain all_gather nodes is unsafe here because the
-        # AOTAutogradCacheDetails subclass sees Dynamo-level graphs where
-        # DTensor ops only expand to all-gathers later during lowering.
+        # This is load-bearing for the CUDA_VISIBLE_DEVICES-per-rank deployment
+        # (every process sees cuda:0) and the AOTAutogradCache path where
+        # DTensor ops only expand to device-specific all-gathers during
+        # lowering. In multi-device setups (rank N on cuda:N), the device
+        # index in TensorMetadata already differentiates keys, but this guard
+        # is still needed because device-index separation is not guaranteed.
         #
-        # ManualOverlapScheduler (driven by custom post-grad passes) also
-        # embeds rank via merge_all_gather_bucket, but is invoked through
-        # user-supplied custom pass UUIDs rather than these configs; that
-        # path is out of scope here and should be handled by the custom pass
-        # providing a rank-aware UUID.
-        #
-        # reorder_for_compute_comm_overlap is intentionally excluded: it
-        # operates at the scheduler level (comms.py) and does not call
-        # merge_all_gather_bucket, so it does not embed rank.
+        # Uses global rank (conservative-correct, unique per process). Narrowing
+        # to group-relative rank or to graphs containing all_gather nodes is
+        # unsafe: the AOTAutogradCacheDetails subclass sees Dynamo-level graphs
+        # before collective expansion.
         #
         # See https://github.com/pytorch/pytorch/issues/188332
         if (

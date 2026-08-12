@@ -5734,26 +5734,25 @@ class TestAllGatherBucketCacheKey(TestCase):
         )
         self.assertNotEqual(key0, key1)
 
-    def test_bucketed_allgather_graphs_differ_by_rank(self):
-        """Traced bucketed allgather embeds rank as constant in narrow offset."""
-        from torch._inductor.fx_passes.bucketing import all_gather_merge_fn_to_trace
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.proxy_tensor import make_fx
+    def test_shared_device_index_still_differentiates(self):
+        """Keys differ even when both ranks share the same device index.
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        with FakeTensorMode():
-            ins = [torch.randn(128, 256, device=device) for _ in range(2)]
-            gm0 = make_fx(all_gather_merge_fn_to_trace)(
-                ins, "0", 2, torch.float32, [torch.float32, torch.float32], 0
-            )
-            gm1 = make_fx(all_gather_merge_fn_to_trace)(
-                ins, "0", 2, torch.float32, [torch.float32, torch.float32], 1
-            )
+        Regression test for https://github.com/pytorch/pytorch/issues/188332.
+        When ranks use CUDA_VISIBLE_DEVICES-per-rank (each seeing cuda:0),
+        TensorMetadata is identical across ranks, so only the distributed_rank
+        attribute prevents the cache key collision.
+        """
+        import torch.distributed as dist
 
-        self.assertNotEqual(
-            gm0.print_readable(print_output=False),
-            gm1.print_readable(print_output=False),
-        )
+        with config.patch({"bucket_all_gathers_fx": "all"}):
+            with mock.patch.object(dist, "get_rank", return_value=0):
+                d0 = FxGraphHashDetails(None, [], cast(Any, {}), [])
+            with mock.patch.object(dist, "get_rank", return_value=1):
+                d1 = FxGraphHashDetails(None, [], cast(Any, {}), [])
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.assertNotEqual(pickler.get_key(d0), pickler.get_key(d1))
 
 
 if __name__ == "__main__":
