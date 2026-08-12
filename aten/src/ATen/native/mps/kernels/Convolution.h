@@ -1,6 +1,19 @@
 #pragma once
 #include <c10/metal/common.h>
 
+// Source element strides of the OIDHW weight view (may be non-contiguous).
+struct ConvWeightPermuteParams {
+  int32_t output_channels;
+  int32_t input_channels_per_group;
+  int32_t kernel_height;
+  int32_t kernel_width;
+  int32_t output_channel_stride;
+  int32_t input_channel_stride;
+  int32_t depth_stride;
+  int32_t height_stride;
+  int32_t width_stride;
+};
+
 struct Conv2DParams {
   int32_t N;
   int32_t C_in;
