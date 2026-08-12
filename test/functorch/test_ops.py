@@ -1307,6 +1307,10 @@ class TestOperators(TestCase):
                 "linalg.householder_product",
                 {torch.float32: tol(atol=2e-04, rtol=9e-3)},
             ),
+            tol1(
+                "linalg.polar",
+                {torch.float32: tol(atol=2e-04, rtol=1e-4)},
+            ),
         ),
     )
     @skipOps(
