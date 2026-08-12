@@ -50,7 +50,7 @@ class TestTraversal(FSDPTestContinuous):
         Capability.distributed.backend,
         Capability.distributed.fsdp,
     )
-    def test_fsdp_modules(self):
+    def test_fsdp_modules(self, device):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
