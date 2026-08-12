@@ -23,6 +23,9 @@ permissions:
 
 jobs:
   dispatch:
+    # A fork has neither the token nor any business reconciling pytorch's
+    # runner groups.
+    if: github.repository_owner == 'pytorch'
     # Never gate this on the very runner groups it exists to unblock.
     runs-on: ubuntu-latest
     steps:
