@@ -145,11 +145,7 @@ class MicrobatchTestsDevices(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
-            # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
-            flex_fn = flex_attention
+        flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
         out.sum().backward()
 
@@ -255,11 +251,11 @@ class MicrobatchTestsDevices(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
+        if device == "cpu":
             # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
             flex_fn = flex_attention
+        else:
+            flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
 
         q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
