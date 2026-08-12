@@ -14448,6 +14448,134 @@ class TestConvolutionMPS(TestCaseMPS):
         )
         self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
 
+    @parametrize(
+        "kernel_size,dilation,padding",
+        [(2, 1, 1), (4, 1, 2), (3, 8, 8), (3, 64, 64), (9, 1, 4), (15, 1, 7), (31, 1, 15), (13, 3, 18), (3, 1, 9)],
+        name_fn=lambda kernel_size, dilation, padding: f"k{kernel_size}_d{dilation}_p{padding}",
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_sgemm_geometries(self, dtype, with_bias, kernel_size, dilation, padding):
+        input_length = max(257, dilation * (kernel_size - 1) + 17)
+        x = torch.randn(2, 24, input_length).to(dtype).float()
+        weight = torch.randn(40, 24, kernel_size).to(dtype).float()
+        bias = torch.randn(40).to(dtype).float() if with_bias else None
+        expected = F.conv1d(x, weight, bias, padding=padding, dilation=dilation)
+        actual = F.conv1d(
+            x.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            padding=padding,
+            dilation=dilation,
+        )
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @parametrize(
+        "groups,channels,output_channels",
+        [(2, 64, 64), (3, 48, 96), (8, 256, 256)],
+        name_fn=lambda groups, channels, output_channels: f"g{groups}_c{channels}_o{output_channels}",
+    )
+    @parametrize("layout", ["contiguous", "nlc"])
+    def test_conv1d_sgemm_grouped(self, groups, channels, output_channels, layout):
+        x = torch.randn(2, channels, 999)
+        weight = torch.randn(output_channels, channels // groups, 5)
+        bias = torch.randn(output_channels)
+        expected = F.conv1d(x, weight, bias, padding=2, groups=groups)
+        mps_input = x.to("mps")
+        if layout == "nlc":
+            mps_input = mps_input.transpose(1, 2).contiguous().transpose(1, 2)
+        actual = F.conv1d(mps_input, weight.to("mps"), bias.to("mps"), padding=2, groups=groups)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize(
+        "channels,kernel_size,stride,dilation",
+        [(1, 9, 1, 4), (3, 3, 1, 8), (8, 5, 1, 1), (1, 10, 5, 1), (4, 2, 2, 1)],
+        name_fn=lambda channels, kernel_size, stride, dilation: f"c{channels}_k{kernel_size}_s{stride}_d{dilation}",
+    )
+    def test_conv1d_small_channels(self, channels, kernel_size, stride, dilation):
+        x = torch.randn(2, channels, 2048)
+        weight = torch.randn(33, channels, kernel_size)
+        bias = torch.randn(33)
+        padding = dilation * (kernel_size - 1) // 2
+        expected = F.conv1d(x, weight, bias, stride=stride, padding=padding, dilation=dilation)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), stride=stride, padding=padding,
+                          dilation=dilation)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("output_channels", [1, 3])
+    def test_conv1d_tiny_output_channels(self, output_channels):
+        x = torch.randn(2, 96, 3111)
+        weight = torch.randn(output_channels, 96, 3)
+        bias = torch.randn(output_channels)
+        expected = F.conv1d(x, weight, bias, padding=1)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=1)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_conv1d_long_input(self, dtype):
+        x = torch.randn(1, 20, 131072).to(dtype).float()
+        weight = torch.randn(24, 20, 3).to(dtype).float()
+        expected = F.conv1d(x, weight, padding=1)
+        actual = F.conv1d(x.to(device="mps", dtype=dtype), weight.to(device="mps", dtype=dtype), padding=1)
+        tol = self._conv1d_tolerance(dtype, weight.size(1) * weight.size(2))
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    def test_conv1d_long_input_strided_catalog(self):
+        x = torch.randn(1, 12, 50011)
+        weight = torch.randn(16, 12, 16)
+        expected = F.conv1d(x, weight, stride=8)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), stride=8)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("kernel_size", [4, 31])
+    def test_conv1d_depthwise_nlc(self, kernel_size):
+        channels = 64
+        x = torch.randn(2, channels, 1024)
+        weight = torch.randn(channels, 1, kernel_size)
+        bias = torch.randn(channels)
+        expected = F.conv1d(x, weight, bias, padding=kernel_size // 2, groups=channels)
+        mps_input = x.to("mps").transpose(1, 2).contiguous().transpose(1, 2)
+        actual = F.conv1d(mps_input, weight.to("mps"), bias.to("mps"), padding=kernel_size // 2, groups=channels)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(actual.transpose(1, 2).is_contiguous())
+
+    def test_conv1d_pointwise_strided(self):
+        x = torch.randn(2, 48, 1000)
+        weight = torch.randn(96, 48, 1)
+        bias = torch.randn(96)
+        expected = F.conv1d(x, weight, bias, stride=4)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), stride=4)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("multiplier", [2, 3])
+    def test_conv1d_depthwise_multiplier(self, multiplier):
+        channels = 16
+        x = torch.randn(2, channels, 777)
+        weight = torch.randn(channels * multiplier, 1, 3)
+        bias = torch.randn(channels * multiplier)
+        expected = F.conv1d(x, weight, bias, padding=1, groups=channels)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=1, groups=channels)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("groups", [1, 4])
+    def test_conv1d_strided_catalog_miss(self, groups):
+        x = torch.randn(2, 64, 3000)
+        weight = torch.randn(64, 64 // groups, 9)
+        bias = torch.randn(64)
+        expected = F.conv1d(x, weight, bias, stride=2, padding=4, groups=groups)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), stride=2, padding=4, groups=groups)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
+    def test_conv1d_pad_only_columns(self):
+        # padding wide enough that leading and trailing outputs read only zeros
+        x = torch.randn(1, 16, 9)
+        weight = torch.randn(16, 16, 3)
+        bias = torch.randn(16)
+        expected = F.conv1d(x, weight, bias, padding=64)
+        actual = F.conv1d(x.to("mps"), weight.to("mps"), bias.to("mps"), padding=64)
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
     def test_conv1d_all_strides_paddings(self):
         # https://github.com/pytorch/pytorch/issues/82921
         def helper(stride, padding):

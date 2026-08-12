@@ -282,25 +282,29 @@ kernel void conv1d_dw(
     constant Conv1dDwParams& params [[buffer(3)]],
     device const T* bias [[buffer(4)]],
     uint3 position [[thread_position_in_grid]]) {
-  const int output_index = int(position.x);
-  const int channel = int(position.y);
+  // the host puts the output's stride-1 axis on x
+  const int output_index = int(params.swap_grid ? position.y : position.x);
+  const int channel = int(params.swap_grid ? position.x : position.y);
   const int batch = int(position.z);
   float accumulator = params.has_bias ? (float)bias[channel] : 0.0f;
-  device const T* input_row = input +
-      ((int64_t)batch * params.input_channels + channel) * params.input_length;
+  device const T* input_batch = input +
+      (int64_t)batch * params.input_channels * params.input_length +
+      (int64_t)(channel / params.channel_multiplier) * params.in_channel_stride;
   const int input_start = output_index * params.stride - params.padding;
   for (int kernel_index = 0; kernel_index < params.kernel_size;
        ++kernel_index) {
     const int input_index = input_start + kernel_index * params.dilation;
     if (input_index >= 0 && input_index < params.input_length) {
-      accumulator += (float)input_row[input_index] *
+      accumulator +=
+          (float)input_batch[(int64_t)input_index * params.in_pos_stride] *
           (float)weight[(int64_t)channel * params.kernel_size + kernel_index];
     }
   }
   output
-      [((int64_t)batch * params.input_channels + channel) *
+      [(int64_t)batch * params.input_channels * params.channel_multiplier *
            params.output_length +
-       output_index] = (T)accumulator;
+       (int64_t)channel * params.out_channel_stride +
+       (int64_t)output_index * params.out_pos_stride] = (T)accumulator;
 }
 
 template <typename T, bool CHECK_BOUNDS>
@@ -321,7 +325,9 @@ kernel void conv1d_dw_vec(
     accumulators[lane] = initial;
   }
   device const T* input_row = input +
-      ((int64_t)batch * params.input_channels + channel) * params.input_length;
+      ((int64_t)batch * params.input_channels +
+       channel / params.channel_multiplier) *
+          params.input_length;
   for (int kernel_index = 0; kernel_index < params.kernel_size;
        ++kernel_index) {
     const int input_start =
@@ -339,7 +345,9 @@ kernel void conv1d_dw_vec(
     }
   }
   const int64_t output_row =
-      ((int64_t)batch * params.input_channels + channel) * params.output_length;
+      ((int64_t)batch * params.input_channels * params.channel_multiplier +
+       channel) *
+      params.output_length;
 #pragma unroll
   for (int lane = 0; lane < conv1d_dw_outputs_per_thread; ++lane) {
     const int output_index = output_start + lane;
@@ -352,7 +360,8 @@ kernel void conv1d_dw_vec(
 }
 
 // DHWIO copy of an OIDHW weight view; ATen's generic permute copy is
-// launch-bound at typical weight sizes, a flat kernel is ~10x faster.
+// launch-bound at typical weight sizes. Each thread streams one kW row so
+// large weights stay bandwidth-bound instead of thread-launch-bound.
 template <typename T>
 kernel void conv_weight_to_dhwio(
     device const T* source [[buffer(0)]],
@@ -361,60 +370,264 @@ kernel void conv_weight_to_dhwio(
     uint3 position [[thread_position_in_grid]]) {
   const int output_channel = int(position.x);
   const int input_channel = int(position.y);
-  const int kernel_index = int(position.z);
-  const int kernel_width_index = kernel_index % params.kernel_width;
-  const int kernel_plane_index = kernel_index / params.kernel_width;
+  const int kernel_plane_index = int(position.z);
   const int kernel_height_index = kernel_plane_index % params.kernel_height;
   const int kernel_depth_index = kernel_plane_index / params.kernel_height;
-  destination
-      [((int64_t)kernel_index * params.input_channels_per_group +
-        input_channel) *
-           params.output_channels +
-       output_channel] = source
-          [(int64_t)output_channel * params.output_channel_stride +
-           (int64_t)input_channel * params.input_channel_stride +
-           (int64_t)kernel_depth_index * params.depth_stride +
-           (int64_t)kernel_height_index * params.height_stride +
-           (int64_t)kernel_width_index * params.width_stride];
+  device const T* source_row = source +
+      (int64_t)output_channel * params.output_channel_stride +
+      (int64_t)input_channel * params.input_channel_stride +
+      (int64_t)kernel_depth_index * params.depth_stride +
+      (int64_t)kernel_height_index * params.height_stride;
+  device T* destination_row = destination +
+      ((int64_t)kernel_plane_index * params.kernel_width *
+           params.input_channels_per_group +
+       input_channel) *
+          params.output_channels +
+      output_channel;
+  for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
+       ++kernel_width_index) {
+    destination_row
+        [(int64_t)kernel_width_index * params.input_channels_per_group *
+         params.output_channels] =
+            source_row[(int64_t)kernel_width_index * params.width_stride];
+  }
+}
+
+// (kW, O, I) copy of an OIkW weight view: per-tap slabs with input channels
+// contiguous, the A-operand form of conv1d_sgemm.
+template <typename T>
+kernel void conv_weight_to_koc(
+    device const T* source [[buffer(0)]],
+    device T* destination [[buffer(1)]],
+    constant ConvWeightPermuteParams& params [[buffer(2)]],
+    uint3 position [[thread_position_in_grid]]) {
+  const int input_channel = int(position.x);
+  const int output_channel = int(position.y);
+  device const T* source_row = source +
+      (int64_t)output_channel * params.output_channel_stride +
+      (int64_t)input_channel * params.input_channel_stride;
+  device T* destination_row = destination +
+      (int64_t)output_channel * params.input_channels_per_group + input_channel;
+  const int64_t tap_stride =
+      (int64_t)params.input_channels_per_group * params.output_channels;
+  for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
+       ++kernel_width_index) {
+    destination_row[kernel_width_index * tap_stride] =
+        source_row[(int64_t)kernel_width_index * params.width_stride];
+  }
 }
 
 static_assert(
     conv1d_dw_outputs_per_thread == 8,
     "CONV1D_DW_OUTPUTS_PER_THREAD_STR must match conv1d_dw_outputs_per_thread");
 
-#define INSTANTIATE_CONV1D_DW(DT)                                       \
-  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>(   \
-      device const DT*,                                                 \
-      device const DT*,                                                 \
-      device DT*,                                                       \
-      constant Conv1dDwParams&,                                         \
-      device const DT*,                                                 \
-      uint3);                                                           \
-  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
-                       "_" #DT)]] kernel void                           \
-  conv1d_dw_vec<DT, true>(                                              \
-      device const DT*,                                                 \
-      device const DT*,                                                 \
-      device DT*,                                                       \
-      constant Conv1dDwParams&,                                         \
-      device const DT*,                                                 \
-      uint3);                                                           \
-  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
-                       "_valid_" #DT)]] kernel void                     \
-  conv1d_dw_vec<DT, false>(                                             \
-      device const DT*,                                                 \
-      device const DT*,                                                 \
-      device DT*,                                                       \
-      constant Conv1dDwParams&,                                         \
-      device const DT*,                                                 \
-      uint3);                                                           \
-  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void       \
-  conv_weight_to_dhwio<DT>(                                             \
+#define INSTANTIATE_CONV1D_DW(DT)                                              \
+  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>(          \
+      device const DT*,                                                        \
+      device const DT*,                                                        \
+      device DT*,                                                              \
+      constant Conv1dDwParams&,                                                \
+      device const DT*,                                                        \
+      uint3);                                                                  \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR        \
+                       "_" #DT)]] kernel void                                  \
+  conv1d_dw_vec<DT, true>(                                                     \
+      device const DT*,                                                        \
+      device const DT*,                                                        \
+      device DT*,                                                              \
+      constant Conv1dDwParams&,                                                \
+      device const DT*,                                                        \
+      uint3);                                                                  \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR        \
+                       "_valid_" #DT)]] kernel void                            \
+  conv1d_dw_vec<DT, false>(                                                    \
+      device const DT*,                                                        \
+      device const DT*,                                                        \
+      device DT*,                                                              \
+      constant Conv1dDwParams&,                                                \
+      device const DT*,                                                        \
+      uint3);                                                                  \
+  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void              \
+  conv_weight_to_dhwio<DT>(                                                    \
+      device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3); \
+  template [[host_name("conv_weight_to_koc_" #DT)]] kernel void                \
+  conv_weight_to_koc<DT>(                                                      \
       device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);
 
 INSTANTIATE_CONV1D_DW(float)
 INSTANTIATE_CONV1D_DW(half)
 INSTANTIATE_CONV1D_DW(bfloat)
+
+// conv1d_sgemm on simdgroup_matrix for hosts without
+// MetalPerformancePrimitives: identical dispatch contract (koc weights,
+// region table, NCL/NLC operands), fp32 accumulation. Unlike conv3d_simd's
+// implicit-GEMM gather this stages dense activation rows, so 1D geometry
+// keeps its memory-bound tiles coalesced.
+template <typename T, int BM, bool NLC, bool HAS_BIAS, bool GROUPED>
+kernel void conv1d_sgemm_simd(
+    device const T* src [[buffer(0)]],
+    device const T* wts [[buffer(1)]],
+    device T* dst [[buffer(2)]],
+    constant Conv1dSgemmParams& p [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint sgid [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  constexpr int BN = 64;
+  constexpr int BK = 16;
+  constexpr int WM = BM >= 64 ? 2 : 1;
+  constexpr int WN = 2;
+  constexpr int TGP = WM * WN * 32;
+  constexpr int WT_M = BM / WM, WT_N = BN / WN;
+  constexpr int TM = WT_M / 8, TN = WT_N / 8;
+  constexpr int LDA = BK + 8, LDB = BN + 8;
+
+  threadgroup T As[BM * LDA];
+  threadgroup T Bs[BK * LDB];
+
+  const int Cg = p.C_in / p.groups;
+  const int Og = p.C_out / p.groups;
+  int o_off, o_end, c0;
+  if IF_CONSTEXPR (GROUPED) {
+    const int o_tiles = Og / BM + (Og % BM != 0);
+    const int g = int(tgid.x) / o_tiles;
+    o_off = (int(tgid.x) % o_tiles) * BM + g * Og;
+    o_end = g * Og + Og;
+    c0 = g * Cg;
+  } else {
+    o_off = int(tgid.x) * BM;
+    o_end = p.C_out;
+    c0 = 0;
+  }
+  const int zi = int(tgid.y);
+  int r = 0;
+  for (int i = 1; i < p.region_count; ++i) {
+    if (zi >= p.regions[i].tile0) {
+      r = i;
+    }
+  }
+  constant const Conv1dSgemmRegion& reg = p.regions[r];
+  const int m_off = (zi - reg.tile0) * BN;
+  const int nb = int(tgid.z);
+  const int tid = int(sgid) * 32 + int(lane);
+
+  device const T* srcn = src + (int64_t)nb * p.C_in * p.L;
+  device T* dstn = dst + (int64_t)nb * p.C_out * p.outW_total +
+      (NLC ? reg.out_col0 * p.C_out : reg.out_col0);
+
+  simdgroup_matrix<float, 8, 8> Cfrag[TM][TN];
+  for (int i = 0; i < TM; ++i) {
+    for (int j = 0; j < TN; ++j) {
+      Cfrag[i][j] = simdgroup_matrix<float, 8, 8>(0);
+    }
+  }
+  const int warp_m = (int(sgid) / WN) * WT_M;
+  const int warp_n = (int(sgid) % WN) * WT_N;
+
+  for (int j = 0; j < reg.taps; ++j) {
+    const int64_t col = reg.in_col0 + (int64_t)j * p.dilation;
+    device const T* wj = wts + (int64_t)(reg.w_tap0 + j) * Cg * p.C_out;
+    device const T* xj =
+        NLC ? srcn + col * p.C_in + c0 : srcn + (int64_t)c0 * p.L + col;
+    for (int k0 = 0; k0 < Cg; k0 += BK) {
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      for (int i = tid; i < BM * BK; i += TGP) {
+        const int m = i / BK, kk = i % BK;
+        const int o = o_off + m, c = k0 + kk;
+        As[m * LDA + kk] = o < o_end && c < Cg ? wj[(int64_t)o * Cg + c] : T(0);
+      }
+      for (int i = tid; i < BK * BN; i += TGP) {
+        const int kk = i / BN, n = i % BN;
+        const int c = k0 + kk, m = m_off + n;
+        T v = T(0);
+        if (c < Cg && m < reg.out_cols) {
+          v = NLC ? xj[(int64_t)m * p.C_in + c] : xj[(int64_t)c * p.L + m];
+        }
+        Bs[kk * LDB + n] = v;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      for (int kk = 0; kk < BK; kk += 8) {
+        simdgroup_matrix<T, 8, 8> Afrag[TM];
+        simdgroup_matrix<T, 8, 8> Bfrag[TN];
+        for (int i = 0; i < TM; ++i) {
+          simdgroup_load(Afrag[i], &As[(warp_m + i * 8) * LDA + kk], LDA);
+        }
+        for (int t = 0; t < TN; ++t) {
+          simdgroup_load(Bfrag[t], &Bs[kk * LDB + warp_n + t * 8], LDB);
+        }
+        for (int i = 0; i < TM; ++i) {
+          for (int t = 0; t < TN; ++t) {
+            simdgroup_multiply_accumulate(
+                Cfrag[i][t], Afrag[i], Bfrag[t], Cfrag[i][t]);
+          }
+        }
+      }
+    }
+  }
+
+  const int qid = int(lane) / 4;
+  const int fm = (qid & 4) + ((int(lane) / 2) % 4);
+  const int fn = (qid & 2) * 2 + (int(lane) % 2) * 2;
+
+  for (int i = 0; i < TM; ++i) {
+    const int o = o_off + warp_m + i * 8 + fm;
+    if (o >= o_end) {
+      continue;
+    }
+    for (int t = 0; t < TN; ++t) {
+      for (int e = 0; e < 2; ++e) {
+        const int m = m_off + warp_n + t * 8 + fn + e;
+        if (m >= reg.out_cols) {
+          continue;
+        }
+        float v = Cfrag[i][t].thread_elements()[e];
+        if IF_CONSTEXPR (HAS_BIAS) {
+          v += (float)bias[o];
+        }
+        if IF_CONSTEXPR (NLC) {
+          dstn[(int64_t)m * p.C_out + o] = (T)v;
+        } else {
+          dstn[(int64_t)o * p.outW_total + m] = (T)v;
+        }
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(                           \
+    DT, BM, LNAME, NLC, BNAME, HAS_BIAS, GNAME, GROUPED)             \
+  template [[host_name("conv1d_sgemm_simd_" #DT "_bm" #BM "_" #LNAME \
+                       "_" #BNAME "_" #GNAME)]] kernel void          \
+  conv1d_sgemm_simd<DT, BM, NLC, HAS_BIAS, GROUPED>(                 \
+      device const DT*,                                              \
+      device const DT*,                                              \
+      device DT*,                                                    \
+      constant Conv1dSgemmParams&,                                   \
+      device const DT*,                                              \
+      uint3,                                                         \
+      uint,                                                          \
+      uint);
+
+// clang-format off
+#define INSTANTIATE_CONV1D_SGEMM_SIMD_VARIANTS(DT, BM)                                  \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, bias, true, ungrouped, false)   \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, nobias, false, ungrouped, false) \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, bias, true, ungrouped, false)     \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, nobias, false, ungrouped, false)  \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, bias, true, grouped, true)       \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, nobias, false, grouped, true)    \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, bias, true, grouped, true)        \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, nobias, false, grouped, true)
+
+#define INSTANTIATE_CONV1D_SGEMM_SIMD(DT)         \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_VARIANTS(DT, 32)  \
+  INSTANTIATE_CONV1D_SGEMM_SIMD_VARIANTS(DT, 64)
+// clang-format on
+
+INSTANTIATE_CONV1D_SGEMM_SIMD(float)
+INSTANTIATE_CONV1D_SGEMM_SIMD(half)
+INSTANTIATE_CONV1D_SGEMM_SIMD(bfloat)
 
 #if __METAL_VERSION__ >= 400 && \
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
@@ -593,6 +806,10 @@ kernel void conv3d_mpp(
   }
 }
 
+// Source-width shape hint baked into each specialization; the conv1d block
+// redefines it so flat geometries accept lengths up to the header constant.
+#define CONV3D_MPP_SRCW 16384
+
 #define INSTANTIATE_CONV3D_MPP(                                             \
     DT,                                                                     \
     DNAME,                                                                  \
@@ -629,7 +846,7 @@ kernel void conv3d_mpp(
           StaticInt3<KW, KH, KD>,                                           \
           StaticInt3<SX, SY, SZ>,                                           \
           StaticInt3<DX, DY, DZ>,                                           \
-          StaticInt3<SRCC, 16384, 16384>,                                   \
+          StaticInt3<SRCC, CONV3D_MPP_SRCW, 16384>,                         \
           RELAXED,                                                          \
           HAS_BIAS,                                                         \
           OUT_NCDHW,                                                        \
@@ -934,6 +1151,9 @@ kernel void conv3d_mpp(
   INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false)
 // clang-format on
 
+#undef CONV3D_MPP_SRCW
+#define CONV3D_MPP_SRCW conv1d_mpp_src_width_hint
+
 INSTANTIATE_CONV1D_MPP(2, 2, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 2, dyn, -1)
@@ -959,6 +1179,12 @@ INSTANTIATE_CONV1D_MPP(11, 1, 3, dyn, -1)
 INSTANTIATE_CONV1D_MPP(11, 1, 5, dyn, -1)
 INSTANTIATE_CONV1D_MPP(12, 6, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(16, 8, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 5, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(5, 3, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(7, 2, 1, dyn, -1)
+
+#undef CONV3D_MPP_SRCW
+#define CONV3D_MPP_SRCW 16384
 
 // Deduplicated direct Conv3d specs from the surveyed model shapes.
 INSTANTIATE_CONV3D_MPP_GROUPED(1, 1, 2, 1, 1, 2)
@@ -980,6 +1206,174 @@ INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 1, 1, 48, 48)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 1, 1, 64, 64)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 2, 2, dyn, -1)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 2, 2, 2, dyn, -1)
+
+// Unit-stride conv1d as `taps` accumulated shifted GEMMs: for tap j,
+// dst[o, m] += W_j[o, c] * src[c, in_col0 + m + j * dilation]. The activation
+// is read in its native layout (NCL, or NLC via the transposed-B form), so no
+// NHWC staging pass exists on this path, and kernel size and dilation stay
+// runtime. Weights come in as the DHWIO copy: tap-j slab is (C_per_group,
+// C_out) with output channels contiguous. The host splits padded edges into
+// extra dispatches over clipped tap ranges so reads never leave [0, L).
+template <
+    typename T,
+    int BM,
+    int BN,
+    int NSG,
+    bool NLC,
+    bool HAS_BIAS,
+    bool GROUPED>
+kernel void conv1d_sgemm(
+    device T* src [[buffer(0)]],
+    device T* wts [[buffer(1)]],
+    device T* dst [[buffer(2)]],
+    constant Conv1dSgemmParams& p [[buffer(3)]],
+    device const T* bias [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const int Cg = p.C_in / p.groups;
+  const int Og = p.C_out / p.groups;
+  int o_off, o_end, c0;
+  if constexpr (GROUPED) {
+    const int o_tiles = Og / BM + (Og % BM != 0);
+    const int g = int(tgid.x) / o_tiles;
+    o_off = (int(tgid.x) % o_tiles) * BM + g * Og;
+    o_end = g * Og + Og;
+    c0 = g * Cg;
+  } else {
+    o_off = int(tgid.x) * BM;
+    o_end = p.C_out;
+    c0 = 0;
+  }
+  const int zi = int(tgid.y);
+  int r = 0;
+  for (int i = 1; i < p.region_count; ++i) {
+    if (zi >= p.regions[i].tile0) {
+      r = i;
+    }
+  }
+  constant const Conv1dSgemmRegion& reg = p.regions[r];
+  const int m_off = (zi - reg.tile0) * BN;
+  const int nb = int(tgid.z);
+
+  constexpr auto desc = matmul2d_descriptor(
+      BM,
+      BN,
+      static_cast<int>(dynamic_extent),
+      false,
+      NLC,
+      !is_same_v<T, float>,
+      matmul2d_descriptor::mode::multiply_accumulate);
+  matmul2d<desc, execution_simdgroups<NSG>> op;
+
+  device T* srcn = src + (int64_t)nb * p.C_in * p.L;
+  device T* dstn = dst + (int64_t)nb * p.C_out * p.outW_total +
+      (NLC ? reg.out_col0 * p.C_out : reg.out_col0);
+
+  auto cT = op.template get_destination_cooperative_tensor<
+      tensor<device T, dextents<int32_t, 2>, tensor_inline>,
+      tensor<device T, dextents<int32_t, 2>, tensor_inline>,
+      float>();
+  for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
+    if (cT.is_valid_element(i)) {
+      cT[i] = 0.0f;
+    }
+  }
+
+  for (int j = 0; j < reg.taps; ++j) {
+    const int64_t col = reg.in_col0 + (int64_t)j * p.dilation;
+    device T* wj = wts + (int64_t)(reg.w_tap0 + j) * Cg * p.C_out;
+    tensor<device T, dextents<int32_t, 2>, tensor_inline> tA(
+        wj, dextents<int32_t, 2>(Cg, p.C_out), array<int32_t, 2>{1, Cg});
+    tensor<device T, dextents<int32_t, 2>, tensor_inline> tB(
+        NLC ? srcn + col * p.C_in + c0 : srcn + (int64_t)c0 * p.L + col,
+        NLC ? dextents<int32_t, 2>(Cg, reg.out_cols)
+            : dextents<int32_t, 2>(reg.out_cols, Cg),
+        NLC ? array<int32_t, 2>{1, p.C_in} : array<int32_t, 2>{1, p.L});
+    auto mA = tA.slice(0, o_off);
+    auto mB = NLC ? tB.slice(0, m_off) : tB.slice(m_off, 0);
+    op.run(mA, mB, cT);
+  }
+
+  if constexpr (!NLC) {
+    if (m_off + BN <= reg.out_cols && o_off + BM <= o_end) {
+      tensor<device T, dextents<int32_t, 2>, tensor_inline> tD(
+          dstn,
+          dextents<int32_t, 2>(reg.out_cols, p.C_out),
+          array<int32_t, 2>{1, p.outW_total});
+      auto mD = tD.slice(m_off, o_off);
+      auto cO = op.template get_destination_cooperative_tensor<
+          tensor<device T, dextents<int32_t, 2>, tensor_inline>,
+          tensor<device T, dextents<int32_t, 2>, tensor_inline>,
+          T>();
+      for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
+        if (!cT.is_valid_element(i)) {
+          continue;
+        }
+        float v = cT[i];
+        if constexpr (HAS_BIAS) {
+          // clamp: lanes past O are masked by the bounds-aware store below
+          const int o = o_off + (int)cT.get_multidimensional_index(i)[1];
+          v += (float)bias[min(o, p.C_out - 1)];
+        }
+        cO[i] = (T)v;
+      }
+      cO.store(mD);
+      return;
+    }
+  }
+  for (uint16_t i = 0; i < cT.get_capacity(); ++i) {
+    if (!cT.is_valid_element(i)) {
+      continue;
+    }
+    auto idx = cT.get_multidimensional_index(i);
+    const int m = m_off + (int)idx[0];
+    const int o = o_off + (int)idx[1];
+    if (m >= reg.out_cols || o >= o_end) {
+      continue;
+    }
+    float v = cT[i];
+    if constexpr (HAS_BIAS) {
+      v += (float)bias[o];
+    }
+    if constexpr (NLC) {
+      dstn[(int64_t)m * p.C_out + o] = (T)v;
+    } else {
+      dstn[(int64_t)o * p.outW_total + m] = (T)v;
+    }
+  }
+}
+
+#define INSTANTIATE_CONV1D_SGEMM_ONE(                                    \
+    DT, BM, BN, NSG, LNAME, NLC, BNAME, HAS_BIAS, GNAME, GROUPED)        \
+  template [[host_name("conv1d_sgemm_" #DT "_bm" #BM "_bn" #BN "_s" #NSG \
+                       "_" #LNAME "_" #BNAME "_" #GNAME)]] kernel void   \
+  conv1d_sgemm<DT, BM, BN, NSG, NLC, HAS_BIAS, GROUPED>(                 \
+      device DT*,                                                        \
+      device DT*,                                                        \
+      device DT*,                                                        \
+      constant Conv1dSgemmParams&,                                       \
+      device const DT*,                                                  \
+      uint3);
+
+// clang-format off
+#define INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, BM, BN, NSG)                            \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, bias, true, ungrouped, false)   \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, nobias, false, ungrouped, false) \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, bias, true, ungrouped, false)     \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, nobias, false, ungrouped, false)  \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, bias, true, grouped, true)       \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, nobias, false, grouped, true)    \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, bias, true, grouped, true)        \
+  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, nobias, false, grouped, true)
+
+#define INSTANTIATE_CONV1D_SGEMM(DT)              \
+  INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, 32, 64, 2) \
+  INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, 64, 64, 2) \
+  INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, 128, 64, 4)
+// clang-format on
+
+INSTANTIATE_CONV1D_SGEMM(float)
+INSTANTIATE_CONV1D_SGEMM(half)
+INSTANTIATE_CONV1D_SGEMM(bfloat)
 
 #endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
 
