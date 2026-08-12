@@ -17,6 +17,7 @@ from tools.linter.adapters.raw_throw_linter import (
 
 
 PATH = "torch/csrc/example.cpp"
+JIT_PATH = "torch/csrc/jit/python/example.cpp"
 
 
 def code_of(source: str) -> str:
@@ -191,17 +192,50 @@ class TestBuckets(unittest.TestCase):
     def test_allowed(self) -> None:
         for expression in (
             "",  # bare `throw;`
-            "py::cast_error(x)",
             "py::key_error(x)",
             "::py::stop_iteration(x)",
-            "PythonError()",
-            "WorkerException(e)",
             "c10::AcceleratorError(x, y, z)",
             "c10::AcceleratorError{x}",
         ):
             source = f"throw {expression};\n"
             with self.subTest(expression=expression):
                 self.assertEqual(names(source), [])
+
+    def test_an_allowed_bare_name_is_scoped_to_its_subsystem(self) -> None:
+        source = "throw PythonError();\n"
+        self.assertEqual(names(source, "torch/csrc/fx/node.cpp"), [])
+        self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
+
+    def test_scoping_works_on_the_absolute_paths_lintrunner_passes(self) -> None:
+        source = "throw PythonError();\n"
+        root = "/home/user/pytorch/"
+        self.assertEqual(names(source, root + "torch/csrc/fx/node.cpp"), [])
+        self.assertEqual(names(source, root + "aten/src/Foo.cpp"), ["raw-throw"])
+
+    def test_worker_exception_is_scoped_to_the_api_directory(self) -> None:
+        source = "throw WorkerException(e);\n"
+        self.assertEqual(names(source, "torch/csrc/api/include/torch/x.h"), [])
+        self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
+
+    def test_cast_error_is_scoped_to_jit(self) -> None:
+        source = "throw py::cast_error(x);\n"
+        self.assertEqual(names(source, JIT_PATH), [])
+        self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
+
+    def test_a_qualified_allowed_name_need_not_be_scoped(self) -> None:
+        source = "throw py::key_error(x);\n"
+        self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), [])
+
+    def test_an_allowed_call_must_be_the_whole_operand(self) -> None:
+        # Otherwise any violation could be laundered by prefixing an allowed
+        # constructor call.
+        for expression in (
+            "py::key_error(m).with_context(x)",
+            "(py::cast_error(x), std::runtime_error(y))",
+            "py::cast_error(x) ? a : b",
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(names(f"throw {expression};\n"), ["raw-throw"])
 
     def test_a_variable_named_like_an_allowed_type_is_still_flagged(self) -> None:
         self.assertEqual(names("throw PythonError;\n"), ["raw-throw"])
@@ -221,6 +255,14 @@ class TestBuckets(unittest.TestCase):
             with self.subTest(expression=expression):
                 (message,) = check_source(PATH, f"throw {expression};\n")
                 self.assertNotIn("sliced", message.description or "")
+
+    def test_brace_initialised_arguments_are_elided_too(self) -> None:
+        (message,) = check_source(PATH, 'throw Foo{"some message"};\n')
+        self.assertIn("`throw Foo{...}`", message.description or "")
+
+    def test_templated_type_arguments_are_elided_too(self) -> None:
+        (message,) = check_source(PATH, 'throw MyError<int>("some message");\n')
+        self.assertIn("`throw MyError<int>(...)`", message.description or "")
 
     def test_arguments_are_elided_from_the_diagnostic(self) -> None:
         # By this point string literals have been blanked, so printing them back
@@ -252,12 +294,18 @@ class TestAllowMarker(unittest.TestCase):
         self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
 
     def test_marker_above_an_allowed_throw_is_redundant(self) -> None:
-        source = "// @allow-raw-throw: reason\nthrow py::cast_error(x);\n"
-        self.assertEqual(names(source), ["redundant-allow-raw-throw"])
+        for throw in ("throw py::cast_error(x);", "throw;"):
+            with self.subTest(throw=throw):
+                source = f"// @allow-raw-throw: reason\n{throw}\n"
+                self.assertEqual(names(source, JIT_PATH), ["redundant-allow-raw-throw"])
+
+    def test_the_redundant_message_quotes_a_bare_rethrow_correctly(self) -> None:
+        (message,) = check_source(PATH, "// @allow-raw-throw: reason\nthrow;\n")
+        self.assertIn("`throw;` is allowed already", message.description or "")
 
     def test_redundant_marker_is_not_also_reported_as_reasonless(self) -> None:
         source = "// @allow-raw-throw\nthrow py::cast_error(x);\n"
-        self.assertEqual(names(source), ["redundant-allow-raw-throw"])
+        self.assertEqual(names(source, JIT_PATH), ["redundant-allow-raw-throw"])
 
     def test_trailing_marker_does_not_allow_the_throw(self) -> None:
         source = "throw Foo(); // @allow-raw-throw: nope\n"
@@ -291,6 +339,25 @@ class TestAllowMarker(unittest.TestCase):
         source = "// @allow-raw-throw: .\nthrow Foo();\n"
         self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
 
+    def test_doxygen_comment_marker(self) -> None:
+        for comment in ("/** @allow-raw-throw: r */", "//! @allow-raw-throw: r"):
+            with self.subTest(comment=comment):
+                self.assertEqual(names(f"{comment}\nthrow Foo();\n"), [])
+
+    def test_marker_must_have_its_own_line(self) -> None:
+        source = "int x = 1; // @allow-raw-throw: sneaky\nthrow Foo();\n"
+        self.assertEqual(names(source), ["orphaned-allow-raw-throw", "raw-throw"])
+
+    def test_marker_inside_a_macro_body(self) -> None:
+        # A line continuation is the only way to write a multi-line macro, so
+        # it must not count as code sharing the marker's line.
+        source = (
+            "#define M(x)                      \\\n"
+            "  /* @allow-raw-throw: reason */  \\\n"
+            "  throw Foo(x)\n"
+        )
+        self.assertEqual(names(source), [])
+
     def test_marker_in_string_is_not_a_marker(self) -> None:
         source = 'const char* s = "@allow-raw-throw: x";\nthrow Foo();\n'
         self.assertEqual(names(source), ["raw-throw"])
@@ -311,13 +378,33 @@ class TestAllowMarker(unittest.TestCase):
         source = "\f\n// @allow-raw-throw: reason\nthrow Foo();\n"
         self.assertEqual(names(source), [])
 
+    def test_marker_is_not_redundant_when_the_line_has_a_real_throw_too(self) -> None:
+        source = (
+            "// @allow-raw-throw: r\nif (a) throw py::key_error(x); else throw Foo();\n"
+        )
+        self.assertEqual(names(source), ["raw-throw"])
+
     def test_marker_licenses_the_flagged_throw_not_the_allowed_one(self) -> None:
         allowed, marker = "throw py::cast_error(x);", "// @allow-raw-throw: reason"
-        self.assertEqual(names(f"{allowed}\n{marker}\nthrow Foo();\n"), [])
+        source = f"{allowed}\n{marker}\nthrow Foo();\n"
+        self.assertEqual(names(source, JIT_PATH), [])
 
     def test_marker_above_a_wrapped_throw(self) -> None:
         source = "// @allow-raw-throw: reason\nthrow(\n    Foo());\n"
         self.assertEqual(names(source), [])
+
+
+class TestMalformedLiterals(unittest.TestCase):
+    def test_malformed_raw_string_does_not_blank_the_file(self) -> None:
+        source = 'const char* p = R"x";\nthrow Foo();\n'
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_unterminated_raw_string_stops_at_the_line(self) -> None:
+        source = 'auto s = R"(abc\nthrow Foo();\n'
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_exception_specification_is_not_a_rethrow(self) -> None:
+        self.assertEqual(names("void f() throw();\n"), ["raw-throw"])
 
 
 class TestReplacementMacro(unittest.TestCase):

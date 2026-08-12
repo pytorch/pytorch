@@ -17,7 +17,8 @@ A throw that is genuinely correct can be kept by putting
 
 on the line immediately above it. The reason is mandatory, and the marker only
 applies to the next line - there is no way to switch the check off for a whole
-file.
+file. A type that is always correct to throw belongs in ALLOWED_EXCEPTION_TYPES
+instead, and a marker over one of those is itself reported.
 """
 
 from __future__ import annotations
@@ -35,28 +36,31 @@ LINTER_CODE = "RAWTHROW"
 
 MARKER = "@allow-raw-throw"
 
-# Exceptions that no TORCH_CHECK can stand in for: either they are typed
-# control flow that something catches by name, or they reach the interpreter as
-# a Python type c10 has no equivalent of. Add a name here only with that
-# justification, never because converting a site looked awkward. Names are
-# matched exactly as written at the throw and are not scoped to a directory, so
-# a type thrown both qualified and unqualified needs both spellings.
+# Exceptions that no TORCH_CHECK can stand in for, mapped to the path prefix
+# they are allowed under. An unqualified name is scoped to the subsystem that
+# owns it, so that an unrelated type reusing the name elsewhere is still
+# reported; a namespace-qualified name cannot collide, so it is allowed
+# anywhere. Add an entry only with a justification of the kind below, never
+# because converting a site looked awkward.
 #
 # Deliberately absent: py::type_error, py::value_error and py::index_error.
 # Those are exactly TORCH_CHECK_TYPE, TORCH_CHECK_VALUE and TORCH_CHECK_INDEX -
 # same Python type and same message - because the translator registered in
 # torch/csrc/Module.cpp maps c10::TypeError and friends onto PyExc_TypeError.
-ALLOWED_EXCEPTION_TYPES = frozenset(
-    {
-        "PythonError",  # torch/csrc/fx/node.cpp, caught in the same file
-        "WorkerException",  # torch/csrc/api dataloader, carries a worker's error
-        "c10::AcceleratorError",  # carries the device error code alongside the message
-        "py::cast_error",  # pybind11's own cast-failure protocol
-        "py::error_already_set",  # a Python error is set; rethrowing preserves it
-        "py::key_error",  # would become RuntimeError, not KeyError
-        "py::stop_iteration",  # drives the iterator protocol; no c10 equivalent
-    }
-)
+ALLOWED_EXCEPTION_TYPES = {
+    # Typed control flow: each is caught by name, so TORCH_CHECK would break
+    # the code that handles it.
+    "PythonError": "torch/csrc/fx/",
+    "WorkerException": "torch/csrc/api/",
+    "py::cast_error": "torch/csrc/jit/",  # caught by name in jit/python
+    "py::error_already_set": "",  # a Python error is set; rethrowing preserves it
+    # Reach the interpreter as a Python type c10 has no equivalent of, so
+    # TORCH_CHECK would turn them into RuntimeError.
+    "py::key_error": "",
+    "py::stop_iteration": "",
+    # Carries the device error code alongside the message.
+    "c10::AcceleratorError": "",
+}
 
 
 class LintSeverity(str, Enum):
@@ -91,10 +95,13 @@ _NUMBER_CHARS = re.compile(r"[\w']")
 _THROW = re.compile(r"\bthrow\b")
 _QUALIFIED_NAME = re.compile(r"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*")
 _BARE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_TYPE_NAME = re.compile(r"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*(?:<[^<>]*>)?")
 _WORD = re.compile(r"[A-Za-z]")
 # The marker has to be the whole point of its comment. Prose that merely
 # mentions it - as the docs for this linter do - must not license anything.
-_MARKER_LINE = re.compile(rf"^\s*(?://+|/\*)\s*{re.escape(MARKER)}\b(?P<rest>.*)")
+_MARKER_LINE = re.compile(
+    rf"^\s*(?://+!?|/\*+!?|\*)\s*{re.escape(MARKER)}\b(?P<rest>.*)"
+)
 
 
 def scan_source(text: str) -> tuple[str, str]:
@@ -151,16 +158,19 @@ def scan_source(text: str) -> tuple[str, str]:
             prefix_start = i
             while prefix_start > 0 and _IDENT_CHARS.match(text[prefix_start - 1]):
                 prefix_start -= 1
+            end = None
             if text[prefix_start:i] in _RAW_STRING_PREFIXES:
-                open_paren = text.find("(", i + 1)
-                if open_paren != -1:
-                    terminator = ")" + text[i + 1 : open_paren] + '"'
-                    close = text.find(terminator, open_paren + 1)
-                    end = n if close == -1 else close + len(terminator)
-                    blank(code, i, end)
-                    i = end
-                    continue
-            end = _end_of_quoted(text, i, '"')
+                delimiter = _raw_string_delimiter(text, i)
+                if delimiter is not None:
+                    terminator = ")" + delimiter + '"'
+                    close = text.find(terminator, i + len(delimiter) + 2)
+                    if close != -1:
+                        end = close + len(terminator)
+            if end is None:
+                # Not a well-formed raw string, or one that is never
+                # terminated. Fall back to the line-bounded scan so a malformed
+                # literal cannot blank the rest of the file.
+                end = _end_of_quoted(text, i, '"')
             blank(code, i, end)
             i = end
             continue
@@ -183,6 +193,18 @@ def scan_source(text: str) -> tuple[str, str]:
         i += 1
 
     return "".join(code), "".join(comments)
+
+
+def _raw_string_delimiter(text: str, quote: int) -> str | None:
+    """The d-char sequence of the raw string opening at `quote`, or None if this
+    is not a well-formed raw string. The standard caps the delimiter at 16
+    characters and excludes whitespace, parentheses and backslash."""
+    for j in range(quote + 1, min(quote + 18, len(text))):
+        if text[j] == "(":
+            return text[quote + 1 : j]
+        if text[j] in ' ()\\"\n\r\t\v\f':
+            return None
+    return None
 
 
 def _is_continued(text: str, newline: int) -> bool:
@@ -255,13 +277,13 @@ def _unwrap(expression: str) -> str:
             depth += (char == "(") - (char == ")")
             if depth == 0:
                 break
-        if depth or end != len(expression) - 1:
+        if depth or end != len(expression) - 1 or not expression[1:-1].strip():
             break
         expression = expression[1:-1].strip()
     return expression
 
 
-def is_allowed(expression: str) -> bool:
+def is_allowed(path: str, expression: str) -> bool:
     """Whether this throw is correct as written and needs no annotation.
 
     Everything else has to become a TORCH_CHECK, or be added to
@@ -274,21 +296,56 @@ def is_allowed(expression: str) -> bool:
     # it to avoid a copy, so the type still has to be judged on its merits.
     thrown = expression.removeprefix("::")
     match = _QUALIFIED_NAME.match(thrown)
-    if match is None or match.group(0) not in ALLOWED_EXCEPTION_TYPES:
+    if match is None:
         return False
-    # An allowed name still has to be a constructor call, so that a variable
-    # that happens to share the name is not allowed along with it.
-    return thrown[match.end() :].lstrip().startswith(("(", "{"))
+    allowed_under = ALLOWED_EXCEPTION_TYPES.get(match.group(0))
+    if allowed_under is None:
+        return False
+    # lintrunner passes absolute paths, so match the scope as a run of path
+    # segments rather than anchoring at the start of the string.
+    posix = "/" + path.replace("\\", "/")
+    if f"/{allowed_under}" not in posix:
+        return False
+    # The constructor call has to be the whole operand. Checking only that a
+    # `(` follows would let any violation be laundered by prefixing an allowed
+    # one, as in `throw py::key_error(m).with_context(x)`.
+    return _is_whole_call(thrown[match.end() :].lstrip())
+
+
+def _as_statement(expression: str) -> str:
+    """The throw written back out as source, for a diagnostic."""
+    return f"throw {display(expression)};" if expression else "throw;"
+
+
+def _is_whole_call(rest: str) -> bool:
+    """Whether `rest` is exactly one balanced `(...)` or `{...}` and nothing
+    else."""
+    if not rest or rest[0] not in "({":
+        return False
+    depth = 0
+    for i, char in enumerate(rest):
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+            if depth == 0:
+                return not rest[i + 1 :].strip()
+    return False
 
 
 def display(expression: str) -> str:
-    """The thrown expression, for a diagnostic. Arguments are elided because by
-    this point string literals in them have been blanked out."""
+    """The thrown expression, for a diagnostic. Constructor arguments are elided
+    because by this point string literals in them have been blanked out."""
     prefix = "::" if expression.startswith("::") else ""
     thrown = expression.removeprefix("::")
-    match = _QUALIFIED_NAME.match(thrown)
-    if match and thrown[match.end() :].startswith("("):
-        return f"{prefix}{match.group(0)}(...)"
+    match = _TYPE_NAME.match(thrown)
+    if match:
+        rest = thrown[match.end() :].lstrip()
+        for opening, closing in (("(", ")"), ("{", "}")):
+            if rest.startswith(opening):
+                return f"{prefix}{match.group(0)}{opening}...{closing}"
+    if len(expression) > 80:
+        return expression[:77] + "..."
     return expression
 
 
@@ -352,21 +409,28 @@ def check_source(path: str, text: str) -> list[LintMessage]:
         )
 
     throws = find_throws(code)
-    first_on_line: dict[int, Throw] = {}
+    throws_on_line: dict[int, list[Throw]] = {}
     for throw in throws:
-        first_on_line.setdefault(throw.line, throw)
+        throws_on_line.setdefault(throw.line, []).append(throw)
 
     # A marker licenses exactly one throw: the first one on the line below it.
     # A marker sharing a line with a throw licenses nothing - otherwise a
     # trailing marker would silently cover the *next* line's throw.
     licensed: set[int] = set()
     messages = []
+    code_lines = code.split("\n")
     for lineno, comment in enumerate(comments.split("\n"), 1):
         marker = _MARKER_LINE.search(comment)
         if marker is None:
             continue
-        target = first_on_line.get(lineno + 1)
-        if lineno in first_on_line or target is None:
+        # The marker gets a line to itself, so that it cannot trail a throw (and
+        # appear to license the next one) or hide at the end of a line of code.
+        # A trailing `\` is a line continuation, not code, so that a marker can
+        # sit inside a multi-line macro body - which is the only placement
+        # available there.
+        alone = not code_lines[lineno - 1].strip().rstrip("\\").strip()
+        target = throws_on_line.get(lineno + 1)
+        if not alone or target is None:
             messages.append(
                 message(
                     lineno,
@@ -376,13 +440,13 @@ def check_source(path: str, text: str) -> list[LintMessage]:
                     "file-level opt-out and it cannot trail the throw itself.",
                 )
             )
-        elif is_allowed(target.expression):
+        elif all(is_allowed(path, t.expression) for t in target):
             messages.append(
                 message(
                     lineno,
                     "redundant-allow-raw-throw",
-                    f"`throw {display(target.expression)}` is allowed already, "
-                    f"so this `{MARKER}` suppresses nothing. Remove it.",
+                    f"`{_as_statement(target[0].expression)}` is allowed "
+                    f"already, so this `{MARKER}` suppresses nothing. Remove it.",
                 )
             )
         else:
@@ -402,7 +466,7 @@ def check_source(path: str, text: str) -> list[LintMessage]:
         if throw.line in licensed:
             licensed.discard(throw.line)
             continue
-        if is_allowed(throw.expression):
+        if is_allowed(path, throw.expression):
             continue
         messages.append(
             message(throw.line, "raw-throw", describe(path, throw.expression))
