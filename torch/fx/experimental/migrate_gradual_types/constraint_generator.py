@@ -1803,8 +1803,7 @@ class ConstraintGenerator:
 
             if isinstance(t, torch.Tensor):
                 if len(t.shape) > 0:
-                    res = list(t.shape)
-                    attr_type = TensorType(res)
+                    attr_type = TensorType(t.shape)
                     output, counter = gen_tvar(counter)
                     self.symbol_dict[n] = output
                     return [BinConstraintT(output, attr_type, op_eq)], counter

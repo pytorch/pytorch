@@ -434,6 +434,15 @@ check whether the process group has already been initialized use {func}`torch.di
 .. autofunction:: set_timeout
 ```
 
+### Experimental collective time estimation
+
+The context manager and the backend's `_supports_time_estimate` capability probe are
+experimental and may change without notice.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._time_estimator
+```
+
 ### Fault-tolerant reconfiguration
 
 ```{eval-rst}
@@ -781,6 +790,20 @@ Please refer to the [profiler documentation](https://pytorch.org/docs/main/profi
 ```
 
 ## Optimization with Symmetric Memory
+
+### NCCL Symmetric Kernels
+
+NCCL 2.27 and later ship device kernels written specifically for symmetric,
+window-registered buffers, using low-latency, multimem/NVLS, and TMA algorithms
+rather than the generic ring/tree path. ``all_reduce``, ``all_gather_into_tensor``
+and ``reduce_scatter_tensor`` dispatch to them automatically once their buffers
+are registered — the call site does not change. When the buffers are not
+registered, or the op/dtype combination has no symmetric implementation, NCCL
+silently falls back to the regular path.
+
+For how to register buffers, the supported op/dtype matrix, and how to confirm
+the symmetric kernels actually ran, see
+[NCCL Symmetric Kernels](nccl-symmetric-kernels) in the Symmetric Memory documentation.
 
 ### Copy Engine Collectives
 

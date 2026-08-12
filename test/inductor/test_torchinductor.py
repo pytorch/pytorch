@@ -124,6 +124,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionAtLeast,
     skipIfTorchInductor,
     skipIfWindows,
     skipIfXpu,
@@ -6338,6 +6339,9 @@ for dtype in (torch.int32, torch.int64):
     )
     @parametrize("nhwc", (False, True))
     @with_tf32_off
+    @skipIfRocmVersionAtLeast(
+        [7, 14]
+    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
     def test_conv2d_backward_parametrized(
         self,
         channels_groups: list,
@@ -17190,6 +17194,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with ctx:
             self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
 
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_log_ndtr_signbit(self, dtype):
+        """Regression test for https://github.com/pytorch/pytorch/issues/187336."""
+        if not self.is_dtype_supported(dtype):
+            self.skipTest(f"dtype {dtype} not supported on {self.device}")
+        if self.device == "mps":
+            # aten::special_log_ndtr.out is not currently implemented for the MPS device
+            # See issue: https://github.com/pytorch/pytorch/issues/191339 (or a dedicated follow-up issue)
+            self.skipTest("aten::special_log_ndtr.out not implemented on MPS")
+
+        def fn(x):
+            return torch.special.log_ndtr(x)
+
+        x = torch.tensor([100.0, -5.0], dtype=dtype, device=self.device)
+
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor")(x)
+
+        # Value must match eager
+        self.assertEqual(actual, expected)
+        # Signbit must be set for 100.0 (result is -0.0, not +0.0)
+        self.assertTrue(
+            torch.signbit(actual[0]).item(),
+            f"log_ndtr(100.0) signbit lost for {dtype} on {self.device}",
+        )
+
+    # Halide backend does not support copysign; Triton-CPU libdevice lacks erfcx
+    test_log_ndtr_signbit._expected_failure_halide = True
+    test_log_ndtr_signbit._expected_failure_triton_cpu = True
+
     # codegen test fails with no dynamic for loop in dynamic shape tests
     @expectedFailureCodegenDynamic
     def test_view_uint8_through_differing_bitwidths(self):
@@ -19416,6 +19450,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for _ in range(4):
             self.assertEqual(compiled(x, a, b), fn(x, a, b))
 
+    def test_eye_uint16_index(self):
+        # Inductor uses uint16 indices for this size; the output remains float32.
+        def fn(x):
+            return torch.eye(x.shape[-1], device=x.device)
+
+        self.common(fn, (torch.zeros(10, 256, device=self.device),))
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -21349,6 +21390,9 @@ if RUN_GPU:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
+        @skipIfRocmVersionAtLeast(
+            [7, 14]
+        )  # ck/config.h missing on ROCm 7.14+ wheel stack
         @unittest.skipIf(
             not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
             "no scaled_grouped_mm support",
