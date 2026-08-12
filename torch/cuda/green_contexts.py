@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 __all__ = [
     "GreenContext",
     "execute_in_green_contexts",
+    "get_green_context_from_stream",
     "get_num_locality_domains",
     "is_localization_supported",
 ]
@@ -781,6 +782,13 @@ def _get_green_ctx_from_stream(stream: int) -> GreenContext | None:
 
 
 def get_green_context_from_stream(stream: torch.cuda.Stream) -> GreenContext | None:
+    r"""Return the green context associated with a CUDA stream, if any.
+
+    If the association is not already registered, it is queried from CUDA and
+    returned as a non-owning :class:`GreenContext` wrapper. The wrapper does not
+    destroy the underlying CUDA green context. Returns ``None`` if ``stream`` is
+    not associated with a green context.
+    """
     return _get_green_ctx_from_stream(stream.cuda_stream)
 
 
