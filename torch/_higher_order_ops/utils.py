@@ -115,8 +115,8 @@ def _move_batch_dims_to_last_for_scan(unbatched_args, in_dims):
 
 
 def _batch_dims_as_last_for_scan(in_dims):
-    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched,
-    # else None. Encodes the same scan-specific last-axis convention described there.
+    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched, else None.
+    # Encodes the same scan-specific last-axis convention described there.
     return tuple(
         -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
     )
@@ -126,8 +126,8 @@ class _VmapCombineFnWrapper:
     """Re-vmaps a scan/associative_scan combine_fn for use inside a scan batch rule.
 
     The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
-    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``)
-    so it cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
+    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
+    cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
     and passed as the combine_fn to the underlying HOP.
 
     Contract for callers:
@@ -140,9 +140,15 @@ class _VmapCombineFnWrapper:
         ``associative_scan_batch_rule`` falls back to the xs batch dims (the op is a
         no-op so outputs alias xs), while ``scan_batch_rule`` asserts the op always
         runs. The consistency check below guards ``out_dims`` stability across steps,
-        not ``in_dims`` correctness -- ``in_dims`` must be chosen by the caller so the
-        outputs carry the same batch dims as the inputs (see associative_scan_batch_rule,
-        which probes for the output dims and expands xs accordingly).
+        not ``in_dims`` correctness.
+      - ``expected_out_dims`` (optional): the batch-dim markers the caller assumes the
+        combine_fn outputs will carry. ``generic_associative_scan`` feeds combine_fn
+        outputs back as the left-hand arguments on later recursion levels, reusing the
+        fixed ``in_dims``; that is only valid if the outputs keep the same batchedness
+        as those inputs. When the outputs diverge (e.g. batched additional_inputs with
+        unbatched xs), the stale markers would silently reinterpret a batch axis as
+        data. Passing ``expected_out_dims`` makes the wrapper raise a clear error on
+        the first call instead, before the divergence corrupts a later level.
     """
 
     def __init__(
@@ -151,11 +157,13 @@ class _VmapCombineFnWrapper:
         in_dims: tuple[Any, ...],
         batch_size: int,
         randomness: str,
+        expected_out_dims: tuple[Any, ...] | None = None,
     ) -> None:
         self.combine_fn = combine_fn
         self.in_dims = in_dims
         self.batch_size = batch_size
         self.randomness = randomness
+        self.expected_out_dims = expected_out_dims
         self.out_dims: tuple[Any, ...] | None = None
 
     def __call__(self, *args: Any) -> Any:
