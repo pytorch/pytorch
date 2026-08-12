@@ -923,6 +923,34 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     return ctx.wrap_tensors(ret)
 
 
+class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
+    """``_VmapCombineFnWrapper`` specialization for ``combine_mode="pointwise"``.
+
+    The associative_scan batch rule only fires for pointwise combines (see Note
+    [associative_scan vmap coverage]), so ``combine_fn`` is guaranteed elementwise.
+    The base wrapper re-vmaps ``combine_fn`` with the batch dim parked on the last
+    axis; that round-trips the batch dim to the front and back, injecting a
+    canceling pair of layout ops around the elementwise core. Those ops would
+    survive into the Inductor combine subgraph and force it to elide them, which is
+    unsound for a genuinely non-pointwise combine.
+
+    When every argument is batched at the trailing axis, an elementwise combine is
+    oblivious to that axis, so we call ``combine_fn`` directly: no layout op is
+    injected and the combine subgraph stays elementwise, which is what the compile
+    path relies on. When some argument is unbatched (eager-only) we defer to the
+    base re-vmap path, which broadcasts correctly.
+    """
+
+    def __call__(self, *args: Any) -> Any:
+        if not all(bdim is not None for bdim in self.in_dims):
+            return super().__call__(*args)
+        outputs = self.combine_fn(*args)
+        # All inputs are batched at -1 and combine_fn is elementwise, so every
+        # output leaf is batched at -1 too.
+        self.out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
+        return outputs
+
+
 # Note [associative_scan vmap coverage]
 # This batch rule is dispatched only when the associative_scan_op HOP is present
 # under a vmap layer. The frontend builds that HOP for combine_mode="pointwise";
@@ -932,8 +960,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
 # Consequently only the pointwise cases in the vmap tests exercise the code below;
 # the generic cases guard the frontend decomposition instead. In eager the HOP
 # dense-decomposes on any device, so pointwise+CPU already covers this rule; the
-# CUDA-only restriction and the compile failure (xfail) are properties of the
-# lowered pointwise scan, not of this rule.
+# CUDA-only restriction is a property of the lowered pointwise scan, not this rule.
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     unbatched_args, in_dims = unwrap_batched(
@@ -976,7 +1003,11 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
             for x, xd, od in zip(unbatched_xs, xs_move_dims, out_dims)
         ]
         run_move_dims = (*out_dims, *out_dims, *additional_move_dims)
-        wrapper = _VmapCombineFnWrapper(
+        # Use the pointwise wrapper: after reconciliation the xs args are all
+        # batched, so it calls combine_fn directly and keeps the combine subgraph
+        # elementwise for the compile path (any still-unbatched arg, e.g. an
+        # unbatched additional_input in eager, falls back to the base re-vmap).
+        wrapper = _PointwiseVmapCombineFnWrapper(
             combine_fn, run_move_dims, batch_size, interpreter.randomness()
         )
         unwrapped_out = associative_scan_op(
