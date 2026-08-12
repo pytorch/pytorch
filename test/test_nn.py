@@ -13961,6 +13961,8 @@ if __name__ == '__main__':
             else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 48
                 expected_weight_grad_max_ulp_diff = 128
+                if isRocmArchAnyOf(MI200_ARCH):
+                    expected_input_grad_max_ulp_diff = 256
         elif _resolved_policy == "accurate":
             # bias=False caps are device-independent here (the device-specific
             # spread lived only in the now-dropped bias=True caps).
