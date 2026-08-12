@@ -370,7 +370,7 @@ class TestStateDictUtilsOnCUDA(DTensorTestBase):
     )
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_create_cpu_state_dict_share_and_pin(self):
+    def test_create_cpu_state_dict_share_and_pin(self, device):
         buffer = io.BytesIO()
         torch.save(torch.ones(10), buffer)
         buffer.seek(0)
@@ -391,5 +391,6 @@ class TestStateDictUtilsOnCUDA(DTensorTestBase):
 
 
 instantiate_device_type_tests(TestStateDictUtils, globals(), except_for="cpu")
+instantiate_device_type_tests(TestStateDictUtilsOnCUDA, globals(), only_for="cuda")
 if __name__ == "__main__":
     run_tests()
