@@ -1031,6 +1031,25 @@ static PyObject* THPModule_userEnabledFA3SDP(
   else
     Py_RETURN_FALSE;
 }
+static PyObject* THPModule_setSDPUseFA4(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_fa4 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFA4(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_userEnabledFA4SDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledFA4SDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 static PyObject* THPModule_setSDPUseMemEfficient(
     PyObject* _unused,
     PyObject* arg) {
@@ -2092,6 +2111,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
     {"_get_fa3_sdp_enabled", THPModule_userEnabledFA3SDP, METH_NOARGS, nullptr},
     {"_set_sdp_use_fa3", THPModule_setSDPUseFA3, METH_O, nullptr},
+    {"_get_fa4_sdp_enabled", THPModule_userEnabledFA4SDP, METH_NOARGS, nullptr},
+    {"_set_sdp_use_fa4", THPModule_setSDPUseFA4, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
      METH_NOARGS,
@@ -2674,6 +2695,13 @@ PyObject* initModule() {
   PyObject* has_cusparselt = Py_False;
 #endif
   ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
+
+#if defined(USE_CUFILE)
+  PyObject* has_gds = Py_True;
+#else
+  PyObject* has_gds = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_gds", has_gds));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;

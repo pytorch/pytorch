@@ -289,6 +289,14 @@ void Context::setSDPUseFA3(bool e) {
   enabled_fa3SDP = e;
 }
 
+bool Context::userEnabledFA4SDP() const {
+  return enabled_fa4SDP;
+}
+
+void Context::setSDPUseFA4(bool e) {
+  enabled_fa4SDP = e;
+}
+
 bool Context::userEnabledMemEfficientSDP() const {
   return enabled_mem_efficientSDP;
 }
