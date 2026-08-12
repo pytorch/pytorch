@@ -20,6 +20,10 @@ from enum import auto, Enum
 from itertools import chain, product
 from unittest import mock, SkipTest
 
+
+# This file exercises legacy ProcessGroupNCCL-specific behavior and APIs.
+os.environ["TORCH_DIST_USE_NCCL2"] = "0"
+
 import torch
 import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
