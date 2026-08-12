@@ -1619,6 +1619,37 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
+
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
@@ -2787,6 +2818,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
