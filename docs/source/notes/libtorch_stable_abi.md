@@ -61,6 +61,10 @@ which will handle all the rough edges of the C API for the user.
 - `is_tensor_pyobject`: a stable version of `THPVariable_Check` — whether a
   Python object is a `torch.Tensor` (or a subclass)
 
+The dtype and device helpers translate through the stable enum mappings, which
+cover a subset of all dtypes and device types; converting a valid `torch.dtype`
+or `torch.device` outside that subset raises.
+
 Like the rest of the stable ABI, an extension using them can just link
 `libtorch`.
 

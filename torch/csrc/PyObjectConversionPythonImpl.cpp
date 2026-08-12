@@ -79,9 +79,6 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     TORCH_CHECK(
         PyGILState_Check(),
         "torch_dtype_to_pyobject requires the GIL to be held");
-    // getTHPDtype indexes a fixed registry; bounds-check first so an invalid
-    // dtype code coming over the C shim errors instead of reading out of
-    // range.
     const auto raw = static_cast<int64_t>(dtype);
     TORCH_CHECK(
         raw >= 0 && raw < static_cast<int64_t>(at::ScalarType::NumOptions),

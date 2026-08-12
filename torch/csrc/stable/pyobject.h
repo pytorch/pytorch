@@ -48,6 +48,11 @@ inline void* tensor_to_pyobject(const Tensor& t, void* py_type = nullptr) {
   return raw;
 }
 
+// The dtype/device helpers below translate codes through the stable enum
+// mappings (torch::stable::detail::from/to), which cover a subset of all
+// ScalarTypes / DeviceTypes; a valid torch.dtype / torch.device outside that
+// subset errors even though the C shim itself can represent it.
+
 // Read the ScalarType out of a Python torch.dtype (PyObject* passed as void*).
 inline torch::headeronly::ScalarType dtype_from_pyobject(void* py_obj) {
   int32_t dtype = 0;
