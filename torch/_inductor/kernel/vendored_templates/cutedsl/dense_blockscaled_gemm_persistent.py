@@ -460,7 +460,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         alpha_tensor: cute.Tensor = None,
         epilogue_inputs: EpilogueInputPack = EpilogueInputPack(()),
         epilogue_outputs: EpilogueOutputPack = EpilogueOutputPack(()),
-        epilogue_output_count: cutlass.Constexpr = 1,
         primary_epilogue_output: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_feed_tensor: cute.Tensor = None,
@@ -589,7 +588,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         if cutlass.const_expr(local_reduce_feed_tensor is not None):
             local_reduce_feed_tensor = epilogue_tensor_to_mnl(local_reduce_feed_tensor)
 
-        self.epilogue_output_count = epilogue_output_count
         self.primary_epilogue_output = primary_epilogue_output
 
         # Setup static attributes before smem/grid/tma computation
@@ -1658,7 +1656,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         len(epilogue_inputs.values) > 0
                     )
                     has_epilogue_outputs = cutlass.const_expr(
-                        self.epilogue_output_count > 1
+                        len(epilogue_outputs.values) > 0
                     )
                     if cutlass.const_expr(
                         has_epilogue_tensors
