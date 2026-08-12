@@ -319,7 +319,7 @@ def _check_method_arity(
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
-    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
     qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
@@ -331,18 +331,55 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
+# CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
+# deliberately mirrors the low four so the mapping is near-identity.
+_METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
+
+
+@functools.cache
+def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
+    """Arity convention for `python_type.name`, read from its CPython
+    PyMethodDef.ml_flags. Falls back to VARARGS|KEYWORDS when python_type has no
+    such attribute or it carries no ml_flags (slot wrappers, pure-Python
+    functions)."""
+    import torch
+
+    default = MethodFlags.VARARGS | MethodFlags.KEYWORDS
+    fn = getattr(python_type, name, None)
+    ml = None if fn is None else torch._C._dynamo.eval_frame.get_method_ml_flags(fn)
+    if ml is None:
+        return default
+    flags = MethodFlags(0)
+    if ml & _METH_NOARGS:
+        flags |= MethodFlags.NOARGS
+    if ml & _METH_O:
+        flags |= MethodFlags.O
+    if ml & (_METH_VARARGS | _METH_FASTCALL):
+        flags |= MethodFlags.VARARGS
+    if ml & _METH_KEYWORDS:
+        flags |= MethodFlags.KEYWORDS
+    return flags or default
+
+
+def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
+    """Resolve the arity flags for method `name` from the VT's arity-reference
+    type (see VariableTracker.method_flags_type)."""
+    return _flags_from_ml_flags(vt.method_flags_type(), name)
+
+
 @dataclasses.dataclass(slots=True)
 class Method:
     """Declarative entry in a VariableTracker's `tp_methods` table, analogous
-    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+    to CPython's PyMethodDef.
 
     Handlers have signature `(self, tx, args, kwargs)` and return the result
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
-    object-protocol dispatch below."""
+    object-protocol dispatch below. The method name is the tp_methods key this
+    entry is stored under; its arity convention is derived
+    on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
-    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
 
     def __call__(
         self,
@@ -352,7 +389,8 @@ class Method:
         args: Any,
         kwargs: Any,
     ) -> VariableTracker | None:
-        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        flags = _derive_method_flags(vt, name)
+        _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
 
@@ -387,6 +425,20 @@ def getset_build(
 ) -> Callable[..., VariableTracker]:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
+
+
+def unsupported_attr(name: str) -> Callable[..., VariableTracker | None]:
+    def graph_break(
+        vt: VariableTracker, tx: InstructionTranslatorBase
+    ) -> VariableTracker | None:
+        unimplemented(
+            gb_type="Unsupported attribute",
+            context=f"attr_unsupported {vt} {name}",
+            explanation=f"{type(vt).__name__} does not support attribute '{name}'",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
+    return graph_break
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1596,14 +1648,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     return table[name]
         return None
 
-    def lookup_tp_getset(self, name: str) -> GetSet | None:
-        return self._lookup_tp_table(name, "tp_getset")
-
-    def lookup_tp_member(self, name: str) -> Member | None:
-        return self._lookup_tp_table(name, "tp_members")
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        return self._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def method_flags_type(self) -> type:
+        """Type whose CPython ml_flags define this VT's tp_methods arities
+        (see _derive_method_flags). Defaults to python_type(); a VT whose
+        python_type() is a pure-Python stand-in without C ml_flags (e.g.
+        OrderedSet) overrides this to the builtin whose method arities it
+        mirrors, so MethodFlags still enforces arity."""
+        return maybe_get_python_type(self)
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
@@ -1738,6 +1795,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.python_type().__name__
         except NotImplementedError:
             return "<unknown type>"
+
+    def python_qualified_name(self) -> str:
+        """
+        Equivalent to _PyType_GetFullyQualifiedName
+
+        See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+        """
+        try:
+            type_ = self.python_type()
+        except NotImplementedError:
+            return "<unknown type>"
+        # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
+        # (and not execute user code)
+        mod = type_.__module__
+        qn = type_.__qualname__
+        if mod not in ("__main__", "builtins"):
+            return f"{mod}.{qn}"
+        else:
+            return qn
 
     def as_python_constant(self) -> Any:
         """For constants"""
@@ -1891,6 +1967,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
+    def get_value_for_setattr(self) -> object | None:
+        """Return the wrapped Python object for generic STORE_ATTR mutation,
+        or None to decline.  Only override for VTs with __dict__ and
+        standard __setattr__."""
+        return None
+
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -1924,7 +2006,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         # tp_getset/tp_members are data descriptors: resolve ahead of the
         # object-protocol walk. A getter returning None declines.
-        getset = self.lookup_tp_getset(name)
+        getset = self.lookup_tp_getset_member(name)
         if getset is not None:
             result = getset.getter(self, tx)
             if result is not None:
@@ -2018,6 +2100,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> list[VariableTracker]:
         raise NotImplementedError
 
+    def _hasattr_check_side_effects(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> ConstantVariable | None:
+        """If *name* has a pending mutation, return the hasattr result; else None."""
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(value, variables.DeletedVariable)
+            )
+        return None
+
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -2028,6 +2121,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         True/False.
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
+        result = self._hasattr_check_side_effects(tx, name)
+        if result is not None:
+            return result
+
         try:
             self.getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)
