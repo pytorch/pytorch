@@ -55,7 +55,7 @@ class TestFormatUtils(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_temp_dir
-    def test_dcp_to_torch_save(self) -> None:
+    def test_dcp_to_torch_save(self, device) -> None:
         model = SimpleModelUneven()
         dcp.save({"model": model}, checkpoint_id=self.temp_dir)
 
@@ -66,7 +66,7 @@ class TestFormatUtils(DTensorTestBase):
         self.assertEqual(loaded_sd, {"model": model.state_dict()})
 
     @with_temp_dir
-    def test_torch_save_to_dcp(self) -> None:
+    def test_torch_save_to_dcp(self, device) -> None:
         model = SimpleModelUneven()
         sd = {"model": model.state_dict()}
         torch_path = self.temp_dir + "/model.pt"
