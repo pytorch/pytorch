@@ -857,7 +857,10 @@ class CUDAGraph(_CUDAGraph):
 
         _require_cuda_bindings()
         # Narrow for the type checker (cuda bindings are present past the check).
-        assert _cuda_runtime is not None and _cuda_driver is not None  # noqa: S101
+        if _cuda_runtime is None or _cuda_driver is None:
+            raise AssertionError(
+                "expected _cuda_runtime and _cuda_driver to be not None"
+            )
 
         if _is_tools_id_unavailable():
             raise RuntimeError(
@@ -1223,6 +1226,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> _ModuleOrCallable: ...
 
 
@@ -1234,6 +1238,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -1244,6 +1249,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -1278,6 +1284,11 @@ def make_graphed_callables(
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
             :class:`~torch.cuda.MemPool` that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+        enable_annotations (bool, optional): If ``True``, the forward and backward
+            captures record kernel annotations from
+            :func:`torch.cuda.graph_annotations.mark_kernels` scopes inside the
+            callables (backward kernels are tagged via the scopes' autograd node
+            hooks). See :mod:`torch.cuda.graph_annotations`. Default: ``False``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -1417,6 +1428,7 @@ def make_graphed_callables(
             stream=stream,
             pool=mempool,
             capture_error_mode=capture_error_mode,
+            enable_annotations=enable_annotations,
         ):
             func_outputs = func(*args)
 
@@ -1446,6 +1458,7 @@ def make_graphed_callables(
                 stream=stream,
                 pool=mempool,
                 capture_error_mode=capture_error_mode,
+                enable_annotations=enable_annotations,
             ):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
