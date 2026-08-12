@@ -16,10 +16,14 @@ the health watchdog takes a configurable action.
 Usage:
 
     from torch.distributed._watchdog import (
+        init,
         stream_timeout,
         cpu_timeout,
         op_timeout,
     )
+
+    # Optional: configure programmatically (overrides env vars)
+    init(poll_interval=0.5, timeout_action="abort")
 
     # Detect a hung GPU kernel: record event AFTER the kernel launch
     some_kernel_launch()
@@ -59,6 +63,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "_get_watchdog",
+    "init",
     "shutdown",
     "stream_timeout",
     "cpu_timeout",
@@ -134,18 +139,29 @@ class _Watchdog:
     thread.
     """
 
-    def __init__(self) -> None:
-        self._poll_interval = float(
-            os.environ.get("TORCH_WATCHDOG_POLL_INTERVAL_SECS", "1.0")
+    def __init__(
+        self,
+        *,
+        poll_interval: float | None = None,
+        health_interval: float | None = None,
+        stuck_action: str | None = None,
+        timeout_action: str | None = None,
+    ) -> None:
+        self._poll_interval = (
+            poll_interval
+            if poll_interval is not None
+            else float(os.environ.get("TORCH_WATCHDOG_POLL_INTERVAL_SECS", "1.0"))
         )
-        self._health_interval = float(
-            os.environ.get("TORCH_WATCHDOG_HEALTH_INTERVAL_SECS", "30.0")
+        self._health_interval = (
+            health_interval
+            if health_interval is not None
+            else float(os.environ.get("TORCH_WATCHDOG_HEALTH_INTERVAL_SECS", "30.0"))
         )
-        self._stuck_action = os.environ.get(
-            "TORCH_WATCHDOG_STUCK_ACTION", "log"
+        self._stuck_action = (
+            stuck_action or os.environ.get("TORCH_WATCHDOG_STUCK_ACTION", "log")
         ).lower()
-        self._timeout_action = os.environ.get(
-            "TORCH_WATCHDOG_TIMEOUT_ACTION", "abort"
+        self._timeout_action = (
+            timeout_action or os.environ.get("TORCH_WATCHDOG_TIMEOUT_ACTION", "abort")
         ).lower()
 
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
@@ -365,6 +381,44 @@ def shutdown() -> None:
             _watchdog = None
     if wd is not None:
         wd.shutdown()
+
+
+def init(
+    *,
+    poll_interval: float | None = None,
+    health_interval: float | None = None,
+    stuck_action: str | None = None,
+    timeout_action: str | None = None,
+) -> None:
+    """Configure and start the watchdog.
+
+    Programmatic settings override environment variables.
+
+    If a watchdog is already running it is shut down first.
+
+    Args:
+        poll_interval: Seconds between CUDA event polls (env: TORCH_WATCHDOG_POLL_INTERVAL_SECS, default 1.0).
+        health_interval: Seconds between health pings (env: TORCH_WATCHDOG_HEALTH_INTERVAL_SECS, default 30.0).
+        stuck_action: Action when event loop is stuck: "log", "abort", or "exit" (env: TORCH_WATCHDOG_STUCK_ACTION, default "log").
+        timeout_action: Action on timeout: "abort" or "log" (env: TORCH_WATCHDOG_TIMEOUT_ACTION, default "abort").
+
+    Example::
+        from torch.distributed._watchdog import init
+
+        init(poll_interval=0.5, timeout_action="abort")
+    """
+    global _watchdog
+    old: _Watchdog | None = None
+    with _watchdog_lock:
+        old = _watchdog
+        _watchdog = _Watchdog(
+            poll_interval=poll_interval,
+            health_interval=health_interval,
+            stuck_action=stuck_action,
+            timeout_action=timeout_action,
+        )
+    if old is not None:
+        old.shutdown()
 
 
 def stream_timeout(
