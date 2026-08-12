@@ -1172,10 +1172,27 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     // channel multipliers ride the same kernel: output channel o reads input
     // channel o / (C_out / groups)
     const bool is_depthwise = groups > 0 && groups == input_t.size(1) && weight_t.size(0) % groups == 0;
-    const bool use_depthwise_metal = is_depthwise && (output_t.is_contiguous() || conv1d_is_nlc(output_t)) &&
+    // A groups == 1, C_in == 1 conv only matches the depthwise pattern
+    // degenerately; strided catalog geometries with enough columns to fill a
+    // destination tile run faster as the direct GEMM than as C_out dw passes.
+    const bool c1_direct = groups == 1 && input_t.size(1) == 1 && stride[1] > 1 && output_t.size(3) >= 64 &&
+        conv1d_direct_metal_eligible(input_t, weight_t, bias_defined, stride[1], dilation[1], groups, output_t);
+    const bool use_depthwise_metal = is_depthwise && !c1_direct &&
+        (output_t.is_contiguous() || conv1d_is_nlc(output_t)) &&
         conv1d_dw_indexing_fits_int32(weight_t, stride[1], padding[1], dilation[1], output_t);
     if (use_depthwise_metal) {
       conv1d_dw_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], output_t);
+      return output_t;
+    }
+    if (c1_direct) {
+      conv3d_metal_forward(input_t.unsqueeze(2),
+                           weight_t.unsqueeze(2),
+                           bias_opt,
+                           {0, 0, padding[1]},
+                           {1, 1, stride[1]},
+                           {1, 1, dilation[1]},
+                           groups,
+                           output_t.unsqueeze(2));
       return output_t;
     }
     if (groups == 1 && input_t.size(1) > 0 && output_t.size(3) == 1 && padding[1] == 0) {
@@ -1234,7 +1251,10 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       const auto input_g0 = input_t.narrow(1, 0, group_in);
       const auto weight_g0 = weight_t.narrow(0, 0, group_out);
       const auto output_g0 = output_t.narrow(1, 0, group_out);
-      if (group_out > 0 &&
+      // a channel-narrowed slice of a channels-last output is not NDHWC-packed,
+      // so the ndhwc kernels cannot write it; those shapes take the catch-all
+      const bool sliced_output_ok = output_g0.is_contiguous() || is_packed_channels_last_3d(output_g0.unsqueeze(2));
+      if (group_out > 0 && sliced_output_ok &&
           conv1d_direct_metal_eligible(input_g0, weight_g0, bias_defined, stride[1], dilation[1], 1, output_g0)) {
         for (const auto g : c10::irange(groups)) {
           const auto bias_g =

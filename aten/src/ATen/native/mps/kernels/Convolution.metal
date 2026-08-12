@@ -1136,52 +1136,60 @@ kernel void conv3d_mpp(
 // tiles are flat along W. Relaxed-mode MPP miscomputes BH == 1 tiles with
 // BW / NSG < 16 (measured), so every candidate keeps BW >= 16 * NSG.
 // clang-format off
-#define INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, BNAME, HAS_BIAS) \
+#define INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, BNAME, HAS_BIAS, LNAME, OUT_NCDHW) \
   INSTANTIATE_CONV3D_MPP_DTYPES(32, 32, 1, 2, 1, 1, KW, 1, 1, SX, 1, 1, DX,   \
-      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)             \
+      CNAME, SRCC, BNAME, HAS_BIAS, LNAME, OUT_NCDHW, ungrouped, false)        \
   INSTANTIATE_CONV3D_MPP_DTYPES(64, 64, 1, 2, 1, 1, KW, 1, 1, SX, 1, 1, DX,   \
-      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)             \
+      CNAME, SRCC, BNAME, HAS_BIAS, LNAME, OUT_NCDHW, ungrouped, false)        \
   INSTANTIATE_CONV3D_MPP_DTYPES(64, 128, 1, 4, 1, 1, KW, 1, 1, SX, 1, 1, DX,  \
-      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)             \
+      CNAME, SRCC, BNAME, HAS_BIAS, LNAME, OUT_NCDHW, ungrouped, false)        \
   INSTANTIATE_CONV3D_MPP_DTYPES(128, 64, 1, 4, 1, 1, KW, 1, 1, SX, 1, 1, DX,  \
-      CNAME, SRCC, BNAME, HAS_BIAS, ncdhw, true, ungrouped, false)
+      CNAME, SRCC, BNAME, HAS_BIAS, LNAME, OUT_NCDHW, ungrouped, false)
 
-#define INSTANTIATE_CONV1D_MPP(KW, SX, DX, CNAME, SRCC)             \
-  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, bias, true) \
-  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false)
+#define INSTANTIATE_CONV1D_MPP(KW, SX, DX, CNAME, SRCC)                          \
+  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, bias, true, ncdhw, true) \
+  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false, ncdhw, true)
+
+// Strided conv1d cannot ride the unit-stride conv1d_sgemm path, so channels-last
+// outputs (inherited from channels-last inputs) need ndhwc twins to stay on the
+// direct kernel; s == 1 geometries never reach it with a channels-last output.
+#define INSTANTIATE_CONV1D_MPP_STRIDED(KW, SX, CNAME, SRCC)                        \
+  INSTANTIATE_CONV1D_MPP(KW, SX, 1, CNAME, SRCC)                                   \
+  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, 1, CNAME, SRCC, bias, true, ndhwc, false)   \
+  INSTANTIATE_CONV1D_MPP_TILES(KW, SX, 1, CNAME, SRCC, nobias, false, ndhwc, false)
 // clang-format on
 
 #undef CONV3D_MPP_SRCW
 #define CONV3D_MPP_SRCW conv1d_mpp_src_width_hint
 
-INSTANTIATE_CONV1D_MPP(2, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(2, 2, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 2, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 3, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 4, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 5, dyn, -1)
-INSTANTIATE_CONV1D_MPP(3, 2, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(3, 3, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(4, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(3, 2, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(3, 3, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(4, 2, dyn, -1)
 INSTANTIATE_CONV1D_MPP(5, 1, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(5, 2, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(6, 3, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(5, 2, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(6, 3, dyn, -1)
 INSTANTIATE_CONV1D_MPP(7, 1, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(7, 1, 3, dyn, -1)
 INSTANTIATE_CONV1D_MPP(7, 1, 5, dyn, -1)
 INSTANTIATE_CONV1D_MPP(7, 1, 9, dyn, -1)
-INSTANTIATE_CONV1D_MPP(8, 4, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(10, 4, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(10, 5, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(8, 4, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(10, 4, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(10, 5, dyn, -1)
 INSTANTIATE_CONV1D_MPP(10, 5, 1, 1, 1)
 INSTANTIATE_CONV1D_MPP(11, 1, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(11, 1, 3, dyn, -1)
 INSTANTIATE_CONV1D_MPP(11, 1, 5, dyn, -1)
-INSTANTIATE_CONV1D_MPP(12, 6, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(16, 8, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(3, 5, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(5, 3, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(7, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(12, 6, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(16, 8, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(3, 5, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(5, 3, dyn, -1)
+INSTANTIATE_CONV1D_MPP_STRIDED(7, 2, dyn, -1)
 
 #undef CONV3D_MPP_SRCW
 #define CONV3D_MPP_SRCW 16384
