@@ -21,22 +21,42 @@ class DataPtr;
 /**
  * Note [Flags defining the behavior of events]
  *
- * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
- * BACKEND_DEFAULT is what a particular backend would select if no
- * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same.
+ * EventFlag is a bitmask where each bit controls one feature:
+ *   bit 0 (0x1): enable timing
+ *   bit 1 (0x2): CPU-blocking synchronize
+ *   bit 2 (0x4): IPC-shareable (interprocess)
+ *   bits 3-7:    reserved (used internally by legacy sentinel values)
  *
- * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation.
+ * PYTORCH_DEFAULT (0x0), BACKEND_DEFAULT (0xF9), and INVALID (0xFF) are
+ * legacy sentinels preserved for backward compatibility. New code should
+ * compose bit flags directly, e.g.:
+ *
+ *   EventFlag::TIMING
+ *   EventFlag::TIMING | EventFlag::BLOCKING
+ *   EventFlag::BLOCKING | EventFlag::INTERPROCESS
+ *
+ * Backends that do not support a flag should ignore the corresponding bit.
  */
-enum class EventFlag {
-  // Disable timing
-  PYTORCH_DEFAULT,
-  // Enable timing
-  BACKEND_DEFAULT,
-  // FOR TESTING ONLY
-  INVALID
+enum class EventFlag : uint8_t {
+  // Legacy sentinels -- BC preserved
+  PYTORCH_DEFAULT = 0x0, // no timing, no blocking, no interprocess
+  BACKEND_DEFAULT = 0xF9, // legacy CUDA default (timing only); bits 3-7 set to
+  // distinguish from new bitmask values
+  INVALID = 0xFF, // sentinel for testing; not a valid flag
+
+  // Bit flags -- combine with operator|.
+  TIMING = 0x1, // enable timing
+  BLOCKING = 0x2, // CPU blocks in synchronize()
+  INTERPROCESS = 0x4, // event is IPC-shareable
 };
+
+inline EventFlag operator|(EventFlag a, EventFlag b) {
+  return static_cast<EventFlag>(
+      static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+inline bool operator&(EventFlag a, EventFlag b) {
+  return static_cast<uint8_t>(a) & static_cast<uint8_t>(b);
+}
 
 namespace impl {
 
