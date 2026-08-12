@@ -58,7 +58,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfMPS,
     TEST_Z3,
     run_tests,
     TestCase,
@@ -2133,7 +2132,6 @@ class {test_classname}(torch.nn.Module):
 class TestNormalizeOperators(JitTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIfMPS
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
