@@ -114,6 +114,22 @@ NANMEAN_CASES = (
     ("split_fp64", (8, 65536), 1, torch.float64),
 )
 
+LOGSUMEXP_CASES = (
+    ("persistent_fp32", (64, 256), 1, torch.float32),
+    ("persistent_fp64", (64, 256), 1, torch.float64),
+    ("looped_fp32", (8, 12000), 1, torch.float32),
+    ("looped_fp64", (8, 12000), 1, torch.float64),
+    ("split_fp32", (8, 65536), 1, torch.float32),
+    ("split_fp64", (8, 65536), 1, torch.float64),
+)
+
+LOGSUMEXP_FALLBACK_CASES = (
+    ("persistent_fp16", (64, 256), 1, torch.float16),
+    ("persistent_bf16", (64, 256), 1, torch.bfloat16),
+    ("looped_fp16", (8, 12000), 1, torch.float16),
+    ("looped_bf16", (8, 12000), 1, torch.bfloat16),
+)
+
 DYNAMIC_CASES = (("plan_change", (512, 65537), {}),)
 
 OUT_OF_SCOPE_CASES = (
@@ -281,6 +297,92 @@ class StrictNumericsTest(TestCase):
         self._assert_bitwise_equal(eager, result)
         self.assertTrue((result != 0).all().item())
         self.assertIn(INNER_TREE_CALL, code)
+
+    def _make_logsumexp_input(self, shape, dtype, device):
+        m, n = shape
+        values = torch.arange(m * n, device=device, dtype=torch.float64).reshape(m, n)
+        return (((values % 29) - 14) / 29 + ((values % 7) - 3) / 13).to(dtype)
+
+    @parametrize("case", LOGSUMEXP_CASES, name_fn=lambda c: c[0])
+    def test_logsumexp_bitwise(self, device, case):
+        name, shape, dim, dtype = case
+        x = self._make_logsumexp_input(shape, dtype, device)
+
+        def fn(z):
+            return torch.logsumexp(z, dim)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertIn("libdevice.exp(", code)
+        self.assertIn("libdevice.log(", code)
+        self.assertNotIn("tl_math.exp", code)
+        self.assertNotIn("tl_math.log", code)
+        expected_count = 2 if name.startswith("split") else 1
+        self.assertEqual(code.count(INNER_TREE_CALL), expected_count)
+        if name.startswith("persistent"):
+            self.assertIn("@triton_heuristics.persistent_reduction(", code)
+        elif name.startswith("looped"):
+            self.assertIn("for r0_offset in", code)
+
+    def test_logsumexp_strict_overrides_fast_math(self, device):
+        x = self._make_logsumexp_input((64, 256), torch.float32, device)
+
+        def fn(z):
+            return torch.logsumexp(z, 1)
+
+        eager = fn(x)
+        result, code = self._run(fn, x, use_fast_math=True)
+        self._assert_bitwise_equal(eager, result)
+        self.assertIn("libdevice.exp(", code)
+        self.assertIn("libdevice.log(", code)
+        self.assertNotIn("tl_math.exp", code)
+        self.assertNotIn("tl_math.log", code)
+        self.assertEqual(code.count(INNER_TREE_CALL), 1)
+
+    def test_logsumexp_all_negative_infinity(self, device):
+        x = self._make_logsumexp_input((64, 256), torch.float32, device)
+        x[0].fill_(-torch.inf)
+
+        def fn(z):
+            return torch.logsumexp(z, 1)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertTrue(torch.isneginf(result[0]).item())
+        self.assertFalse(torch.isnan(result[0]).item())
+        self.assertIn(INNER_TREE_CALL, code)
+        self.assertIn("libdevice.exp(", code)
+        self.assertIn("libdevice.log(", code)
+
+    @parametrize("case", LOGSUMEXP_FALLBACK_CASES, name_fn=lambda c: c[0])
+    def test_logsumexp_low_precision_fallback(self, device, case):
+        _, shape, dim, dtype = case
+        x = self._make_logsumexp_input(shape, dtype, device)
+
+        def fn(z):
+            return torch.logsumexp(z, dim)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertIn("torch.ops.aten.logsumexp.default", code)
+        self.assertNotIn(INNER_TREE_CALL, code)
+
+    def test_logsumexp_multidim_fallback(self, device):
+        x = self._make_logsumexp_input((64, 256), torch.float32, device).reshape(
+            2, 32, 256
+        )
+
+        def fn(z):
+            return torch.logsumexp(z, (0, 1))
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertIn("torch.ops.aten.logsumexp.default", code)
+        self.assertNotIn(INNER_TREE_CALL, code)
 
     def _make_nansum_input(self, shape, dtype, device):
         # Standard-normal values keep magnitudes reasonable while making the
