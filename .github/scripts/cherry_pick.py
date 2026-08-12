@@ -109,14 +109,19 @@ def resolve_trunk_revert(
     if not revert_sha:
         return None
 
-    if not is_ancestor(repo, commit_sha, onto_branch):
+    # This runs before create_cherry_pick_branch checks the branch out, so it
+    # only exists as a remote-tracking ref. git rev-parse's DWIM does not reach
+    # refs/remotes/origin/<branch> from a bare name, so qualify it.
+    onto_ref = f"{repo.remote}/{onto_branch}"
+
+    if not is_ancestor(repo, commit_sha, onto_ref):
         raise RuntimeError(
             f"Refuse to cherry pick #{pr.pr_num} onto {onto_branch}: it was reverted "
             f"on {pr.default_branch()} by {revert_sha}, and its landed commit "
             f"{commit_sha} is not on {onto_branch}, so there is nothing to revert there."
         )
 
-    if is_ancestor(repo, revert_sha, onto_branch):
+    if is_ancestor(repo, revert_sha, onto_ref):
         raise RuntimeError(
             f"Refuse to cherry pick #{pr.pr_num} onto {onto_branch}: the revert "
             f"{revert_sha} is already on {onto_branch}."

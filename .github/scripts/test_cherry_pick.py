@@ -118,6 +118,23 @@ class TestResolveTrunkRevert(TestCase):
             resolve_trunk_revert(repo, make_pr(), "release/2.14", OTHER_LANDED)
         )
 
+    def test_ancestry_is_checked_against_the_remote_tracking_ref(self) -> None:
+        # This runs before the branch is checked out, so it only exists as
+        # refs/remotes/origin/<branch>. git rev-parse's DWIM ladder does not
+        # reach that from a bare "release/2.14", so both guards would die with
+        # exit 128 on exactly the PRs this feature exists for.
+        seen: list[str] = []
+        repo = make_repo(f"{REVERT}\n", on_branch=(LANDED,))
+        repo.get_merge_base.side_effect = lambda ref, branch: (
+            seen.append(branch) or (ref if ref == LANDED else "base")
+        )
+
+        resolve_trunk_revert(repo, make_pr(), "release/2.14", LANDED)
+
+        self.assertTrue(seen)
+        for branch in seen:
+            self.assertEqual(branch, "origin/release/2.14")
+
 
 class TestCreateCherryPickBranch(TestCase):
     def _repo(self) -> Any:
