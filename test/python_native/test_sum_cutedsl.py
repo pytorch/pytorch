@@ -385,6 +385,19 @@ class TestSumCuteDSLOverride(TestCase):
             got = x.prod(dim=1)
         self.assertFalse(torch.equal(got, ref))
 
+    @skipIfRocm
+    def test_prod_output_hash(self):
+        cases = [
+            (torch.float32, 128, 8192, "37bd2a1dc47b71c5"),
+            (torch.float64, 8, 200000, "374e728d5c174437"),
+        ]
+        for dtype, m, n, expected in cases:
+            with self.subTest(dtype=dtype, m=m, n=n):
+                x = self._make_prod_input(m, n, dtype)
+                with self._inner_tree_flag():
+                    result = x.prod(dim=1)
+                self.assertEqual(self._sha(result), expected)
+
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_prod_low_precision_matches_aten(self, dtype):
         # 0.75 and 1.25 are exactly representable in fp16/bf16; a sparse set of
@@ -455,6 +468,737 @@ class TestSumCuteDSLOverride(TestCase):
         with self._inner_tree_flag():
             result = x.prod(dim=1)
         self.assertEqual(result, torch.ones(17, device="cuda", dtype=dtype))
+
+    # --- nansum (shares the inner-tree sum DAG after filtering loaded NaNs) ---
+
+    def _make_nansum_input(self, m, n, dtype):
+        compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        cols = torch.arange(n, device="cuda", dtype=compute_dtype).reshape(1, n)
+        rows = torch.arange(m, device="cuda", dtype=compute_dtype).reshape(m, 1)
+        values = (cols % 9) - 4 + (rows % 3) - 1
+        values[:, ::17] = float("nan")
+        return values.to(dtype)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nansum_override_matches_aten(self, dtype):
+        # Exact small integers keep every fp32 partial sum below 2**24, making
+        # the reference independent of its different reduction order.
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nansum_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nansum(x, dim=1)
+                with self._inner_tree_flag():
+                    got = torch.nansum(x, dim=1)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nansum_matches_sum_of_nan_to_num(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                x[:, ::17] = float("nan")
+                zero = torch.zeros((), device=x.device, dtype=x.dtype)
+                with self._inner_tree_flag():
+                    got = torch.nansum(x, dim=1)
+                    expected = torch.sum(torch.where(torch.isnan(x), zero, x), dim=1)
+                self.assertTrue(
+                    torch.equal(got.view(view_dtype), expected.view(view_dtype))
+                )
+
+    def test_nansum_override_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nansum_input(128, 8195, torch.float32)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.nansum(x, dim=1)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_nansum_into",
+                wraps=inner_tree_kernel.inner_tree_nansum_into,
+            ) as nansum_into,
+            self._inner_tree_flag(),
+        ):
+            got = torch.nansum(x, dim=1)
+        self.assertEqual(nansum_into.call_count, 1)
+        self.assertEqual(got, ref, rtol=0, atol=0)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_nansum_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nansum_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nansum(x, dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nansum(x, dim=1)
+                self.assertEqual(nansum_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_nansum_override_out_variant(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        x[:, ::17] = float("nan")
+        with self._inner_tree_flag():
+            functional = torch.nansum(x, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_nansum_into",
+                wraps=inner_tree_kernel.inner_tree_nansum_into,
+            ) as nansum_into,
+            self._inner_tree_flag(),
+        ):
+            returned = torch.nansum(x, dim=1, out=out)
+        self.assertEqual(nansum_into.call_count, 1)
+        self.assertIs(returned, out)
+        self.assertTrue(
+            torch.equal(out.view(torch.int32), functional.view(torch.int32))
+        )
+
+    def test_nansum_nan_to_zero(self):
+        n = 32769
+        x = torch.zeros(3, n, device="cuda", dtype=torch.float32)
+        x[0].fill_(float("nan"))
+        x[1, 0] = 1.0
+        x[1, 3:5] = float("nan")
+        x[1, 4097] = 2.0
+        x[1, 8191:8193] = float("nan")
+        x[1, -1] = -4.0
+        x[2, 0] = float("inf")
+        x[2, 1] = -float("inf")
+        x[2, 8192] = float("nan")
+        x[2, -1] = 1.0
+        with self._inner_tree_flag():
+            result = torch.nansum(x, dim=1)
+        self.assertEqual(result[0].view(torch.int32).item(), 0)
+        self.assertEqual(result[1].item(), -1.0)
+        self.assertTrue(torch.isnan(result[2]).item())
+
+    def test_nansum_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nansum_input(4, 32, torch.float32)
+        complex_x = torch.ones(4, 32, device="cuda", dtype=torch.complex64)
+        complex_x[:, ::17] = complex(float("nan"), 0.0)
+        cases = [
+            ("dim_none", x, {"dim": None}),
+            ("multi_dim", x.reshape(2, 2, 32), {"dim": (1, 2)}),
+            ("explicit_dtype", x, {"dim": 1, "dtype": torch.float64}),
+            ("noncontiguous", x[:, ::2], {"dim": 1}),
+            (
+                "integer",
+                torch.arange(128, device="cuda", dtype=torch.int64).reshape(4, 32),
+                {"dim": 1},
+            ),
+            ("complex", complex_x, {"dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nansum(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nansum(input_, **kwargs)
+                self.assertEqual(nansum_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+    # --- mean (sum DAG followed by one final division) ---
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_mean_matches_sum_over_n(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                with self._inner_tree_flag():
+                    got = torch.mean(x, dim=1)
+                    # IEEE true division (tensor/tensor, div.rn) to match the
+                    # kernel's divide-by-N. NOTE: `tensor / python_int` lowers to
+                    # reciprocal-multiply (sum * (1/n)) which differs by ~1 ULP.
+                    expected = torch.sum(x, dim=1) / torch.tensor(
+                        n, device=x.device, dtype=dtype
+                    )
+                self.assertTrue(
+                    torch.equal(got.view(view_dtype), expected.view(view_dtype))
+                )
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_mean_matches_aten(self, dtype):
+        rtol, atol = (1e-5, 1e-6) if dtype == torch.float32 else (1e-12, 1e-12)
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.mean(x, dim=1)
+                with self._inner_tree_flag():
+                    got = torch.mean(x, dim=1)
+                self.assertEqual(got, ref, rtol=rtol, atol=atol)
+
+    def test_mean_override_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_mean_into",
+                wraps=inner_tree_kernel.inner_tree_mean_into,
+            ) as mean_into,
+            self._inner_tree_flag(),
+        ):
+            torch.mean(x, dim=1)
+        self.assertEqual(mean_into.call_count, 1)
+
+    def test_mean_override_out_variant(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        with self._inner_tree_flag():
+            functional = torch.mean(x, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_mean_into",
+                wraps=inner_tree_kernel.inner_tree_mean_into,
+            ) as mean_into,
+            self._inner_tree_flag(),
+        ):
+            returned = torch.mean(x, dim=1, out=out)
+        self.assertEqual(mean_into.call_count, 1)
+        self.assertIs(returned, out)
+        self.assertTrue(
+            torch.equal(out.view(torch.int32), functional.view(torch.int32))
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_mean_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.mean(x, dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_mean_into",
+                        wraps=inner_tree_kernel.inner_tree_mean_into,
+                    ) as mean_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.mean(x, dim=1)
+                self.assertEqual(mean_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_mean_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(4, 32, torch.float32)
+        cases = [
+            ("bare", x, {}),
+            ("explicit_dtype", x, {"dim": 1, "dtype": torch.float64}),
+            ("multi_dim", x.reshape(2, 2, 32), {"dim": (1, 2)}),
+            ("noncontiguous", x[:, ::2], {"dim": 1}),
+            ("complex", x.to(torch.complex64), {"dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.mean(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_mean_into",
+                        wraps=inner_tree_kernel.inner_tree_mean_into,
+                    ) as mean_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.mean(input_, **kwargs)
+                self.assertEqual(mean_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+        integer = torch.ones(4, 32, device="cuda", dtype=torch.int64)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_mean_into",
+                wraps=inner_tree_kernel.inner_tree_mean_into,
+            ) as mean_into,
+            self._inner_tree_flag(),
+            self.assertRaisesRegex(RuntimeError, "could not infer output dtype"),
+        ):
+            torch.mean(integer, dim=1)
+        self.assertEqual(mean_into.call_count, 0)
+
+    # --- vector norm (abs/square pre-map plus optional sqrt post-map) ---
+
+    def test_vector_norm_cond_orders(self):
+        impl = _cutedsl_impl()
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with self._inner_tree_flag():
+            for order in (1, 1.0, 2, 2.0):
+                with self.subTest(order=order):
+                    self.assertTrue(impl._vector_norm_cond(x, order, [1]))
+                    self.assertTrue(impl._vector_norm_out_cond(x, order, [1], out=out))
+            self.assertTrue(impl._vector_norm_cond(x, dim=[1]))
+            self.assertTrue(impl._vector_norm_out_cond(x, dim=[1], out=out))
+
+            for order in (0, 3, float("inf"), -float("inf"), 1 + 0j, True):
+                with self.subTest(rejected_order=order):
+                    self.assertFalse(impl._vector_norm_cond(x, order, [1]))
+                    self.assertFalse(impl._vector_norm_out_cond(x, order, [1], out=out))
+
+            self.assertFalse(impl._vector_norm_cond(x, 2, [1], dtype=torch.float32))
+            self.assertFalse(
+                impl._vector_norm_out_cond(x, 2, [1], dtype=torch.float32, out=out)
+            )
+            self.assertFalse(impl._vector_norm_cond(x, 2, None))
+            self.assertFalse(impl._vector_norm_out_cond(x, 2, None, out=out))
+            x_3d = x.reshape(2, 64, 8195)
+            self.assertFalse(impl._vector_norm_cond(x_3d, 2, [1, 2]))
+            self.assertFalse(
+                impl._vector_norm_out_cond(
+                    x_3d,
+                    2,
+                    [1, 2],
+                    out=torch.empty(2, device="cuda", dtype=torch.float32),
+                )
+            )
+
+            for unsupported in (
+                torch.ones(4, 32, device="cuda", dtype=torch.int64),
+                torch.ones(4, 32, device="cuda", dtype=torch.complex64),
+                x[:, ::2],
+            ):
+                with self.subTest(dtype=unsupported.dtype, stride=unsupported.stride()):
+                    unsupported_out = torch.empty(
+                        unsupported.shape[0],
+                        device="cuda",
+                        dtype=(
+                            torch.float32
+                            if unsupported.is_complex()
+                            else unsupported.dtype
+                        ),
+                    )
+                    self.assertFalse(impl._vector_norm_cond(unsupported, 2, [1]))
+                    self.assertFalse(
+                        impl._vector_norm_out_cond(
+                            unsupported, 2, [1], out=unsupported_out
+                        )
+                    )
+
+            singleton = torch.ones(4, 1, device="cuda", dtype=torch.float32)
+            singleton_out = torch.empty(4, device="cuda", dtype=torch.float32)
+            self.assertFalse(impl._vector_norm_cond(singleton, 2, [1]))
+            self.assertFalse(
+                impl._vector_norm_out_cond(singleton, 2, [1], out=singleton_out)
+            )
+
+            self.assertTrue(impl._vector_norm_cond(x, 2, [1]))
+            for invalid_out in (
+                torch.empty(129, device="cuda", dtype=torch.float32),
+                torch.empty(128, device="cuda", dtype=torch.float64),
+            ):
+                self.assertFalse(impl._vector_norm_out_cond(x, 2, [1], out=invalid_out))
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_vector_norm_matches_inner_tree_composition(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for order in (2, 1):
+            for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+                with self.subTest(order=order, m=m, n=n):
+                    x = self._make_order_sensitive_input(m, n, dtype)
+                    with self._inner_tree_flag():
+                        got = torch.linalg.vector_norm(x, ord=order, dim=1)
+                        if order == 2:
+                            expected = torch.sqrt(torch.sum(x * x, dim=1))
+                        else:
+                            expected = torch.sum(torch.abs(x), dim=1)
+                    self.assertTrue(
+                        torch.equal(got.view(view_dtype), expected.view(view_dtype))
+                    )
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_vector_norm_matches_aten(self, dtype):
+        rtol, atol = (1e-5, 1e-6) if dtype == torch.float32 else (1e-12, 1e-12)
+        for order in (2, 1):
+            for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+                with self.subTest(order=order, m=m, n=n):
+                    x = self._make_order_sensitive_input(m, n, dtype)
+                    with torch.backends.python_native.cutedsl.disabled():
+                        ref = torch.linalg.vector_norm(x, ord=order, dim=1)
+                    with self._inner_tree_flag():
+                        got = torch.linalg.vector_norm(x, ord=order, dim=1)
+                    self.assertEqual(got, ref, rtol=rtol, atol=atol)
+
+    def test_vector_norm_override_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        calls = [
+            (
+                "torch.linalg.vector_norm",
+                lambda: torch.linalg.vector_norm(x, ord=2, dim=1),
+            ),
+            (
+                "torch.linalg.norm",
+                lambda: torch.linalg.norm(x, ord=2, dim=1),
+            ),
+            ("torch.norm", lambda: torch.norm(x, p=2, dim=1)),
+            (
+                "default_order",
+                lambda: torch.linalg.vector_norm(x, dim=1),
+            ),
+        ]
+        for name, call in calls:
+            with self.subTest(name=name):
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_vector_norm_into",
+                        wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+                    ) as vector_norm_into,
+                    self._inner_tree_flag(),
+                ):
+                    call()
+                self.assertEqual(vector_norm_into.call_count, 1)
+
+    def test_vector_norm_out_variant(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        for order in (2, 1):
+            for keepdim in (False, True):
+                with self.subTest(order=order, keepdim=keepdim):
+                    with self._inner_tree_flag():
+                        functional = torch.linalg.vector_norm(
+                            x, ord=order, dim=1, keepdim=keepdim
+                        )
+                    out_shape = (128, 1) if keepdim else (128,)
+                    out = torch.empty(out_shape, device="cuda", dtype=torch.float32)
+                    with (
+                        mock.patch.object(
+                            inner_tree_kernel,
+                            "inner_tree_vector_norm_into",
+                            wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+                        ) as vector_norm_into,
+                        self._inner_tree_flag(),
+                    ):
+                        returned = torch.linalg.vector_norm(
+                            x, ord=order, dim=1, keepdim=keepdim, out=out
+                        )
+                    self.assertEqual(vector_norm_into.call_count, 1)
+                    self.assertIs(returned, out)
+                    self.assertTrue(
+                        torch.equal(out.view(torch.int32), functional.view(torch.int32))
+                    )
+
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.linalg.vector_norm(x, ord=3, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_vector_norm_into",
+                wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+            ) as vector_norm_into,
+            self._inner_tree_flag(),
+        ):
+            returned = torch.linalg.vector_norm(x, ord=3, dim=1, out=out)
+        self.assertEqual(vector_norm_into.call_count, 0)
+        self.assertIs(returned, out)
+        self.assertEqual(out, ref, rtol=0, atol=0)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_vector_norm_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for order in (2, 1):
+            for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+                with self.subTest(order=order, m=m, n=n):
+                    x = self._make_order_sensitive_input(m, n, dtype)
+                    with torch.backends.python_native.cutedsl.disabled():
+                        ref = torch.linalg.vector_norm(x, ord=order, dim=1)
+                    with (
+                        mock.patch.object(
+                            inner_tree_kernel,
+                            "inner_tree_vector_norm_into",
+                            wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+                        ) as vector_norm_into,
+                        self._inner_tree_flag(),
+                    ):
+                        got = torch.linalg.vector_norm(x, ord=order, dim=1)
+                    self.assertEqual(vector_norm_into.call_count, 1)
+                    self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+        overflow = torch.zeros(64, 32, device="cuda", dtype=dtype)
+        overflow[:, :2] = 30000
+        cases = [("overflow", overflow)]
+        if dtype == torch.bfloat16:
+            underflow = torch.zeros(64, 32, device="cuda", dtype=dtype)
+            underflow[:, :2] = 2**-70
+            cases.append(("underflow", underflow))
+
+        for name, x in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    expected = torch.sqrt(
+                        torch.sum(x.to(torch.float32) ** 2, dim=1)
+                    ).to(dtype)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_vector_norm_into",
+                        wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+                    ) as vector_norm_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.linalg.vector_norm(x, ord=2, dim=1)
+                self.assertEqual(vector_norm_into.call_count, 1)
+                self.assertTrue(torch.isfinite(got).all().item())
+                self.assertTrue(
+                    torch.equal(got.view(torch.int16), expected.view(torch.int16))
+                )
+
+    def test_vector_norm_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(4, 32, torch.float32)
+        cases = [
+            ("order_zero", x, {"ord": 0, "dim": 1}),
+            ("order_three", x, {"ord": 3, "dim": 1}),
+            ("order_inf", x, {"ord": float("inf"), "dim": 1}),
+            ("order_neg_inf", x, {"ord": -float("inf"), "dim": 1}),
+            ("explicit_dtype", x, {"ord": 2, "dim": 1, "dtype": torch.float64}),
+            ("dim_none", x, {"ord": 2, "dim": None}),
+            (
+                "multi_dim",
+                x.reshape(2, 2, 32),
+                {"ord": 2, "dim": (1, 2)},
+            ),
+            ("noncontiguous", x[:, ::2], {"ord": 2, "dim": 1}),
+            ("complex", x.to(torch.complex64), {"ord": 2, "dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.linalg.vector_norm(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_vector_norm_into",
+                        wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+                    ) as vector_norm_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.linalg.vector_norm(input_, **kwargs)
+                self.assertEqual(vector_norm_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+        error_cases = [
+            (
+                "integer_input",
+                torch.ones(4, 32, device="cuda", dtype=torch.int64),
+                2,
+                "floating point or complex",
+            ),
+            ("complex_order", x, 1 + 0j, "Expected a non-complex scalar"),
+        ]
+        for name, input_, order, error in error_cases:
+            with self.subTest(name=name):
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_vector_norm_into",
+                        wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+                    ) as vector_norm_into,
+                    self._inner_tree_flag(),
+                    self.assertRaisesRegex(RuntimeError, error),
+                ):
+                    torch.linalg.vector_norm(input_, ord=order, dim=1)
+                self.assertEqual(vector_norm_into.call_count, 0)
+
+        limit = torch.finfo(torch.float32).max
+        extreme = torch.tensor(
+            [[limit], [-limit], [limit / 2], [-limit / 2]],
+            device="cuda",
+            dtype=torch.float32,
+        )
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_vector_norm_into",
+                wraps=inner_tree_kernel.inner_tree_vector_norm_into,
+            ) as vector_norm_into,
+            self._inner_tree_flag(),
+        ):
+            got = torch.linalg.vector_norm(extreme, ord=2, dim=1)
+        self.assertEqual(vector_norm_into.call_count, 0)
+        self.assertTrue(torch.isfinite(got).all().item())
+        self.assertTrue(
+            torch.equal(
+                got.view(torch.int32), extreme.abs().squeeze(1).view(torch.int32)
+            )
+        )
+
+    # --- nanmean (ATen composite over nansum + count/div) ---
+
+    def _make_nanmean_input(self, m, n, dtype):
+        x = self._make_order_sensitive_input(m, n, dtype)
+        cols = torch.arange(n, device="cuda").reshape(1, n)
+        rows = torch.arange(m, device="cuda").reshape(m, 1)
+        return x.masked_fill((cols + 3 * rows) % 13 == 0, float("nan"))
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nanmean_matches_nansum_over_count(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nanmean_input(m, n, dtype)
+                with self._inner_tree_flag():
+                    got = torch.nanmean(x, 1)
+                    count = (~torch.isnan(x)).sum(1)
+                    expected = torch.nansum(x, 1) / count
+                self.assertEqual(count.dtype, torch.int64)
+                self.assertEqual(
+                    got.view(view_dtype), expected.view(view_dtype), rtol=0, atol=0
+                )
+
+    def test_nanmean_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nanmean_input(128, 8195, torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_nansum_into",
+                wraps=inner_tree_kernel.inner_tree_nansum_into,
+            ) as nansum_into,
+            self._inner_tree_flag(),
+        ):
+            torch.nanmean(x, dim=1)
+        self.assertEqual(nansum_into.call_count, 1)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nanmean_matches_aten(self, dtype):
+        rtol, atol = (1e-5, 1e-6) if dtype == torch.float32 else (1e-12, 1e-12)
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nanmean_input(m, n, dtype)
+                x[0].fill_(float("nan"))
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nanmean(x, dim=1)
+                with self._inner_tree_flag():
+                    got = torch.nanmean(x, dim=1)
+                self.assertTrue(torch.isnan(got[0]).item())
+                self.assertEqual(got[1:], ref[1:], rtol=rtol, atol=atol)
+
+    def test_nanmean_out_variant(self):
+        x = self._make_nanmean_input(128, 8195, torch.float32)
+        with self._inner_tree_flag():
+            functional = torch.nanmean(x, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with self._inner_tree_flag():
+            returned = torch.nanmean(x, dim=1, out=out)
+        self.assertIs(returned, out)
+        self.assertEqual(
+            out.view(torch.int32), functional.view(torch.int32), rtol=0, atol=0
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_nanmean_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nanmean_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nanmean(x, dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nanmean(x, dim=1)
+                self.assertEqual(nansum_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_nanmean_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nanmean_input(4, 32, torch.float32)
+        cases = [
+            ("dim_none", x, {"dim": None}),
+            ("explicit_dtype", x, {"dim": 1, "dtype": torch.float64}),
+            ("multi_dim", x.reshape(2, 2, 32), {"dim": (1, 2)}),
+            ("noncontiguous", x[:, ::2], {"dim": 1}),
+            ("complex", x.to(torch.complex64), {"dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nanmean(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nanmean(input_, **kwargs)
+                self.assertEqual(nansum_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+        for dtype in (torch.int64, torch.bool):
+            with self.subTest(dtype=dtype):
+                integer = torch.ones(4, 32, device="cuda", dtype=dtype)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "expected input to have floating point or complex dtype",
+                    ),
+                ):
+                    torch.nanmean(integer, dim=1)
+                self.assertEqual(nansum_into.call_count, 0)
+
+    def test_nanmean_requires_grad_is_warning_free(self):
+        x = self._make_nanmean_input(4, 32, torch.float32).requires_grad_()
+        with self._inner_tree_flag():
+            self.assertNotWarn(lambda: torch.nanmean(x, dim=1).sum().backward())
+        self.assertIsNotNone(x.grad)
 
 
 instantiate_parametrized_tests(TestSumCuteDSLOverride)
