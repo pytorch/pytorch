@@ -2322,6 +2322,94 @@ class GraphModule(torch.nn.Module):
         # Recompile since SizeStore has changed
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_tensor_subclass_with_callable_opaque_attr(self):
+        """Callable value-opaque objects on a tensor subclass should allow method access."""
+
+        class CallableConfig(CustomClassBase):
+            def __init__(self, scale):
+                self.scale = scale
+
+            def __call__(self, x):
+                return x * self.scale
+
+            def get_scale(self):
+                return self.scale
+
+            def __eq__(self, other):
+                return isinstance(other, CallableConfig) and self.scale == other.scale
+
+            def __hash__(self):
+                return hash(self.scale)
+
+            def __fx_repr__(self):
+                return (
+                    f"CallableConfig(scale={self.scale!r})",
+                    {"CallableConfig": CallableConfig},
+                )
+
+        register_custom_class(CallableConfig, typ="constant")
+
+        class TensorWithCallableOpaque(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, config):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    device=data.device,
+                    dtype=data.dtype,
+                )
+
+            def __init__(self, data, config):
+                self._data = data
+                self._config = config
+
+            def __tensor_flatten__(self):
+                return ["_data"], (self._config,)
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TensorWithCallableOpaque(inner_tensors["_data"], ctx[0])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TensorWithCallableOpaque) else x
+
+                config = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TensorWithCallableOpaque):
+                        config = arg._config
+                        break
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs),
+                )
+                return torch.utils._pytree.tree_map(
+                    lambda x: TensorWithCallableOpaque(x, config)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out,
+                )
+
+        def fn(x):
+            y = x * 2
+            scale = y._config.get_scale()
+            return y + scale
+
+        config = CallableConfig(scale=5)
+        x = TensorWithCallableOpaque(torch.randn(4), config)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        result = opt_fn(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_tensor_subclass_with_opaque_attr_backward(self):
         """Test opaque objects in tensor subclass are correctly remapped through backward."""
 
@@ -3070,7 +3158,7 @@ def forward(self, primals_1, tangents_1):
 
         This tests the code path where:
         1. An opaque class (like Color) is accessed via CustomClassVariable
-        2. Attribute access (Color.RED) goes through getattro_impl with static getattr
+        2. Attribute access (Color.RED) goes through tp_getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
         from torch._library.opaque_object import is_opaque_symbolic_type
@@ -3259,7 +3347,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_staticmethod(self):
         """Test that accessing a staticmethod on an opaque class works correctly.
 
-        This verifies that CustomClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.tp_getattro_impl properly handles
         staticmethod descriptors (instead of raising 'Unsupported descriptor').
         """
         captured = {"graph": None}
@@ -3282,7 +3370,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_property(self):
         """Test that accessing a property descriptor on an opaque class works correctly.
 
-        This verifies that CustomClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.tp_getattro_impl properly handles
         property descriptors. When accessing a property on the class (not instance),
         you get the property object back.
         """

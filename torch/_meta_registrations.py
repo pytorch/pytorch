@@ -6264,6 +6264,28 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
+def alloc_with_matching_layout(
+    query: Tensor,
+    res_shape: tuple[int, ...],
+):
+    """Allocate a result with the query's dimension order."""
+    if tuple(query.shape) == res_shape:
+        return torch.empty_like(query)
+
+    fill_order = sorted(
+        range(query.dim()),
+        key=lambda idx: query.stride()[idx] if query.stride()[idx] else math.inf,
+    )
+    strides = [0] * len(fill_order)
+    stride = 1
+    for idx in fill_order:
+        strides[idx] = stride
+        stride *= res_shape[idx]
+    return torch.empty_strided(
+        res_shape, strides, dtype=query.dtype, device=query.device
+    )
+
+
 @register_meta([aten._scaled_dot_product_flash_attention.default])
 def meta__scaled_dot_product_flash_attention(
     query: Tensor,
@@ -6280,7 +6302,7 @@ def meta__scaled_dot_product_flash_attention(
     head_dim = query.size(3)
     max_seqlen_batch_k = key.size(2)
 
-    attention = torch.empty_like(query)
+    attention = alloc_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
@@ -6353,28 +6375,6 @@ def meta__scaled_dot_product_flash_attention_quantized(
         return_debug_mask,
         scale,
     )
-
-
-def alloc_with_matching_layout(
-    query: Tensor,
-    res_shape: tuple[int, ...],
-):
-    if tuple(query.shape) == res_shape:
-        res = torch.empty_like(query)
-    else:
-        dim_order = sorted(
-            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
-        )
-        strides = [0] * len(dim_order)
-        stride = 1
-        for idx in reversed(dim_order):
-            strides[idx] = stride
-            stride *= res_shape[idx]
-        res = torch.empty_strided(
-            res_shape, strides, dtype=query.dtype, device=query.device
-        )
-
-    return res
 
 
 @register_meta([aten._scaled_dot_product_cudnn_attention])
@@ -6824,7 +6824,7 @@ def meta__flash_attention_forward(
     head_dim = query.size(-1)
 
     # Cuda Path
-    attention = torch.empty_like(query)
+    attention = alloc_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     if cum_seq_q is None:
         logsumexp = torch.empty(
             (batch_size, num_heads, max_seqlen_batch_q),
@@ -7597,7 +7597,7 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            x.device == input_gates.device
+            x is None or x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
         lambda: "expected all inputs to be same device",
@@ -7617,6 +7617,20 @@ def _thnn_fused_lstm_cell_meta(
     hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
     cy = torch.empty_like(cx, memory_format=torch.contiguous_format)
     return (hy, cy, workspace)
+
+
+@register_meta(aten._thnn_fused_gru_cell.default)
+def _thnn_fused_gru_cell_meta(
+    input_gates,
+    hidden_gates,
+    hx,
+    input_bias=None,
+    hidden_bias=None,
+):
+    rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 3, hx)
+    workspace = hx.new_empty((hx.size(0), hx.size(1) * 5))
+    hy = torch.empty_like(hx, memory_format=torch.contiguous_format)
+    return (hy, workspace)
 
 
 @register_meta(aten._cudnn_rnn.default)
@@ -7886,6 +7900,50 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
     grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
+
+
+def checkGRUBackwardSizes(grad_hy, workspace):
+    torch._check(
+        grad_hy.dim() == 2,
+        lambda: f"Expected grad_hy to be 2-D, but got {grad_hy.dim()}-D",
+    )
+    torch._check(
+        workspace.dim() == 2,
+        lambda: f"Expected workspace to be 2-D, but got {workspace.dim()}-D",
+    )
+    torch._check(
+        workspace.size(0) == grad_hy.size(0),
+        lambda: (
+            f"Expected workspace batch size ({workspace.size(0)}) to match "
+            f"grad_hy batch size ({grad_hy.size(0)})"
+        ),
+    )
+    torch._check(
+        workspace.size(1) == grad_hy.size(1) * 5,
+        lambda: (
+            "Expected workspace.size(1) to equal grad_hy.size(1) * 5, but got "
+            f"workspace.size(1)={workspace.size(1)} and "
+            f"grad_hy.size(1)={grad_hy.size(1)}"
+        ),
+    )
+
+
+@register_meta(aten._thnn_fused_gru_cell_backward.default)
+def _thnn_fused_gru_cell_backward(grad_hy, workspace, has_bias):
+    checkGRUBackwardSizes(grad_hy, workspace)
+    gates_shape = (grad_hy.size(0), grad_hy.size(1) * 3)
+    grad_input_gates = workspace.new_empty(gates_shape)
+    grad_hidden_gates = workspace.new_empty(gates_shape)
+    grad_hx = torch.empty_like(grad_hy, memory_format=legacy_contiguous_memory_format)
+    grad_input_bias = grad_input_gates.sum(0, keepdim=False) if has_bias else None
+    grad_hidden_bias = grad_hidden_gates.sum(0, keepdim=False) if has_bias else None
+    return (
+        grad_input_gates,
+        grad_hidden_gates,
+        grad_hx,
+        grad_input_bias,
+        grad_hidden_bias,
+    )
 
 
 # From aten/src/ATen/native/mps/operations/Linear.mm
