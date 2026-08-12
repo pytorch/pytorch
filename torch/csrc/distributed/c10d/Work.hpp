@@ -82,6 +82,9 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // If work is not supposed to have result, we return empty list.
   virtual std::vector<at::Tensor> result();
 
+  // Releases result tensors for internal callers that consume them separately.
+  virtual void releaseResultTensors();
+
   // Ensures that operations on the output tensors that are invoked
   // after this function returns are correctly sequenced after the
   // asynchronous completion of this work.

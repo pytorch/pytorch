@@ -176,6 +176,13 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_set_default_timeout_compatibility_alias(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        backend._set_default_timeout(timedelta(seconds=7))
+        self.assertEqual(backend.options._timeout, timedelta(seconds=7))
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
