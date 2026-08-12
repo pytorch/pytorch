@@ -4958,8 +4958,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+                if global_tensor.shape[0] == 0:
+                    # No row to copy, and the 1D bias does not depend on M.
+                    bias = cls.benchmark_example_value(extern_node, hint_override)
+                else:
+                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                    bias = global_tensor[0].contiguous()
+                additional_example_inputs[extern_name] = bias
 
             return {
                 **unique_example_inputs,
