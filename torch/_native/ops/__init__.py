@@ -5,6 +5,7 @@ from . import (
     pointwise,
     polar,
     reductions,
+    rng,
     scatter_add,
     topk,
 )
