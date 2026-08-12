@@ -49,9 +49,32 @@ PROD_CASES = (
     ("split_fp32", (8, 65536), 1, torch.float32),
 )
 
-# Split fp16/bf16 is excluded from NANSUM_CASES/MEAN_CASES/NANMEAN_CASES due to
-# a pre-existing strict Triton compile hang tracked separately, consistent with
-# SUM_CASES/PROD_CASES.
+# Split fp16/bf16 is excluded from VECNORM_CASES/NANSUM_CASES/MEAN_CASES/
+# NANMEAN_CASES due to a pre-existing strict Triton LLVM-SLP compile hang
+# tracked separately, consistent with SUM_CASES/PROD_CASES.
+VECNORM_CASES = (
+    ("persistent_fp16_p1", (64, 256), 1, torch.float16, 1),
+    ("persistent_bf16_p1", (64, 256), 1, torch.bfloat16, 1),
+    ("persistent_fp32_p1", (64, 256), 1, torch.float32, 1),
+    ("persistent_fp64_p1", (64, 256), 1, torch.float64, 1),
+    ("persistent_fp16_p2", (64, 256), 1, torch.float16, 2),
+    ("persistent_bf16_p2", (64, 256), 1, torch.bfloat16, 2),
+    ("persistent_fp32_p2", (64, 256), 1, torch.float32, 2),
+    ("persistent_fp64_p2", (64, 256), 1, torch.float64, 2),
+    ("looped_fp16_p1", (8, 12000), 1, torch.float16, 1),
+    ("looped_bf16_p1", (8, 12000), 1, torch.bfloat16, 1),
+    ("looped_fp32_p1", (8, 12000), 1, torch.float32, 1),
+    ("looped_fp64_p1", (8, 12000), 1, torch.float64, 1),
+    ("looped_fp16_p2", (8, 12000), 1, torch.float16, 2),
+    ("looped_bf16_p2", (8, 12000), 1, torch.bfloat16, 2),
+    ("looped_fp32_p2", (8, 12000), 1, torch.float32, 2),
+    ("looped_fp64_p2", (8, 12000), 1, torch.float64, 2),
+    ("split_fp32_p1", (8, 65536), 1, torch.float32, 1),
+    ("split_fp64_p1", (8, 65536), 1, torch.float64, 1),
+    ("split_fp32_p2", (8, 65536), 1, torch.float32, 2),
+    ("split_fp64_p2", (8, 65536), 1, torch.float64, 2),
+)
+
 NANSUM_CASES = (
     ("persistent_fp16", (64, 256), 1, torch.float16),
     ("persistent_bf16", (64, 256), 1, torch.bfloat16),
@@ -111,6 +134,15 @@ MEAN_OUT_OF_SCOPE_CASES = (
 NANMEAN_OUT_OF_SCOPE_CASES = (
     ("dim_none", lambda z: torch.nanmean(z, dim=None)),
     ("dtype", lambda z: torch.nanmean(z, 1, dtype=torch.float64)),
+)
+
+VECNORM_OUT_OF_SCOPE_CASES = (
+    ("ord3", lambda z: torch.linalg.vector_norm(z, ord=3, dim=1)),
+    (
+        "dtype",
+        lambda z: torch.linalg.vector_norm(z, ord=2, dim=1, dtype=torch.float64),
+    ),
+    ("dim_none", lambda z: torch.linalg.vector_norm(z, ord=2, dim=None)),
 )
 
 LAYOUT_CASES = (
@@ -220,6 +252,36 @@ class StrictNumericsTest(TestCase):
         if name.startswith("split"):
             self.assertEqual(code.count(INNER_TREE_CALL), 2)
 
+    @parametrize("case", VECNORM_CASES, name_fn=lambda c: c[0])
+    def test_vector_norm_bitwise(self, device, case):
+        name, shape, dim, dtype, order = case
+        x = torch.randn(*shape, device=device, dtype=dtype)
+
+        def fn(z):
+            return torch.linalg.vector_norm(z, ord=order, dim=dim)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        strict_kernel_count = 2 if name.startswith("split") else 1
+        self.assertEqual(code.count(INNER_TREE_CALL), strict_kernel_count)
+        self.assertEqual(code.count("'enable_fp_fusion': False"), strict_kernel_count)
+        if order == 2:
+            sqrt = "libdevice.sqrt" if dtype == torch.float64 else "tl.sqrt_rn"
+            self.assertIn(sqrt, code)
+
+    def test_vector_norm_p2_subnormal(self, device):
+        x = torch.full((64, 256), 2**-65, device=device, dtype=torch.float32)
+
+        def fn(z):
+            return torch.linalg.vector_norm(z, ord=2, dim=1)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertTrue((result != 0).all().item())
+        self.assertIn(INNER_TREE_CALL, code)
+
     def _make_nansum_input(self, shape, dtype, device):
         # Standard-normal values keep magnitudes reasonable while making the
         # reduction order observable.
@@ -320,6 +382,12 @@ class StrictNumericsTest(TestCase):
         _, code = self._run(fn, x)
         self.assertNotIn(INNER_TREE_CALL, code)
         self.assertNotIn("triton.language.div_rn", code)
+
+    @parametrize("case", VECNORM_OUT_OF_SCOPE_CASES, name_fn=lambda c: c[0])
+    def test_vector_norm_out_of_scope_uses_default_order(self, device, case):
+        _, fn = case
+        _, code = self._run(fn, torch.randn(64, 300, device=device))
+        self.assertNotIn(INNER_TREE_CALL, code)
 
     @parametrize("case", SUM_VARIANTS, name_fn=lambda c: c[0])
     def test_sum_variants(self, device, case):
