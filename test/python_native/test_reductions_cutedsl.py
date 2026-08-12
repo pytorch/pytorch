@@ -383,6 +383,227 @@ class TestCuTeDSLReductionWiring(TestCase):
             ref = torch.linalg.matrix_power(e, 0)
         self.assertEqual(torch.linalg.matrix_power(e, 0), ref)
 
+    def test_scalar_in_first_operand_slot_is_served(self):
+        # REGRESSION: the cond took its DEVICE reference from operand 0, but aten puts the
+        # coerced scalar FIRST for the reflected overloads -- rsub.Scalar is
+        # `at::sub(wrapped_scalar, self)`, and remainder.Scalar_Tensor / xlogy.Scalar_Self
+        # are declared that way. Operand 0 was then a 0-d CPU tensor, failed the
+        # is-this-CUDA test, and every such call declined (`1.0 - t` fired nothing). The
+        # reference is now the first operand that is not a coerced scalar.
+        from torch._native.ops.pointwise import kernel as K
+
+        def served(fn):
+            orig, n = K.run, [0]
+
+            def counting(*a, **k):
+                n[0] += 1
+                return orig(*a, **k)
+
+            K.run = counting
+            try:
+                out = fn()
+            finally:
+                K.run = orig
+            return n[0], out
+
+        t = torch.tensor([1.0, 2.0, 3.0], device="cuda")
+        i = torch.tensor([2, 4, 6], dtype=torch.int32, device="cuda")
+        for fn in (
+            lambda: 1.0 - t,
+            lambda: torch.remainder(2.0, t),
+            lambda: torch.xlogy(2.0, t),
+            lambda: torch.bitwise_and(3, i),
+        ):
+            n, got = served(fn)
+            self.assertGreaterEqual(n, 1, "scalar-first call must be served")
+            with _disabled():
+                self.assertEqual(got, fn())
+        # A genuine cross-device call must STILL decline and let aten raise, i.e. the
+        # loosened reference must not have loosened the device check itself.
+        cpu = torch.tensor([1.0, 2.0, 3.0])
+        for fn in (lambda: t + cpu, lambda: cpu + t):
+            with self.assertRaises(RuntimeError):
+                fn()
+
+    def test_int64_reduction_on_the_column_path(self):
+        # REGRESSION: kernel_col._PART_TORCH lacked Int64 while kernel_general and
+        # kernel_xcta had it, so K2 was the one path that KeyError'd when allocating an
+        # int64 stage-1 partial buffer -- and integer reductions accumulate in int64.
+        # dim=0 is the column path; dim=1 the row path, as a control.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_general as kg
+
+        x = torch.arange(256 * 64, device="cuda", dtype=torch.int64).reshape(256, 64)
+        for dim in (0, 1):
+            out = kg.reduce_dim(
+                T.SumOps(acc=cutlass.Int64), ("sum_i64",), x, {dim}, torch.int64
+            )
+            ref = x.sum(dim=dim)
+            self.assertEqual(out.reshape(ref.shape), ref, f"dim={dim}")
+
+    def test_vector_norm_ord0_and_nansum(self):
+        # ord=0 is the NONZERO COUNT, not a |x|**p sum, so it needs CountNonzeroOps rather
+        # than NormOps -- the cond used to decline it outright. And NanSumOps existed in
+        # the trait library with zero call sites; wiring it also gets nanmean, which aten
+        # decomposes into nansum / isnan.logical_not.sum.
+        x = torch.tensor([[0.0, 1.0, 0.0, 2.0], [3.0, 0.0, 0.0, 0.0]], device="cuda")
+        for ord_ in (0, 1, 2, 3, float("inf"), float("-inf")):
+            got = torch.linalg.vector_norm(x, ord_, dim=1)
+            with _disabled():
+                self.assertEqual(got, torch.linalg.vector_norm(x, ord_, dim=1))
+        nan = float("nan")
+        y = torch.tensor(
+            [[1.0, nan, 3.0], [nan, nan, nan], [4.0, 5.0, 6.0]], device="cuda"
+        )
+        for fn in (
+            lambda: torch.nansum(y, dim=1),
+            lambda: torch.nansum(y, dim=0),
+            lambda: torch.nansum(y),
+            lambda: torch.nansum(y, dim=1, dtype=torch.float64),
+            lambda: torch.nanmean(y, dim=1),
+        ):
+            with _disabled():
+                ref = fn()
+            self.assertEqual(fn(), ref, equal_nan=True)
+
+    def test_nullary_fill_serves_every_layout(self):
+        # fill_ is the NULLARY (nin == 0) case: no input tensor at all, so the caller's
+        # `self` is the only source of shape/device/layout AND the destination. Everything
+        # in the kernel that normally reads inputs[0] has to come from the output instead.
+        #
+        # Coverage is the contract -- every layout is SERVED, not just the fast ones: a
+        # contiguous aligned target takes the vec path, and unaligned / transposed /
+        # strided targets fall to the strided route (which bakes the real layout, hence
+        # the output layout appearing in both the plan and kernel keys).
+        from torch._native.ops.pointwise import kernel as K
+
+        def served(fn):
+            orig, n = K.run, [0]
+
+            def counting(*a, **k):
+                n[0] += 1
+                return orig(*a, **k)
+
+            K.run = counting
+            try:
+                fn()
+            finally:
+                K.run = orig
+            return n[0]
+
+        base = torch.empty(4096, device="cuda")
+        targets = (
+            ("contiguous", torch.empty(1024, device="cuda")),
+            ("unaligned", base[1:1025]),
+            ("transposed", torch.empty(32, 32, device="cuda").t()),
+            ("strided", torch.empty(2048, device="cuda")[::2]),
+            ("0-dim", torch.empty((), device="cuda")),
+        )
+        for name, t in targets:
+            self.assertEqual(
+                served(lambda t=t: t.fill_(2.5)), 1, f"{name} must be served"
+            )
+            self.assertTrue(bool((t == 2.5).all()), name)
+        # Every constructor aten builds on empty()+fill_ rides the same override, with no
+        # per-constructor row: full / zeros / ones / full_like, floats and ints alike.
+        for fn in (
+            lambda: torch.full((1024,), 3.5, device="cuda"),
+            lambda: torch.zeros(1024, device="cuda"),
+            lambda: torch.ones(1024, device="cuda"),
+            lambda: torch.full((1024,), 9, device="cuda", dtype=torch.int64),
+        ):
+            self.assertEqual(served(fn), 1)
+            with _disabled():
+                ref = fn()
+            self.assertEqual(fn(), ref)
+        # An fp64 value must not narrow through fp32 (the const has to be boxed in the
+        # compute dtype: 1e20 came back as its fp32 neighbour before that fix).
+        d = torch.empty(8, device="cuda", dtype=torch.float64).fill_(1e20)
+        self.assertEqual(d[0].item(), 1e20)
+
+    def test_range_factories_use_the_flat_index(self):
+        # arange/linspace are nullary AND index-consuming: each element's value comes from
+        # its FLAT INDEX alone, which aten expresses with gpu_kernel_with_index and we
+        # expose as the kernel's `with_index` flag (strided route only -- the vectorized
+        # routes hand the fn a whole V-wide fragment, so there is no single index).
+        from torch._native.ops.pointwise import kernel as K
+
+        def served(fn):
+            orig, n = K.run, [0]
+
+            def counting(*a, **k):
+                n[0] += 1
+                return orig(*a, **k)
+
+            K.run = counting
+            try:
+                out = fn()
+            finally:
+                K.run = orig
+            return n[0], out
+
+        # linspace: fp32/fp64 and the integer dtypes are BIT-EXACT with aten.
+        for dt in (torch.float32, torch.float64, torch.int32, torch.int64):
+            for a, b, steps in ((0, 1, 5), (-1, 1, 9), (5, -5, 64), (2.5, 3.5, 17)):
+                fn = lambda: torch.linspace(  # noqa: E731
+                    a, b, steps, device="cuda", dtype=dt
+                )
+                n, got = served(fn)
+                self.assertEqual(n, 1, f"linspace {dt} must be served")
+                with _disabled():
+                    self.assertEqual(got, fn())
+        # Halves compute in FP32 and narrow only on the store, where aten runs the whole
+        # expression in scalar_t -- so we can differ by well under one ULP, on the MORE
+        # accurate side. Endpoints stay exact regardless (that is what aten's halfway
+        # split buys, and why the kernel reproduces it rather than stepping forward
+        # throughout).
+        for dt in (torch.float16, torch.bfloat16):
+            for a, b, steps in ((0, 1, 5), (-1, 1, 64), (5, -5, 1001)):
+                got = torch.linspace(a, b, steps, device="cuda", dtype=dt)
+                with _disabled():
+                    ref = torch.linspace(a, b, steps, device="cuda", dtype=dt)
+                span = max(abs(float(a)), abs(float(b)))
+                tol = torch.finfo(dt).eps * span
+                self.assertLess((got.double() - ref.double()).abs().max().item(), tol)
+                self.assertEqual(got[0].item(), torch.tensor(a, dtype=dt).item())
+                self.assertEqual(got[-1].item(), torch.tensor(b, dtype=dt).item())
+        # arange: we override arange.start_out, which the functional form reaches only
+        # from C++ (at::arange_out), so drive the .out form the override actually serves.
+        for dt in (torch.float32, torch.float64, torch.int32, torch.int64):
+            for s, e, st in ((0, 10, 1), (0.0, 5.0, 0.5), (10, 0, -1), (-5, 5, 2)):
+                with _disabled():
+                    ref = torch.arange(s, e, st, device="cuda", dtype=dt)
+                out = torch.empty_like(ref)
+                n, got = served(lambda out=out: torch.arange(s, e, st, out=out))
+                self.assertEqual(n, 1, f"arange {dt} must be served")
+                self.assertEqual(got, ref)
+
+    def test_optional_scalar_is_not_silently_dropped(self):
+        # REGRESSION (wrong RESULTS, not a crash): logit's eps is `float?`, and the row
+        # originally declared no scalars at all on the theory that an explicit eps would
+        # decline. It did not -- the arg was silently IGNORED, so torch.logit(x, 1e-3)
+        # ran the unclamped kernel and returned nan where aten clamps. An omitted eps
+        # means "no clamping", which aten spells as a negative sentinel; optional_defaults
+        # supplies it, so one row serves both overloads.
+        x = torch.tensor(
+            [0.0, 1e-8, 0.5, 0.9999, 1.5, -0.5, float("nan")], device="cuda"
+        )
+        for fn in (
+            lambda t: torch.logit(t),
+            lambda t: torch.logit(t, 1e-3),
+            lambda t: torch.logit(t, 0.0),
+            lambda t: torch.special.logit(t, eps=0.1),
+            # eps > 0.5 CROSSES the bounds (lo=0.6 > hi=0.4). aten's nested ternary
+            # returns lo and never re-clamps; a sequential clamp-low-then-high would pull
+            # it back to hi and FLIP THE SIGN of the log (caught by test_out_logit).
+            lambda t: torch.logit(t, 0.6),
+        ):
+            with _disabled():
+                ref = fn(x)
+            self.assertEqual(fn(x), ref, equal_nan=True)
+
     def test_pointwise_neg_and_conj_views_decline(self):
         # REGRESSION: a neg/conj bit is LAZY metadata -- the buffer holds the UNNEGATED
         # values -- and aten materializes such a view BY CALLING copy_, which THIS

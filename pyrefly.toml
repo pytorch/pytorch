@@ -102,6 +102,9 @@ ignore-missing-imports = [
     "cutlass.*",
     "cutlass_library.*",
     "cutlass_api.*",
+    # nvidia cuda-python. Ships alongside cutlass (the CuteDSL kernels use both) and
+    # is likewise absent from the linter image, so it needs the same treatment.
+    "cuda.bindings.*",
     "deeplearning.*",
     "einops.*",
     "libfb.*",
@@ -113,6 +116,7 @@ ignore-missing-imports = [
     "onnxscript.*",
     "redis.*",
     "tabulate.*",
+    "shtab.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
@@ -364,6 +368,26 @@ unannotated-attribute = true
 
 [[sub-config]]
 matches = "torch/optim/_functional.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_lazy/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_inductor/fx_passes/serialized_patterns/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true

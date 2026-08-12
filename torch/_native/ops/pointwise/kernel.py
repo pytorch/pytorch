@@ -109,7 +109,7 @@ _EPT_SCHEDULE = ((768 * 1024, 4), (384 * 1024, 2), (0, 1))
 _VEC256_MIN = (32, 8 * 1024 * 1024)
 
 
-def _choose_config(numel: int, compute_bits: int, hw=None) -> "_PointwiseConfig":
+def _choose_config(numel: int, compute_bits: int, hw=None, nin=1) -> "_PointwiseConfig":
     # Measured per-(numel, dtype) heuristic (B200; fp32 + bf16 threshold study), scaled to
     # the device. Pointwise has ONE effective dimension (flat numel), so the config is a
     # function of numel, dtype, and device fill capacity. block / load / pipe_depth are
@@ -120,7 +120,11 @@ def _choose_config(numel: int, compute_bits: int, hw=None) -> "_PointwiseConfig"
     fill = 1.0 if hw is None else hw.fill_scale
     norm = numel // max(compute_bits // 16, 1)  # dtype-normalized element count
     ept = next(e for thresh, e in _EPT_SCHEDULE if norm >= thresh * fill)
-    wide = compute_bits >= _VEC256_MIN[0] and numel >= _VEC256_MIN[1] * fill
+    # The 256b widening was measured on ops that READ memory, where the extra width buys
+    # load throughput. A WRITE-ONLY op (nin == 0: fill_ and the constructors) has no loads
+    # to widen and 256b nearly HALVES it -- measured on a 64M fp32 fill_: 3.74 TB/s at
+    # 256b vs 6.87 TB/s at 128b, where aten is 6.83. So gate the widening on having inputs.
+    wide = nin > 0 and compute_bits >= _VEC256_MIN[0] and numel >= _VEC256_MIN[1] * fill
     return _PointwiseConfig(ept=ept, vec_bits=256 if wide else 128)
 
 
@@ -376,7 +380,15 @@ class _ElementwiseStrided:
     # General path: each thread retires `ept` output elements (block-strided), linear
     # index into each operand's (possibly broadcast / strided) layout -- CuTe decodes
     # the offset. block/ept are the exposed knobs.
-    def __init__(self, fn, nin, nout, nconsts, compute, out_types, block, ept):
+    #
+    # with_index: pass the thread's FLAT OUTPUT INDEX to `fn` as its first argument, the
+    # analogue of aten's gpu_kernel_with_index. This is what the RANGE factories need
+    # (arange/linspace compute their value from the index alone), and it is exposed only
+    # on this path because the vec/rowvec routes hand the fn a vector fragment rather
+    # than one element, so there is no single index to give it.
+    def __init__(
+        self, fn, nin, nout, nconsts, compute, out_types, block, ept, with_index=False
+    ):
         self.fn = fn
         self.nin = nin
         self.nout = nout
@@ -385,6 +397,7 @@ class _ElementwiseStrided:
         self.out_types = out_types
         self.block = block
         self.ept = ept
+        self.with_index = with_index
 
     @cute.jit
     def __call__(self, mIns: list, mOuts: list, consts: list, stream: cuda.CUstream):
@@ -408,7 +421,13 @@ class _ElementwiseStrided:
                 vals = tuple(
                     self.compute(mIns[k][i]) for k in range(const_expr(self.nin))
                 )
-                outs = self.fn(*vals, *consts)
+                # Int64 index: aten's gpu_kernel_with_index hands the lambda an int64_t,
+                # and arange's size can exceed Int32 (the step multiply happens in the
+                # accumulate type, so the index must not wrap first).
+                if const_expr(self.with_index):
+                    outs = self.fn(cutlass.Int64(i), *vals, *consts)
+                else:
+                    outs = self.fn(*vals, *consts)
                 if const_expr(self.nout == 1):
                     mOuts[0][i] = self.out_types[0](outs)
                 else:
@@ -503,18 +522,26 @@ _VEC_OUT_DTYPES = (
 )
 
 
-def _vec_ok(inputs, shape, out_dtypes, compute_torch, V):
+def _vec_ok(inputs, shape, out_dtypes, compute_torch, V, out_ref=None):
     # Fast path requires: every input already has the output shape (no broadcast), is
     # contiguous, the element count is a multiple of V (exact (numel/V, V) reshape), AND
     # every output is a vector-storable float (see _VEC_OUT_DTYPES).
+    #
+    # For a NULLARY op (nin == 0) the `all(... for t in inputs)` tests below are vacuously
+    # true, so the shape/contiguity/alignment obligation falls entirely on the OUTPUT --
+    # check out_ref explicitly or an unaligned in-place target would take the vec path and
+    # fault in from_dlpack.
     if any(d not in _VEC_OUT_DTYPES for d in out_dtypes):
         return False
     numel = math.prod(shape)
     if numel == 0 or numel % V != 0:
         return False
-    if not all(_is_16b_aligned(t) for t in inputs):
+    probes = list(inputs) if inputs else ([out_ref] if out_ref is not None else [])
+    if not probes:
         return False
-    return all(tuple(t.shape) == tuple(shape) and t.is_contiguous() for t in inputs)
+    if not all(_is_16b_aligned(t) for t in probes):
+        return False
+    return all(tuple(t.shape) == tuple(shape) and t.is_contiguous() for t in probes)
 
 
 def _is_16b_aligned(t) -> bool:
@@ -567,6 +594,13 @@ def _rowvec_ok(inputs, shape, out_dtypes, compute_torch, V):
     # (as for the flat vec path) every output is a vector-storable dtype. Returns the
     # shared (rows, run, row_step) or None. Output is allocated CONTIGUOUS (matches aten,
     # which drops the gap on the result), so only inputs need the gapped view.
+    #
+    # A NULLARY op has no inputs to carry a gap geometry, and this path's premise is
+    # "gapped inputs, contiguous output" -- there is nothing to vectorize within. Decline
+    # explicitly rather than relying on the empty-views fallthrough, which would also wrap
+    # the output at assumed_align=16 that an unaligned target cannot honour.
+    if not inputs:
+        return None
     if any(d not in _VEC_OUT_DTYPES for d in out_dtypes):
         return None
     if any(tuple(t.shape) != tuple(shape) for t in inputs):
@@ -574,7 +608,7 @@ def _rowvec_ok(inputs, shape, out_dtypes, compute_torch, V):
     if not all(_is_16b_aligned(t) for t in inputs):
         return None  # rowvec also wraps at assumed_align=16 (see _is_16b_aligned)
     views = [_row_gap_view(t) for t in inputs]
-    if any(v is None for v in views) or len({v for v in views}) != 1:
+    if any(v is None for v in views) or len(set(views)) != 1:
         return None  # all inputs must share ONE row-gapped geometry
     rows, run, row_step = views[0]
     return views[0] if run % V == 0 else None
@@ -604,6 +638,8 @@ def _build_plan(
     vec_bits,
     load,
     pipe_depth,
+    out_ref=None,
+    with_index=False,
 ):
     # ALL shape-invariant work for this operand signature: broadcast shape, path
     # selection, op construction, and the kernel compile (against the live tensors as
@@ -612,11 +648,21 @@ def _build_plan(
     # block/ept/vec_bits/load/pipe_depth are the exposed knobs, baked into the op +
     # compiled kernel. load/pipe_depth apply only to the vec route; the strided route
     # is always direct (broadcast/irregular layouts can't use the vec smem staging).
-    shape = tuple(torch.broadcast_shapes(*(t.shape for t in inputs)))
+    # NULLARY ops (nin == 0: fill_ and the constructors built on it) have no input to
+    # infer from -- the caller-supplied OUTPUT carries the shape, device and layout that
+    # inputs normally provide. `ref` is that source of truth: operand 0 when there is
+    # one, else the seed output. broadcast_shapes() of nothing is () (a 0-d scalar), so
+    # the shape must come from ref for nin == 0.
+    ref = inputs[0] if inputs else out_ref
+    shape = (
+        tuple(torch.broadcast_shapes(*(t.shape for t in inputs)))
+        if inputs
+        else tuple(ref.shape)
+    )
     # Fill any knob the caller left None from the measured per-(numel, dtype) heuristic,
     # scaled to the device. numel is the flat element count -- pointwise's single
     # effective dimension.
-    cfg = _choose_config(math.prod(shape), compute.width, _hw.caps(inputs[0].device))
+    cfg = _choose_config(math.prod(shape), compute.width, _hw.caps(ref.device), nin)
     block = cfg.block if block is None else block
     ept = cfg.ept if ept is None else ept
     vec_bits = cfg.vec_bits if vec_bits is None else vec_bits
@@ -638,8 +684,17 @@ def _build_plan(
     # one cp.async, so fall back to direct rather than fail IR verification.
     if load == "cpasync" and V * compute.width > 128:
         load = "direct"
-    dev = inputs[0].device
-    seed_outs = [torch.empty(shape, device=dev, dtype=d) for d in out_dtypes]
+    dev = ref.device
+    # The strided route BAKES its operands' layouts, and for a nullary op the output is the
+    # only operand -- so seed with the REAL target rather than a fresh contiguous tensor,
+    # or a strided/transposed target compiles a contiguous kernel and from_dlpack rejects
+    # it at launch ("Mismatched mOuts[0].strides[0]"). Ops WITH inputs keep the fresh seed:
+    # their output is always contiguous (allocated here or cond-verified dense).
+    seed_outs = (
+        [out_ref]
+        if not inputs and out_ref is not None
+        else [torch.empty(shape, device=dev, dtype=d) for d in out_dtypes]
+    )
     rowgap = ()
     in_dtypes = tuple(t.dtype for t in inputs)
     # The kernel-cache key holds ONLY what the compiled kernel BAKES (see _KERNELS).
@@ -649,8 +704,21 @@ def _build_plan(
     # needs static fragments; strided decodes a baked layout), so their keys carry the
     # geometry -- same per-layout compile count as before, but scalar-value recompiles
     # are gone there too.
-    common = (id(fn), nin, nout, len(consts), compute, tuple(out_dtypes), in_dtypes)
-    if _vec_ok(inputs, shape, out_dtypes, compute_torch, V) and load != "tma":
+    common = (
+        id(fn),
+        nin,
+        nout,
+        len(consts),
+        compute,
+        tuple(out_dtypes),
+        in_dtypes,
+        with_index,
+    )
+    # An index-consuming fn only works on the strided route (the vectorized routes give the
+    # fn a whole V-wide fragment, not one element, so there is no single index to pass), so
+    # skip the vec/rowvec tests entirely and let the else-branch below take it.
+    vec1 = not with_index and _vec_ok(inputs, shape, out_dtypes, compute_torch, V, ref)
+    if vec1 and load != "tma":
         # tma is excluded from the dynamic wrap: make_tiled_tma_atom builds a
         # descriptor from the (static) tile extents; the rare tma plan falls to the
         # static branch below.
@@ -666,13 +734,13 @@ def _build_plan(
             ept,
             load,
             pipe_depth,
-            _L.torch2cute[inputs[0].dtype],
+            _L.torch2cute[ref.dtype],
         )
         cin = [_L.cute_tensor_vec_dyn(t, V, read_only=True) for t in inputs]
         cout = [_L.cute_tensor_vec_dyn(o, V) for o in seed_outs]
         path = "vec"
         kkey = common + ("vec", V, block, ept, load, pipe_depth)
-    elif _vec_ok(inputs, shape, out_dtypes, compute_torch, V):
+    elif vec1:
         op = _ElementwiseVec(
             fn,
             nin,
@@ -685,13 +753,16 @@ def _build_plan(
             ept,
             load,
             pipe_depth,
-            _L.torch2cute[inputs[0].dtype],
+            _L.torch2cute[ref.dtype],
         )
         cin = [_L.cute_tensor_vec(t, V, read_only=True) for t in inputs]
         cout = [_L.cute_tensor_vec(o, V) for o in seed_outs]
         path = "vec_static"
         kkey = common + ("vec_static", shape, V, block, ept, load, pipe_depth)
-    elif (rg := _rowvec_ok(inputs, shape, out_dtypes, compute_torch, V)) is not None:
+    elif (
+        not with_index
+        and (rg := _rowvec_ok(inputs, shape, out_dtypes, compute_torch, V)) is not None
+    ):
         # Row-dense-gapped inputs -> vectorize within rows (contiguous output). The
         # output is dense, so its run == its full row-length; only inputs carry the gap.
         rows, run, row_step = rg
@@ -707,13 +778,19 @@ def _build_plan(
         kkey = common + ("rowvec", rg, V, block)
     else:
         op = _ElementwiseStrided(
-            fn, nin, nout, len(consts), compute, out_types, block, ept
+            fn, nin, nout, len(consts), compute, out_types, block, ept, with_index
         )
         cin = [_L.cute_tensor(t.expand(shape), read_only=True) for t in inputs]
         cout = [_L.cute_tensor(o) for o in seed_outs]
         path = "strided"
+        # This route BAKES each operand's layout, so every baked layout must be in the
+        # kernel key -- including the OUTPUTS'. For ops with inputs the outputs are always
+        # contiguous, so `shape` pins them; a nullary op's output is the only operand and
+        # can be strided/transposed, so key it explicitly or a transposed target's kernel
+        # gets handed a differently-strided one and from_dlpack rejects it at launch.
         lays = tuple((tuple(t.shape), t.stride()) for t in inputs)
-        kkey = common + ("strided", shape, lays, block, ept)
+        out_lays = tuple((tuple(o.shape), o.stride()) for o in seed_outs)
+        kkey = common + ("strided", shape, lays, out_lays, block, ept)
     # Compile against PLACEHOLDER scalar values, not the live ones. The scalars are
     # genuine runtime arguments (they arrive as %arg f32/i32 in the IR), but the DSL
     # mangles every non-IR argument's VALUE into the generated MLIR symbol name, so
@@ -748,6 +825,7 @@ def run(
     load=None,
     pipe_depth=None,
     out=None,
+    with_index=False,
 ):
     # inputs: torch tensors (any broadcastable shapes / strides). Returns nout torch
     # tensors of the broadcast shape. The plan (path / shape / compiled kernel) is
@@ -780,9 +858,13 @@ def run(
             vec_bits,
             load,
             pipe_depth,
+            # NULLARY (nin == 0, e.g. fill_): with no input, the caller-supplied output is
+            # the only source of shape/device/layout. Such a call always passes `out`.
+            out[0] if not inputs and out else None,
+            with_index,
         ),
     )
-    dev = inputs[0].device
+    dev = inputs[0].device if inputs else out[0].device
     outs = (
         list(out)
         if out is not None

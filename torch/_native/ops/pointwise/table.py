@@ -85,15 +85,15 @@ class PointwiseDef(NamedTuple):
     # cond runs, so it cannot be declined in Python -- the overload must not be
     # registered at all. Functional and in-place still are.
     skip_out_variant: bool = False
-    # OPTIONAL scalars: names in `scalars` that aten declares `Scalar?`/`float?` and the
-    # caller may omit INDEPENDENTLY (clamp's min/max, nan_to_num's nan/posinf/neginf).
-    # Distinct from scalar_defaults, which is a fixed value per slot: an optional
-    # scalar's fill-in can depend on the COMPUTE DTYPE, so it is a callable
-    # `(compute_torch_dtype) -> value` in `optional_defaults` instead. Verified against
-    # aten: an omitted nan_to_num posinf is numeric_limits<dtype>::max() (fp16 65504,
-    # fp32 3.4e38, fp64 1.8e308), and an omitted clamp bound is the corresponding
-    # infinity, so the one NaN-propagating formula covers every arity.
-    optional_scalars: tuple[str, ...] = ()
+    # OPTIONAL scalars: name -> fill-in for the entries of `scalars` that aten declares
+    # `Scalar?`/`float?` and the caller may omit INDEPENDENTLY (clamp's min/max,
+    # nan_to_num's nan/posinf/neginf, logit's eps). Distinct from scalar_defaults, which
+    # is a fixed value per slot: these fill-ins depend on the RESULT DTYPE, so each is a
+    # callable `(torch_dtype) -> value`. Verified against aten: an omitted nan_to_num
+    # posinf is numeric_limits<dtype>::max() (fp16 65504, fp32 3.4e38, fp64 1.8e308), an
+    # omitted clamp bound is the corresponding infinity, and an omitted logit eps is a
+    # negative sentinel meaning "do not clamp" -- so one formula covers every arity.
+    # Membership in this dict IS the "is optional" flag; there is no separate name list.
     optional_defaults: dict | None = None
     # Select the ops.py fn by a STRING kwarg rather than by dtype (int_fn's axis).
     # aten spells two distinct kernels as one overload plus a mode string: gelu's
@@ -186,17 +186,24 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
     PointwiseDef("div.Tensor", 2, "_div", promotion=_INT2FLOAT, int_via_float=True),
     PointwiseDef("maximum", 2, "_maximum", int_dtypes=_INT_DTYPES),
     PointwiseDef("minimum", 2, "_minimum", int_dtypes=_INT_DTYPES),
-    PointwiseDef("atan2", 2, "_atan2", int_via_float=True),
+    PointwiseDef("atan2", 2, "_atan2", promotion=_INT2FLOAT, int_via_float=True),
     PointwiseDef("rsub.Tensor", 2, "_rsub", scalars=("alpha",), int_dtypes=_INT_DTYPES),
     # fmax/fmin are the NaN-SUPPRESSING pair (vs maximum/minimum which propagate).
     PointwiseDef("fmax", 2, "_fmax", int_dtypes=_INT_DTYPES),
     PointwiseDef("fmin", 2, "_fmin", int_dtypes=_INT_DTYPES),
     PointwiseDef("clamp_min.Tensor", 2, "_clamp_min", int_dtypes=_INT_DTYPES),
     PointwiseDef("clamp_max.Tensor", 2, "_clamp_max", int_dtypes=_INT_DTYPES),
-    PointwiseDef("copysign.Tensor", 2, "_copysign", int_via_float=True),
+    # atan2/copysign/xlogy/xlog1py are INT_TO_FLOAT in aten just like div: an all-integer
+    # operand pair promotes to float32. int_via_float alone only ACCEPTS the int input --
+    # without the promotion kind, DEFAULT promotion keeps the compute dtype integer and
+    # cute.math.log/atan (float-only primitives) reject it (copysign's math happens to
+    # lower on ints, so it silently returned an integer instead of aten's float32).
+    PointwiseDef(
+        "copysign.Tensor", 2, "_copysign", promotion=_INT2FLOAT, int_via_float=True
+    ),
     PointwiseDef("hypot", 2, "_hypot"),
     PointwiseDef("logaddexp", 2, "_logaddexp"),
-    PointwiseDef("xlogy.Tensor", 2, "_xlogy", int_via_float=True),
+    PointwiseDef("xlogy.Tensor", 2, "_xlogy", promotion=_INT2FLOAT, int_via_float=True),
     # pow keeps integers integer (aten int^int -> int); the float fn is the exp2/log2
     # composite with full sign/edge handling. Integer pow needs a repeated-multiply
     # loop the DSL can't express over a runtime exponent -> float-only.
@@ -263,9 +270,18 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
     PointwiseDef("asinh", 1, "_asinh", promotion=_INT2FLOAT, int_via_float=True),
     PointwiseDef("acosh", 1, "_acosh", promotion=_INT2FLOAT, int_via_float=True),
     PointwiseDef("atanh", 1, "_atanh", promotion=_INT2FLOAT, int_via_float=True),
-    # logit: only the eps=None overload semantics (no clamp); an explicit eps arg is a
-    # float?-typed positional our scalar plumbing doesn't model -> that call declines.
-    PointwiseDef("logit", 1, "_logit", promotion=_INT2FLOAT),
+    # logit's eps is `float?`: omitted means NO clamping, which aten spells as a negative
+    # eps sentinel inside its kernel. optional_defaults reproduces that exactly, so one
+    # row serves both overloads. (Before optional scalars were modelled this row ignored an
+    # explicit eps and silently returned the unclamped result -- nan where aten clamps.)
+    PointwiseDef(
+        "logit",
+        1,
+        "_logit",
+        promotion=_INT2FLOAT,
+        scalars=("eps",),
+        optional_defaults={"eps": lambda dt: -1.0},
+    ),
     # --- activations (INT_TO_FLOAT like aten; Scalar-parameterized ones bake them) ---
     PointwiseDef("silu", 1, "_silu", promotion=_INT2FLOAT),
     PointwiseDef(
@@ -363,7 +379,9 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
     PointwiseDef("heaviside", 2, "_heaviside", int_dtypes=_INT_DTYPES),
     PointwiseDef("logaddexp2", 2, "_logaddexp2"),
     PointwiseDef("special_entr", 1, "_entr", promotion=_INT2FLOAT),
-    PointwiseDef("special_xlog1py", 2, "_xlog1py", int_via_float=True),
+    PointwiseDef(
+        "special_xlog1py", 2, "_xlog1py", promotion=_INT2FLOAT, int_via_float=True
+    ),
     PointwiseDef("hardswish", 1, "_hardswish"),
     # aten's default negative_slope is 0.01: without scalar_defaults a defaulted call
     # would bake 1 and compute plain identity.
@@ -406,7 +424,6 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         1,
         "_clamp",
         scalars=("min", "max"),
-        optional_scalars=("min", "max"),
         optional_defaults={"min": _lowest, "max": _highest},
         int_dtypes=_INT_DTYPES,
     ),
@@ -418,7 +435,6 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         1,
         "_nan_to_num",
         scalars=("nan", "posinf", "neginf"),
-        optional_scalars=("nan", "posinf", "neginf"),
         optional_defaults={
             "nan": lambda dt: 0.0,
             "posinf": lambda dt: torch.finfo(dt).max,
