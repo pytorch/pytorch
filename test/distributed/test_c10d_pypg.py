@@ -502,7 +502,7 @@ class TestPyProcessGroup(TestCase):
             stream.synchronize()
             self.assertTrue(event.query())
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
+    @unittest.skipIf(not TEST_ACCELERATOR, "no accelerator")
     def test_block_current_stream_use_after_free(self) -> None:
         """
         This tests that the CPU control tensor is not freed before the CUDA kernel executes.
