@@ -520,6 +520,8 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
     // returns the MPSEvent back to MPSEventPool
     buffer_block->event.reset(nullptr);
   }
+  // Releases every consumer stream's MPSEvent back to MPSEventPool
+  buffer_block->stream_uses.clear();
   buffer_block->in_use = false;
   HeapBlock* heap = buffer_block->heap;
   heap->free_bytes += buffer_block->size;
@@ -686,40 +688,58 @@ bool MPSHeapAllocatorImpl::recordStream(const void* ptr, MPSStream* stream) {
   if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
     return false;
   }
-  if (!buffer_block->event) {
-    buffer_block->event = m_event_pool->acquireEvent(false, stream);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
-  } else {
-    buffer_block->event->reset(stream, /*enable_timing=*/false);
+  // Each consumer stream gets its own event so that recording a new stream
+  // never discards tracking for an earlier stream that is not complete yet,
+  // since we don't know what order the streams will complete in.
+  auto it = buffer_block->stream_uses.find(stream);
+  if (it == buffer_block->stream_uses.end()) {
+    it = buffer_block->stream_uses.emplace(stream, m_event_pool->acquireEvent(false, stream)).first;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(it->second);
   }
-  buffer_block->event->record(/*needsLock*/ false);
+  it->second->record(/*needsLock*/ false);
   return true;
 }
 
 bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
-  std::vector<BufferBlock*> buffer_blocks;
+  struct PendingWait {
+    BufferBlock* buffer_block;
+    std::vector<MPSEvent*> events;
+  };
+  std::vector<PendingWait> pending_waits;
   {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     for (const auto& buffer : buffers) {
       BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
-      // wait on event if "shared" buffer was allocated on MPSAllocator and
+      // wait on events if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
-      if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
-          buffer_block->event) {
-        buffer_blocks.push_back(buffer_block);
+      if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1) {
+        std::vector<MPSEvent*> events;
+        if (buffer_block->event) {
+          events.push_back(buffer_block->event.get());
+        }
+        for (auto& stream_use : buffer_block->stream_uses) {
+          events.push_back(stream_use.second.get());
+        }
+        if (!events.empty()) {
+          pending_waits.push_back({buffer_block, std::move(events)});
+        }
       }
     }
   }
   bool waitedForEvent = false;
 
-  for (const auto& buffer_block : buffer_blocks) {
+  for (const auto& pending_wait : pending_waits) {
     // check for retain count again as the previous wait might have released the buffer
-    if (buffer_block->retainCount() > 1) {
-      bool waitedOnCPU = buffer_block->event->synchronize();
+    if (pending_wait.buffer_block->retainCount() > 1) {
+      bool waitedOnCPU = false;
+      // Every consumer stream that was recorded on this buffer must finish.
+      for (MPSEvent* event : pending_wait.events) {
+        waitedOnCPU |= event->synchronize();
+      }
       if (waitedOnCPU) {
         // after waiting, it's a good time to free some pending inactive buffers
         freeInactiveBuffers();
-        waitedForEvent |= buffer_block->retainCount() <= 1;
+        waitedForEvent |= pending_wait.buffer_block->retainCount() <= 1;
       } else {
         // even if one of the buffers weren't recorded beforehand, we return
         // without continuing with other buffers since retainCount > 1
@@ -794,13 +814,14 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
     BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
       // A buffer marked by recordEvents (used by the GPU in a context where a
-      // subsequent CPU reuse could race it, e.g. a pinned-memory copy) and still
+      // subsequent CPU reuse could race it, e.g. a pinned-memory copy) or by
+      // recordStream (used by one or more separate consumer streams) and still
       // referenced by an in-flight command buffer must not be recycled yet:
       // handing it to a new allocation could let the CPU overwrite it before the
       // GPU is done. Park it in limbo; freeInactiveBuffers() reclaims it once its
       // command buffer completes. Unmarked buffers are only GPU-accessed, so
       // serial-stream ordering already makes immediate reuse safe.
-      if (buffer_block->event && buffer_block->retainCount() > 1) {
+      if ((buffer_block->event || !buffer_block->stream_uses.empty()) && buffer_block->retainCount() > 1) {
         pool.buffers_pending_free.insert(buffer_block);
       } else {
         free_buffer(buffer_block);
