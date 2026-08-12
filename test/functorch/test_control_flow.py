@@ -6941,38 +6941,24 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), x)
 
     @requires_cuda
-    def test_associative_scan_in_vmap_pointwise_compile(self):
+    @parametrize("in_dims", [0, 1])
+    @parametrize("combine_fn_name", ["add", "mul"])
+    def test_associative_scan_in_vmap_pointwise_compile(self, in_dims, combine_fn_name):
+        combine_fn = {"add": torch.add, "mul": torch.mul}[combine_fn_name]
+        # Batch axis at position ``in_dims``; scan is always over the lane's dim 0.
         x = torch.randn(3, 4, 2, device="cuda")
-
-        def combine_fn(a, b):
-            return a + b
+        if in_dims == 1:
+            x = x.movedim(0, 1)
 
         def fn(x):
             def inner_fn(xi):
                 return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
 
-            return torch.vmap(inner_fn, in_dims=0)(x)
+            return torch.vmap(inner_fn, in_dims=in_dims)(x)
 
+        unbatched = [x.select(in_dims, i) for i in range(x.shape[in_dims])]
         exp = torch.stack(
-            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
-        )
-        self.assertEqual(torch.compile(fn)(x), exp)
-
-    @requires_cuda
-    def test_associative_scan_in_vmap_pointwise_compile_mul(self):
-        x = torch.randn(3, 4, 2, device="cuda")
-
-        def combine_fn(a, b):
-            return a * b
-
-        def fn(x):
-            def inner_fn(xi):
-                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
-
-            return torch.vmap(inner_fn, in_dims=0)(x)
-
-        exp = torch.stack(
-            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+            [_fake_associative_scan(combine_fn, xi, dim=0) for xi in unbatched]
         )
         self.assertEqual(torch.compile(fn)(x), exp)
 
@@ -7008,27 +6994,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
 
     @requires_cuda
-    def test_associative_scan_in_vmap_pointwise_compile_nonzero_in_dims(self):
-        x = torch.randn(4, 3, 2, device="cuda")
-
-        def combine_fn(a, b):
-            return a + b
-
-        def fn(x):
-            def inner_fn(xi):
-                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
-
-            return torch.vmap(inner_fn, in_dims=1)(x)
-
-        exp = torch.stack(
-            [
-                _fake_associative_scan(combine_fn, x[:, i], dim=0)
-                for i in range(x.shape[1])
-            ]
-        )
-        self.assertEqual(torch.compile(fn)(x), exp)
-
-    @requires_cuda
     def test_associative_scan_in_vmap_pointwise_compile_nested(self):
         x = torch.randn(2, 3, 4, 2, device="cuda")
 
@@ -7053,6 +7018,22 @@ class GraphModule(torch.nn.Module):
             ]
         )
         self.assertEqual(torch.compile(fn)(x), exp)
+
+    @requires_cuda
+    def test_associative_scan_in_vmap_pointwise_compile_nonpointwise(self):
+        x = torch.randn(4, 3, 3, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b.transpose(-1, -2)
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        with self.assertRaises(Exception):
+            torch.compile(fn, fullgraph=True)(x)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
