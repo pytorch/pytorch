@@ -2967,7 +2967,9 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
-            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            reduced = (
+                f"{ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            )
 
             # Restore the exact original shape via .view() to handle keepdim
             # and multi-dimensional reductions correctly.
@@ -2978,16 +2980,27 @@ class SIMDScheduling(BaseScheduling):
                     for s in buffer.get_layout().size
                 ]
                 final_shape_str = f"[{', '.join(final_shape)}]"
-                final_reduce += f".view({final_shape_str})"
+                reduced += f".view({final_shape_str})"
 
             # The workspace tensor is in torch.float, need a cast if the buffer is
             # not.
             if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
-                final_reduce += f".to({buffer_dtype})"
-            V.graph.wrapper_code.writeline(final_reduce)
-            # mark the buffer as allocated, so we don't try to allocate
-            # it again when it's later used
-            V.graph.wrapper_code.allocated.add(buffer_name)
+                reduced += f".to({buffer_dtype})"
+
+            if isinstance(buffer, ir.Buffer) and isinstance(
+                buffer.get_output_spec(), ir.NonOwningLayout
+            ):
+                # The buffer is a view into another buffer's storage (e.g. a
+                # cat destination). Rebinding the name would leave the
+                # underlying region never written; write through the view
+                # instead. See https://github.com/pytorch/pytorch/issues/193061
+                V.graph.wrapper_code.codegen_allocation(buffer)
+                V.graph.wrapper_code.writeline(f"{buffer_name}.copy_({reduced})")
+            else:
+                V.graph.wrapper_code.writeline(f"{buffer_name} = {reduced}")
+                # mark the buffer as allocated, so we don't try to allocate
+                # it again when it's later used
+                V.graph.wrapper_code.allocated.add(buffer_name)
 
         kernel.deallocate_workspaces()
 
