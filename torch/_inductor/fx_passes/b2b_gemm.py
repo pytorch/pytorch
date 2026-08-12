@@ -3,6 +3,7 @@ import functools
 from collections import deque
 
 import torch
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -358,12 +359,12 @@ b2b_gemm_configs = [
 ]
 
 
-# XPU-specific configs: num_stages=1 with smaller tiles. Appended to the
-# autotune candidate set only on XPU (see tuned_b2b_gemm). The triton-xpu
-# SPIR-V backend regresses on num_stages>=2 for the nested b2b loops, so
-# these simpler-pipeline configs (no software pipelining, lower register
-# pressure) keep the Triton template at parity with the unfused fallback.
-# Gated to XPU so CUDA/HIP autotune sees no extra candidates.
+# XPU-specific configs: num_stages=1 with smaller tiles and lower warps.
+# Appended to the autotune candidate set only on XPU (see tuned_b2b_gemm).
+# On XPU these simpler configs are what autotune selects as best for the
+# nested b2b loops; the CUDA-tuned num_stages>=2 / larger-tile candidates
+# do not win on XPU hardware. Gated to XPU so CUDA/HIP autotune sees no
+# extra candidates.
 b2b_gemm_xpu_configs = [
     {
         "BLOCK_SIZE_M": 32,
@@ -460,12 +461,15 @@ def is_b2b_gemm_good_on(
     O, P = C.shape
 
     # ceildiv() requires int arguments, but FakeTensor shapes may be
-    # torch.SymInt (even wrapping concrete values). Convert to int.
-    # With dynamic shapes enabled, SymInt may be symbolic -> can't compute
-    # the heuristic statically, so skip b2b_gemm.
+    # torch.SymInt. int(SymInt) guards the symbol to its concrete value, which
+    # works when the shape has a known hint (the common dynamic=True case).
+    # A genuinely unbacked symbolic shape has no value to guard to, and
+    # int(SymInt) raises GuardOnDataDependentSymNode (a RuntimeError, not
+    # TypeError); a non-SymInt, non-int object raises TypeError. In either
+    # case the heuristic can't be evaluated statically, so skip b2b_gemm.
     try:
         M, N, O, P = int(M), int(N), int(O), int(P)
-    except TypeError:
+    except (TypeError, GuardOnDataDependentSymNode):
         return False
 
     ratios = []
@@ -645,11 +649,10 @@ def tuned_b2b_gemm(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
     )
-    # XPU gets extra num_stages=1 / small-tile candidates: triton-xpu's
-    # SPIR-V backend regresses on deeper pipelines (num_stages>=2) for the
-    # nested b2b loops, so simpler-pipeline configs keep the Triton template
-    # at parity with the unfused fallback. Gated by device so that CUDA and
-    # HIP share the original CUDA-oriented b2b_gemm_configs candidate set.
+    # XPU gets extra num_stages=1 / small-tile candidates, which autotune
+    # selects as best on XPU for the nested b2b loops. Gated by device so
+    # that CUDA and HIP share the original CUDA-oriented b2b_gemm_configs
+    # candidate set.
     device = A.get_device_or_error()
     candidate_configs = (
         b2b_gemm_configs + b2b_gemm_xpu_configs

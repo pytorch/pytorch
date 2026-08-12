@@ -186,6 +186,41 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
+    @torch._dynamo.config.patch(recompile_limit=32)
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_good_shape_unbacked_symbol_skips(self):
+        """
+        When a b2b_gemm input has an unhinted, unbacked symbolic shape (a
+        data-dependent dim with no concrete value to guard to), int(SymInt)
+        raises GuardOnDataDependentSymNode (a RuntimeError, not TypeError).
+        is_b2b_gemm_good_on() must catch it and skip b2b_gemm rather than
+        crashing the compiler. The pass should not fire for such a shape.
+        """
+
+        class FakeVal:
+            def __init__(self, shape):
+                self.shape = shape
+                self.is_cuda = False
+                self.is_xpu = True
+
+        class FakeNode:
+            def __init__(self, shape):
+                self.meta = {"val": FakeVal(shape)}
+
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        env = ShapeEnv()
+        u0 = env.create_unbacked_symint()  # unhinted, unbacked
+
+        A_node = FakeNode((u0, 32))
+        B_node = FakeNode((32, 64))
+        C_node = FakeNode((64, 32))
+
+        from torch._inductor.fx_passes.b2b_gemm import is_b2b_gemm_good_on
+
+        # Must return False (skip) instead of raising GuardOnDataDependentSymNode.
+        self.assertFalse(is_b2b_gemm_good_on(True, A_node, B_node, C_node))
+
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
     def test_plain_b2b_gemm_performance(self):
