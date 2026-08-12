@@ -581,18 +581,39 @@ class SideEffects:
             raise AssertionError(f"Missing attribute mutation kind for {item}.{name}")
         return self.attr_mutation_kinds[item][name]
 
+    def _record_traced_source(
+        self, item: VariableTracker, name: str, traced_source: Source | None
+    ) -> None:
+        if traced_source is None:
+            item_source = getattr(item, "source", None)
+            if item_source is None:
+                return
+            traced_source = AttrSource(item_source, name)
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            output_graph.current_tx.output.current_tracer.traced_sources.add(
+                traced_source
+            )
+
     def load_attr(
         self,
         item: VariableTracker,
         name: str,
         deleted_ok: bool = False,
         check: bool = False,
+        traced_source: Source | None = None,
     ) -> VariableTracker:
         if check:
             if not self.is_attribute_mutation(item):
                 raise AssertionError(
                     f"Expected attribute mutation for {item} in load_attr"
                 )
+        # Reads served from here bypass VariableBuilder, so record the source
+        # ourselves -- otherwise a subgraph that reads an attribute mutated
+        # before it ran has no traced source to intersect with mutated_sources
+        # and is wrongly considered reusable. Mirrors store_attr's key so the
+        # two sets line up.
+        self._record_traced_source(item, name, traced_source)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented(
@@ -626,16 +647,12 @@ class SideEffects:
             raise AssertionError(
                 f"Expected CellVariable, got {type(cellvar)} in load_cell"
             )
-        # Track the cell_contents source during subgraph tracing so that
-        # mutations (e.g. nonlocal counter = 3) are detected by the reuse
-        # mechanism via set intersection with mutated_sources.
-        output_graph = self.output_graph_weakref()
-        if output_graph:
-            cell_source = getattr(cellvar, "source", None)
-            if cell_source is not None:
-                output_graph.current_tx.output.current_tracer.traced_sources.add(
-                    AttrSource(cell_source, "cell_contents")
-                )
+        # Recorded here rather than only in load_attr because an unmutated cell
+        # returns pre_existing_contents below without going through load_attr,
+        # and a mutation landing after that read must still be detected.
+        contents = cellvar.pre_existing_contents
+        contents_source = getattr(contents, "source", None) if contents else None
+        self._record_traced_source(cellvar, "cell_contents", contents_source)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -652,16 +669,9 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(gvar)} in load_global"
             )
-        # This path serves the read out of side effects, bypassing
-        # VariableBuilder, so record the source here the way load_cell does --
-        # otherwise a subgraph reading a rebound global has no traced source to
-        # intersect with mutated_sources and is wrongly considered reusable.
-        output_graph = self.output_graph_weakref()
-        if output_graph:
-            output_graph.current_tx.output.current_tracer.traced_sources.add(
-                GlobalSource(name)
-            )
-        return self.load_attr(gvar, name)
+        # gvar's source already names the global, so override load_attr's
+        # default key for the same reason store_global does.
+        return self.load_attr(gvar, name, traced_source=GlobalSource(name))
 
     def store_global(
         self, gvar: VariableTracker, name: str, value: VariableTracker
