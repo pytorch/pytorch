@@ -84,6 +84,20 @@ def _create_tensor_with_layout(layout, rows, cols, dtype, device="cuda"):
         raise ValueError(f"Unknown layout: {layout}")
 
 
+def _make_nvfp4_scaled_mm_inputs(m, n, k):
+    packed_k = k // 2
+    a = _create_tensor_with_layout("contiguous", m, packed_k, torch.float4_e2m1fn_x2)
+    b = _create_tensor_with_layout("contiguous", n, packed_k, torch.float4_e2m1fn_x2).T
+    scale_k = _prep_k(k, 16)
+    scale_a = torch.rand(_round_up(m, 128) * scale_k, device="cuda").to(
+        torch.float8_e4m3fn
+    )
+    scale_b = torch.rand(_round_up(n, 128) * scale_k, device="cuda").to(
+        torch.float8_e4m3fn
+    )
+    return a, b, scale_a, scale_b
+
+
 def _nvgemm_config(**overrides):
     """Standard NVGEMM test config. Always disables ATen fallback."""
     cfg = {
@@ -492,6 +506,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
         m, n, k = 128, 128, 512
         packed_k = k // 2
@@ -523,9 +538,11 @@ class TestNVUniversalGemm(TestCase):
             swizzle_mode_a=swizzle,
             scale_mode_b=mode,
             swizzle_mode_b=swizzle,
-            local_reduce_out=reduce_out,
-            local_reduce_group=group,
-            local_reduce_axis=1,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
         )
         kernel = next(
             candidate
@@ -830,7 +847,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(variance))
         online_softmax = dataclasses.replace(plan, reduction_type="online_softmax")
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(online_softmax))
-        self.assertTrue(
+        self.assertFalse(
             GemmVariant.SCALED_GEMM.supports_reduction(
                 dataclasses.replace(online_softmax, feeds_main=True)
             )
@@ -1524,21 +1541,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     def test_scaled_mm_large_epilogue_fusion(self):
         m, n, k = self.M, self.N, self.K
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         biases = tuple(
             torch.randn(n, device="cuda", dtype=torch.bfloat16) for _ in range(5)
         )
@@ -1736,14 +1739,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("output=", code)
 
         if case == (1, "sum", 32):
             if not has_triton_reduction_ordering():
                 self.skipTest("requires INNER_TREE Triton")
             with config.patch({"numerics": "strict"}):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
-            self.assertNotIn("'local_reduce_out'", strict_code)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
@@ -1779,8 +1782,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
-        self.assertIn("'local_reduce_source': 'square'", code)
+        self.assertIn("output=", code)
+        self.assertIn("source_type='square'", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -1814,7 +1817,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("'local_reduce_out'", code)
+        self.assertNotIn("'local_reduce': GemmReductionArguments", code)
 
     def test_scaled_mm_grouped_reduce_feeds_main(self):
         m, n, k, group = 128, 128, 512, 4
@@ -1848,7 +1851,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
