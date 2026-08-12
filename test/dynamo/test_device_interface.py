@@ -10,11 +10,11 @@ from torch._dynamo.device_interface import (
     CpuInterface,
     CudaInterface,
     DeviceInterface,
+    get_registered_device_interfaces,
     MpsInterface,
     MtiaInterface,
-    XpuInterface,
-    get_registered_device_interfaces,
     register_interface_for_device,
+    XpuInterface,
 )
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 
