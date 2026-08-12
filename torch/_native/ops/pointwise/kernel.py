@@ -654,6 +654,10 @@ def _build_plan(
     # one, else the seed output. broadcast_shapes() of nothing is () (a 0-d scalar), so
     # the shape must come from ref for nin == 0.
     ref = inputs[0] if inputs else out_ref
+    if ref is None:
+        # nin == 0 (fill_ / the constructors) always passes the target: it is the only
+        # source of shape, device and dtype. run() enforces this at the call site.
+        raise AssertionError("nullary pointwise plan needs a target tensor")
     shape = (
         tuple(torch.broadcast_shapes(*(t.shape for t in inputs)))
         if inputs
@@ -864,6 +868,8 @@ def run(
             with_index,
         ),
     )
+    if not inputs and not out:
+        raise AssertionError("nullary pointwise run needs a target tensor")
     dev = inputs[0].device if inputs else out[0].device
     outs = (
         list(out)
