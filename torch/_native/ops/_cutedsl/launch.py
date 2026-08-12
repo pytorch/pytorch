@@ -16,7 +16,7 @@
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Float32, Int32
+from cutlass import Float32, Int32, Int64
 
 import torch
 from torch.utils.dlpack import ReadOnlyTensorWrapper
@@ -28,6 +28,7 @@ torch2cute = {
     torch.float16: cutlass.Float16,
     torch.bfloat16: cutlass.BFloat16,
     torch.int32: Int32,
+    torch.int64: Int64,
 }
 
 
