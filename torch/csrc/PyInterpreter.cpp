@@ -1051,15 +1051,16 @@ std::function<py::object(py::object)> make_fake_device_stamp(
   };
 }
 
-// Python dispatch keys that op-impl / fast-op-impl callbacks must run beneath so
-// their own tensor ops don't re-enter the Python dispatcher. Named so the two
-// call sites can't drift.
+// Python dispatch keys that op-impl / fast-op-impl callbacks must run beneath
+// so their own tensor ops don't re-enter the Python dispatcher. Named so the
+// two call sites can't drift.
 constexpr c10::DispatchKeySet kFakeCallbackExcludeKeys =
     c10::DispatchKeySet(c10::DispatchKey::Python) |
     c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot);
 
-// Apply `convert` to each returned tensor (tuple/list/single). Lists are mutated
-// in place (e.g. the _foreach_* ops hand back raw meta tensors to stamp).
+// Apply `convert` to each returned tensor (tuple/list/single). Lists are
+// mutated in place (e.g. the _foreach_* ops hand back raw meta tensors to
+// stamp).
 py::object apply_output_convert(
     py::object result,
     const std::function<py::object(py::object)>& convert) {
@@ -1076,6 +1077,7 @@ py::object apply_output_convert(
   }
   if (py::isinstance<py::list>(result)) {
     py::list lst = result.cast<py::list>();
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < lst.size(); i++) {
       lst[i] = convert(py::reinterpret_borrow<py::object>(lst[i]));
     }
@@ -1116,8 +1118,8 @@ bool run_fake_python_callback(
   return true;
 }
 
-// The active FakeTensorMode and the CppFakeTensorMode Python object that op-impl
-// callbacks are invoked against.
+// The active FakeTensorMode and the CppFakeTensorMode Python object that
+// op-impl callbacks are invoked against.
 struct ActiveFakeMode {
   std::shared_ptr<c10::FakeTensorMode> mode;
   py::object py_fake_mode;
@@ -1127,8 +1129,7 @@ ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
   py::object py_fake_mode = getFakeModePyObj(mode.get());
-  TORCH_CHECK(
-      !py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
+  TORCH_CHECK(!py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
 
@@ -1154,7 +1155,7 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
   return run_fake_python_callback(
       op,
       stack,
-      [&](py::object args, py::dict kwargs) {
+      [&](const py::object& args, const py::dict& kwargs) {
         return decomp_fn(*args, **kwargs);
       },
       /*convert=*/{},
@@ -1177,8 +1178,8 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
       make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/true);
 
   // Check op_impl_checks for op: if an impl applies, run it; otherwise keep
-  // going (it returns NotImplemented). Args are popped and parsed once because a
-  // NotImplemented impl won't change them.
+  // going (it returns NotImplemented). Args are popped and parsed once because
+  // a NotImplemented impl won't change them.
   const auto& schema = op.schema();
   auto arguments = torch::jit::pop(*stack, schema.arguments().size());
   bool committed = false;
@@ -1235,7 +1236,7 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
   return run_fake_python_callback(
       op,
       stack,
-      [&](py::object args, py::dict kwargs) {
+      [&](const py::object& args, const py::dict& kwargs) {
         c10::impl::ExcludeDispatchKeyGuard guard(kFakeCallbackExcludeKeys);
         return fast_impl(active.py_fake_mode, *args, **kwargs);
       },
@@ -1257,7 +1258,7 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
   return run_fake_python_callback(
       op,
       stack,
-      [&](py::object args, py::dict kwargs) {
+      [&](const py::object& args, const py::dict& kwargs) {
         return prim_meta_impl(*args, **kwargs);
       },
       /*convert=*/{},
@@ -1335,7 +1336,8 @@ py::object getFakeModePyObj(const c10::FakeTensorMode* mode) {
   if (mode == nullptr || mode->fake_mode_pyobj_ == nullptr) {
     return py::none();
   }
-  // fake_mode_pyobj_ is a weak ref to the python object CppFakeTensorMode to avoid cycles
+  // fake_mode_pyobj_ is a weak ref to the python object CppFakeTensorMode to
+  // avoid cycles
   PyObject* obj = nullptr;
   if (PyWeakref_GetRef(mode->fake_mode_pyobj_->ptr(getPyInterpreter()), &obj) <=
       0) {
