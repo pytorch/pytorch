@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 from unittest import main, TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from cherry_pick import (
     create_cherry_pick_branch,
     find_revert_commit_sha,
+    get_merge_commit_sha,
     is_ancestor,
     post_tracker_issue_comment,
     resolve_trunk_revert,
@@ -39,6 +40,36 @@ def make_pr(pr_num: int = 42, default_branch: str = "main") -> Any:
     pr.pr_num = pr_num
     pr.default_branch.return_value = default_branch
     return pr
+
+
+class TestGetMergeCommitSha(TestCase):
+    def _pr(self, closed: bool) -> Any:
+        pr = make_pr()
+        pr.is_closed.return_value = closed
+        return pr
+
+    def test_closed_pr_returns_its_landed_commit(self) -> None:
+        with patch("cherry_pick.get_pr_commit_sha", return_value=LANDED):
+            self.assertEqual(
+                get_merge_commit_sha(make_repo(""), self._pr(closed=True)), LANDED
+            )
+
+    def test_open_never_merged_pr_is_refused(self) -> None:
+        # No revert names this commit, so the PR is genuinely not merged.
+        with patch("cherry_pick.get_pr_commit_sha", return_value=LANDED):
+            self.assertIsNone(
+                get_merge_commit_sha(make_repo(""), self._pr(closed=False))
+            )
+
+    def test_reopened_after_revert_is_accepted(self) -> None:
+        # The revert bot reopens the PR it reverts, so the one case the revert
+        # path exists for arrives here open. Gating on is_closed() alone made
+        # the feature unreachable.
+        with patch("cherry_pick.get_pr_commit_sha", return_value=LANDED):
+            self.assertEqual(
+                get_merge_commit_sha(make_repo(f"{REVERT}\n"), self._pr(closed=False)),
+                LANDED,
+            )
 
 
 class TestFindRevertCommitSha(TestCase):

@@ -54,10 +54,16 @@ def parse_args() -> Any:
 def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> str | None:
     """
     Return the merge commit SHA iff the PR has been merged. For simplicity, we
-    will only cherry pick PRs that have been merged into main
+    will only cherry pick PRs that have been merged into main.
+
+    A merged PR that was later reverted is reopened by the revert bot, so
+    is_closed() alone would reject exactly the PRs the revert path exists for.
+    Accept an open PR only when its landed commit was in fact reverted.
     """
     commit_sha = get_pr_commit_sha(repo, pr)
-    return commit_sha if pr.is_closed() else None
+    if pr.is_closed():
+        return commit_sha
+    return commit_sha if find_revert_commit_sha(repo, pr, commit_sha) else None
 
 
 def is_ancestor(repo: GitRepo, ref: str, branch: str) -> bool:
