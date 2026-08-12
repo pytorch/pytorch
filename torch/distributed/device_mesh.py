@@ -560,15 +560,15 @@ else:
                 None,
                 None,
             ):
-                sub_ranks = pg_ranks_by_dim.flatten().tolist()
-                sequential_ranks = list(range(get_world_size()))
-                if sub_ranks == sequential_ranks:
+                # Reuse default_group when ranks match standard [0..N-1] order.
+                ranks = list(range(get_world_size()))
+                if ranks == pg_ranks_by_dim.flatten().tolist():
                     # Append default pg to first dim groups if compatible
                     # with `self._device_type`. Otherwise, create new pg.
                     dim_group = (
                         new_group(
                             backend=backend,
-                            ranks=sequential_ranks,
+                            ranks=ranks,
                             group_desc="mesh_default",
                         )
                         if torch.cuda.is_available()
@@ -621,9 +621,6 @@ else:
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
-                # Preserves topology-aware rank order by skipping sorting if ranks
-                # are custom-ordered.
-                is_sorted = subgroup_ranks == sorted(subgroup_ranks)
                 dim_group = new_group(
                     ranks=subgroup_ranks,
                     timeout=timeout,
@@ -631,7 +628,7 @@ else:
                     pg_options=pg_options,
                     group_desc=group_desc,
                     use_local_synchronization=use_hashed,
-                    sort_ranks=is_sorted,
+                    sort_ranks=False,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
