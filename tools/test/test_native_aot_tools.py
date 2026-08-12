@@ -419,5 +419,3 @@ class TestSourceStaleness(unittest.TestCase):
                     {"prefix": "x", "spec": point, "sources": {rel: "0" * 16}}, f
                 )
             self.assertTrue(export._job_needed(job, force=False))
-
-
