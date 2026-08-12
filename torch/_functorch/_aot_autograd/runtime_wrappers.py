@@ -43,6 +43,10 @@ from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.autograd.graph import (
+    _CompiledAutogradOutputMetadata,
+    _CompiledAutogradOutputProvenance,
+)
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -231,6 +235,58 @@ def _unwrap_tensoralias(x: TensorAlias) -> torch.Tensor:
 
 def _identity(x: Any) -> Any:
     return x
+
+
+def _mark_compiled_autograd_output_provenance(
+    ret_outs: list[Any],
+    fw_outs: list[Any],
+    output_indices: tuple[int, ...],
+    metadata: _CompiledAutogradOutputMetadata,
+) -> None:
+    """Associate replayed alias outputs with their opaque compiled autograd node."""
+    compiled_node = None
+    # TensorAlias entries are returned inputs or aliases reconstructed outside
+    # the current CompiledFunction. They can carry metadata from an older
+    # compiled call, so only inspect actual tensor slots from this forward.
+    for output in fw_outs:
+        if not isinstance(output, Tensor) or output.grad_fn is None:
+            continue
+        node_metadata = getattr(output.grad_fn, "_aot_autograd_output_metadata", None)
+        if isinstance(node_metadata, _CompiledAutogradOutputMetadata):
+            compiled_node = output.grad_fn
+            break
+
+    owner = (
+        compiled_node
+        if compiled_node is not None
+        else torch.autograd.graph._CompiledAutogradOutputOwner(metadata)
+    )
+
+    for output_idx in output_indices:
+        output = ret_outs[output_idx]
+        if isinstance(output, Tensor) and output.grad_fn is not compiled_node:
+            torch.autograd.graph._register_compiled_autograd_output_provenance(
+                output, _CompiledAutogradOutputProvenance(owner, output_idx)
+            )
+
+
+def _make_compiled_autograd_output_metadata(
+    fw_metadata: ViewAndMutationMeta,
+) -> _CompiledAutogradOutputMetadata:
+    output_dependencies = tuple(fw_metadata.compiled_autograd_output_deps)
+    return _CompiledAutogradOutputMetadata(
+        fw_metadata.num_mutated_inp_runtime_indices,
+        output_dependencies,
+        tuple(
+            sorted(
+                {
+                    dependency_idx
+                    for dependencies in output_dependencies
+                    for dependency_idx in dependencies
+                }
+            )
+        ),
+    )
 
 
 class AliasOfInputHandler:
@@ -947,6 +1003,40 @@ def _codegen_epilogue(
                 dims_name = f"_dyn_dims_{i}"
                 buf.add_global(dims_name, o.dynamic_dims)
                 buf.emit(f"_mark_dynamic_(ret_outs[{i}], {dims_name})", indent=1)
+
+    dependency_sources = {
+        output_idx
+        for output_idx, dependencies in enumerate(
+            runtime_metadata.compiled_autograd_output_deps
+        )
+        if dependencies
+    }
+    dependency_targets = {
+        dependency_idx
+        for dependencies in runtime_metadata.compiled_autograd_output_deps
+        for dependency_idx in dependencies
+        if runtime_metadata.output_info[dependency_idx].output_type
+        != OutputType.is_input
+    }
+    relevant_outputs = dependency_sources | dependency_targets
+    if relevant_outputs:
+        buf.add_global(
+            "_mark_compiled_autograd_outputs_",
+            _mark_compiled_autograd_output_provenance,
+        )
+        target_indices_name = buf.bind_value(
+            "_compiled_autograd_output_indices",
+            tuple(sorted(relevant_outputs)),
+        )
+        output_metadata_name = buf.bind_value(
+            "_compiled_autograd_output_metadata",
+            _make_compiled_autograd_output_metadata(runtime_metadata),
+        )
+        buf.emit(
+            "_mark_compiled_autograd_outputs_("
+            f"ret_outs, fw_outs, {target_indices_name}, {output_metadata_name})",
+            indent=1,
+        )
 
     if runtime_metadata.grad_enabled_mutation is not None:
         buf.emit(
@@ -3227,8 +3317,26 @@ def _codegen_compiled_forward(
         artifact_name="compiled_function_forward",
     )
     buf.bind(torch=torch, BackwardState=BackwardState)
+    compiled_autograd_output_deps = tuple(fw_metadata.compiled_autograd_output_deps)
+    has_compiled_autograd_output_deps = any(compiled_autograd_output_deps)
+    if has_compiled_autograd_output_deps:
+        buf.bind(
+            _compiled_autograd_output_metadata_=(
+                _make_compiled_autograd_output_metadata(fw_metadata)
+            ),
+            _enable_compiled_autograd_output_validation_=(
+                torch.autograd.graph._enable_compiled_autograd_output_validation
+            ),
+        )
 
     with buf.indent():
+        if has_compiled_autograd_output_deps:
+            buf.writeline("_enable_compiled_autograd_output_validation_()")
+            buf.writeline(
+                "ctx._aot_autograd_output_metadata = "
+                "_compiled_autograd_output_metadata_"
+            )
+
         if backward_state_indices:
             idx = backward_state_indices[0]
             buf.writeline(f"_bw_state = args[{idx}]")

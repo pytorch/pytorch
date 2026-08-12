@@ -6426,6 +6426,416 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         self.assertEqual(result, result_test)
         self.assertEqual(x, x_test)
 
+    # https://github.com/pytorch/pytorch/issues/132929
+    def test_autograd_grad_compiled_sibling_output_error(self):
+        def fn(x):
+            latent = x.sin()
+            out = latent.cos()
+            return out, latent
+
+        x = torch.randn(4, requires_grad=True)
+        eager_out, eager_latent = fn(x)
+        (eager_grad,) = torch.autograd.grad(eager_out.sum(), eager_latent)
+        self.assertEqual(eager_grad, -eager_latent.sin())
+
+        compiled_out, compiled_latent = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(x)
+
+        msg = (
+            "torch.autograd.grad is not supported.*different output from the "
+            "same compiled graph"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(compiled_out.sum(), compiled_latent)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(
+                compiled_out.sum(), compiled_latent, materialize_grads=True
+            )
+
+        compiled_latent_edge = torch.autograd.graph.get_gradient_edge(compiled_latent)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(compiled_out.sum(), compiled_latent_edge)
+
+        msg = (
+            "torch.autograd.backward is not supported.*different output from "
+            "the same compiled graph"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.backward(compiled_out.sum(), inputs=(compiled_latent,))
+
+        def alias_fn(x):
+            latent = x.view(2, 2).T
+            out = latent.cos()
+            return out, latent
+
+        alias_out, alias_latent = torch.compile(
+            alias_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        msg = (
+            "torch.autograd.grad is not supported.*different output from the "
+            "same compiled graph"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(alias_out.sum(), alias_latent, allow_unused=True)
+        alias_latent_edge = torch.autograd.graph.get_gradient_edge(alias_latent)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(alias_out.sum(), alias_latent_edge, allow_unused=True)
+
+        def replayed_alias_source_fn(x):
+            latent = x.sin()
+            base = latent.cos().reshape(2, 2)
+            return base.T, base[:, :], latent
+
+        replayed_source, _, replayed_target = torch.compile(
+            replayed_alias_source_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(replayed_source.sum(), replayed_target)
+
+        def replayed_alias_chain_fn(x):
+            base = x.sin().reshape(2, 2)
+            first_view = base.T
+            return first_view[:, :], first_view
+
+        second_view, first_view = torch.compile(
+            replayed_alias_chain_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(second_view.sum(), first_view)
+
+        def input_alias_chain_fn(x):
+            first_view = x.view(2, 2).T
+            return first_view[:, :], first_view
+
+        second_view, first_view = torch.compile(
+            input_alias_chain_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(second_view.sum(), first_view)
+
+        second_view, first_view = torch.compile(
+            input_alias_chain_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        downstream = second_view * 2
+        first_view_edge = torch.autograd.graph.get_gradient_edge(first_view)
+        del second_view, first_view
+        gc.collect()
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(downstream.sum(), first_view_edge)
+
+        def shared_base_alias_fn(x):
+            base = x.sin().reshape(2, 2)
+            target = base.T
+            return base[:, :], target[:, :], target
+
+        independent, dependent, target = torch.compile(
+            shared_base_alias_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        (grad,) = torch.autograd.grad(
+            independent.sum(), target, allow_unused=True, retain_graph=True
+        )
+        self.assertIsNone(grad)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(dependent.sum(), target)
+
+        def chained_alias_fn(y):
+            latent = y.view(2, 2).T
+            return y, latent.cos(), latent
+
+        _, chained_out, chained_latent = torch.compile(
+            chained_alias_fn, backend="aot_eager", fullgraph=True
+        )(compiled_out)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(chained_out.sum(), chained_latent)
+
+        subclass_x = TwoTensor(torch.randn(4), torch.randn(4)).requires_grad_()
+        subclass_out, subclass_latent = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(subclass_x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(subclass_out.sum(), subclass_latent)
+
+        def mutated_input_fn(mutated, x):
+            mutated.add_(1)
+            return fn(x)
+
+        mutated = torch.zeros(4)
+        mutated_out, mutated_latent = torch.compile(
+            mutated_input_fn, backend="aot_eager", fullgraph=True
+        )(mutated, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(mutated_out.sum(), mutated_latent)
+
+        def transitive_fn(x):
+            first = x.sin()
+            second = first.cos()
+            return second.exp(), second, first
+
+        transitive_out, _, transitive_target = torch.compile(
+            transitive_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(transitive_out.sum(), transitive_target)
+
+        def duplicate_input_fn(x, duplicate):
+            latent = x.sin()
+            out = latent.cos() + duplicate * 0
+            return out, latent
+
+        duplicate_out, duplicate_latent = torch.compile(
+            duplicate_input_fn, backend="aot_eager", fullgraph=True
+        )(x, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(duplicate_out.sum(), duplicate_latent)
+
+        def synthetic_base_fn(mutated, alias, x):
+            mutated.add_(1)
+            latent = x.sin()
+            out = latent.cos() + alias * 0
+            return out, latent
+
+        base = torch.zeros(8)
+        synthetic_base_out, synthetic_base_latent = torch.compile(
+            synthetic_base_fn, backend="aot_eager", fullgraph=True
+        )(base[:4], base[4:], x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(synthetic_base_out.sum(), synthetic_base_latent)
+
+    # https://github.com/pytorch/pytorch/issues/132929
+    def test_autograd_grad_compiled_sibling_output_partial_grad_error(self):
+        def fn(x):
+            latent = x.sin()
+            out = latent.cos()
+            return latent, out
+
+        x = torch.randn(4, requires_grad=True)
+        compiled_latent, compiled_out = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(x)
+
+        msg = (
+            "torch.autograd.grad is not supported.*different output from the "
+            "same compiled graph"
+        )
+        for invalid_inputs in (
+            [compiled_latent, 1],
+            [1, compiled_latent],
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "all inputs have to be Tensors or GradientEdges"
+            ):
+                torch.autograd.grad(
+                    compiled_out.sum(), invalid_inputs, allow_unused=True
+                )
+
+        non_grad = torch.tensor(1.0)
+        for invalid_inputs in (
+            [compiled_latent, non_grad],
+            [non_grad, compiled_latent],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+                torch.autograd.grad(
+                    compiled_out.sum(), invalid_inputs, allow_unused=True
+                )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "all inputs have to be Tensors or GradientEdges"
+        ):
+            torch.autograd.backward(compiled_out.sum(), inputs=[compiled_latent, 1])
+        with self.assertRaisesRegex(RuntimeError, "requires_grad=False"):
+            torch.autograd.backward(
+                compiled_out.sum(), inputs=[compiled_latent, non_grad]
+            )
+
+        for invalid_outputs in (
+            [compiled_out.sum(), non_grad],
+            [non_grad, compiled_out.sum()],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+                torch.autograd.grad(
+                    invalid_outputs, [compiled_latent], allow_unused=True
+                )
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            torch.autograd.backward(
+                [compiled_out.sum(), non_grad], inputs=[compiled_latent]
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(
+                [compiled_latent.sum(), compiled_out.sum()],
+                [compiled_latent],
+                allow_unused=True,
+            )
+
+        def independent_fn(x, y):
+            return x.sin(), y.cos()
+
+        a, b = torch.compile(independent_fn, backend="aot_eager", fullgraph=True)(
+            x, x.detach().requires_grad_()
+        )
+        (grad,) = torch.autograd.grad(b.sum(), a, allow_unused=True)
+        self.assertIsNone(grad)
+        (grad,) = torch.autograd.grad(b.sum(), a, materialize_grads=True)
+        self.assertEqual(grad, torch.zeros_like(a))
+
+        def detached_use_fn(x):
+            latent = x.sin()
+            out = x.cos() + latent.detach()
+            return out, latent
+
+        detached_out, detached_latent = torch.compile(
+            detached_use_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        (grad,) = torch.autograd.grad(
+            detached_out.sum(), detached_latent, allow_unused=True
+        )
+        self.assertIsNone(grad)
+
+        def returned_input_fn(x):
+            return x.cos(), x
+
+        returned_input_out, returned_input = torch.compile(
+            returned_input_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        (grad,) = torch.autograd.grad(returned_input_out.sum(), returned_input)
+        self.assertEqual(grad, -x.sin())
+
+        class IgnoreLatent(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, latent):
+                return x.cos() + latent
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+        def nondifferentiable_use_fn(x):
+            latent = x.sin()
+            out = IgnoreLatent.apply(x, latent)
+            return out, latent
+
+        nondifferentiable_out, nondifferentiable_latent = torch.compile(
+            nondifferentiable_use_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        (grad,) = torch.autograd.grad(
+            nondifferentiable_out.sum(),
+            nondifferentiable_latent,
+            allow_unused=True,
+        )
+        self.assertIsNone(grad)
+
+        class StopAboveCompiledOutput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        stopped_above_out = StopAboveCompiledOutput.apply(compiled_out)
+        (grad,) = torch.autograd.grad(
+            stopped_above_out.sum(), compiled_latent, allow_unused=True
+        )
+        self.assertIsNone(grad)
+
+        class StopGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        def stopped_below_target_fn(x):
+            latent = StopGradient.apply(x)
+            return latent.cos(), latent
+
+        stopped_out, stopped_latent = torch.compile(
+            stopped_below_target_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(stopped_out.sum(), stopped_latent)
+
+        def identity_gradient_fn(x):
+            latent = x.clone()
+            return latent.cos(), latent
+
+        identity_out, identity_latent = torch.compile(
+            identity_gradient_fn, backend="aot_eager", fullgraph=True
+        )(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(identity_out.sum(), identity_latent)
+
+        def foreach_fn(x, y):
+            first = x.clone()
+            second = y.clone()
+            torch._foreach_add_([first, second], 1)
+            return first.cos(), first
+
+        foreach_out, foreach_latent = torch.compile(
+            foreach_fn, backend="aot_eager", fullgraph=True
+        )(x, x.detach().requires_grad_())
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(foreach_out.sum(), foreach_latent)
+
+    # https://github.com/pytorch/pytorch/issues/132929
+    def test_autograd_grad_compiled_sibling_output_error_with_effect_token(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op(
+            "test::issue_132929_effectful_identity", mutates_args=()
+        )
+        def effectful_identity(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effectful_identity.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return grad
+
+        effectful_identity.register_autograd(backward, setup_context=setup_context)
+        handle = _register_effectful_op(effectful_identity, EffectType.ORDERED)
+
+        try:
+
+            def fn(x):
+                latent = torch.ops.test.issue_132929_effectful_identity(x).sin()
+                out = latent.cos()
+                return out, latent
+
+            msg = (
+                "torch.autograd.grad is not supported.*different output from "
+                "the same compiled graph"
+            )
+            for unlift_effect_tokens in (False, True):
+                with (
+                    self.subTest(unlift_effect_tokens=unlift_effect_tokens),
+                    torch._functorch.config.patch(
+                        unlift_effect_tokens=unlift_effect_tokens
+                    ),
+                ):
+                    torch._dynamo.reset()
+                    x = torch.randn(4, requires_grad=True)
+                    compiled_out, compiled_latent = torch.compile(
+                        fn, backend="aot_eager", fullgraph=True
+                    )(x)
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        torch.autograd.grad(
+                            compiled_out.sum(), compiled_latent, allow_unused=True
+                        )
+        finally:
+            handle.destroy()
+
     # https://github.com/pytorch/pytorch/issues/167009
     def test_inbuilt_nn_module_forward_after_hook_graph_break(self):
         # When a hook causes a graph break on an inbuilt nn.Module, the module's

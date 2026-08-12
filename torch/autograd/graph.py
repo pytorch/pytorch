@@ -207,6 +207,75 @@ def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
     return node
 
 
+class _CompiledAutogradOutputMetadata(NamedTuple):
+    num_mutated_input_outputs: int
+    output_dependencies: tuple[tuple[int, ...], ...]
+    dependency_targets: tuple[int, ...]
+
+
+class _CompiledAutogradOutputOwner:
+    __slots__ = ("metadata",)
+
+    def __init__(self, metadata: _CompiledAutogradOutputMetadata) -> None:
+        self.metadata = metadata
+
+
+class _CompiledAutogradOutputProvenance(NamedTuple):
+    owner: Node | _CompiledAutogradOutputOwner
+    output_idx: int
+
+
+_COMPILED_AUTOGRAD_OUTPUT_PROVENANCE_KEY = "_aot_autograd_output_provenance"
+_compiled_autograd_output_provenance_enabled = False
+_compiled_autograd_output_validation_enabled = False
+
+
+def _enable_compiled_autograd_output_validation() -> None:
+    global _compiled_autograd_output_validation_enabled
+    _compiled_autograd_output_validation_enabled = True
+
+
+def _register_compiled_autograd_output_provenance(
+    tensor: torch.Tensor, provenance: _CompiledAutogradOutputProvenance
+) -> None:
+    global _compiled_autograd_output_provenance_enabled
+    if tensor.grad_fn is None:
+        return
+    _compiled_autograd_output_provenance_enabled = True
+    _enable_compiled_autograd_output_validation()
+    node_metadata = cast(dict[str, Any], tensor.grad_fn.metadata)
+    provenance_by_output_nr = node_metadata.setdefault(
+        _COMPILED_AUTOGRAD_OUTPUT_PROVENANCE_KEY, {}
+    )
+    if not isinstance(provenance_by_output_nr, dict):
+        raise AssertionError("invalid compiled autograd output provenance metadata")
+    provenances = provenance_by_output_nr.setdefault(tensor.output_nr, [])
+    if not isinstance(provenances, list):
+        raise AssertionError("invalid compiled autograd output provenance list")
+    provenances.append(provenance)
+
+
+def _get_compiled_autograd_output_edge_provenances(
+    node: Node, output_nr: int
+) -> tuple[_CompiledAutogradOutputProvenance, ...]:
+    if not _compiled_autograd_output_provenance_enabled:
+        return ()
+    node_metadata = cast(dict[str, Any], node.metadata)
+    provenance_by_output_nr = node_metadata.get(
+        _COMPILED_AUTOGRAD_OUTPUT_PROVENANCE_KEY
+    )
+    if not isinstance(provenance_by_output_nr, dict):
+        return ()
+    provenances = provenance_by_output_nr.get(output_nr)
+    if not isinstance(provenances, list):
+        return ()
+    return tuple(
+        provenance
+        for provenance in provenances
+        if isinstance(provenance, _CompiledAutogradOutputProvenance)
+    )
+
+
 class GradientEdge(NamedTuple):
     """Object representing a given gradient edge within the autograd graph.
 

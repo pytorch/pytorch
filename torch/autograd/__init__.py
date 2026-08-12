@@ -10,7 +10,7 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import cast, overload
+from typing import Any, cast, overload
 
 import torch
 from torch import _vmap_internals
@@ -252,6 +252,218 @@ def _tensor_or_tensors_to_tuple(
     return tuple(tensors)
 
 
+def _gradient_edge(
+    tensor_or_edge: torch.Tensor | graph.GradientEdge,
+) -> tuple[graph.Node, int] | None:
+    if isinstance(tensor_or_edge, graph.GradientEdge):
+        return tensor_or_edge.node, tensor_or_edge.output_nr
+    if tensor_or_edge.grad_fn is None:
+        return None
+    return tensor_or_edge.grad_fn, tensor_or_edge.output_nr
+
+
+def _compiled_autograd_output_info(
+    node: Any, output_nr: int
+) -> tuple[tuple[int, ...], graph._CompiledAutogradOutputMetadata] | None:
+    if not isinstance(node, torch.autograd.function.BackwardCFunction):
+        return None
+    metadata = getattr(node, "_aot_autograd_output_metadata", None)
+    if not isinstance(metadata, graph._CompiledAutogradOutputMetadata):
+        return None
+    output_idx = output_nr - metadata.num_mutated_input_outputs
+    if 0 <= output_idx < len(metadata.output_dependencies):
+        return (output_idx,), metadata
+    return None
+
+
+def _compiled_autograd_owner_metadata(
+    owner: graph.Node | graph._CompiledAutogradOutputOwner,
+) -> graph._CompiledAutogradOutputMetadata | None:
+    metadata = (
+        owner.metadata
+        if isinstance(owner, graph._CompiledAutogradOutputOwner)
+        else getattr(owner, "_aot_autograd_output_metadata", None)
+    )
+    if isinstance(metadata, graph._CompiledAutogradOutputMetadata):
+        return metadata
+    return None
+
+
+def _compiled_autograd_output_edges(
+    tensor_or_edge: torch.Tensor | graph.GradientEdge,
+) -> list[tuple[graph.Node | graph._CompiledAutogradOutputOwner, int]]:
+    compiled_edges: list[
+        tuple[graph.Node | graph._CompiledAutogradOutputOwner, int]
+    ] = []
+    edge = _gradient_edge(tensor_or_edge)
+    if edge is None:
+        return compiled_edges
+    node, output_nr = edge
+    output_info = _compiled_autograd_output_info(node, output_nr)
+    if output_info is not None:
+        output_indices, metadata = output_info
+        compiled_edges.extend(
+            (node, output_idx)
+            for output_idx in output_indices
+            if output_idx in metadata.dependency_targets
+        )
+
+    provenances = graph._get_compiled_autograd_output_edge_provenances(node, output_nr)
+    for provenance in provenances:
+        metadata = _compiled_autograd_owner_metadata(provenance.owner)
+        if (
+            metadata is not None
+            and 0 <= provenance.output_idx < len(metadata.output_dependencies)
+            and provenance.output_idx in metadata.dependency_targets
+        ):
+            compiled_edges.append((provenance.owner, provenance.output_idx))
+    return compiled_edges
+
+
+def _compiled_autograd_output_depends_on(
+    metadata: graph._CompiledAutogradOutputMetadata,
+    output_idx: int,
+    input_idx: int,
+) -> bool:
+    seen: set[int] = set()
+    stack = list(metadata.output_dependencies[output_idx])
+    while stack:
+        dependency_idx = stack.pop()
+        if dependency_idx == input_idx:
+            return True
+        if dependency_idx in seen:
+            continue
+        seen.add(dependency_idx)
+        stack.extend(metadata.output_dependencies[dependency_idx])
+    return False
+
+
+def _inputs_may_have_compiled_autograd_output(
+    inputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
+) -> bool:
+    if not graph._compiled_autograd_output_validation_enabled:
+        return False
+    if any(
+        not isinstance(inp, graph.GradientEdge)
+        and (not isinstance(inp, torch.Tensor) or not inp.requires_grad)
+        for inp in inputs
+    ):
+        # Preserve the engine's established validation and error precedence for
+        # invalid input lists before checking the compiled-output relationship.
+        return False
+    provenance_enabled = graph._compiled_autograd_output_provenance_enabled
+    for inp in inputs:
+        node = (
+            inp.node
+            if isinstance(inp, graph.GradientEdge)
+            else inp.grad_fn
+            if isinstance(inp, torch.Tensor)
+            else None
+        )
+        if node is None:
+            continue
+        if isinstance(node, torch.autograd.function.BackwardCFunction) and isinstance(
+            getattr(node, "_aot_autograd_output_metadata", None),
+            graph._CompiledAutogradOutputMetadata,
+        ):
+            return True
+        if provenance_enabled and (
+            isinstance(inp, graph.GradientEdge)
+            or (isinstance(inp, torch.Tensor) and inp._base is not None)
+        ):
+            return True
+    return False
+
+
+def _outputs_are_valid_for_compiled_autograd_validation(
+    outputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
+) -> bool:
+    return all(
+        isinstance(output, graph.GradientEdge)
+        or (isinstance(output, torch.Tensor) and output.requires_grad)
+        for output in outputs
+    )
+
+
+def _validate_outputs_do_not_depend_on_compiled_graph_sibling(
+    outputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
+    inputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
+    api_name: str,
+) -> None:
+    compiled_input_edges: list[
+        tuple[graph.Node | graph._CompiledAutogradOutputOwner, int]
+    ] = []
+    for inp in inputs:
+        compiled_input_edges.extend(_compiled_autograd_output_edges(inp))
+
+    if not compiled_input_edges:
+        return
+
+    stack: list[tuple[graph.Node, int]] = []
+    for out in outputs:
+        edge = _gradient_edge(out)
+        if edge is not None:
+            stack.append(edge)
+
+    seen: set[tuple[graph.Node, int]] = set()
+    while stack:
+        node, output_nr = stack.pop()
+        key = (node, output_nr)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        output_provenances: list[
+            tuple[
+                graph.Node | graph._CompiledAutogradOutputOwner,
+                tuple[int, ...],
+                graph._CompiledAutogradOutputMetadata,
+            ]
+        ] = []
+        if (output_info := _compiled_autograd_output_info(node, output_nr)) is not None:
+            output_indices, metadata = output_info
+            output_provenances.append((node, output_indices, metadata))
+        for provenance in graph._get_compiled_autograd_output_edge_provenances(
+            node, output_nr
+        ):
+            metadata = _compiled_autograd_owner_metadata(provenance.owner)
+            if metadata is not None:
+                output_provenances.append(
+                    (provenance.owner, (provenance.output_idx,), metadata)
+                )
+
+        for output_owner, output_indices, metadata in output_provenances:
+            for output_idx in output_indices:
+                for input_owner, input_idx in compiled_input_edges:
+                    if (
+                        output_owner is input_owner
+                        and _compiled_autograd_output_depends_on(
+                            metadata, output_idx, input_idx
+                        )
+                    ):
+                        raise RuntimeError(
+                            f"{api_name} is not supported when `outputs` depends "
+                            "on one torch.compile graph output and `inputs` "
+                            "contains a different output from the same compiled "
+                            "graph. torch.compile's AOTAutograd backend only "
+                            "computes gradients of compiled graph outputs with "
+                            "respect to compiled graph inputs; it does not "
+                            "preserve internal gradient edges between sibling "
+                            "outputs. Split the compiled region, for example by "
+                            "compiling the producer and consumer submodules "
+                            "separately, or run this part without torch.compile."
+                        )
+
+        if type(node).__name__ == "CppFunction" or isinstance(
+            node, torch.autograd.function.BackwardCFunction
+        ):
+            continue
+
+        for next_node, next_output_nr in node.next_functions:
+            if next_node is not None:
+                stack.append((next_node, next_output_nr))
+
+
 def backward(
     tensors: _TensorOrTensorsOrGradEdge,
     grad_tensors: _TensorOrOptionalTensors | None = None,
@@ -388,6 +600,17 @@ def backward(
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
     if retain_graph is None:
         retain_graph = create_graph
+
+    if (
+        inputs_tuple
+        and _outputs_are_valid_for_compiled_autograd_validation(tensors)
+        and _inputs_may_have_compiled_autograd_output(inputs_tuple)
+    ):
+        _validate_outputs_do_not_depend_on_compiled_graph_sibling(
+            tensors,
+            inputs_tuple,
+            "torch.autograd.backward",
+        )
 
     # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
@@ -570,6 +793,15 @@ def grad(
 
     if retain_graph is None:
         retain_graph = create_graph
+
+    if _outputs_are_valid_for_compiled_autograd_validation(
+        outputs
+    ) and _inputs_may_have_compiled_autograd_output(inputs_tuple):
+        _validate_outputs_do_not_depend_on_compiled_graph_sibling(
+            outputs,
+            inputs_tuple,
+            "torch.autograd.grad",
+        )
 
     # The reason we repeat the same comment several times below is because
     # some Python versions print out the first line of multi-line function

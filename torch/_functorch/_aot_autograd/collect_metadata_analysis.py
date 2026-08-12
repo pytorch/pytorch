@@ -72,6 +72,66 @@ log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
+def _collect_output_autograd_dependencies(
+    output_edges: list[tuple[torch.autograd.graph.Node, int] | None],
+) -> list[tuple[int, ...]]:
+    """Collect candidate dependencies while the outer output edges are still live.
+
+    Using the FunctionalTensor outputs avoids confusing detached dataflow with
+    autograd connectivity and preserves outer tensor-subclass and view structure.
+    Paths through custom autograd Functions are omitted conservatively because
+    ``next_functions`` cannot say which inputs their backward returns gradients for.
+    """
+    if sum(edge is not None for edge in output_edges) < 2:
+        return [() for _ in output_edges]
+
+    edge_to_output_indices: dict[tuple[torch.autograd.graph.Node, int], list[int]] = (
+        collections.defaultdict(list)
+    )
+    for output_idx, edge in enumerate(output_edges):
+        if edge is not None:
+            edge_to_output_indices[edge].append(output_idx)
+
+    output_dependencies: list[tuple[int, ...]] = []
+    for output_idx, edge in enumerate(output_edges):
+        dependencies: set[int] = set()
+        stack: list[tuple[torch.autograd.graph.Node, int]] = (
+            [] if edge is None else [edge]
+        )
+        seen: set[tuple[torch.autograd.graph.Node, int]] = set()
+        while stack:
+            node, output_nr = stack.pop()
+            current_edge = (node, output_nr)
+            if current_edge in seen:
+                continue
+            seen.add(current_edge)
+
+            current_dependencies = {
+                dependency_idx
+                for dependency_idx in edge_to_output_indices.get((node, output_nr), ())
+                if dependency_idx != output_idx
+            }
+            if current_dependencies:
+                dependencies.update(current_dependencies)
+                # Store only the nearest sibling outputs. Runtime validation
+                # follows these edges transitively, avoiding quadratic metadata
+                # for functions that return a long chain of intermediates.
+                continue
+
+            if type(node).__name__ == "CppFunction" or isinstance(
+                node, torch.autograd.function.BackwardCFunction
+            ):
+                continue
+
+            stack.extend(
+                (next_node, next_output_nr)
+                for next_node, next_output_nr in node.next_functions
+                if next_node is not None
+            )
+        output_dependencies.append(tuple(sorted(dependencies)))
+    return output_dependencies
+
+
 # Note [Tangents memory format]
 # We assume tangents memory format to be similar to corresponding output's memory_format.
 # The idea is that we are technically making a guess about the strides of our tangents,
@@ -423,6 +483,7 @@ def run_functionalized_fw_and_collect_metadata(
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
         intermediate_bases_descs: list[AOTInput] = []
+        output_grad_edges: list[tuple[torch.autograd.graph.Node, int] | None] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -479,6 +540,9 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(o, Tensor):
                 with FunctionalTensorMode():
                     grad_fn = o.grad_fn
+            output_grad_edges.append(
+                None if grad_fn is None else (grad_fn, o.output_nr)
+            )
 
             is_result_of_custom_autograd_fn = False
             # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
@@ -871,6 +935,9 @@ from a multi-output view call"
             subclass_inp_meta=subclass_inp_meta,
             subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
             subclass_tangent_meta=subclass_tangent_meta,
+            compiled_autograd_output_deps=_collect_output_autograd_dependencies(
+                output_grad_edges
+            ),
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
