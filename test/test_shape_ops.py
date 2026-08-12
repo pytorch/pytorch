@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
-    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TestCase,
     torch_to_numpy_dtype_dict,
 )
