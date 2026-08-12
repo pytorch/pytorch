@@ -49,16 +49,14 @@ class _EpilogueABI:
 
     input_pack: EpilogueInputPack
     outputs: EpilogueOutputPack
-    output_count: int
     primary_output: int
 
     @classmethod
     def from_args(cls, args, tensor_attr: str) -> _EpilogueABI:
-        outputs, output_count, primary_output = _epilogue_outputs(args, tensor_attr)
+        outputs, primary_output = _epilogue_outputs(args, tensor_attr)
         return cls(
             input_pack=_epilogue_input_pack(args, tensor_attr),
             outputs=outputs,
-            output_count=output_count,
             primary_output=primary_output,
         )
 
@@ -122,10 +120,10 @@ def _epilogue_abi_tensor(tensor):
     return TensorWrapper(padded)
 
 
-def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int, int]:
+def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int]:
     epilogue = getattr(args, "epilogue", None)
     if epilogue is None:
-        return EpilogueOutputPack(()), 1, 0
+        return EpilogueOutputPack(()), 0
     output_names = _epilogue_signature(epilogue.epilogue_fn)[1]
     if not output_names:
         raise NotImplementedError("NVGEMM scaled epilogues require an output")
@@ -139,7 +137,7 @@ def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int, int]:
             if index != primary_index
         )
     )
-    return tensors, len(output_names), primary_index
+    return tensors, primary_index
 
 
 def _ones_alpha():
@@ -303,7 +301,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 alpha,
                 epilogue_inputs,
                 epilogue.outputs,
-                epilogue.output_count,
                 epilogue.primary_output,
                 (
                     local_reduce_out.compile_time_tensor
@@ -328,7 +325,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             alpha,
             epilogue_inputs,
             epilogue.outputs,
-            epilogue.output_count,
             epilogue.primary_output,
             target_sm=target_sm,
         )
