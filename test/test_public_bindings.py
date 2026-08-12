@@ -356,12 +356,15 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.py312_intrinsics",
             "torch._inductor.codegen.cutlass.cuda_template",
             "torch._inductor.codegen.cutedsl._cutedsl_utils",
+            "torch._inductor.codegen.cutedsl._inline_asm",  # depends on cutlass
+            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
             "torch._inductor.codegen.cpp_template_kernel",
             "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
@@ -417,6 +420,8 @@ class TestPublicBindings(TestCase):
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
                 "torch._native.ops.foreach_mm.",
+                "torch._native.ops.polar.",
+                "torch._native.ops.reductions.inner_tree_kernel",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
