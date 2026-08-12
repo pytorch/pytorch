@@ -39,8 +39,8 @@ from torch._library.opaque_object import (
     _OPAQUE_TYPES,
     _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
     MemberType,
     register_custom_class,
 )
@@ -1958,6 +1958,60 @@ def forward(self, primals, tangents):
         res = gm(x)
         self.assertEqual(res[1], ValueConfig("square"))
 
+    def test_value_type_graph_output_subclass_metadata_side_effect(self):
+        class TensorWithValueMetadata(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, config):
+                t = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    strides=data.stride(),
+                    dtype=data.dtype,
+                    device=data.device,
+                    layout=data.layout,
+                    requires_grad=data.requires_grad,
+                )
+                t._data = data
+                t._config = config
+                return t
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"config": self._config}
+
+            def __repr__(self):
+                return "TensorWithValueMetadata(...)"
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                return TensorWithValueMetadata(inner_tensors["_data"], meta["config"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(x):
+                    if isinstance(x, TensorWithValueMetadata):
+                        return x._data
+                    return x
+
+                return func(
+                    *pytree.tree_map(unwrap, args),
+                    **pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        store = {}
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x):
+            config = ValueConfig("square")
+            store["config"] = config
+            return TensorWithValueMetadata(x + 1, config)
+
+        out = fn(torch.zeros(2))
+
+        self.assertIs(type(out._config), ValueConfig)
+        self.assertEqual(out._config.mode, "square")
+        self.assertIs(type(store["config"]), ValueConfig)
+        self.assertEqual(store["config"].mode, "square")
+
     def test_value_type_graph_input(self):
         # Even though cfg is an input, it should not be an input to the dynamo
         # graph. Instead it should directly put in the graph argument as a
@@ -2098,8 +2152,8 @@ def forward(self, arg0_1):
 
             register_custom_class(TmpClass, typ="constant")
 
-            self.assertTrue(is_opaque_type(TmpClass))
-            self.assertTrue(is_opaque_value_type(TmpClass))
+            self.assertTrue(is_custom_class(TmpClass))
+            self.assertTrue(is_opaque_constant_type(TmpClass))
             self.assertIn(TmpClass, _OPAQUE_TYPES)
 
             return get_opaque_type_name(TmpClass)
@@ -3015,14 +3069,14 @@ def forward(self, primals_1, tangents_1):
         """Test that opaque class attribute access works correctly.
 
         This tests the code path where:
-        1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
-        2. Attribute access (Color.RED) goes through getattro_impl with static getattr
+        1. An opaque class (like Color) is accessed via CustomClassVariable
+        2. Attribute access (Color.RED) goes through tp_getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
-        from torch._library.opaque_object import is_opaque_reference_type
+        from torch._library.opaque_object import is_opaque_symbolic_type
 
-        self.assertTrue(is_opaque_reference_type(Color))
-        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+        self.assertTrue(is_opaque_symbolic_type(Color))
+        self.assertTrue(is_opaque_symbolic_type(type(Color.RED)))
 
         captured = {"graph": None, "example_inputs": None}
 
@@ -3205,7 +3259,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_staticmethod(self):
         """Test that accessing a staticmethod on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.tp_getattro_impl properly handles
         staticmethod descriptors (instead of raising 'Unsupported descriptor').
         """
         captured = {"graph": None}
@@ -3228,7 +3282,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_property(self):
         """Test that accessing a property descriptor on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.tp_getattro_impl properly handles
         property descriptors. When accessing a property on the class (not instance),
         you get the property object back.
         """
@@ -3357,8 +3411,8 @@ class GraphModule(torch.nn.Module):
                     {"ExtendedConfig": ExtendedConfig},
                 )
 
-        self.assertTrue(is_opaque_type(ExtendedConfig))
-        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+        self.assertTrue(is_custom_class(ExtendedConfig))
+        self.assertTrue(is_opaque_constant_type(ExtendedConfig))
 
         cfg = ExtendedConfig("square", 2.0)
 
@@ -3418,9 +3472,9 @@ class GraphModule(torch.nn.Module):
             ep.graph_module.code.strip(),
             """\
 def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
-    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    return (linear,)""",
+    noisy_inject_default = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject_default = None
+    linear_default = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear_default,)""",
         )
 
     def test_hoist_no_recompile_on_different_string(self):
@@ -3521,8 +3575,8 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[4, 4]", d):
-        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
-        return (add,)
+        add_tensor: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
+        return (add_tensor,)
 """,
         )
 
@@ -3726,7 +3780,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_script_object_intermediate_exposed_from_checkpoint(self):
-        # A TorchScriptObjectVariable created inside an AC region and accessed
+        # A CustomClassObjectVariable created inside an AC region and accessed
         # outside via a list side effect must be exposed as a subgraph output.
         import torch.utils.checkpoint
 
@@ -3935,13 +3989,13 @@ class GraphModule(torch.nn.Module):
                 self.assertIn(
                     "val",
                     node.meta,
-                    f"Node {node.name} created via reconstruct_fn is missing "
+                    lambda msg: f"{msg}\nNode {node.name} created via reconstruct_fn is missing "
                     f"meta['val']. This would cause the partitioner to fail "
                     f"with 'Expected {node.name} to be a tensor'.",
                 )
                 self.assertTrue(
                     is_opaque_node(node),
-                    f"Node {node.name} should be classified as opaque",
+                    lambda msg: f"{msg}\nNode {node.name} should be classified as opaque",
                 )
         finally:
             _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn = original_reconstruct_fn

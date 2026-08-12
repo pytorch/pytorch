@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
-    skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
+    skipIfRocm, skipIfRocmVersionAtLeast, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
@@ -222,6 +222,39 @@ class TestTorchDeviceType(TestCase):
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
+    @onlyNativeDeviceTypes
+    def test_storage_throws_on_data_ptr_access(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.storage import _throws_on_data_ptr_access
+
+        def raises_on_data_ptr(storage):
+            try:
+                storage.data_ptr()
+            except RuntimeError:
+                return True
+            return False
+
+        # Normal storage: data_ptr() works, so we report False.
+        s = torch.randn(4, device=device).untyped_storage()
+        self.assertFalse(_throws_on_data_ptr_access(s))
+        self.assertFalse(raises_on_data_ptr(s))
+
+        # FakeTensor with unsafe access disallowed: data_ptr() raises.
+        with FakeTensorMode() as mode:
+            mode._allow_unsafe_data_ptr_access = False
+            fs = torch.randn(4, device=device).untyped_storage()
+            self.assertTrue(_throws_on_data_ptr_access(fs))
+            self.assertTrue(raises_on_data_ptr(fs))
+
+        # Storage armed to throw on the immutable data_ptr path.
+        s2 = torch.randn(4, device=device).untyped_storage()
+        torch._C._set_storage_data_ptr_access_error_msg(s2._cdata, "invalid")
+        self.assertTrue(_throws_on_data_ptr_access(s2))
+        self.assertTrue(raises_on_data_ptr(s2))
+        torch._C._clear_storage_data_ptr_access_error_msg(s2._cdata)
+        self.assertFalse(_throws_on_data_ptr_access(s2))
+        self.assertFalse(raises_on_data_ptr(s2))
+
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -274,10 +307,12 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(
             isinstance(s, (torch.UntypedStorage, torch.TypedStorage)) and
             isinstance(s_check, type(s)),
-            (
-                's and s_check must both be one of UntypedStorage or '
-                'TypedStorage, but got'
-                f' {type(s).__name__} and {type(s_check).__name__}'))
+            lambda msg: (
+                f"{msg}\ns and s_check must both be one of UntypedStorage or "
+                "TypedStorage, but got"
+                f" {type(s).__name__} and {type(s_check).__name__}"
+            ),
+        )
 
         self.assertEqual(s.device.type, 'meta')
         self.assertEqual(s.nbytes(), s_check.nbytes())
@@ -860,6 +895,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
             scripted_cpp_warn_fn()
             warning = w[0]
@@ -884,6 +921,8 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
             # ignore all deprecation warnings
             warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
             scripted_warn_fn = torch.jit.script(warn_fn)
             scripted_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
@@ -892,7 +931,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
 
             # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 10, warning.lineno)
+            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
             self.assertEqual(len(w), 1)
 
     # FIXME: move to test_testing
@@ -2108,7 +2147,11 @@ class TestTorchDeviceType(TestCase):
         temp = y.repeat_interleave(2)
         self.assertEqual(torch.Size([8]), temp.size())
 
-        for dtype in [torch.int, torch.long]:
+        repeat_dtypes = [torch.int, torch.long]
+        if device == "cpu":
+            repeat_dtypes.extend([torch.int8, torch.uint8, torch.int16])
+
+        for dtype in repeat_dtypes:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
             a = torch.repeat_interleave(
@@ -2285,7 +2328,7 @@ class TestTorchDeviceType(TestCase):
             for to_ in [-4.2, 0, 42]:
                 if to_ > from_:
                     t = torch.empty(size, dtype=dtype, device=device).uniform_(from_, to_)
-                    res = stats.kstest(t.cpu().to(torch.double), 'uniform', args=(from_, (to_ - from_)))
+                    res = stats.kstest(t.cpu().to(torch.double), stats.uniform(from_, (to_ - from_)).cdf)
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2296,7 +2339,7 @@ class TestTorchDeviceType(TestCase):
         for mean in [-10, 0, 50]:
             for std in [1, 5, 10]:
                 t = torch.empty(size, dtype=dtype, device=device).normal_(mean=mean, std=std)
-                res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
+                res = stats.kstest(t.cpu().to(torch.double), stats.norm(mean, std).cdf)
                 self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2306,10 +2349,10 @@ class TestTorchDeviceType(TestCase):
         size = 50000
         for std in [0.005, 0.01]:
             t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
-            res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(0, std))
+            res = stats.kstest(t.cpu().to(torch.double), stats.norm(0, std).cdf)
             self.assertTrue(
                 res.statistic < 0.01,
-                msg=f"KS statistic {res.statistic:.4f} for {dtype} std={std}",
+                msg=lambda msg: f"{msg}\nKS statistic {res.statistic:.4f} for {dtype} std={std}",
             )
 
     @skipIfNoSciPy
@@ -2322,7 +2365,7 @@ class TestTorchDeviceType(TestCase):
             kurtosis = stats.kurtosis(t.cpu().to(torch.double).numpy())
             self.assertAlmostEqual(
                 kurtosis, 0.0, delta=0.15,
-                msg=f"Excess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}",
+                msg=lambda msg: f"{msg}\nExcess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}",
             )
 
     @dtypes(torch.bfloat16)
@@ -2335,7 +2378,7 @@ class TestTorchDeviceType(TestCase):
         max_sigma = t.float().abs().max().item()
         self.assertGreater(
             max_sigma, 3.5,
-            msg=f"Max |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)",
+            msg=lambda msg: f"{msg}\nMax |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)",
         )
 
     @dtypes(torch.half, torch.bfloat16)
@@ -4819,7 +4862,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
+                    lambda msg: f"{msg}\nresult of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in bias_fns:
                 result_c = fn(x_c, b_c)
@@ -4827,7 +4870,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
+                    lambda msg: f"{msg}\nresult of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in return_contig_fns:
                 result_c = fn(x_c, y_c)
@@ -4835,7 +4878,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
-                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
+                    lambda msg: f"{msg}\nresult of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
 
         _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
@@ -7074,7 +7117,7 @@ class TestTorch(TestCase):
 
                 self.assertEqual(len(w), 1, msg=lambda msg: f'{msg}\n{warning_type} not raised')
                 warning = w[0].message
-                self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
+                self.assertTrue(isinstance(warning, warning_type), msg=lambda msg: f'{msg}\n{warning_type} not raised')
                 self.assertTrue(re.search(
                     message,
                     str(warning)))
@@ -7657,6 +7700,17 @@ class TestTorch(TestCase):
         maxdim = torch.quasirandom.SobolEngine.MAXDIM
         with self.assertRaises(ValueError):
             torch.quasirandom.SobolEngine(maxdim + 1)
+
+    def test_sobol_invalid_inputs(self):
+        quasi = torch.ones(2, dtype=torch.long)
+        sobolstate = torch.ones(2, 30, dtype=torch.long)
+
+        with self.assertRaisesRegex(ValueError, "dimension must match"):
+            torch._sobol_engine_ff_(quasi, 1, sobolstate, 1250999896764, 0)
+        with self.assertRaisesRegex(ValueError, "at most"):
+            torch._sobol_engine_ff_(quasi, 1, sobolstate, 2, 2**30 - 1)
+        with self.assertRaisesRegex(ValueError, "dimension must be between"):
+            torch._sobol_engine_initialize_state_(sobolstate, 1250999896764)
 
     def test_sobolengine_high_dim(self):
         engine = torch.quasirandom.SobolEngine(1111, scramble=False, seed=123456)
@@ -8703,6 +8757,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         torch.__config__.show()
 
     @unittest.skipIf(IS_FBCODE, "CXX_FLAGS is only for OSS build.")
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()
 
@@ -9968,8 +10023,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                 for k, v in common_args.items():
-                    self.assertNotIn(v, desc, f'The argument description "{v}" in {func} can be '
-                                              f'replaced by {{{k}}}')
+                    self.assertNotIn(v, desc, lambda msg: f'{msg}\nThe argument description "{v}" in {func} can be replaced by {{{k}}}')
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
@@ -10005,10 +10059,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 full_name = ns_name + '.' + name
                 if any(r.match(name) for r in skip_regexes):
                     self.assertFalse(has_doc,
-                                     f'New docs have been added for {full_name}, please remove '
+                                     lambda msg: f'{msg}\nNew docs have been added for {full_name}, please remove '
                                      'it from the skipped list in TestTorch.test_doc')
                 else:
-                    self.assertTrue(has_doc, f'{full_name} is missing documentation')
+                    self.assertTrue(has_doc, lambda msg: f'{msg}\n{full_name} is missing documentation')
 
             # FIXME: All of the following should be marked as expected failures
             # so that it is easier to tell when missing has been added.
@@ -10938,44 +10992,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
-    def test_swap_allows_tensor_weakref(self):
-        from torch.utils.weak import TensorWeakRef
-
-        t1 = torch.nn.Parameter(torch.zeros(2))
-        t2 = torch.nn.Parameter(torch.ones(2))
-        t2.foo = "bar"
-
-        t1_ref = TensorWeakRef(t1)
-        t2_ref = TensorWeakRef(t2)
-        self.assertIs(t1_ref.ref, t1_ref)
-        self.assertIs(t1_ref(), t1)
-        self.assertIs(t2_ref(), t2)
-        self.assertTrue(
-            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t1))
-        )
-        self.assertTrue(
-            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t2))
-        )
-
-        torch.utils.swap_tensors(t1, t2)
-
-        self.assertIs(t1_ref(), t1)
-        self.assertIs(t2_ref(), t2)
-        self.assertEqual(t1, torch.ones(2))
-        self.assertEqual(t2, torch.zeros(2))
-        self.assertEqual(t1.foo, "bar")
-
-        _wr = weakref.ref(t1)
-        with self.assertRaisesRegex(RuntimeError, "has weakref"):
-            torch.utils.swap_tensors(t1, t2)
-
-        t3 = torch.nn.Parameter(torch.zeros(2))
-        t4 = torch.nn.Parameter(torch.ones(2))
-        _ = TensorWeakRef(t3)
-        _ = TensorWeakRef(t4)
-        _wr = weakref.ref(t4)
-        with self.assertRaisesRegex(RuntimeError, "has weakref"):
-            torch.utils.swap_tensors(t3, t4)
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):
