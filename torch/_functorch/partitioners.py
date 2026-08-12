@@ -4122,6 +4122,200 @@ def classify_nodes(
     )
 
 
+def _prefer_recompute_cat_log_softmax(
+    joint_module: fx.GraphModule, num_fwd_outputs: int
+) -> None:
+    """Keep a cheap cat virtual when log-softmax backward would save it.
+
+    Only the full-size pointwise spine is recomputed. The row statistics remain
+    available as inexpensive cut points.
+    """
+    cats = joint_module.graph.find_nodes(op="call_function", target=aten.cat.default)
+    gathers = joint_module.graph.find_nodes(
+        op="call_function", target=aten.gather.default
+    )
+    if not cats or not gathers:
+        return
+
+    fwd_outputs, bwd_outputs, _, _ = _extract_fwd_bwd_outputs(
+        joint_module, num_fwd_outputs=num_fwd_outputs
+    )
+
+    def dependencies(outputs: list[fx.Node]) -> OrderedSet[fx.Node]:
+        result: OrderedSet[fx.Node] = OrderedSet()
+        pending = [node for node in outputs if isinstance(node, fx.Node)]
+        while pending:
+            node = pending.pop()
+            if node in result:
+                continue
+            result.add(node)
+            pending.extend(node.all_input_nodes)
+        return result
+
+    fwd_dependencies = dependencies(fwd_outputs)
+    bwd_dependencies = dependencies(bwd_outputs)
+    public_outputs = OrderedSet(
+        node for node in fwd_outputs if isinstance(node, fx.Node)
+    )
+    passthrough_ops = OrderedSet(
+        [
+            aten._unsafe_view.default,
+            aten.view.default,
+            prims.convert_element_type.default,
+        ]
+    )
+    op_types = get_default_op_list()
+
+    def peel(node: fx.Node) -> tuple[fx.Node, list[fx.Node]]:
+        path: list[fx.Node] = []
+        while node.op == "call_function" and node.target in passthrough_ops:
+            path.append(node)
+            node = node.all_input_nodes[0]
+        return node, path
+
+    def same_numel(node: fx.Node, other: fx.Node) -> bool:
+        value = node.meta.get("val")
+        other_value = other.meta.get("val")
+        return (
+            isinstance(value, torch.Tensor)
+            and isinstance(other_value, torch.Tensor)
+            and statically_known_true(value.numel() == other_value.numel())
+        )
+
+    for gather in gathers:
+        if gather not in fwd_dependencies or len(gather.args) < 3:
+            continue
+        gather_input, gather_dim = gather.args[:2]
+        if not isinstance(gather_input, fx.Node) or not isinstance(gather_dim, int):
+            continue
+
+        normalized, output_path = peel(gather_input)
+        if normalized.target != aten.sub.Tensor or len(normalized.args) < 2:
+            continue
+        shifted, log_sum = normalized.args[:2]
+        if not isinstance(shifted, fx.Node) or not isinstance(log_sum, fx.Node):
+            continue
+        if log_sum.target != aten.log.default or not log_sum.args:
+            continue
+        sum_exp = log_sum.args[0]
+        if not isinstance(sum_exp, fx.Node) or len(sum_exp.args) < 3:
+            continue
+        exp = sum_exp.args[0]
+        if (
+            sum_exp.target != aten.sum.dim_IntList
+            or not isinstance(exp, fx.Node)
+            or exp.target != aten.exp.default
+            or not exp.args
+            or exp.args[0] is not shifted
+            or shifted.target != aten.sub.Tensor
+            or len(shifted.args) < 2
+        ):
+            continue
+        logits, row_max = shifted.args[:2]
+        if not isinstance(logits, fx.Node) or not isinstance(row_max, fx.Node):
+            continue
+        if (
+            row_max.target != aten.amax.default
+            or len(row_max.args) < 3
+            or row_max.args[0] is not logits
+            or row_max.args[2] is not True
+            or sum_exp.args[2] is not True
+        ):
+            continue
+
+        logits_value = logits.meta.get("val")
+        if not isinstance(logits_value, torch.Tensor) or logits_value.dim() == 0:
+            continue
+        rank = logits_value.dim()
+        dims = (row_max.args[1], sum_exp.args[1])
+        if any(
+            not isinstance(dim, (list, tuple))
+            or len(dim) != 1
+            or not isinstance(dim[0], int)
+            or dim[0] % rank != gather_dim % rank
+            for dim in dims
+        ):
+            continue
+
+        cat, input_path = peel(logits)
+        if cat.target != aten.cat.default:
+            continue
+        cat_value = cat.meta.get("val")
+        cat_inputs_arg = cat.args[0] if cat.args else None
+        if (
+            not isinstance(cat_value, torch.Tensor)
+            or cat_value.device.type != "cuda"
+            or not isinstance(cat_inputs_arg, (list, tuple))
+            or len(cat_inputs_arg) != 2
+            or not all(isinstance(node, fx.Node) for node in cat_inputs_arg)
+        ):
+            continue
+        cat_inputs = cast(tuple[fx.Node, fx.Node], tuple(cat_inputs_arg))
+        if any(len(node.users) != 1 or cat not in node.users for node in cat_inputs):
+            continue
+
+        spine = OrderedSet([cat, *input_path, shifted, normalized, *output_path])
+        if (
+            not all(same_numel(node, cat) for node in spine)
+            or not spine.issubset(fwd_dependencies)
+            or not spine.issubset(bwd_dependencies)
+            or bool(spine & public_outputs)
+        ):
+            continue
+        allowed_users = spine | OrderedSet([row_max, exp, gather])
+        if any(
+            user in fwd_dependencies
+            and user not in allowed_users
+            and user.target != aten.argmax.default
+            for node in spine
+            for user in node.users
+        ):
+            continue
+
+        input_ancestry: OrderedSet[fx.Node] = OrderedSet()
+        pending = list(cat_inputs)
+        supported_ancestry = True
+        while pending:
+            node = pending.pop()
+            if node in input_ancestry or node.op in ("placeholder", "get_attr"):
+                continue
+            if node.op == "call_function" and op_types.is_compute_intensive(node):
+                input_ancestry.add(node)
+                continue
+            is_pointwise = (
+                isinstance(node.target, torch._ops.OpOverload)
+                and torch.Tag.pointwise in node.target.tags
+            )
+            if node.op != "call_function" or not (
+                op_types.is_view(node) or is_pointwise
+            ):
+                supported_ancestry = False
+                break
+            input_ancestry.add(node)
+            pending.extend(node.all_input_nodes)
+        if not supported_ancestry:
+            continue
+
+        metadata_nodes = (
+            spine
+            | input_ancestry
+            | OrderedSet([row_max, exp, sum_exp, log_sum, gather])
+        )
+        if any(
+            "recompute" in node.meta
+            or "ac_graph_id" in node.meta
+            or node.meta.get("has_backward_hook", False)
+            or node.meta.get("partitioner_tag") not in (None, "is_forward")
+            or isinstance(node.meta.get("memory_budget"), float)
+            or _get_memory_budget_annotation(node) is not None
+            for node in metadata_nodes
+        ):
+            continue
+
+        for node in spine:
+            node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
+
+
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
     _joint_inputs: Any,
@@ -4189,6 +4383,9 @@ def min_cut_rematerialization_partition(
         cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph
     joint_graph = joint_module.graph
+
+    if compiler == "inductor" and config.recompute_cat_log_softmax:
+        _prefer_recompute_cat_log_softmax(joint_module, num_fwd_outputs)
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
