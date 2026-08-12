@@ -2378,6 +2378,50 @@ class TestTDMScaled(TestCase):
     "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
 )
 class TestTDMScaledEndToEnd(TestCase):
+    """Real-device scaled TDM coverage.
+
+    KNOWN FAILING on gfx1250. Both tests reach the correctness assertion and
+    fail there: the scaled TDM kernel returns an all-zero result. The codegen
+    assertions above it pass -- descriptors are emitted, the template compiles
+    and autotunes -- so "``make_tensor_descriptor`` appears in the output" is
+    NOT evidence that this path is correct. Measured on gfx1250 with ROCm/HIP
+    7.16 and Triton 3.8, ``_scaled_mm`` at 256x256x256:
+
+        enable_tdm=False -> max abs error 0.17 (bf16 rounding)
+        enable_tdm=True  -> 0 of 65536 output elements non-zero
+
+    Reproduced with scales of both 1x1 and 2x3, so it is not a scale-magnitude
+    issue. Dense (``TestTDMEndToEnd``) and flex TDM pass on the same build, so
+    this is specific to the scaled/FP8 descriptor path; the suspected cause is
+    TDM descriptors over 1-byte (FP8) elements.
+
+    Two deliberate deviations from the obvious formulation, both required just
+    to reach that assertion:
+
+    * Row-wise rather than tensor-wise scales. Both recipes live in
+      ``epilogue_scaling_types`` and select the same descriptor template, so
+      the TDM path under test is unchanged. But tensor-wise scales are rank-1,
+      and ``max_autotune`` also builds the plain ``mm_template`` choice, whose
+      ``store_output`` loads every epilogue input with the output's 2D index --
+      that combination raises inside ``FixedLayout`` indexing before any TDM
+      code runs, and does so with ``enable_tdm=False`` too. Note that
+      ``test_configs.autotune_choice_name_regex`` cannot avoid it, because
+      ``filter_choices_by_name_regex`` runs over already-constructed choices
+      while the failure happens during construction.
+
+    * An fp32 recomputation, rather than the eager op, as the oracle. Eager
+      ``_scaled_mm`` dispatches to hipBLASLt, which has no row-wise FP8
+      solution on gfx1250 and raises before the Triton result can be compared.
+    """
+
+    def _assert_close_to_reference(self, result, a, b, scale_a, scale_b):
+        # Both sides consume the same already-quantized FP8 operands, so this
+        # compares accumulation and epilogue scaling only -- quantization error
+        # cancels and does not enter the tolerance. Cross-checked against a CPU
+        # matmul, which agrees with this GPU fp32 matmul exactly.
+        expected = ((a.float() @ b.float()) * scale_a * scale_b).to(result.dtype)
+        torch.testing.assert_close(result, expected, atol=5e-2, rtol=2e-2)
+
     def _compile_and_get_code(self, fn, *args):
         with config.patch(
             {
@@ -2400,15 +2444,13 @@ class TestTDMScaledEndToEnd(TestCase):
 
         a = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn)
         b = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn).t()
-        scale_a = torch.ones(1, device=GPU_TYPE)
-        scale_b = torch.ones(1, device=GPU_TYPE)
+        scale_a = torch.ones(256, 1, device=GPU_TYPE)
+        scale_b = torch.ones(1, 256, device=GPU_TYPE)
         result, code = self._compile_and_get_code(fn, a, b, scale_a, scale_b)
         joined = "\n".join(code)
         self.assertIn("make_tensor_descriptor", joined)
         self.assertIn("load_tensor_descriptor", joined)
-        torch.testing.assert_close(
-            result, fn(a, b, scale_a, scale_b), atol=5e-2, rtol=2e-2
-        )
+        self._assert_close_to_reference(result, a, b, scale_a, scale_b)
 
     def test_tdm_scaled_mm_v2_correctness_and_selection(self):
         def fn(a, b, scale_a, scale_b):
@@ -2416,23 +2458,21 @@ class TestTDMScaledEndToEnd(TestCase):
                 a,
                 b,
                 scale_a=scale_a,
-                scale_recipe_a=ScalingType.TensorWise,
+                scale_recipe_a=ScalingType.RowWise,
                 scale_b=scale_b,
-                scale_recipe_b=ScalingType.TensorWise,
+                scale_recipe_b=ScalingType.RowWise,
                 output_dtype=torch.bfloat16,
             )
 
         a = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn)
         b = torch.randn(256, 256, device=GPU_TYPE).to(torch.float8_e4m3fn).t()
-        scale_a = torch.ones(1, device=GPU_TYPE)
-        scale_b = torch.ones(1, device=GPU_TYPE)
+        scale_a = torch.ones(256, 1, device=GPU_TYPE)
+        scale_b = torch.ones(1, 256, device=GPU_TYPE)
         result, code = self._compile_and_get_code(fn, a, b, scale_a, scale_b)
         joined = "\n".join(code)
         self.assertIn("make_tensor_descriptor", joined)
         self.assertIn("load_tensor_descriptor", joined)
-        torch.testing.assert_close(
-            result, fn(a, b, scale_a, scale_b), atol=5e-2, rtol=2e-2
-        )
+        self._assert_close_to_reference(result, a, b, scale_a, scale_b)
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
