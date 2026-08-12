@@ -41,6 +41,7 @@
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/div_ops.h>
 #include <ATen/ops/divide_native.h>
+#include <ATen/ops/divmod_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/floor_divide.h>
