@@ -93,23 +93,26 @@ class ComposabilityTestBase(MultiProcContinuousTest):
             cls._resolved_device_type()
         )
 
+    def _rank_device(self, device: str) -> torch.device:
+        # `device` is the framework-injected primary device ("{type}:0",
+        # rank-0); resolve to this worker's per-rank device for self.rank.
+        device_type = torch.device(device).type
+        return torch.device(device_type, self.rank)
+
 
 class ComposabilityTest(ComposabilityTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 8
 
-    @property
-    def device(self):
-        return self.rank
-
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
-    def test_pp_and_dcp(self):
+    def test_pp_and_dcp(self, device):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
         with saved correct FQNs
         """
+        rank_device = self._rank_device(device)
 
         class AppState(Stateful):
             def __init__(self, model, optimizer):
@@ -145,7 +148,7 @@ class ComposabilityTest(ComposabilityTestBase):
                     x = layer(x)
                 return x
 
-        torch.accelerator.set_device_index(self.device)
+        torch.accelerator.set_device_index(rank_device)
         # create "entire model"
         total_layers = 8
         dim = 10
@@ -157,7 +160,7 @@ class ComposabilityTest(ComposabilityTestBase):
         end_index = start_index + 1
         pp_model = PPModelChunk(full_model, start_index, end_index)
 
-        pp_model.to(self.device)
+        pp_model.to(rank_device)
         opt = torch.optim.Adam(pp_model.parameters(), lr=0.1)
 
         # perform work in a temp dir that is cleaned up after the test
@@ -204,8 +207,9 @@ class ComposabilityTest(ComposabilityTestBase):
             torch.float32,
         ],
     )
-    def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
-        torch.accelerator.set_device_index(self.device)
+    def test_3d_with_tp_dp_pp(self, device, ScheduleClass, MixedPrecisionParam):
+        rank_device = self._rank_device(device)
+        torch.accelerator.set_device_index(rank_device)
         dim = 8
         tp_size = 2
         pp_size = 2
@@ -273,7 +277,7 @@ class ComposabilityTest(ComposabilityTestBase):
             end_layer = start_layer + layers_per_stage
             # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-            partial_model.to(self.device)
+            partial_model.to(rank_device)
             tp_model = apply_tp(partial_model, tp_mesh)
             dp_model = apply_fsdp(tp_model)
 
@@ -281,7 +285,7 @@ class ComposabilityTest(ComposabilityTestBase):
                 dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -313,8 +317,8 @@ class ComposabilityTest(ComposabilityTestBase):
         for _train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
-            inputs = torch.rand((num_microbatches, dim), device=self.device)
-            labels = torch.rand((num_microbatches, dim), device=self.device)
+            inputs = torch.rand((num_microbatches, dim), device=rank_device)
+            labels = torch.rand((num_microbatches, dim), device=rank_device)
             is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
             if pp_mesh.get_local_rank() == 0:
                 pipeline_schedule.step(inputs)
@@ -346,8 +350,9 @@ class ComposabilityTest(ComposabilityTestBase):
             torch.float32,
         ],
     )
-    def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
-        torch.accelerator.set_device_index(self.device)
+    def test_replicate_pp(self, device, ScheduleClass, MixedPrecisionParam):
+        rank_device = self._rank_device(device)
+        torch.accelerator.set_device_index(rank_device)
         dim = 8
         pp_size = 2
         num_microbatches = 8
@@ -409,10 +414,10 @@ class ComposabilityTest(ComposabilityTestBase):
             end_layer = start_layer + layers_per_stage
             # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-            partial_model.to(self.device)
+            partial_model.to(rank_device)
 
             ref_partial_model = nn.Sequential(*ref_full_model[start_layer:end_layer])
-            ref_partial_model.to(self.device)
+            ref_partial_model.to(rank_device)
 
             dp_model = apply_replicate(partial_model)
             ref_dp_model = apply_same_precision(ref_partial_model)
@@ -421,7 +426,7 @@ class ComposabilityTest(ComposabilityTestBase):
                 dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -429,7 +434,7 @@ class ComposabilityTest(ComposabilityTestBase):
                 ref_dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -484,10 +489,10 @@ class ComposabilityTest(ComposabilityTestBase):
                 ref_optimizer.zero_grad()
 
             inputs = torch.rand(
-                (num_microbatches, dim), device=self.device, dtype=MixedPrecisionParam
+                (num_microbatches, dim), device=rank_device, dtype=MixedPrecisionParam
             )
             labels = torch.rand(
-                (num_microbatches, dim), device=self.device, dtype=MixedPrecisionParam
+                (num_microbatches, dim), device=rank_device, dtype=MixedPrecisionParam
             )
             is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
             if pp_mesh.get_local_rank() == 0:
@@ -522,8 +527,9 @@ class ComposabilityTest(ComposabilityTestBase):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    def test_replicate_pp_grads(self, ScheduleClass):
-        torch.accelerator.set_device_index(self.device)
+    def test_replicate_pp_grads(self, device, ScheduleClass):
+        rank_device = self._rank_device(device)
+        torch.accelerator.set_device_index(rank_device)
         dim = 8
         pp_size = 2
         num_microbatches = 8
@@ -542,7 +548,7 @@ class ComposabilityTest(ComposabilityTestBase):
         # create "entire model"
         total_layers = 8
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
-        ref_model = nn.Sequential(*copy.deepcopy(full_model)).to(self.device)
+        ref_model = nn.Sequential(*copy.deepcopy(full_model)).to(rank_device)
 
         # dummy loss needed just to force backwards to run in schedule step
         def loss_fn(y, target):
@@ -652,7 +658,7 @@ class ComposabilityTest(ComposabilityTestBase):
             end_layer = start_layer + layers_per_stage
             # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-            partial_model.to(self.device)
+            partial_model.to(rank_device)
 
             dp_model = apply_replicate(partial_model)
             pipelined_models_parameters(start_layer, dp_model)
@@ -660,7 +666,7 @@ class ComposabilityTest(ComposabilityTestBase):
                 dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -711,8 +717,8 @@ class ComposabilityTest(ComposabilityTestBase):
                 optimizer.zero_grad()
             ref_optimizer.zero_grad()
 
-            inputs = torch.rand((num_microbatches, dim), device=self.device)
-            labels = torch.rand((num_microbatches, dim), device=self.device)
+            inputs = torch.rand((num_microbatches, dim), device=rank_device)
+            labels = torch.rand((num_microbatches, dim), device=rank_device)
 
             # Ensure all ranks use the same inputs/labels for comparison
             torch.distributed.broadcast(inputs, 0)
