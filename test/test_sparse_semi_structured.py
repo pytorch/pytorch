@@ -1842,6 +1842,33 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8_SPARSE,
         "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
+    def test_cslt_sparse_mm_fp8_compile(self, device):
+        # Exercises meta__cslt_sparse_mm with fp8 inputs (e4m3fnuz on gfx942),
+        # including the omitted-out_dtype path where the fake tensor must be
+        # fp32 on ROCm to match the eager result.
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(128, 128, device=device).to(torch.float16).t()
+
+        A_fp8, _ = to_float8(A)
+        B_fp8, _ = to_float8(B)
+        compressed = torch._cslt_compress(A_fp8)
+
+        def mm_fp32_out(compressed_A, dense_B):
+            return torch._cslt_sparse_mm(compressed_A, dense_B, out_dtype=torch.float32)
+
+        def mm_default_out(compressed_A, dense_B):
+            return torch._cslt_sparse_mm(compressed_A, dense_B)
+
+        for fn in (mm_fp32_out, mm_default_out):
+            ref = fn(compressed, B_fp8)
+            res = torch.compile(fn, fullgraph=True)(compressed, B_fp8)
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res.to(torch.float32), ref.to(torch.float32))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
+    )
     @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific out_dtype restriction")
     # e4m3_type is named explicitly so the generated test id does not change
     # between gfx942 (fnuz) and gfx950 (fn).
