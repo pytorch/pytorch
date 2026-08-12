@@ -151,6 +151,44 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
 
 remove_decompositions(decompositions, decomps_to_exclude)
 
+_vector_norm_decomposition = decompositions[aten.linalg_vector_norm.default]
+_STRICT_VECTOR_NORM_DTYPES = (
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
+)
+
+
+@functools.wraps(_vector_norm_decomposition)
+def _strict_vector_norm_decomposition(
+    x: torch.Tensor,
+    ord: float | int = 2,
+    dim: int | list[int] | tuple[int, ...] | None = None,
+    keepdim: bool = False,
+    *,
+    dtype: torch.dtype | None = None,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if config.numerics == "strict":
+        dims = [dim] if isinstance(dim, int) else dim
+        if (
+            isinstance(ord, bool)
+            or not isinstance(ord, (int, float))
+            or ord not in (1, 2)
+            or dims is None
+            or len(dims) != 1
+            or dtype is not None
+            or not x.is_cuda
+            or x.dtype not in _STRICT_VECTOR_NORM_DTYPES
+        ):
+            return NotImplemented
+    return _vector_norm_decomposition(x, ord, dim, keepdim, dtype=dtype, out=out)
+
+
+decompositions[aten.linalg_vector_norm.default] = _strict_vector_norm_decomposition
+decompositions[aten.linalg_vector_norm.out] = _strict_vector_norm_decomposition
+
 
 def register_decomposition(
     ops: _GenericOperator | list[_GenericOperator],
