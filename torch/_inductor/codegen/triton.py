@@ -1552,6 +1552,8 @@ class TritonOverrides(OpOverrides):
         Check https://github.com/triton-lang/triton/issues/5735 for
         more details.
         """
+        if config.numerics == "strict":
+            return f"libdevice.exp({x})"
         if config.use_fast_math:
             return f"tl_math.exp({x})"
         else:
@@ -2308,7 +2310,7 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
-        if config.eager_numerics.use_pytorch_libdevice:
+        if config.numerics == "strict" or config.eager_numerics.use_pytorch_libdevice:
             # Strict numerics should use the backend math library entry point.
             # On ROCm this maps to OCML and avoids Triton's generic log lowering.
             return f"libdevice.log({x})"

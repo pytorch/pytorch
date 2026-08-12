@@ -151,6 +151,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
 
 remove_decompositions(decompositions, decomps_to_exclude)
 
+_logsumexp_decomposition = decompositions[aten.logsumexp.default]
 _vector_norm_decomposition = decompositions[aten.linalg_vector_norm.default]
 _STRICT_VECTOR_NORM_DTYPES = (
     torch.float16,
@@ -158,6 +159,23 @@ _STRICT_VECTOR_NORM_DTYPES = (
     torch.float32,
     torch.float64,
 )
+
+
+@functools.wraps(_logsumexp_decomposition)
+def _strict_logsumexp_decomposition(
+    self: torch.Tensor,
+    dim: int | list[int] | tuple[int, ...],
+    keepdim: bool = False,
+) -> torch.Tensor:
+    if config.numerics == "strict":
+        dims = [dim] if isinstance(dim, int) else dim
+        if (
+            len(dims) != 1
+            or not self.is_cuda
+            or self.dtype not in (torch.float32, torch.float64)
+        ):
+            return NotImplemented
+    return _logsumexp_decomposition(self, dim, keepdim)
 
 
 @functools.wraps(_vector_norm_decomposition)
@@ -186,6 +204,7 @@ def _strict_vector_norm_decomposition(
     return _vector_norm_decomposition(x, ord, dim, keepdim, dtype=dtype, out=out)
 
 
+decompositions[aten.logsumexp.default] = _strict_logsumexp_decomposition
 decompositions[aten.linalg_vector_norm.default] = _strict_vector_norm_decomposition
 decompositions[aten.linalg_vector_norm.out] = _strict_vector_norm_decomposition
 
