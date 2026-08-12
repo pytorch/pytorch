@@ -3000,6 +3000,12 @@
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
   input: _pack_padded_sequence_backward_symint(grad, input.sym_sizes(), result1, batch_first)
+  result0: std::get<0>(_pack_padded_sequence(input_t, lengths, batch_first))
+
+- name: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, SymInt total_length) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  data: pad_packed_sequence_backward(grad, result1, batch_first, data.sym_sizes())
+  result0: std::get<0>(_pad_packed_sequence_symint(data_t, batch_sizes, batch_first, 0, total_length))
 
 # TH wrappers
 - name: eq.Scalar(Tensor self, Scalar other) -> Tensor

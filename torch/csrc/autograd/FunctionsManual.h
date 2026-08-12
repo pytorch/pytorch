@@ -264,6 +264,11 @@ std::vector<at::Tensor> stack_tensors_backward(
     const at::Tensor& grad,
     int64_t dim,
     const std::vector<ScalarType>& dtypes);
+at::Tensor pad_packed_sequence_backward(
+    const at::Tensor& grad,
+    const at::Tensor& lengths,
+    bool batch_first,
+    c10::SymIntArrayRef data_size);
 std::vector<at::Tensor> block_diag_backward(
     const at::Tensor& grad,
     const std::vector<std::vector<int64_t>>& sizes,

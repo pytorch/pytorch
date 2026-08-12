@@ -7,7 +7,12 @@ import unittest
 import torch
 import torch.nn.utils.rnn as rnn_utils
 from torch.testing._internal.common_utils import (
+    gradcheck,
+    gradgradcheck,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
+    runWithoutCompiledAutograd,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -509,6 +514,59 @@ class PackedSequenceTest(TestCase):
                 torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
             )
 
+    @parametrize(
+        "dtype,batch_first,total_length",
+        list(itertools.product((torch.double, torch.cdouble), (True, False), (5, 7))),
+    )
+    def test_pad_packed_sequence_gradcheck(self, dtype, batch_first, total_length):
+        batch_sizes = torch.tensor([3, 3, 2, 1, 1])
+        data = torch.randn(10, 2, dtype=dtype, requires_grad=True)
+
+        def fn(data):
+            return torch.ops.aten._pad_packed_sequence.default(
+                data,
+                batch_sizes,
+                batch_first,
+                3.0,
+                total_length,
+            )[0]
+
+        gradcheck(fn, (data,), check_forward_ad=True)
+
+    @runWithoutCompiledAutograd(
+        "compiled autograd cannot fake PackPaddedSequenceBackward0"
+    )
+    @parametrize(
+        "batch_first,total_length",
+        list(itertools.product((True, False), (5, 7))),
+    )
+    def test_pad_packed_sequence_gradgradcheck(self, batch_first, total_length):
+        batch_sizes = torch.tensor([3, 3, 2, 1, 1])
+        data = torch.randn(10, 2, dtype=torch.cdouble, requires_grad=True)
+
+        def fn(data):
+            return torch.ops.aten._pad_packed_sequence.default(
+                data,
+                batch_sizes,
+                batch_first,
+                3.0,
+                total_length,
+            )[0]
+
+        gradgradcheck(fn, (data,), check_fwd_over_rev=True)
+
+    @parametrize("batch_first", [True, False])
+    def test_pad_packed_sequence_zero_feature_autograd(self, batch_first):
+        batch_sizes = torch.tensor([2, 1])
+        data = torch.randn(3, 0, dtype=torch.double, requires_grad=True)
+
+        output = torch.ops.aten._pad_packed_sequence.default(
+            data, batch_sizes, batch_first, 0.0, 2
+        )[0]
+        output.sum().backward()
+
+        self.assertEqual(data.grad, torch.zeros_like(data))
+
     def test_empty_packed_sequence(self):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/149622
@@ -538,6 +596,9 @@ class PackedSequenceTest(TestCase):
         # Should not crash - either return empty list or raise informative error
         with self.assertRaises(RuntimeError):
             rnn_utils.unpack_sequence(packed)
+
+
+instantiate_parametrized_tests(PackedSequenceTest)
 
 
 if __name__ == "__main__":

@@ -476,6 +476,7 @@ TESTS_USING_GRADCHECK = [
     "autograd/test_complex",
     "test_nn",
     "nn/test_convolution",
+    "nn/test_packed_sequence",
     "nn/test_pooling",
     "nn/test_parametrization",
     # Domain-specific autograd coverage

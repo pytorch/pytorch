@@ -506,6 +506,7 @@ aten::_nnpack_spatial_convolution.out
 aten::_nnz
 aten::_pack_padded_sequence
 aten::_pack_padded_sequence.out
+aten::_pad_packed_sequence
 aten::_padded_dense_to_jagged_forward
 aten::_pdist_backward
 aten::_pdist_backward.out
