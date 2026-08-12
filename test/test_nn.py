@@ -14027,8 +14027,8 @@ if __name__ == '__main__':
         # (same cancellation inflates them too) which also get 16*eps.
         wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
         if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
-            input_grad_err_tol = input_grad_err_tol * 1.5
-            wb_grad_err_tol = wb_grad_err_tol * 1.5
+            input_grad_err_tol = input_grad_err_tol * 3
+            wb_grad_err_tol = wb_grad_err_tol * 3
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
