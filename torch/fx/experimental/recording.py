@@ -270,6 +270,16 @@ def record_shapeenv_event(
 
         @functools.wraps(fn)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            # Recording is off in a normal compile, and this wraps ShapeEnv
+            # methods called hundreds of thousands of times, so answer that case
+            # before importing, building the retlog closure or touching NEST.
+            shape_env = args[0]
+            if (
+                not shape_env.should_record_events  # type: ignore[attr-defined]
+                or shape_env.is_recording  # type: ignore[attr-defined]
+            ) and not trace_shape_events_log.isEnabledFor(logging.DEBUG):
+                return fn(*args, **kwargs)
+
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
             if not isinstance(args[0], ShapeEnv):
@@ -285,8 +295,6 @@ def record_shapeenv_event(
             def retlog(r: _R) -> _R:
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
-
-            shape_env = args[0]
 
             try:
                 if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
