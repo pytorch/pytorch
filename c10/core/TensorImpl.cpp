@@ -226,7 +226,8 @@ void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
       fake_device.type() != c10::DeviceType::Meta) {
     // skip if fakemode already exists
     if (c10::impl::FakeTensorModeTLS::get_state() == nullptr) {
-      const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
+      const auto* guard_impl =
+          c10::impl::getDeviceGuardImpl(fake_device.type());
       if (guard_impl) {
         fake_device = guard_impl->getDevice();
       }
