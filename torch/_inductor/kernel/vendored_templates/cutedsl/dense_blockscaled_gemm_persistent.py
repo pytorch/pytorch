@@ -1704,10 +1704,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     + col_idx
                                 )
                                 tensor_m = (
-                                    0 if cutlass.const_expr(kind == 2) else global_m
+                                    0
+                                    if cutlass.const_expr(kind in (2, 4))
+                                    else global_m
                                 )
                                 tensor_n = (
-                                    0 if cutlass.const_expr(kind == 3) else global_n
+                                    0
+                                    if cutlass.const_expr(kind in (3, 4))
+                                    else global_n
                                 )
                                 fragment[i] = tensor[0, 0, 0]
                                 if global_m < output_m and global_n < output_n:

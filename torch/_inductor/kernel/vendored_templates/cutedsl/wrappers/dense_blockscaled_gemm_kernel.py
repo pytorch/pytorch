@@ -33,6 +33,7 @@ from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
 )
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmReductionCompileConfig,
+    get_cutedsl_epilogue_schema,
     materialize_epilogue_function,
 )
 
@@ -76,20 +77,14 @@ def _epilogue_input_pack(args, attr: str) -> EpilogueInputPack:
     epilogue = getattr(args, "epilogue", None)
     if epilogue is None:
         return EpilogueInputPack(())
+    schema = get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
+    scalar_names = () if schema is None else schema.scalar_broadcast_names
     inputs = []
-    output_m, output_n = args.out.shape[-2:]
     for name in _epilogue_signature(epilogue.epilogue_fn)[0]:
         tensor = epilogue.tensors[name]
         shape = tensor.shape
-        if shape[-1] == 1 and (len(shape) == 1 or shape[-2] == 1):
-            if output_n == 1:
-                kind = 2
-            elif output_m == 1:
-                kind = 3
-            else:
-                raise NotImplementedError(
-                    "NVGEMM scaled epilogues do not support scalar tensor inputs"
-                )
+        if name in scalar_names or all(size == 1 for size in shape):
+            kind = 4
         elif len(shape) == 1 or shape[-2] == 1:
             kind = 2
         elif shape[-1] == 1:
