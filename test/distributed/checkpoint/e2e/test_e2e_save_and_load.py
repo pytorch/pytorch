@@ -40,6 +40,8 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -512,22 +514,33 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             )
 
 
-class TestNoCPU(DTensorTestBase):
+class TestNoCPU(MultiProcContinuousTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @property
-    def backend(self):
-        return dist.get_default_backend_for_device(self.device_type)
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type)
 
-    @with_comms
-    def test_no_cpu(self):
-        if self.device_type == "cpu":
+    @property
+    def device(self) -> torch.device:
+        return self._dev
+
+    def test_no_cpu(self, device):
+        self._dev = torch.device(device)
+        if device == "cpu":
             self.skipTest("test_no_cpu requires a non-CPU device")
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
             f = saver.async_save({})
             f.result()
+
+
+instantiate_device_type_tests(
+    TestNoCPU,
+    globals(),
+    except_for=("cpu",),
+)
 
 
 class TestInitStateDict(DTensorTestBase):
