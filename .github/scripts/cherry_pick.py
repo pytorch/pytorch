@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import re
@@ -60,76 +59,6 @@ def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> str | None:
     return commit_sha if pr.is_closed() else None
 
 
-def is_ancestor(repo: GitRepo, ref: str, branch: str) -> bool:
-    """
-    Return True if ref is already part of branch's history
-    """
-    return repo.get_merge_base(ref, branch) == repo.rev_parse(ref)
-
-
-def find_revert_commit_sha(repo: GitRepo, pr: GitHubPR, commit_sha: str) -> str | None:
-    """
-    Return the commit on the default branch that reverts commit_sha, or None if
-    the landed commit was never reverted.
-
-    The lookup is keyed on the exact landed SHA rather than the PR number: a PR
-    that landed and was reverted several times has one revert per land, and only
-    the one undoing the land that reached the release branch is the right pick.
-    """
-    default_branch = f"{repo.remote}/{pr.default_branch()}"
-    # `git revert`, which is what the revert bot runs, always records this line
-    revert_shas = repo._run_git(
-        "log",
-        "--format=%H",
-        "--fixed-strings",
-        f"--grep=This reverts commit {commit_sha}.",
-        default_branch,
-    ).strip()
-
-    if not revert_shas:
-        return None
-
-    # Newest first, so a re-reverted commit resolves to the most recent revert
-    return revert_shas.split("\n")[0]
-
-
-def resolve_trunk_revert(
-    repo: GitRepo, pr: GitHubPR, onto_branch: str, commit_sha: str
-) -> str | None:
-    """
-    Return the default-branch revert that the release branch is missing, or None
-    when the PR is a plain cherry pick.
-
-    When the PR landed and was later reverted on the default branch, applying the
-    landed commit would re-add a change trunk has already thrown out, to a branch
-    that already has it. What the release branch needs is for that change to be
-    undone, so the release branch ends up matching trunk.
-    """
-    revert_sha = find_revert_commit_sha(repo, pr, commit_sha)
-    if not revert_sha:
-        return None
-
-    # This runs before create_cherry_pick_branch checks the branch out, so it
-    # only exists as a remote-tracking ref. git rev-parse's DWIM does not reach
-    # refs/remotes/origin/<branch> from a bare name, so qualify it.
-    onto_ref = f"{repo.remote}/{onto_branch}"
-
-    if not is_ancestor(repo, commit_sha, onto_ref):
-        raise RuntimeError(
-            f"Refuse to cherry pick #{pr.pr_num} onto {onto_branch}: it was reverted "
-            f"on {pr.default_branch()} by {revert_sha}, and its landed commit "
-            f"{commit_sha} is not on {onto_branch}, so there is nothing to revert there."
-        )
-
-    if is_ancestor(repo, revert_sha, onto_ref):
-        raise RuntimeError(
-            f"Refuse to cherry pick #{pr.pr_num} onto {onto_branch}: the revert "
-            f"{revert_sha} is already on {onto_branch}."
-        )
-
-    return revert_sha
-
-
 def get_release_version(onto_branch: str) -> str | None:
     """
     Return the release version if the target branch is a release branch
@@ -166,15 +95,13 @@ def cherry_pick(
     classification: str,
     fixes: str,
     dry_run: bool = False,
-    trunk_revert_sha: str = "",
 ) -> None:
     """
     Create a local branch to cherry pick the commit and submit it as a pull request
     """
-    is_revert = bool(trunk_revert_sha)
     current_branch = repo.current_branch()
     cherry_pick_branch = create_cherry_pick_branch(
-        github_actor, repo, pr, commit_sha, onto_branch, trunk_revert_sha
+        github_actor, repo, pr, commit_sha, onto_branch
     )
 
     try:
@@ -182,9 +109,7 @@ def cherry_pick(
 
         cherry_pick_pr = ""
         if not dry_run:
-            cherry_pick_pr = submit_pr(
-                repo, pr, cherry_pick_branch, onto_branch, commit_sha, trunk_revert_sha
-            )
+            cherry_pick_pr = submit_pr(repo, pr, cherry_pick_branch, onto_branch)
 
         tracker_issues_comments = []
         tracker_issues = get_tracker_issues(org, project, onto_branch)
@@ -204,7 +129,6 @@ def cherry_pick(
                     classification,
                     fixes,
                     dry_run,
-                    is_revert,
                 ),
             )
 
@@ -213,11 +137,6 @@ def cherry_pick(
                 tracker_issues_comments.append(comment_url)
 
         msg = f"The cherry pick PR is at {cherry_pick_pr}"
-        if is_revert:
-            msg = (
-                f"This PR was reverted on {pr.default_branch()}, so the change was "
-                f"reverted on {onto_branch} instead of being applied there. {msg}"
-            )
         if fixes:
             msg += f" and it is linked with issue {fixes}."
         elif classification in REQUIRES_ISSUE:
@@ -236,12 +155,7 @@ def cherry_pick(
 
 
 def create_cherry_pick_branch(
-    github_actor: str,
-    repo: GitRepo,
-    pr: GitHubPR,
-    commit_sha: str,
-    onto_branch: str,
-    trunk_revert_sha: str = "",
+    github_actor: str, repo: GitRepo, pr: GitHubPR, commit_sha: str, onto_branch: str
 ) -> str:
     """
     Create a local branch and cherry pick the commit. Return the name of the local
@@ -258,35 +172,7 @@ def create_cherry_pick_branch(
 
     # We might want to support ghstack later
     # We don't want to resolve conflicts here.
-    if trunk_revert_sha:
-        # Revert on the release branch rather than cherry picking the default
-        # branch's revert commit. The revert is then computed against the tree
-        # the release branch actually has, which is what makes it apply on a
-        # branch that has drifted from trunk, and it records the landed SHA that
-        # is really present here instead of trunk's.
-        try:
-            repo.revert(commit_sha)
-        except RuntimeError as error:
-            # Deciding what a conflicted revert should look like on a release
-            # branch is a judgement call, so hand it back rather than guess.
-            with contextlib.suppress(RuntimeError):
-                repo._run_git("revert", "--abort")
-            raise RuntimeError(
-                f"Reverting {commit_sha} on {onto_branch} hit a conflict, so nothing "
-                f"was pushed. Please revert #{pr.pr_num} on {onto_branch} by hand and "
-                f"open the pull request manually.\n\n{error}"
-            ) from error
-        repo.amend_commit_message(
-            "\n".join(
-                (
-                    repo.commit_message("HEAD").rstrip(),
-                    "",
-                    f"Reverted on {pr.default_branch()} by {trunk_revert_sha}.",
-                )
-            )
-        )
-    else:
-        repo._run_git("cherry-pick", "-x", commit_sha)
+    repo._run_git("cherry-pick", "-x", commit_sha)
     repo.push(branch=cherry_pick_branch, dry_run=False)
 
     return cherry_pick_branch
@@ -297,8 +183,6 @@ def submit_pr(
     pr: GitHubPR,
     cherry_pick_branch: str,
     onto_branch: str,
-    commit_sha: str = "",
-    trunk_revert_sha: str = "",
 ) -> str:
     """
     Submit the cherry pick PR and return the link to the PR
@@ -308,27 +192,6 @@ def submit_pr(
     default_msg = f"Cherry pick #{pr.pr_num} onto {onto_branch} branch"
     title = pr.info.get("title", default_msg)
     body = pr.info.get("body", default_msg)
-
-    if trunk_revert_sha:
-        # Reusing the PR's own title and body would describe the change being
-        # undone, which reads as though the feature is being added to the release
-        title = f'[{onto_branch}] Revert "{title}"'
-        body = "\n".join(
-            (
-                f"Reverts #{pr.pr_num} on {onto_branch}.",
-                "",
-                f"#{pr.pr_num} landed before {onto_branch} was cut, so the change is "
-                f"on the release branch, but it was then reverted on "
-                f"{pr.default_branch()} by {trunk_revert_sha}. This brings "
-                f"{onto_branch} back in line with trunk.",
-                "",
-                f"The revert was generated on {onto_branch} rather than cherry picked "
-                f"from {pr.default_branch()}, so it undoes {commit_sha} as that commit "
-                "exists on the release branch.",
-                "",
-                repo.commit_message(trunk_revert_sha),
-            )
-        )
 
     try:
         response = gh_fetch_url(
@@ -394,23 +257,10 @@ def post_tracker_issue_comment(
     classification: str,
     fixes: str,
     dry_run: bool = False,
-    is_revert: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Post a comment on the tracker issue (if any) to record the cherry pick
     """
-    # Skip the empty parts, otherwise an unlinked cherry pick renders a dangling
-    # separator like "Critical - "
-    criteria = " - ".join(
-        part
-        for part in (
-            "Cherry-pick revert" if is_revert else "",
-            classification.capitalize(),
-            fixes.capitalize(),
-        )
-        if part
-    )
-
     comment = "\n".join(
         (
             "Link to landed trunk PR (if applicable):",
@@ -420,7 +270,7 @@ def post_tracker_issue_comment(
             f"* {cherry_pick_pr}",
             "",
             "Criteria Category:",
-            criteria,
+            " - ".join((classification.capitalize(), fixes.capitalize())),
         )
     )
     return gh_post_pr_comment(org, project, issue_num, comment, dry_run)
@@ -442,8 +292,6 @@ def main() -> None:
                 f"Refuse to cherry pick #{pr_num} because it hasn't been merged yet"
             )
 
-        trunk_revert_sha = resolve_trunk_revert(repo, pr, args.onto_branch, commit_sha)
-
         cherry_pick(
             args.github_actor,
             repo,
@@ -453,7 +301,6 @@ def main() -> None:
             args.classification,
             args.fixes,
             args.dry_run,
-            trunk_revert_sha or "",
         )
 
     except RuntimeError as error:
