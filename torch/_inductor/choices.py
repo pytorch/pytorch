@@ -449,8 +449,8 @@ class InductorChoices:
         if not config.triton.persistent_reductions:
             return False
         reduction_hint = features.get_reduction_hint()
-        rblock = features.strict_sum_rblock()
-        if rblock is not None and not features.has_strict_sum_multirow_reduction():
+        rblock = features.strict_reduction_rblock()
+        if rblock is not None and not features.has_strict_multirow_reduction():
             if not (
                 V.graph.sizevars.statically_known_geq(rblock, features.reduction_numel)
             ):

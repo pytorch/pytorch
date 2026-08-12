@@ -67,7 +67,6 @@ def _direct_cutedsl_epilogue(metadata):
     parameter_names = metadata.epilogue.parameter_names
     tensors = metadata.epilogue.tensors
     output_shape = tuple(tensors[outputs[-1]].shape)
-    scalar_broadcast_names = schema.scalar_broadcast_names
 
     def source_mode_map(name):
         shape = tuple(tensors[name].shape)
