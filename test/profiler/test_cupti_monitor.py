@@ -2679,15 +2679,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-<<<<<<< dest:   b2f0d279dd9c - guptaishaan: [inductor] Realize select_scatter...
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_TOOLS_ID,
         "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
     )
-||||||| base:   d518157a9a73 - suo: [profiler][cupti] Install the generated _...
-=======
-    @unittest.skipIf(not TEST_GRAPH_TOOLS_ID, "requires cudaGraphNodeGetToolsId")
->>>>>>> source: addc2ea022e5 - 34420038+dolpm: [profiler][cupti] Give logical...
     def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
         # The serial-chain case above is the one where every candidate ordering agrees. This
         # is the case that separates them: two event nodes on CONCURRENT branches of differing
