@@ -761,6 +761,59 @@ def forward(self, x_1):
         self.assertFalse(i0 > s0)
         self.assertFalse(i0 >= s0)
 
+    def test_expect_true_transitive_inequality(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        c = shape_env.create_unbacked_symint()
+
+        self.assertTrue(expect_true(a <= b))
+        self.assertTrue(expect_true(b <= c))
+
+        self.assertTrue(statically_known_true(a <= c))
+        self.assertTrue(statically_known_false(c < a))
+        self.assertFalse(statically_known_true(a < c))
+
+    def test_expect_true_transitive_inequality_strictness(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        c = shape_env.create_unbacked_symint()
+
+        self.assertTrue(expect_true(a < b))
+        self.assertTrue(expect_true(b <= c))
+        self.assertTrue(statically_known_true(a < c))
+
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        c = shape_env.create_unbacked_symint()
+
+        self.assertTrue(expect_true(a <= b))
+        self.assertTrue(expect_true(b < c))
+        self.assertTrue(statically_known_true(a < c))
+
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        c = shape_env.create_unbacked_symint()
+        d = shape_env.create_unbacked_symint()
+
+        self.assertTrue(expect_true(a <= b))
+        self.assertTrue(expect_true(b <= c))
+        self.assertTrue(expect_true(c <= d))
+        self.assertTrue(statically_known_true(a <= d))
+
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+
+        self.assertTrue(expect_true(a <= b))
+        self.assertTrue(expect_true(b <= a))
+        self.assertTrue(statically_known_true(a <= b))
+        self.assertTrue(statically_known_true(b <= a))
+        self.assertTrue(statically_known_false(a < b))
+
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()

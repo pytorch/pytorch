@@ -7254,6 +7254,60 @@ class ShapeEnv:
 
         return tuple(equiv.items())
 
+    def _record_axiom(self, expr: SympyBoolean) -> None:
+        """Record an assumed-true expression and its direct implications."""
+        self.axioms.update(dict(self.get_implications(self.simplify(expr))))
+
+    def _maybe_evaluate_transitive_relation(
+        self,
+        expr: sympy.Basic,
+        axioms: Mapping[sympy.Basic, sympy.Basic],
+    ) -> sympy.Basic | None:
+        expr = canonicalize_bool_expr(expr)
+        if not isinstance(expr, (sympy.Lt, sympy.Le)):
+            return None
+
+        edges: dict[sympy.Basic, list[tuple[sympy.Basic, bool]]] = {}
+        for axiom, value in axioms.items():
+            if value is not sympy.true:
+                continue
+            axiom = canonicalize_bool_expr(axiom)
+            if isinstance(axiom, (sympy.Lt, sympy.Le)):
+                edges.setdefault(axiom.lhs, []).append((axiom.rhs, isinstance(axiom, sympy.Lt)))
+
+        def is_implied(query: sympy.Basic) -> bool:
+            query = canonicalize_bool_expr(query)
+            if not isinstance(query, (sympy.Lt, sympy.Le)):
+                return False
+            if query.lhs == query.rhs and isinstance(query, sympy.Lt):
+                return False
+
+            need_strict = isinstance(query, sympy.Lt)
+            work: list[tuple[sympy.Basic, bool]] = [(query.lhs, False)]
+            seen: set[tuple[sympy.Basic, bool]] = set(work)
+
+            while work:
+                term, has_strict = work.pop()
+                for next_term, edge_is_strict in edges.get(term, ()):
+                    next_has_strict = has_strict or edge_is_strict
+                    if next_term == query.rhs and (
+                        next_has_strict or not need_strict
+                    ):
+                        return True
+                    key = (next_term, next_has_strict)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    work.append(key)
+
+            return False
+
+        if is_implied(expr):
+            return sympy.true
+        if is_implied(sympy.Not(expr)):
+            return sympy.false
+        return None
+
     def _is_nonneg_term(self, term: sympy.Expr) -> bool:
         """Check if a single term is non-negative (symbol with non-neg range or non-neg constant)."""
         if term.is_Symbol:
@@ -7395,6 +7449,10 @@ class ShapeEnv:
 
         if not fs and (expr.is_number or expr.is_Boolean):
             return expr
+
+        transitive_expr = self._maybe_evaluate_transitive_relation(expr, subst)
+        if transitive_expr is not None:
+            return transitive_expr
 
         if var_to_range is None:
             var_ranges = self.var_to_range
@@ -8928,7 +8986,7 @@ class ShapeEnv:
                         g, self._get_sloc(), size_oblivious=size_oblivious
                     )
                     self.guards.append(guard)
-                    self.axioms.update(dict(self.get_implications(self.simplify(g))))
+                    self._record_axiom(g)
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
@@ -9092,7 +9150,7 @@ class ShapeEnv:
             # and the guard in question has no unbacked symbols in front
             ix = cands[-1] if cands else None
             self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
-            self.axioms.update(dict(self.get_implications(self.simplify(expr))))
+            self._record_axiom(expr)
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
         else:

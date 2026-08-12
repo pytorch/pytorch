@@ -7124,6 +7124,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
         )
 
+    def test_torch_check_transitive_inequality_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, t):
+                u0 = t[0].item()
+                u1 = t[1].item()
+                u2 = t[2].item()
+                torch._check(u0 <= u1)
+                torch._check(u1 <= u2)
+                if u0 <= u2:
+                    return x + 1
+                return x - 1
+
+        for strict in (False, True):
+            export(M(), (torch.randn(3), torch.tensor([1, 2, 3])), strict=strict)
+
     def test_torch_check_symbool_python_not_strict(self):
         class M(torch.nn.Module):
             def forward(self, x):
