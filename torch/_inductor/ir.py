@@ -56,7 +56,7 @@ from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
-from torch._native.ops.sum import inner_tree_plan
+from torch._native.ops.reductions import inner_tree_plan
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -1406,8 +1406,8 @@ class Reduction(Loops):
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
     # Exact eager tile; rblock 1 is the split final stage.
-    strict_sum_multirow: bool = False
-    strict_sum_rblock: int | None = None
+    strict_reduction_multirow: bool = False
+    strict_reduction_rblock: int | None = None
 
     def __str__(self) -> str:
         return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
@@ -1469,8 +1469,8 @@ class Reduction(Loops):
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
-            strict_sum_multirow=self.strict_sum_multirow,
-            strict_sum_rblock=self.strict_sum_rblock,
+            strict_reduction_multirow=self.strict_reduction_multirow,
+            strict_reduction_rblock=self.strict_reduction_rblock,
         )
 
     @staticmethod
@@ -1760,7 +1760,7 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
         *,
-        strict_sum: bool = False,
+        strict_reduction: bool = False,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -1808,9 +1808,9 @@ class Reduction(Loops):
             )
 
         strict_split = None
-        strict_sum_multirow = False
-        strict_sum_rblock = None
-        if strict_sum and reduction_hint in (
+        strict_reduction_multirow = False
+        strict_reduction_rblock = None
+        if strict_reduction and reduction_hint in (
             ReductionHint.DEFAULT,
             ReductionHint.INNER,
         ):
@@ -1835,31 +1835,33 @@ class Reduction(Loops):
                 )
                 if indexing_safe:
                     strict_split = 1
-                    strict_sum_multirow = (
+                    strict_reduction_multirow = (
                         guarded_reduction_numel
                         <= vector_size * inner_tree_plan._K_MULTIROW_MAX_LOADS
                     )
-                    if strict_sum_multirow:
+                    if strict_reduction_multirow:
                         num_loads = ceildiv(guarded_reduction_numel, vector_size)
                         num_loads = 1 << (num_loads - 1).bit_length()
-                        strict_sum_rblock = num_loads * vector_size
+                        strict_reduction_rblock = num_loads * vector_size
                     else:
                         params = inner_tree_plan.compute_inner_tree_params(
                             guarded_reduction_numel,
                             1,
                             vector_size,
                         )
-                        strict_sum_rblock = params.batch_total_elements
+                        strict_reduction_rblock = params.batch_total_elements
                         if (
                             params.num_batches > inner_tree_plan._K_TWO_KERNEL_THRESHOLD
-                            and guarded_reduction_numel % strict_sum_rblock == 0
+                            and guarded_reduction_numel % strict_reduction_rblock == 0
                         ):
                             strict_split = params.num_batches
-        strict_sum = strict_split is not None
+        strict_reduction = strict_split is not None
 
-        if strict_sum_multirow:
-            if strict_sum_rblock is None:
-                raise AssertionError("strict multirow sum requires a reduction block")
+        if strict_reduction_multirow:
+            if strict_reduction_rblock is None:
+                raise AssertionError(
+                    "strict multirow reduction requires a reduction block"
+                )
             actual_reduction_numel = reduction_numel
             original_inner_fn = inner_fn
             default = cls.default_value(reduction_type, dst_dtype)
@@ -1878,10 +1880,10 @@ class Reduction(Loops):
                 return ops.masked(mask, body, default)
 
             inner_fn = cast(Callable[..., Any], padded_inner_fn)
-            reduction_ranges = [sympy.Integer(strict_sum_rblock)]
-            reduction_numel = sympy.Integer(strict_sum_rblock)
+            reduction_ranges = [sympy.Integer(strict_reduction_rblock)]
+            reduction_numel = sympy.Integer(strict_reduction_rblock)
 
-        if reduction_numel == 1 and not strict_sum:
+        if reduction_numel == 1 and not strict_reduction:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
@@ -1903,7 +1905,7 @@ class Reduction(Loops):
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
-            and not strict_sum
+            and not strict_reduction
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -1987,7 +1989,7 @@ class Reduction(Loops):
                 split,
                 reduction_hint,
                 input_node,
-                strict_sum=strict_sum,
+                strict_reduction=strict_reduction,
             )
 
             # Find the reduction that get split
@@ -2042,8 +2044,8 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
-                strict_sum_multirow=strict_sum_multirow,
-                strict_sum_rblock=strict_sum_rblock,
+                strict_reduction_multirow=strict_reduction_multirow,
+                strict_reduction_rblock=strict_reduction_rblock,
             )
         )
         return out
@@ -2230,7 +2232,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-        strict_sum: bool = False,
+        strict_reduction: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2253,7 +2255,7 @@ class Reduction(Loops):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
-            strict_sum=strict_sum,
+            strict_reduction=strict_reduction,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -2282,7 +2284,7 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
-                strict_sum_rblock=1 if strict_sum else None,
+                strict_reduction_rblock=1 if strict_reduction else None,
             )
         )
 
@@ -2300,7 +2302,7 @@ class Reduction(Loops):
         reduction_hint: ReductionHint,
         input_node: IRNode | None = None,
         *,
-        strict_sum: bool = False,
+        strict_reduction: bool = False,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2332,7 +2334,7 @@ class Reduction(Loops):
             reduction_type,
             split,
             reduction_hint,
-            strict_sum,
+            strict_reduction,
         )
 
     @classmethod
@@ -5566,8 +5568,8 @@ class ComputedBuffer(OperationBuffer):
                 reduction_type=old_data.reduction_type,
                 src_dtype=old_data.src_dtype,
                 reduction_hint=old_data.reduction_hint,
-                strict_sum_multirow=old_data.strict_sum_multirow,
-                strict_sum_rblock=old_data.strict_sum_rblock,
+                strict_reduction_multirow=old_data.strict_reduction_multirow,
+                strict_reduction_rblock=old_data.strict_reduction_rblock,
             )
             self.data = new_data
             # this layout does not matter since we skip tl.store
