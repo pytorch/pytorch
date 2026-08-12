@@ -7744,6 +7744,28 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
+def _is_strict_reduction_result(x) -> bool:
+    name = ir.try_get_name(x)
+    if name is None:
+        return False
+    buffer = V.graph.try_get_buffer(name)
+    return (
+        isinstance(buffer, ir.ComputedBuffer)
+        and isinstance(buffer.data, Reduction)
+        and buffer.data.strict_reduction_rblock is not None
+    )
+
+
+def _lowp_pointwise_barrier(x):
+    dtype = x.get_dtype()
+
+    def inner(value):
+        value = ops.to_dtype(value, dtype, use_compute_types=False)
+        return ops.to_dtype(value, dtype)
+
+    return make_pointwise(inner, override_return_dtype=dtype)(x)
+
+
 @make_pointwise
 def _div_rn(a, b):
     return ops.div_rn(a, b)
@@ -7887,6 +7909,11 @@ def div(a, b):
     a, b = promote_constants(
         (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     )
+    if _is_strict_reduction_result(a):
+        if a.get_dtype() in (torch.float16, torch.bfloat16):
+            a = _lowp_pointwise_barrier(a)
+            b = _lowp_pointwise_barrier(b)
+        return _div_rn(a, b)
     return div_prim(a, b)
 
 
