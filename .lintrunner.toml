@@ -618,19 +618,7 @@ exclude_patterns = [
 ]
 command = [
     'python3',
-    'tools/linter/adapters/grep_linter.py',
-    '--pattern=\bthrow\b',
-    '--allowlist-pattern=@allow-raw-throw',
-    '--linter-name=RAWTHROW',
-    '--error-name=raw throw statement',
-    """--error-description=\
-        Do not use raw `throw` in C++ code. Use TORCH_CHECK, \
-        TORCH_CHECK_WITH, C10_THROW_ERROR, or other error-reporting macros \
-        instead. See c10/util/Exception.h for available macros. If this is a \
-        re-throw (throw;), restructure the code to avoid try/catch/throw or \
-        add the file to the RAWTHROW exclude list in .lintrunner.toml with \
-        justification.\
-    """,
+    'tools/linter/adapters/raw_throw_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
