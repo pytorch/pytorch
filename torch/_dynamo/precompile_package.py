@@ -14,7 +14,7 @@ Usage::
         for variant in variants:  # every path you want covered
             with variant:
                 compiled(*args)
-    session.save(path)
+    session.save("snapshots/model.pt")
 
 ``example_inputs`` runs the calls for you, so a capture with nothing
 conditional in it is one statement, and ``invariants`` writes a readable
@@ -37,10 +37,12 @@ graphs apart. Intersection is per frame because guards from different frames are
 not comparable: the entry frame guards its arguments, a resume frame guards
 whatever crossed the break. See ``PrecompileSession.invariants``.
 
-Note the asymmetry with ``save``: ``invariants`` names a FILE and writes exactly
-it, creating parent directories, so ``snapshots/invariants.txt`` is a text file
-you can commit and diff. ``save`` names a DIRECTORY and puts the artifact
-inside it.
+Both path kwargs name a FILE and write exactly it, creating parent directories:
+``snapshots/invariants.txt`` is a text file you can commit and diff, and
+``save("snapshots/model.pt")`` is the artifact itself, handed straight back to
+``precompile_load``. That is deliberately unlike ``DiskDynamoStore``, whose path
+is a directory it fills, because a content-addressed cache owns its layout while
+an artifact you name is a file you move around.
 
     # later, in a fresh process
     compiled = precompile_load(model, path, backend="inductor")
@@ -157,6 +159,7 @@ import dataclasses
 import functools
 import logging
 import os
+import pickle
 import re
 import sys
 import types
@@ -170,7 +173,12 @@ from torch._guards import ChainedSource, Source
 
 from .exc import PackageError
 from .guards import CheckFunctionManager
-from .package import _DynamoCacheEntry, CompilePackage, DiskDynamoStore
+from .package import (
+    _DynamoCacheEntry,
+    CompilePackage,
+    DynamoStore,
+    PrecompileCacheEntry,
+)
 from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
@@ -654,6 +662,46 @@ def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
     )
 
 
+class _SingleFileStore(DynamoStore):
+    """
+    One artifact, one file.
+
+    DiskDynamoStore treats its path as a directory and writes ``entry`` inside
+    it, which is right for a content-addressed cache that owns its own layout.
+    An artifact you name explicitly is a file you hand around, so this writes
+    exactly the path given. Only the two storage primitives differ; everything
+    above them is the shared DynamoStore.
+    """
+
+    def clear(self) -> None:
+        pass
+
+    def write(self, cache_entry: PrecompileCacheEntry, path: str) -> None:
+        from torch._inductor.codecache import write_atomic
+
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        try:
+            write_atomic(path, pickle.dumps(cache_entry))
+        except Exception as e:
+            raise PackageError(f"Failed to write artifact to {path}: {e}") from e
+
+    def read(self, path: str) -> PrecompileCacheEntry:
+        if os.path.isdir(path):
+            raise PackageError(
+                f"{path} is a directory. precompile artifacts are single files; "
+                f"pass the path save() was given."
+            )
+        try:
+            with open(path, "rb") as handle:
+                entry = pickle.loads(handle.read())
+        except Exception as e:
+            raise PackageError(f"Failed to read artifact from {path}: {e}") from e
+        if not isinstance(entry, PrecompileCacheEntry):
+            raise PackageError(f"{path} does not hold a precompile artifact")
+        return entry
+
+
 def _value_fingerprint(entry: GuardFilterEntry) -> str:
     """
     What the guard checks, when the rendered code does not say.
@@ -885,9 +933,8 @@ class PrecompileSession:
         Write :meth:`invariants` to ``path`` in human-readable form.
 
         ``path`` is a FILE, written exactly as given, with parent directories
-        created -- ``snapshots/invariants.txt`` is a text file, not a directory.
-        That is the opposite of :meth:`save`, which treats its path as a
-        directory to put the artifact in.
+        created -- ``snapshots/invariants.txt`` is a text file. Same contract as
+        :meth:`save`.
 
         Output is stable across runs of the same capture: object ids and
         Dynamo's per-process counters are normalized away, so the file can be
@@ -966,15 +1013,9 @@ class PrecompileSession:
         ``summary().risky_dropped_guards`` once for your model, then pass
         ``require_no_risky_drops=True`` to hold it.
 
-        ``path`` names a DIRECTORY, created if absent, holding a single file
-        called ``entry``: a file-looking ``model.pt`` becomes ``model.pt/entry``.
-        ``precompile_load`` takes that same directory path.
-
-        Saving also records the package into the process-global
-        PrecompileContext and nothing here clears it, so capturing several
-        callables in one process leaves all of them there and whatever drains
-        the context next -- ``PrecompileContext.save_to_dynamo_cache()``, say --
-        sees every capture rather than this one.
+        ``path`` is a FILE, written exactly as given with parent directories
+        created, and ``precompile_load`` takes it straight back. Same contract
+        as ``invariants``.
         """
         if self._stack is not None:
             raise RuntimeError("save() must be called after the capture block exits")
@@ -1075,14 +1116,18 @@ class PrecompileSession:
                 len(summary.wont_generalize),
                 list(summary.wont_generalize),
             )
-        store = DiskDynamoStore()
+        store = _SingleFileStore()
         if self._backend == "eager":
             # Eager "backends" are fx graphs with no compiled artifact of their
             # own, so they have to be handed to the store explicitly.
             for backend_id, backend in self._package.cached_backends.items():
                 store.record_eager_backend(backend_id, backend)
         try:
-            store.save_package(self._package, path)
+            # save_cache_entry, not save_package: the latter also files the
+            # package into the process-global PrecompileContext, which is for
+            # the transparent cache. An artifact written to a path the caller
+            # chose should not leave anything behind.
+            store.save_cache_entry(self._package.cache_entry(), path)
         except RuntimeError as e:
             if "is not found in the given backends" not in str(e):
                 raise
@@ -1151,7 +1196,7 @@ def precompile_load(
     manager that unloads on exit.
     """
     entry_fn = _entry_fn_of(fn)
-    store = DiskDynamoStore()
+    store = _SingleFileStore()
     cache_entry = store.load_cache_entry(path)
     _check_artifact_matches(cache_entry.dynamo, entry_fn, path)
     package, backends = (

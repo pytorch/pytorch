@@ -34,6 +34,7 @@ from torch._dynamo.package import (
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import (
     _dynamo_alias_module,
+    _SingleFileStore,
     precompile_capture,
     precompile_load,
     serving,
@@ -77,7 +78,7 @@ def staged_break_then_add_thousand(x):
 
 
 def _resume_names_in(path):
-    with open(os.path.join(path, "entry"), "rb") as f:
+    with open(path, "rb") as f:
         entry = pickle.load(f)
     return [
         name
@@ -94,7 +95,7 @@ def _rename_resume_function(path, old, new):
     process, so two captures in one process cannot collide, but two capture
     processes routinely do.
     """
-    with open(os.path.join(path, "entry"), "rb") as f:
+    with open(path, "rb") as f:
         entry = pickle.load(f)
     for code in entry.dynamo.codes:
         code.function_names = [new if n == old else n for n in code.function_names]
@@ -105,7 +106,7 @@ def _rename_resume_function(path, old, new):
                     new if n == old else n for n in guarded.dynamo_code.co_names
                 ),
             )
-    with open(os.path.join(path, "entry"), "wb") as f:
+    with open(path, "wb") as f:
         pickle.dump(entry, f)
 
 
@@ -1858,10 +1859,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         DynamoCache.clear()
         PrecompileContext.clear()
 
-    def path(self):
+    def dir(self):
         path = os.path.join(cache_dir(), f"precompile_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def path(self, name="artifact.pt"):
+        """An artifact FILE inside this test's scratch dir; save() writes files."""
+        return os.path.join(self.dir(), name)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_breaks_and_recompiles_round_trip(self, backend):
@@ -2494,7 +2499,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         purge()
         self.addCleanup(purge)
-        return self._import_module(os.path.join(self.path(), "corpus"), name)
+        return self._import_module(os.path.join(self.dir(), "corpus"), name)
 
     def _corpus(self, cls):
         return getattr(self._corpus_module("cmodels"), cls)()
@@ -2553,8 +2558,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
             with session as compiled, torch.no_grad():
                 compiled(torch.randn(3, 4))
-            path = os.path.join(self.path(), f"pkg_{act.__name__}")
-            os.makedirs(path, exist_ok=True)
+            path = self.path(f"pkg_{act.__name__}.pt")
             # self.act is a dispatch slot; this test is about unloading, not it.
             session.save(path, require_no_risky_drops=False)
             paths.append(path)
@@ -2581,7 +2585,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # the source checksum has to fire even though the module is found by
         # name and its path differs between the two machines.
         src = "import torch\n\n\ndef staged(x):\n    y = x * 2\n    torch._dynamo.graph_break()\n    return (y + 1).sum()\n"
-        pkg_dir = os.path.join(self.path(), "srcdrift")
+        pkg_dir = os.path.join(self.dir(), "srcdrift")
         os.makedirs(pkg_dir, exist_ok=True)
         mod_path = os.path.join(pkg_dir, "drift_mod.py")
         with open(mod_path, "w") as f:
@@ -2639,8 +2643,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 compiled(x)
             # No opt-out: a float attribute is a serializable guard.
             self.assertEqual(session.summary().risky_dropped_guards, ())
-            path = os.path.join(self.path(), f"shared_{cls.__name__}")
-            os.makedirs(path, exist_ok=True)
+            path = self.path(f"shared_{cls.__name__}.pt")
             session.save(path, require_complete=False)
             paths.append(path)
 
@@ -2724,8 +2727,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ):
                 pass
 
-        first = os.path.join(self.path(), "a.invariants")
-        second = os.path.join(self.path(), "b.invariants")
+        first = self.path("a.invariants")
+        second = self.path("b.invariants")
         capture(first)
         capture(second)
         with open(first) as handle:
@@ -2743,7 +2746,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # save() treats its path as a directory to put the artifact in; this one
         # is a plain text file written exactly where asked, parent directories
         # included. The two are easy to confuse, so pin it.
-        path = os.path.join(self.path(), "snapshots", "invariants.txt")
+        path = os.path.join(self.dir(), "snapshots", "invariants.txt")
         self.assertFalse(os.path.exists(os.path.dirname(path)))
         with precompile_capture(
             PrecompileInvariantModel(),
@@ -2944,7 +2947,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(summary.wont_generalize, ())
 
     def _write_module(self, dirname, name, src):
-        pkg_dir = os.path.join(self.path(), dirname)
+        pkg_dir = os.path.join(self.dir(), dirname)
         os.makedirs(pkg_dir, exist_ok=True)
         with open(os.path.join(pkg_dir, f"{name}.py"), "w") as f:
             f.write(src)
@@ -3227,8 +3230,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
             with session as compiled, torch.no_grad():
                 compiled(x)
-            path = os.path.join(self.path(), act.__name__)
-            os.makedirs(path, exist_ok=True)
+            path = self.path(f"{act.__name__}.pt")
             session.save(path, require_no_risky_drops=False)
             paths.append(path)
 
@@ -3275,8 +3277,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
             with session as compiled, torch.no_grad():
                 compiled(x)
-            path = os.path.join(self.path(), act.__name__)
-            os.makedirs(path, exist_ok=True)
+            path = self.path(f"{act.__name__}.pt")
             session.save(path, require_no_risky_drops=False)
             paths.append(path)
 
@@ -3368,7 +3369,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             compiled(torch.randn(4, 8))
         session.save(self.path())
 
-        entry_path = os.path.join(self.path(), "entry")
+        entry_path = self.path()
         with open(entry_path, "rb") as f:
             entry = pickle.load(f)
         entry.dynamo.system_info = dataclasses.replace(
@@ -3395,7 +3396,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             compiled(torch.randn(4, 8))
         session.save(self.path())
 
-        entry_path = os.path.join(self.path(), "entry")
+        entry_path = self.path()
         with open(entry_path, "rb") as f:
             entry = pickle.load(f)
         entry.dynamo.codes = []
@@ -3431,20 +3432,21 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(PackageError, "captured from code object"):
             precompile_load(instrumented, self.path(), backend="eager", dynamic=False)
 
-    def test_save_writes_a_directory_containing_entry(self):
-        # save() takes a directory path, not a file path: a name like model.pt
-        # becomes a directory holding one file called "entry", and that same
-        # directory path is what precompile_load expects back.
+    def test_save_writes_a_single_file(self):
+        # save() names a FILE, written exactly as given with parent directories
+        # created, and precompile_load takes that same path back. Matches
+        # `invariants`; deliberately unlike DiskDynamoStore, whose path is a
+        # directory because the transparent cache owns its own layout.
         session = precompile_capture(
             staged_with_graph_breaks, backend="eager", dynamic=False
         )
         with session as compiled:
             compiled(torch.randn(4, 8))
         with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "model.pt")
+            path = os.path.join(tmp, "nested", "model.pt")
             session.save(path)
-            self.assertTrue(os.path.isdir(path))
-            self.assertEqual(os.listdir(path), ["entry"])
+            self.assertTrue(os.path.isfile(path))
+            self.assertFalse(os.path.isdir(path))
             torch._dynamo.reset()
             with precompile_load(
                 staged_with_graph_breaks, path, backend="eager", dynamic=False
@@ -3571,7 +3573,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         session.save(self.path())
 
         torch._dynamo.reset()
-        cache_entry = DiskDynamoStore().load_cache_entry(self.path())
+        cache_entry = _SingleFileStore().load_cache_entry(self.path())
         backends = cache_entry.backends
 
         class _Boom:
