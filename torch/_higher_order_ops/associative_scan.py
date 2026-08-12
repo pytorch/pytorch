@@ -775,7 +775,9 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
 
             def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
-                return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
+                g_bw = bw * bw_next
+                g_gl = torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
+                return [g_bw, g_gl]
 
             # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
             # associative_scan_op HOP (not generic_associative_scan) so this scan is
@@ -924,6 +926,7 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
             interpreter.batch_size(),
             interpreter.randomness(),
             expected_out_dims=xs_move_dims,
+            op_name="associative_scan",
         )
         unwrapped_out = associative_scan_op(
             wrapper, unbatched_xs, unbatched_additional_inputs

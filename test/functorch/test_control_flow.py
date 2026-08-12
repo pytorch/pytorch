@@ -6941,8 +6941,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), x)
 
     @requires_cuda
-    @unittest.expectedFailure
+    @skipIfTorchDynamo("don't test compile on compile")
     def test_associative_scan_in_vmap_pointwise_compile_xfail(self):
+        from torch._inductor.exc import InductorError
+
         x = torch.randn(3, 4, 2, device="cuda")
 
         def combine_fn(a, b):
@@ -6954,10 +6956,8 @@ class GraphModule(torch.nn.Module):
 
             return torch.vmap(inner_fn, in_dims=0)(x)
 
-        exp = torch.stack(
-            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
-        )
-        self.assertEqual(torch.compile(fn)(x), exp)
+        with self.assertRaisesRegex(InductorError, "LoweringException"):
+            torch.compile(fn)(x)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
