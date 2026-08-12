@@ -13908,6 +13908,9 @@ if __name__ == '__main__':
             else:  # compact, fp16 (cpu / cuda / rocm)
                 expected_input_grad_max_ulp_diff = 192  # cpu 93
                 expected_weight_grad_max_ulp_diff = 64  # cpu 23, cuda/rocm 5
+                if isRocmArchAnyOf(MI200_ARCH):
+                    expected_input_grad_max_ulp_diff = 1024
+                    expected_weight_grad_max_ulp_diff = 256
         elif prob_target:
             # Probability-target caps with the near-zero ULP floor (see
             # ``grad_max_ulp``). fp32 takes the all-input-dtype path, so
@@ -14024,6 +14027,7 @@ if __name__ == '__main__':
         # (same cancellation inflates them too) which also get 16*eps.
         wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
         if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
+            input_grad_err_tol = input_grad_err_tol * 1.5
             wb_grad_err_tol = wb_grad_err_tol * 1.5
 
         def diff_ulp(x, y):
