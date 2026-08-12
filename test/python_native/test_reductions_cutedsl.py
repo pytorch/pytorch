@@ -496,7 +496,6 @@ class TestCuTeDSLReductionWiring(TestCase):
         base = torch.empty(4096, device="cuda")
         targets = (
             ("contiguous", torch.empty(1024, device="cuda")),
-            ("unaligned", base[1:1025]),
             ("transposed", torch.empty(32, 32, device="cuda").t()),
             ("strided", torch.empty(2048, device="cuda")[::2]),
             ("0-dim", torch.empty((), device="cuda")),
@@ -506,6 +505,14 @@ class TestCuTeDSLReductionWiring(TestCase):
                 served(lambda t=t: t.fill_(2.5)), 1, f"{name} must be served"
             )
             self.assertTrue(bool((t == 2.5).all()), name)
+        # A nonzero STORAGE OFFSET declines for now (cap.dlpack_offset_ok): CuteDSL's
+        # tvm-ffi entry asserts the DLPack byte_offset is 0, and pytorch#182924 made that
+        # field carry the offset. It is a layout we can otherwise serve -- the strided
+        # route handles it -- so this expectation flips back to `served == 1` when that
+        # gate is removed. Values must still be right, via aten.
+        offset_target = base[1:1025]
+        self.assertEqual(served(lambda t=offset_target: t.fill_(2.5)), 0)
+        self.assertTrue(bool((offset_target == 2.5).all()))
         # Every constructor aten builds on empty()+fill_ rides the same override, with no
         # per-constructor row: full / zeros / ones / full_like, floats and ints alike.
         for fn in (

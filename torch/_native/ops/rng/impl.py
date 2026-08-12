@@ -46,6 +46,7 @@ def _serveable(self) -> bool:
         and self.numel() > 0
         and not self.is_neg()
         and not self.is_conj()
+        and cap.dlpack_offset_ok(self)
         and not cap.is_traced(self)
         and cap.device_ok(self)
         and cap.on_current_device(self)
