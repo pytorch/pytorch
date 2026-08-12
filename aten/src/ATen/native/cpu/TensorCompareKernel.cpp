@@ -122,29 +122,98 @@ void min_kernel_impl(
     bool keepdim) {
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
-  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
-    compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
-      scalar_t* result_data, int64_t* indice_data,
-      const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename c10::scalar_value_type<scalar_t>::type;
-        value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t min_number = c10::load(self_data);
-        int64_t index = 0;
-        for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
-          if (!(zabs_(value) >= zabs_(min_number))) {
-            min_number = value;
-            index = i;
-            if (_isnan<scalar_t>(value)) {
-              break;
+  auto min_impl = [&](auto scalar_tag) {
+    using scalar_t = decltype(scalar_tag);
+
+    compare_base_kernel<scalar_t>(
+        result,
+        indice,
+        self,
+        dim,
+        keepdim,
+        [&](scalar_t* result_data,
+            int64_t* indice_data,
+            const scalar_t* self_data,
+            auto self_dim_stride) {
+          scalar_t min_number = c10::load(self_data);
+          int64_t index = 0;
+
+          for (const auto i : c10::irange(1, self_dim_size)) {
+            scalar_t value =
+                c10::load(&self_data[i * self_dim_stride]);
+
+            if constexpr (
+                std::is_same_v<scalar_t, uint16_t> ||
+                std::is_same_v<scalar_t, uint32_t> ||
+                std::is_same_v<scalar_t, uint64_t>) {
+              if (value < min_number) {
+                min_number = value;
+                index = i;
+              }
+            } else {
+              using value_t =
+                  typename c10::scalar_value_type<scalar_t>::type;
+              value_t (*zabs_)(scalar_t) =
+                  zabs<scalar_t, value_t>;
+
+              if (!(zabs_(value) >= zabs_(min_number))) {
+                min_number = value;
+                index = i;
+
+                if (_isnan<scalar_t>(value)) {
+                  break;
+                }
+              }
             }
           }
-        }
-        *result_data = min_number;
-        *indice_data = index;
-      }
-    );
-  });
+
+          *result_data = min_number;
+          *indice_data = index;
+        });
+  };
+
+  AT_DISPATCH_SWITCH(
+      self.scalar_type(),
+      "min_cpu",
+      AT_DISPATCH_CASE(ScalarType::Byte, [&] {
+        min_impl(uint8_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Char, [&] {
+        min_impl(int8_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Short, [&] {
+        min_impl(int16_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Int, [&] {
+        min_impl(int32_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Long, [&] {
+        min_impl(int64_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Half, [&] {
+        min_impl(c10::Half{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Float, [&] {
+        min_impl(float{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Double, [&] {
+        min_impl(double{});
+      })
+      AT_DISPATCH_CASE(ScalarType::BFloat16, [&] {
+        min_impl(c10::BFloat16{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Bool, [&] {
+        min_impl(bool{});
+      })
+      AT_DISPATCH_CASE(ScalarType::UInt16, [&] {
+        min_impl(uint16_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::UInt32, [&] {
+        min_impl(uint32_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::UInt64, [&] {
+        min_impl(uint64_t{});
+      }));
 }
 
 void max_kernel_impl(
@@ -155,29 +224,98 @@ void max_kernel_impl(
     bool keepdim) {
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
-  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
-    compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
-      scalar_t* result_data, int64_t* indice_data,
-      const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename c10::scalar_value_type<scalar_t>::type;
-        value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t max_number = c10::load(self_data);
-        int64_t index = 0;
-        for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
-          if (!(zabs_(value) <= zabs_(max_number))) {
-            max_number = value;
-            index = i;
-            if (_isnan<scalar_t>(value)) {
-              break;
+  auto max_impl = [&](auto scalar_tag) {
+    using scalar_t = decltype(scalar_tag);
+
+    compare_base_kernel<scalar_t>(
+        result,
+        indice,
+        self,
+        dim,
+        keepdim,
+        [&](scalar_t* result_data,
+            int64_t* indice_data,
+            const scalar_t* self_data,
+            auto self_dim_stride) {
+          scalar_t max_number = c10::load(self_data);
+          int64_t index = 0;
+
+          for (const auto i : c10::irange(1, self_dim_size)) {
+            scalar_t value =
+                c10::load(&self_data[i * self_dim_stride]);
+
+            if constexpr (
+                std::is_same_v<scalar_t, uint16_t> ||
+                std::is_same_v<scalar_t, uint32_t> ||
+                std::is_same_v<scalar_t, uint64_t>) {
+              if (value > max_number) {
+                max_number = value;
+                index = i;
+              }
+            } else {
+              using value_t =
+                  typename c10::scalar_value_type<scalar_t>::type;
+              value_t (*zabs_)(scalar_t) =
+                  zabs<scalar_t, value_t>;
+
+              if (!(zabs_(value) <= zabs_(max_number))) {
+                max_number = value;
+                index = i;
+
+                if (_isnan<scalar_t>(value)) {
+                  break;
+                }
+              }
             }
           }
-        }
-        *result_data = max_number;
-        *indice_data = index;
-      }
-    );
-  });
+
+          *result_data = max_number;
+          *indice_data = index;
+        });
+  };
+
+  AT_DISPATCH_SWITCH(
+      self.scalar_type(),
+      "max_cpu",
+      AT_DISPATCH_CASE(ScalarType::Byte, [&] {
+        max_impl(uint8_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Char, [&] {
+        max_impl(int8_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Short, [&] {
+        max_impl(int16_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Int, [&] {
+        max_impl(int32_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Long, [&] {
+        max_impl(int64_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Half, [&] {
+        max_impl(c10::Half{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Float, [&] {
+        max_impl(float{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Double, [&] {
+        max_impl(double{});
+      })
+      AT_DISPATCH_CASE(ScalarType::BFloat16, [&] {
+        max_impl(c10::BFloat16{});
+      })
+      AT_DISPATCH_CASE(ScalarType::Bool, [&] {
+        max_impl(bool{});
+      })
+      AT_DISPATCH_CASE(ScalarType::UInt16, [&] {
+        max_impl(uint16_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::UInt32, [&] {
+        max_impl(uint32_t{});
+      })
+      AT_DISPATCH_CASE(ScalarType::UInt64, [&] {
+        max_impl(uint64_t{});
+      }));
 }
 
 void aminmax_kernel(
