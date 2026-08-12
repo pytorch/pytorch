@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from functools import cache
 from typing import ParamSpec, TypeVar
 
 import torch.library
@@ -388,6 +389,37 @@ def _cast_to_weak_dtype(out, cast_dtype):
     return out
 
 
+@cache  # pure over a tiny dtype-pair domain; avoids two allocs per coerced call
+def _promotes_with(a: torch.dtype, b: torch.dtype) -> bool:
+    try:
+        torch.result_type(torch.empty((), dtype=a), torch.empty((), dtype=b))
+    except RuntimeError:
+        return False
+    return True
+
+
+def _weak_wrap(num, tensor_dtypes: list[torch.dtype], cast_dtype: torch.dtype):
+    """Wrap a Python number as a 0-d tensor, at natural precision where aten can
+    promote it and at ``cast_dtype`` where it cannot.
+
+    The natural wrap (int -> i64) is what preserves the number's VALUE, but aten
+    refuses to promote the barebones unsigned dtypes (uint16/32/64) against ANY
+    other integer dtype -- ``result_type(uint16_tensor, i64_tensor)`` raises
+    "Promotion for uint16, uint32, uint64 types is not supported" even though the
+    WEAK form ``result_type(uint16_tensor, 7)`` is fine (-> uint16). Materializing
+    the number therefore turned working aten calls (``uint16_t / 7``) into hard
+    errors. ``cast_dtype`` is already aten's weak result, so wrapping at it
+    reproduces the weak rule -- but only when the value survives the cast exactly;
+    a number outside the dtype's range (70000 into uint16) would silently wrap
+    around, so we leave those at natural precision and let aten raise as before.
+    """
+    nat = torch.as_tensor(num)
+    if all(_promotes_with(nat.dtype, dt) for dt in tensor_dtypes):
+        return nat
+    narrowed = nat.to(cast_dtype)
+    return narrowed if narrowed.to(nat.dtype).equal(nat) else nat
+
+
 def _scalar_arg_coercer(overload: "torch._ops.OpOverload | None"):
     """Build a fn ``args -> (coerced_args, cast_dtype)`` that wraps Python-number args
     sitting in Tensor-typed positional slots into 0-d tensors, or None if the op has no
@@ -444,9 +476,10 @@ def _scalar_arg_coercer(overload: "torch._ops.OpOverload | None"):
         cast_dtype = (
             acc.dtype if isinstance(acc, torch.Tensor) else torch.as_tensor(acc).dtype
         )
+        tensor_dtypes = [a.dtype for a in operands if isinstance(a, torch.Tensor)]
         out = list(args)
         for i in scalar_slots:
-            out[i] = torch.as_tensor(args[i])
+            out[i] = _weak_wrap(args[i], tensor_dtypes, cast_dtype)
         return tuple(out), cast_dtype
 
     return coerce
