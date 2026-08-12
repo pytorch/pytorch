@@ -1,0 +1,28 @@
+diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
+index e7e010b1415799d995c47b01e437cc85295137b4..63282b4092a863a0395946a3bfebac82c8b0a9a1 100644
+--- a/quack/grouped_reduce.py
++++ b/quack/grouped_reduce.py
+@@ -264,0 +265 @@ class GroupedLocalReduceOutputLayout:
++    validate_carrier_fn: object | None = None
+@@ -276,0 +278,2 @@ class GroupedLocalReduceOutputLayout:
++        if self.validate_carrier_fn is not None and not callable(self.validate_carrier_fn):
++            raise TypeError("output layout carrier validator must be callable")
+@@ -288,0 +292 @@ class GroupedLocalReduceOutputLayout:
++            semantic_value_key(self.validate_carrier_fn, set(), force_source=True),
+@@ -623,6 +627,7 @@ class GroupedReduceBase(EpiOp):
+-        elif value.ndim not in (2, 3):
+-            raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
+-        if value.stride(-1) != 1:
+-            raise ValueError(
+-                f"{self.name}: compressed aux buffer must be contiguous in its last dim"
+-            )
++        else:
++            if value.ndim not in (2, 3):
++                raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
++            if value.stride(-1) != 1:
++                raise ValueError(
++                    f"{self.name}: compressed aux buffer must be contiguous in its last dim"
++                )
+@@ -686,0 +692,2 @@ class GroupedReduceBase(EpiOp):
++        if self.output_layout.validate_carrier_fn is not None:
++            self.output_layout.validate_carrier_fn(value)
