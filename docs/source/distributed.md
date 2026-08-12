@@ -434,6 +434,15 @@ check whether the process group has already been initialized use {func}`torch.di
 .. autofunction:: set_timeout
 ```
 
+### Experimental collective time estimation
+
+The context manager and the backend's `_supports_time_estimate` capability probe are
+experimental and may change without notice.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._time_estimator
+```
+
 ### Fault-tolerant reconfiguration
 
 ```{eval-rst}

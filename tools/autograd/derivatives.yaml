@@ -1147,11 +1147,11 @@
   result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p > other_p, self_t, other_t))
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
-  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
-  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
-  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
+  # Split finite ties and preserve the forward NaN-selection convention.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self >= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self > other).logical_or_(other.isnan()), 0)
   # Do not blend tangents arithmetically: an inactive NaN or infinite tangent must not contaminate the result.
-  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p > other_p, self_t, other_t))
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where((self_p > other_p).logical_or_(other_p.isnan()), self_t, other_t))
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
@@ -1213,11 +1213,11 @@
   result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p < other_p, self_t, other_t))
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
-  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
-  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
-  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
+  # Split finite ties and preserve the forward NaN-selection convention.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self <= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self < other).logical_or_(other.isnan()), 0)
   # Do not blend tangents arithmetically: an inactive NaN or infinite tangent must not contaminate the result.
-  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p < other_p, self_t, other_t))
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where((self_p < other_p).logical_or_(other_p.isnan()), self_t, other_t))
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
