@@ -22,17 +22,14 @@ fi
 
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
-# Set up Python. Manylinux test images ship /opt/python/cpXY; official python
-# images expose the requested interpreter on PATH already.
+# Set up Python
 if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
   if [[ "\$python_nodot" = *t ]]; then
     python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
     python_path="/opt/python/cp\$python_digits-cp\${python_digits}t"
   fi
-  if [[ -d "\$python_path" ]]; then
-    export PATH="\${python_path}/bin:\$PATH"
-  fi
+  export PATH="\${python_path}/bin:\$PATH"
 fi
 
 # Move debug wheels out of the package dir so they don't get installed
