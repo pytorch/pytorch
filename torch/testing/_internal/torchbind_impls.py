@@ -179,6 +179,8 @@ def load_torchbind_test_lib():
         lib_file_path = find_library_location("torchbind_test.dll")
     else:
         lib_file_path = find_library_location("libtorchbind_test.so")
+    if not IS_SANDCASTLE and not IS_FBCODE and not lib_file_path.exists():
+        raise unittest.SkipTest(f"torchbind test library not found: {lib_file_path}")
     torch.ops.load_library(str(lib_file_path))
 
 
