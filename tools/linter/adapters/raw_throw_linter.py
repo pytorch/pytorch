@@ -17,7 +17,8 @@ A throw that is genuinely correct can be kept by putting
 
 on the line immediately above it. The reason is mandatory, and the marker only
 applies to the next line - there is no way to switch the check off for a whole
-file.
+file. A type that is always correct to throw belongs in ALLOWED_EXCEPTION_TYPES
+instead, and a marker over one of those is itself reported.
 """
 
 from __future__ import annotations
@@ -34,6 +35,32 @@ from typing import NamedTuple
 LINTER_CODE = "RAWTHROW"
 
 MARKER = "@allow-raw-throw"
+
+# Exceptions that no TORCH_CHECK can stand in for, mapped to the path prefix
+# they are allowed under. An unqualified name is scoped to the subsystem that
+# owns it, so that an unrelated type reusing the name elsewhere is still
+# reported; a namespace-qualified name cannot collide, so it is allowed
+# anywhere. Add an entry only with a justification of the kind below, never
+# because converting a site looked awkward.
+#
+# Deliberately absent: py::type_error, py::value_error and py::index_error.
+# Those are exactly TORCH_CHECK_TYPE, TORCH_CHECK_VALUE and TORCH_CHECK_INDEX -
+# same Python type and same message - because the translator registered in
+# torch/csrc/Module.cpp maps c10::TypeError and friends onto PyExc_TypeError.
+ALLOWED_EXCEPTION_TYPES = {
+    # Typed control flow: each is caught by name, so TORCH_CHECK would break
+    # the code that handles it.
+    "PythonError": "torch/csrc/fx/",
+    "WorkerException": "torch/csrc/api/",
+    "py::cast_error": "torch/csrc/jit/",  # caught by name in jit/python
+    "py::error_already_set": "",  # a Python error is set; rethrowing preserves it
+    # Reach the interpreter as a Python type c10 has no equivalent of, so
+    # TORCH_CHECK would turn them into RuntimeError.
+    "py::key_error": "",
+    "py::stop_iteration": "",
+    # Carries the device error code alongside the message.
+    "c10::AcceleratorError": "",
+}
 
 
 class LintSeverity(str, Enum):
@@ -66,6 +93,9 @@ _RAW_STRING_PREFIXES = frozenset({"R", "LR", "uR", "UR", "u8R"})
 _IDENT_CHARS = re.compile(r"\w")
 _NUMBER_CHARS = re.compile(r"[\w']")
 _THROW = re.compile(r"\bthrow\b")
+_QUALIFIED_NAME = re.compile(r"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*")
+_BARE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_TYPE_NAME = re.compile(r"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*(?:<[^<>]*>)?")
 _WORD = re.compile(r"[A-Za-z]")
 # The marker has to be the whole point of its comment. Prose that merely
 # mentions it - as the docs for this linter do - must not license anything.
@@ -234,9 +264,89 @@ def find_throws(code: str) -> list[Throw]:
         # Line continuations inside a macro body are noise, not part of the
         # expression.
         tokens = (t.rstrip("\\") for t in code[match.end() : i].split())
-        expression = " ".join(t for t in tokens if t)
+        expression = _unwrap(" ".join(t for t in tokens if t))
         throws.append(Throw(code.count("\n", 0, match.start()) + 1, expression))
     return throws
+
+
+def _unwrap(expression: str) -> str:
+    """Drop the parentheses clang-format adds around a wrapped throw operand."""
+    while expression.startswith("("):
+        depth = 0
+        for end, char in enumerate(expression):
+            depth += (char == "(") - (char == ")")
+            if depth == 0:
+                break
+        if depth or end != len(expression) - 1 or not expression[1:-1].strip():
+            break
+        expression = expression[1:-1].strip()
+    return expression
+
+
+def is_allowed(path: str, expression: str) -> bool:
+    """Whether this throw is correct as written and needs no annotation.
+
+    Everything else has to become a TORCH_CHECK, or be added to
+    ALLOWED_EXCEPTION_TYPES with a justification, or carry a per-site marker.
+    """
+    if not expression:
+        return True  # bare `throw;` re-raises the exception already in flight
+    # `throw std::move(e)` is deliberately not allowed. It reads like a rethrow,
+    # but every occurrence in this repo constructs a fresh exception and moves
+    # it to avoid a copy, so the type still has to be judged on its merits.
+    thrown = expression.removeprefix("::")
+    match = _QUALIFIED_NAME.match(thrown)
+    if match is None:
+        return False
+    allowed_under = ALLOWED_EXCEPTION_TYPES.get(match.group(0))
+    if allowed_under is None:
+        return False
+    # lintrunner passes absolute paths, so match the scope as a run of path
+    # segments rather than anchoring at the start of the string.
+    posix = "/" + path.replace("\\", "/")
+    if f"/{allowed_under}" not in posix:
+        return False
+    # The constructor call has to be the whole operand. Checking only that a
+    # `(` follows would let any violation be laundered by prefixing an allowed
+    # one, as in `throw py::key_error(m).with_context(x)`.
+    return _is_whole_call(thrown[match.end() :].lstrip())
+
+
+def _as_statement(expression: str) -> str:
+    """The throw written back out as source, for a diagnostic."""
+    return f"throw {display(expression)};" if expression else "throw;"
+
+
+def _is_whole_call(rest: str) -> bool:
+    """Whether `rest` is exactly one balanced `(...)` or `{...}` and nothing
+    else."""
+    if not rest or rest[0] not in "({":
+        return False
+    depth = 0
+    for i, char in enumerate(rest):
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+            if depth == 0:
+                return not rest[i + 1 :].strip()
+    return False
+
+
+def display(expression: str) -> str:
+    """The thrown expression, for a diagnostic. Constructor arguments are elided
+    because by this point string literals in them have been blanked out."""
+    prefix = "::" if expression.startswith("::") else ""
+    thrown = expression.removeprefix("::")
+    match = _TYPE_NAME.match(thrown)
+    if match:
+        rest = thrown[match.end() :].lstrip()
+        for opening, closing in (("(", ")"), ("{", "}")):
+            if rest.startswith(opening):
+                return f"{prefix}{match.group(0)}{opening}...{closing}"
+    if len(expression) > 80:
+        return expression[:77] + "..."
+    return expression
 
 
 def replacement_macro(path: str) -> str:
@@ -251,18 +361,18 @@ def replacement_macro(path: str) -> str:
 
 
 def describe(path: str, expression: str) -> str:
-    if not expression:
-        return (
-            "`throw;` re-raises the exception being handled. If the try/catch "
-            f"cannot be restructured away, put `// {MARKER}: <reason>` on the "
-            "line immediately above it."
-        )
     macro = replacement_macro(path)
-    if len(expression) > 80:
-        expression = expression[:77] + "..."
-    lines = [
-        f"`throw {expression}` is a raw throw. Use {macro} instead.",
-    ]
+    if _BARE_IDENTIFIER.fullmatch(expression):
+        lines = [
+            f"`throw {expression};` throws a copy of `{expression}` with its "
+            "static type, so a derived exception would be sliced. If it is "
+            "re-raising the exception being handled, write `throw;`; if it is "
+            f"reporting a fresh error, use {macro}.",
+        ]
+    else:
+        lines = [
+            f"`throw {display(expression)}` is a raw throw. Use {macro} instead.",
+        ]
     if macro == "TORCH_CHECK":
         lines.append(
             "c10::Error surfaces as RuntimeError, which is already what "
@@ -273,8 +383,11 @@ def describe(path: str, expression: str) -> str:
             "IndexError; TORCH_CHECK_VALUE and TORCH_CHECK_INDEX preserve those."
         )
     lines.append(
-        f"If this throw is correct and must stay, put `// {MARKER}: <reason>` "
-        "on the line immediately above it."
+        "If this exception is typed control flow that something catches by "
+        "name, add it to ALLOWED_EXCEPTION_TYPES in "
+        "tools/linter/adapters/raw_throw_linter.py with a reason. If this one "
+        f"site is correct, put `// {MARKER}: <reason>` on the line immediately "
+        "above it."
     )
     return " ".join(lines)
 
@@ -296,7 +409,9 @@ def check_source(path: str, text: str) -> list[LintMessage]:
         )
 
     throws = find_throws(code)
-    throw_lines = {throw.line for throw in throws}
+    throws_on_line: dict[int, list[Throw]] = {}
+    for throw in throws:
+        throws_on_line.setdefault(throw.line, []).append(throw)
 
     # A marker licenses exactly one throw: the first one on the line below it.
     # A marker sharing a line with a throw licenses nothing - otherwise a
@@ -314,8 +429,8 @@ def check_source(path: str, text: str) -> list[LintMessage]:
         # sit inside a multi-line macro body - which is the only placement
         # available there.
         alone = not code_lines[lineno - 1].strip().rstrip("\\").strip()
-        target = lineno + 1
-        if not alone or target not in throw_lines:
+        target = throws_on_line.get(lineno + 1)
+        if not alone or target is None:
             messages.append(
                 message(
                     lineno,
@@ -325,22 +440,33 @@ def check_source(path: str, text: str) -> list[LintMessage]:
                     "file-level opt-out and it cannot trail the throw itself.",
                 )
             )
-            continue
-        licensed.add(target)
-        rest = marker.group("rest").strip()
-        if not (rest.startswith(":") and _WORD.search(rest)):
+        elif all(is_allowed(path, t.expression) for t in target):
             messages.append(
                 message(
                     lineno,
-                    "allow-raw-throw-without-reason",
-                    f"`{MARKER}` must state why the throw is correct, as "
-                    f"`// {MARKER}: <reason>`.",
+                    "redundant-allow-raw-throw",
+                    f"`{_as_statement(target[0].expression)}` is allowed "
+                    f"already, so this `{MARKER}` suppresses nothing. Remove it.",
                 )
             )
+        else:
+            licensed.add(lineno + 1)
+            rest = marker.group("rest").strip()
+            if not (rest.startswith(":") and _WORD.search(rest)):
+                messages.append(
+                    message(
+                        lineno,
+                        "allow-raw-throw-without-reason",
+                        f"`{MARKER}` must state why the throw is correct, as "
+                        f"`// {MARKER}: <reason>`.",
+                    )
+                )
 
     for throw in throws:
         if throw.line in licensed:
             licensed.discard(throw.line)
+            continue
+        if is_allowed(path, throw.expression):
             continue
         messages.append(
             message(throw.line, "raw-throw", describe(path, throw.expression))

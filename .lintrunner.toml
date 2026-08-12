@@ -583,29 +583,25 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Pre-existing violations; burn down over time.
+    # Vendored upstream code - permanent, not debt.
+    'third_party/concurrentqueue/**',
+    # Pre-existing violations; burn down over time. Nothing may be added here.
     'aten/src/**',
     'c10/core/**',
-    'c10/cuda/**',
     'c10/test/**',
     'c10/util/**',
-    'c10/xpu/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
-    'third_party/concurrentqueue/**',
     'tools/autograd/**',
     'torch/csrc/*.cpp',
     'torch/csrc/*.h',
-    'torch/csrc/api/**',
     'torch/csrc/autograd/**',
     'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
     'torch/csrc/dynamo/**',
     'torch/csrc/export/**',
-    'torch/csrc/fx/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/lazy/**',
     'torch/csrc/multiprocessing/**',
     'torch/csrc/profiler/**',
     'torch/csrc/stable/**',
@@ -614,7 +610,6 @@ exclude_patterns = [
     'torch/csrc/xpu/**',
     'torch/headeronly/**',
     'torch/lib/**',
-    'torch/nativert/**',
 ]
 command = [
     'python3',
