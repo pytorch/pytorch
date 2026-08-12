@@ -16,6 +16,7 @@ from .gemm_epilogue_utils import statically_known_shape_equal
 
 
 GEMM_ACCUMULATOR_ARG_NAME = "accum"
+GEMM_REDUCTION_FRAGMENT_WIDTH = 32
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
