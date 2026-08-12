@@ -86,11 +86,12 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         aot_result = aot_mod(*args)
         self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
 
+    @unittest.skipIf(not torch._C._get_mkldnn_enabled(), "MKLDNN is not enabled")
     def test_LSTM_compile_training_cpu(self):
         # https://github.com/pytorch/pytorch/issues/158007
-        # torch.compile with nn.LSTM must work end-to-end including backward.
-        # The MKLDNN path on CPU produces a workspace tensor that must survive
-        # AOTAutograd's no_grad forward partition.
+        # torch.compile with nn.LSTM on CPU must work end-to-end including
+        # backward.  The MKLDNN path allocates a workspace tensor that must
+        # survive AOTAutograd's no_grad forward partition.
         class LSTMModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -104,30 +105,87 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
                 return self.fc(output[:, -1, :])
 
         mod = LSTMModel()
+        eager_mod = copy.deepcopy(mod)
         x = torch.randn(4, 8, 10)
+
+        eager_result = eager_mod(x)
+        eager_result.sum().backward()
 
         compiled = torch.compile(mod, backend="inductor")
         compiled_result = compiled(x)
         compiled_result.sum().backward()
 
-        torch._dynamo.reset()
-        eager_result = mod(x)
-        self.assertEqual(compiled_result.shape, eager_result.shape)
-        self.assertIsNotNone(mod.lstm.weight_ih_l0.grad)
+        self.assertEqual(compiled_result, eager_result)
+        for (name, p_compiled), (_, p_eager) in zip(
+            mod.named_parameters(), eager_mod.named_parameters()
+        ):
+            self.assertEqual(
+                p_compiled.grad, p_eager.grad, msg=f"grad mismatch: {name}"
+            )
 
-    def test_LSTM_no_graph_breaks(self):
+    @unittest.skipIf(not torch._C._get_mkldnn_enabled(), "MKLDNN is not enabled")
+    def test_LSTM_compile_bidirectional_cpu(self):
+        mod = torch.nn.LSTM(16, 32, num_layers=2, batch_first=True, bidirectional=True)
+        eager_mod = copy.deepcopy(mod)
+        x = torch.randn(4, 10, 16)
+
+        eager_out, _ = eager_mod(x)
+        eager_out.sum().backward()
+
+        compiled = torch.compile(mod, backend="inductor")
+        compiled_out, _ = compiled(x)
+        compiled_out.sum().backward()
+
+        self.assertEqual(compiled_out, eager_out)
+        for (name, p_c), (_, p_e) in zip(
+            mod.named_parameters(), eager_mod.named_parameters()
+        ):
+            self.assertEqual(p_c.grad, p_e.grad, msg=f"grad mismatch: {name}")
+
+    def test_GRU_compile_training_cpu(self):
+        mod = torch.nn.GRU(8, 16, num_layers=2, batch_first=True)
+        eager_mod = copy.deepcopy(mod)
+        x = torch.randn(3, 5, 8)
+
+        eager_out, _ = eager_mod(x)
+        eager_out.sum().backward()
+
+        compiled = torch.compile(mod, backend="inductor")
+        compiled_out, _ = compiled(x)
+        compiled_out.sum().backward()
+
+        self.assertEqual(compiled_out, eager_out)
+        for (name, p_c), (_, p_e) in zip(
+            mod.named_parameters(), eager_mod.named_parameters()
+        ):
+            self.assertEqual(p_c.grad, p_e.grad, msg=f"grad mismatch: {name}")
+
+    def test_RNN_compile_training_cpu(self):
+        mod = torch.nn.RNN(8, 16, num_layers=1, batch_first=True)
+        eager_mod = copy.deepcopy(mod)
+        x = torch.randn(2, 7, 8)
+
+        eager_out, _ = eager_mod(x)
+        eager_out.sum().backward()
+
+        compiled = torch.compile(mod, backend="inductor")
+        compiled_out, _ = compiled(x)
+        compiled_out.sum().backward()
+
+        self.assertEqual(compiled_out, eager_out)
+        for (name, p_c), (_, p_e) in zip(
+            mod.named_parameters(), eager_mod.named_parameters()
+        ):
+            self.assertEqual(p_c.grad, p_e.grad, msg=f"grad mismatch: {name}")
+
+    def test_LSTM_compile_no_graph_breaks(self):
         # allow_rnn=True should produce zero graph breaks for LSTM.
-        mod = torch.nn.LSTM(
-            input_size=10, hidden_size=20, num_layers=1, batch_first=True
-        )
-        mod.eval()
+        mod = torch.nn.LSTM(10, 20, num_layers=1, batch_first=True)
         x = torch.randn(2, 5, 10)
-
-        explanation = torch._dynamo.explain(mod)(x)
-        self.assertEqual(explanation.graph_break_count, 0)
+        compiled = torch.compile(mod, backend="eager", fullgraph=True)
+        compiled(x)
 
     def test_flatten_parameters_no_graph_break(self):
-        # flatten_parameters() must not cause a graph break during compilation.
         class LSTMWithFlatten(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -138,11 +196,9 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
                 return self.lstm(x)
 
         mod = LSTMWithFlatten()
-        mod.eval()
         x = torch.randn(2, 5, 10)
-
-        explanation = torch._dynamo.explain(mod)(x)
-        self.assertEqual(explanation.graph_break_count, 0)
+        compiled = torch.compile(mod, backend="eager", fullgraph=True)
+        compiled(x)
 
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301

@@ -7770,6 +7770,13 @@ def mkldnn_rnn_layer(
         cy = torch.empty(0, device=input.device)
     else:
         cy = cx_.new_empty(cx_.shape)
+    # The workspace size is determined at runtime by the oneDNN primitive
+    # descriptor and scales with seq_length * batch * hidden_size.  We
+    # cannot compute it here without the primitive.  Return an empty
+    # tensor; the Inductor MkldnnRnnLayer IR skips size/stride assertions
+    # on this output, and mkldnn_rnn_layer_backward reads the buffer via
+    # workspace.data_ptr() + the primitive's workspace_desc, never
+    # consulting the tensor's size metadata.
     workspace = torch.empty(0, device=input.device, dtype=torch.uint8)
     return output, hy, cy, workspace
 

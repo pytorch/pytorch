@@ -270,12 +270,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
   w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
   w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
-  // Always use the training forward path to allocate workspace.
-  // AOTAutograd's compiled forward runs under no_grad with train=False,
-  // yet the backward partition still needs the workspace tensor.
-  // The workspace is a small buffer; unconditional allocation avoids
-  // mismatches when the op is called from compiled contexts.
-  {
+  // Gate on the `train` parameter rather than GradMode::is_enabled().
+  // AOTAutograd's compiled forward runs under no_grad, yet the backward
+  // partition still needs the workspace tensor.  The decomposition
+  // (torch/_decomp/decompositions.py: mkldnn_one_layer_lstm) passes
+  // train=True when backward may be needed, so gating on `train` keeps
+  // the inference primitive reachable for genuine inference while ensuring
+  // workspace is allocated for compiled training.
+  if (train || at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
@@ -287,6 +289,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
         pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
     return std::make_tuple(
         std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
+  } else {
+    ideep::lstm_forward_inference::compute(
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
+    return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
 }
 

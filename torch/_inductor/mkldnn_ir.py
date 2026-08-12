@@ -1307,8 +1307,16 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                 raise AssertionError("Expect output_shape to be 3D")
             return FlexibleLayout.contiguous_strides(output_shape)
 
-        # C shim call requires all the outputs to be passed in, and thus the last
-        # dummy return value is added.
+        # The 4th output is the oneDNN workspace buffer consumed by
+        # mkldnn_rnn_layer_backward.  Its actual size is determined at
+        # runtime by the oneDNN primitive descriptor and scales with
+        # seq_length * batch * hidden_size, so the declared size [0]
+        # is a placeholder.  We skip size/stride assertions for this
+        # output (skip_size_stride_alignment_checks below) because the
+        # meta kernel cannot compute the real workspace size without
+        # the primitive, and mkldnn_rnn_layer_backward reads the buffer
+        # via workspace.data_ptr() + the primitive's workspace_desc,
+        # never consulting the tensor's size metadata.
         output_sizes = [output_shape, hy_shape, cy_shape, [0]]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
