@@ -87,6 +87,12 @@ def apply_descriptor(platform: Platform) -> None:
         # pyrefly: ignore [bad-assignment]
         cu.TEST_SAVE_XML = None
 
+    # _should_stop_test_suite calls torch.cuda.synchronize() whenever CUDA looks
+    # initialized -- which the descriptor claims it is -- and with the GPU hidden that
+    # raises, so unittest abandons the rest of the suite. Everything after the abort
+    # lands in neither `ran` nor `skipped`, making a truncated file read as a clean one.
+    cu.TestCase._should_stop_test_suite = lambda self: False
+
     if platform.device_type == "cpu":
         torch.cuda.is_available = lambda: False
         cdt.device_type_test_bases = [cdt.CPUTestBase]
@@ -447,15 +453,21 @@ def _probes() -> dict[str, bool]:
 def _status(mod: ModuleType) -> dict:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
+    loadable = 0
     for cls in _testcase_classes(mod).values():
         tests = loader.loadTestsFromTestCase(cls)
+        loadable += tests.countTestCases()
         if tests.countTestCases():
             suite.addTests(tests)
     result = _Recorder()
     suite.run(result)
+    # Reported so a caller can tell a file with no requirements from one whose suite
+    # was abandoned partway: an aborted run leaves the remaining tests in neither
+    # bucket, which is indistinguishable from their having no requirement at all.
     return {
         "ran": sorted(result.ran),
         "skipped": sorted(result.skipped_reasons.items()),
+        "loadable": loadable,
         "probes": _probes(),
     }
 
