@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -1252,6 +1253,17 @@ Example:
       .value("GATHER", ::c10d::HookOpName::GATHER)
       .value("SPLIT", ::c10d::HookOpName::SPLIT)
       .value("NEW_WINDOW", ::c10d::HookOpName::NEW_WINDOW)
+      .value("ALLREDUCE_COALESCED", ::c10d::HookOpName::ALLREDUCE_COALESCED)
+      .value("ALLGATHER_BASE", ::c10d::HookOpName::ALLGATHER_BASE)
+      .value("ALLGATHER_COALESCED", ::c10d::HookOpName::ALLGATHER_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::HookOpName::ALLGATHER_INTO_TENSOR_COALESCED)
+      .value("REDUCE_SCATTER_BASE", ::c10d::HookOpName::REDUCE_SCATTER_BASE)
+      .value(
+          "REDUCE_SCATTER_TENSOR_COALESCED",
+          ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(module, "PreHookArgs")
@@ -2463,6 +2475,31 @@ Arguments:
 
               See :func:`torch.distributed.gather` for more details.)")
           .def(
+              "gather_single",
+              &::c10d::ProcessGroup::gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Gathers the input tensor from all processes into a single
+              output tensor on the root rank.
+
+              See :func:`torch.distributed.gather_single` for more details.)")
+          // Deprecated alias of gather_single, kept for backward
+          // compatibility. Bound to gather_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
+              "gather_into_tensor",
+              &::c10d::ProcessGroup::gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Gathers the input tensor from all processes into a single
+              output tensor on the root rank.
+
+              See :func:`torch.distributed.gather_single` for more details.)")
+          .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
               py::arg("output_tensors"),
@@ -2725,6 +2762,14 @@ Arguments:
             py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
+          .def(
+              "_add_ephemeral_timeout",
+              &::c10d::ProcessGroup::addEphemeralTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Temporarily extends timeouts for subsequently issued work.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "_device_types", &::c10d::ProcessGroup::getDeviceTypes)
           .def(
@@ -2907,7 +2952,11 @@ Arguments:
               &::c10d::ProcessGroup::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::ProcessGroup::supportsAbortHooks,
+              "(test whether the process group supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -2918,6 +2967,10 @@ Arguments:
               "unregister_abort_hook",
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::ProcessGroup::supportsCompletionHooks,
+              "(test whether the process group supports completion hooks)")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3013,9 +3066,23 @@ Arguments:
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
-              "supports_time_estimate",
+              "_supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
-              "(test whether the backend supports collective time estimation)")
+              R"(Test whether the backend supports collective time estimation.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_start_time_estimate",
+              &::c10d::Backend::startTimeEstimate,
+              R"(Start estimating the duration of subsequent collectives.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_end_time_estimate",
+              &::c10d::Backend::endTimeEstimate,
+              R"(Stop estimating collectives and return their duration in microseconds.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
               &::c10d::Backend::supportsShrinking,
@@ -3030,6 +3097,14 @@ Arguments:
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
+          .def(
+              "_add_ephemeral_timeout",
+              &::c10d::Backend::addEphemeralTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Temporarily extends timeouts for subsequently issued work.
+
+Unsupported backends ignore this call. This API is experimental and subject to change.)")
           .def(
               "shrink",
               &::c10d::Backend::shrink,
@@ -3057,7 +3132,11 @@ Arguments:
               &::c10d::Backend::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::Backend::supportsAbortHooks,
+              "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
@@ -3068,6 +3147,10 @@ Arguments:
               "unregister_abort_hook",
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::Backend::supportsCompletionHooks,
+              "(test whether the backend supports completion hooks)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -3233,6 +3316,23 @@ Arguments:
               py::arg("input_tensor"),
               py::arg("root"),
               py::arg("timeout") = ::c10d::kUnsetTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "gather_single",
+              &::c10d::Backend::gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          // Deprecated alias of gather_single, kept for backward
+          // compatibility. Bound to gather_single to avoid referencing the
+          // deprecated C++ method.
+          .def(
+              "gather_into_tensor",
+              &::c10d::Backend::gather_single,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::GatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "scatter",
@@ -3645,6 +3745,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           &::c10d::ProcessGroupGloo::setTimeout,
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_error",
+          &::c10d::ProcessGroupGloo::getError,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
           &::c10d::ProcessGroupGloo::getOptions,
@@ -3737,10 +3841,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
-              "_start_time_estimate",
-              &::c10d::ProcessGroupNCCL::startTimeEstimate)
-          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
-          .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def(
@@ -3748,22 +3848,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setTimeout,
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_add_ephemeral_timeout",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const std::chrono::milliseconds& timeout) {
-                self->addEphemeralTimeout(timeout);
-              },
-              py::arg("timeout"))
-          .def(
-              "_verify_work_timeout",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::intrusive_ptr<::c10d::Work>& work,
-                 const std::chrono::milliseconds& timeout) {
-                return self->verifyWorkTimeoutForTest(work, timeout);
-              },
-              py::arg("work"),
-              py::arg("timeout"))
           .def_property_readonly(
               "options",
               &::c10d::ProcessGroupNCCL::getOptions,
@@ -3860,6 +3944,14 @@ for details.
 #endif
 #ifdef NCCL_HAS_MAX_P2P_PEERS
       .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
+#endif
+#ifdef NCCL_HAS_COMM_NAME
+      .def_property(
+          "comm_name",
+          [](const ncclConfig_t& self) { return self.commName; },
+          [](ncclConfig_t& self, const char* tmp) {
+            self.commName = strdup(tmp);
+          })
 #endif
       .def(
           "unsafe_get_ptr",
@@ -4115,32 +4207,37 @@ Returns:
           .def(
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "register_mem_pool",
+              &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
+              py::arg("pool"),
+              py::arg("symm") = false)
+          .def(
+              "deregister_mem_pool",
+              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+          .def_property_readonly(
+              "options",
+              &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
+              R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
-  intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
-      processGroupNCCL2, "Options", backendOptions)
-      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-      .def_readwrite(
-          "is_high_priority_stream",
-          &::c10d::nccl2::ProcessGroupNCCL::Options::is_high_priority_stream)
-      .def_readwrite(
-          "abort_process_on_timeout_or_error",
-          &::c10d::nccl2::ProcessGroupNCCL::Options::
-              abort_process_on_timeout_or_error);
+  processGroupNCCL2.attr("Options") = processGroupNCCL.attr("Options");
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)
       .def(
-          py::init(
-              [](const c10::intrusive_ptr<::c10d::Store>& store,
-                 int rank,
-                 int size,
-                 c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL::Options>
-                     options) {
-                py::gil_scoped_release nogil{};
-                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                    store, rank, size, std::move(options));
-              }),
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      const c10::intrusive_ptr<
+                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
+            py::gil_scoped_release nogil{};
+            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                store, rank, size, options);
+          }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
@@ -4166,7 +4263,20 @@ Returns:
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "perform_nocolor_split",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
+            self.getPrimary()->performNocolorSplit(device);
+          })
+      .def_property_readonly(
+          "options",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return c10::static_intrusive_pointer_cast<
+                ::c10d::nccl2::ProcessGroupNCCL::Options>(
+                self.getBackendOptions());
+          },
+          R"(Return the options used to create this ProcessGroupNCCLLazy instance.)");
 #endif
 
 #ifdef USE_C10D_UCC
@@ -4214,6 +4324,9 @@ Returns:
       .value(
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::OpType::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::OpType::ALLGATHER_INTO_TENSOR_COALESCED)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")
@@ -4421,6 +4534,16 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   This API only works for NCCL backend for now and must set
                   TORCH_NCCL_ENABLE_TIMING environment variable.
             )")
+          .def(
+              "_get_sequence_number",
+              &::c10d::Work::getSequencenumber,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+              Returns:
+                  The process group collective sequence number of the
+                  corresponding collective communication.
+            )")
+          .def_property_readonly("timeout", &::c10d::Work::getTimeout)
           .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {
@@ -4769,27 +4892,55 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "attach",
           &::c10d::FlightRecorderHook::attach,
           py::arg("pg"),
+          py::arg("global_ranks") = std::vector<uint64_t>{},
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.)")
+is called or the returned handle is garbage collected.
+
+global_ranks maps the group's ranks to world ranks; it names the per-rank
+dump file and is published as the group's membership. Leave it empty only
+for a backend that fills in Options::global_ranks_in_group itself -- a
+group with no mapping from either source publishes none rather than
+fabricating 0..size-1, which would collide the dump files of a subgroup.)")
       .def("remove", &::c10d::FlightRecorderHook::remove);
+
+  py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
+      module, "NanCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::NanCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach a NaN check hook to a process group. Input (send) buffers of
+collectives issued through the group are checked for NaNs, regardless of
+whether the backend has a native NaN checker (ProcessGroupNCCL's
+TORCH_NCCL_NAN_CHECK). Receive buffers are not checked. On CPU a NaN raises
+a RuntimeError; on CUDA it triggers a device-side assert. The process group
+owns the hook, so the returned handle only has to be kept if the check should
+be removed again via remove().)")
+      .def("remove", &::c10d::NanCheckHook::remove);
 
   module.def(
       "_dump_fr_trace_json",
       [](std::optional<bool> includeCollectives,
-         std::optional<bool> onlyActive) {
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
         return py::bytes(::c10d::dump_fr_trace_json(
-            includeCollectives.value_or(true), onlyActive.value_or(false)));
+            includeCollectives.value_or(true),
+            onlyActive.value_or(false),
+            backend));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
       R"(
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -4798,23 +4949,71 @@ is called or the returned handle is garbage collected.)")
       "_dump_fr_trace",
       [](std::optional<bool> includeCollectives,
          std::optional<bool> includeStackTraces,
-         std::optional<bool> onlyActive) {
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
         return py::bytes(::c10d::dump_fr_trace(
             includeCollectives.value_or(true),
             includeStackTraces.value_or(true),
-            onlyActive.value_or(false)));
+            onlyActive.value_or(false),
+            backend));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("includeStackTraces") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
       R"(
             Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
+        )");
+  module.def(
+      "_dump_fr_trace_file",
+      [](int rank,
+         std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
+        ::c10d::dump_fr_trace_file(
+            rank,
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(false),
+            onlyActive.value_or(false),
+            backend);
+      },
+      py::arg("rank"),
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
+      py::call_guard<py::gil_scoped_release>(),
+      R"(
+            Dumps the pickled work traces to the file the registered
+            DebugInfoWriter points at, which defaults to
+            <TORCH_FR_DUMP_TEMP_FILE><rank>.
+
+            Arguments:
+                rank(int): Rank used to name the per-rank output file.
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
+        )");
+  module.def(
+      "_reset_fr_trace",
+      [](const std::string& backend) { ::c10d::reset_fr_trace(backend); },
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
+      R"(
+            Drops every work trace recorded so far, so a subsequent dump only
+            contains collectives issued after this call. Backend-agnostic
+            counterpart of _reset_fr_recording_nccl.
+
+            Arguments:
+                backend (str, optional): Name of the backend whose recorder instance to reset. Default is "gloo".
         )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(

@@ -146,24 +146,17 @@ diff --git a/gemm_act.py b/gemm_act.py
 index 155093a..f5a1057 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
-@@ -29,6 +29,7 @@ from quack.epi_ops import (
+@@ -29,7 +29,9 @@ from quack.epi_ops import (
      EpiSmemBytes,
      GroupedLocalReduce,
++    LOCAL_REDUCE_FRAGMENT_WIDTH,
      Scalar,
+     grouped_local_reduce_uses_smem,
 +    grouped_rowvec_reduce_value,
      TileTupleLoad,
      TileStore,
  )
-@@ -59,6 +60,8 @@ from quack.rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_ou
- _tensor_epilogue_fns: dict[str, Callable] = {}
- _local_reduce_combine_fns: dict[str, Callable] = {}
- _local_reduce_finalize_fns: dict[str, Callable] = {}
-+# Feed-main must fit within grouped_rowvec_reduce_value's lane-layout M extent.
-+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
-
-
- def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
-@@ -132,6 +135,7 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -132,6 +134,7 @@ class GemmActMixin(ComposableEpiMixin):
          ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
          ("tensor_epilogue_returns_aux", cutlass.Constexpr, False),
          ("tensor_epilogue_returns_local_reduce", cutlass.Constexpr, False),
@@ -171,7 +164,7 @@ index 155093a..f5a1057 100644
          ("local_reduce_group", cutlass.Constexpr, 0),
          ("local_reduce_axis", cutlass.Constexpr, 1),
      )
-@@ -144,6 +148,7 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -144,6 +147,7 @@ class GemmActMixin(ComposableEpiMixin):
          tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
          tensor_epilogue_returns_aux: cutlass.Constexpr[bool] = False
          tensor_epilogue_returns_local_reduce: cutlass.Constexpr[bool] = False
@@ -179,7 +172,7 @@ index 155093a..f5a1057 100644
          local_reduce_group: cutlass.Constexpr[int] = 0
          local_reduce_axis: cutlass.Constexpr[int] = 1
          local_reduce_combine_fn: cutlass.Constexpr[Optional[Callable]] = None
-@@ -161,6 +166,16 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -161,6 +165,16 @@ class GemmActMixin(ComposableEpiMixin):
 
      # EpilogueParams auto-generated from _epi_ops + _extra_param_fields
 
@@ -196,7 +189,7 @@ index 155093a..f5a1057 100644
      def epi_to_underlying_arguments(self, args: EpilogueArguments, *, loc=None, ip=None):
          self.rounding_mode = args.rounding_mode
          if isinstance(args.mAuxOut, tuple):
-@@ -178,8 +193,10 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -178,8 +192,10 @@ class GemmActMixin(ComposableEpiMixin):
          d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
          d["tensor_epilogue_returns_aux"] = args.tensor_epilogue_returns_aux
          d["tensor_epilogue_returns_local_reduce"] = args.tensor_epilogue_returns_local_reduce
@@ -207,16 +200,7 @@ index 155093a..f5a1057 100644
          self.local_reduce_group = args.local_reduce_group
          self.local_reduce_axis = args.local_reduce_axis
          for key in ("mRowVecBroadcast", "mColVecBroadcast"):
-@@ -193,7 +210,7 @@ class GemmActMixin(ComposableEpiMixin):
-         if (
-             args.mLocalReduce is not None
-             and args.local_reduce_axis == 0
--            and args.local_reduce_group > 32
-+            and args.local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH
-         ):
-             smem_warps = max((warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0)
-             result += EpiSmemBytes(
-@@ -356,16 +373,24 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -356,16 +372,24 @@ class GemmActMixin(ComposableEpiMixin):
          tRS_rD: cute.Tensor,
          tRS_rC: Optional[cute.Tensor] = None,
      ) -> Optional[cute.Tensor]:
@@ -242,7 +226,7 @@ index 155093a..f5a1057 100644
                  row_arg_index = 0
                  col_arg_index = 0
                  tile_arg_index = 0
-@@ -384,11 +409,11 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -384,11 +408,11 @@ class GemmActMixin(ComposableEpiMixin):
                      )
                      tRS_rEpilogueAux.store(epilogue_aux.load())
                      epilogue_aux_values.append(tRS_rEpilogueAux.load())
@@ -259,7 +243,7 @@ index 155093a..f5a1057 100644
              if const_expr(params.tensor_epilogue_returns_aux):
                  tRS_rD.store(epilogue_result[0])
                  aux_results = []
-@@ -402,10 +427,14 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -402,10 +426,14 @@ class GemmActMixin(ComposableEpiMixin):
                      aux_results.append(tRS_rAuxOut)
                  if const_expr(params.tensor_epilogue_returns_local_reduce):
                      tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
@@ -274,7 +258,7 @@ index 155093a..f5a1057 100644
                  tRS_rD.store(epilogue_result[0])
                  tDrLocalReduce.store(epilogue_result[1])
                  tRS_rAuxOut = cute.make_rmem_tensor(
-@@ -602,6 +631,7 @@ def _compile_gemm_act(
+@@ -602,6 +630,7 @@ def _compile_gemm_act(
      tensor_epilogue_arg_kinds,
      tensor_epilogue_returns_aux,
      tensor_epilogue_returns_local_reduce,
@@ -282,7 +266,7 @@ index 155093a..f5a1057 100644
      tensor_epilogue_rowvec_dtypes,
      tensor_epilogue_colvec_dtypes,
      tensor_epilogue_colvec_ndims,
-@@ -718,7 +748,10 @@ def _compile_gemm_act(
+@@ -718,7 +747,10 @@ def _compile_gemm_act(
          )
      else:
          local_reduce_shape = None
@@ -294,7 +278,7 @@ index 155093a..f5a1057 100644
          mLocalReduce = None
      else:
          local_reduce_leading_dim = 2 if local_reduce_ndim == 3 else 1
-@@ -763,6 +796,7 @@ def _compile_gemm_act(
+@@ -763,6 +795,7 @@ def _compile_gemm_act(
          tensor_epilogue_arg_kinds=tensor_epilogue_arg_kinds,
          tensor_epilogue_returns_aux=tensor_epilogue_returns_aux,
          tensor_epilogue_returns_local_reduce=tensor_epilogue_returns_local_reduce,
@@ -302,7 +286,7 @@ index 155093a..f5a1057 100644
          local_reduce_group=local_reduce_group,
          local_reduce_axis=local_reduce_axis,
          local_reduce_combine_fn=local_reduce_combine_fn,
-@@ -835,6 +869,7 @@ def gemm_act(
+@@ -835,6 +868,7 @@ def gemm_act(
      tensor_epilogue_key: Optional[str] = None,
      tensor_epilogue_returns_aux: bool = False,
      tensor_epilogue_returns_local_reduce: bool = False,
@@ -310,7 +294,7 @@ index 155093a..f5a1057 100644
      tensor_epilogue_arg_kinds: tuple[str, ...] = (),
      tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
      tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
-@@ -862,6 +897,13 @@ def gemm_act(
+@@ -862,6 +896,13 @@ def gemm_act(
      must be provided together, and a tensor epilogue function or registry key is
      required.
 
@@ -324,7 +308,7 @@ index 155093a..f5a1057 100644
      ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
      CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
      combine callback merges two physical partial values using the reduction
-@@ -982,14 +1024,43 @@ def gemm_act(
+@@ -982,14 +1023,43 @@ def gemm_act(
      )
      alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
      beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
@@ -370,7 +354,7 @@ index 155093a..f5a1057 100644
      if local_reduce_out is not None and tensor_epilogue_fn is None and tensor_epilogue_key is None:
          raise RuntimeError("local_reduce_out requires tensor_epilogue_fn")
      if local_reduce_out is not None:
-@@ -1009,7 +1080,7 @@ def gemm_act(
+@@ -1009,7 +1079,7 @@ def gemm_act(
      local_reduce_dtype = (
          torch2cute_dtype_map[local_reduce_out.dtype]
          if local_reduce_out is not None
@@ -379,7 +363,7 @@ index 155093a..f5a1057 100644
      )
      local_reduce_leading_dim = (
          2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
-@@ -1042,6 +1113,7 @@ def gemm_act(
+@@ -1042,6 +1112,7 @@ def gemm_act(
          tensor_epilogue_arg_kind_codes,
          tensor_epilogue_returns_aux,
          tensor_epilogue_returns_local_reduce,
@@ -387,7 +371,7 @@ index 155093a..f5a1057 100644
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
          tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
-@@ -1091,6 +1163,7 @@ def gemm_act(
+@@ -1091,6 +1162,7 @@ def gemm_act(
          tensor_epilogue_arg_kinds=None,
          tensor_epilogue_returns_aux=None,
          tensor_epilogue_returns_local_reduce=None,
