@@ -49,12 +49,7 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     # A copy is mandatory even when input_tensor already has the requested
     # stride: the op is registered as a functional custom op, so returning
     # the input would trip the library-level aliasing check.
-    new_tensor = torch.empty_strided(
-        input_tensor.shape,
-        stride,
-        dtype=input_tensor.dtype,
-        device=input_tensor.device,
-    )
+    new_tensor = input_tensor.new_empty_strided(input_tensor.shape, stride)
     new_tensor.copy_(input_tensor)
     return new_tensor
 
@@ -198,7 +193,11 @@ rand_eager_offsets = _prims._make_prim(
 force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
-    doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+    doc=(
+        "Force the stride order for input tensor. The eager impl always "
+        "copies (the op is functional); the inductor lowering is a no-op "
+        "when the strides already match"
+    ),
 )
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
