@@ -36,6 +36,7 @@ from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
 from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
+from torch.utils import _pytree as pytree
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
@@ -240,15 +241,10 @@ def _add_namedtuple_types_to_scope(value: Any, scope: dict[str, Any]) -> None:
     type must exist in the launcher scope. Mirrors ``codegen_namedtuple_defs``
     in the generated Triton module (#192288).
     """
-    fields = getattr(type(value), "_fields", None)
-    if (
-        isinstance(value, tuple)
-        and isinstance(fields, tuple)
-        and all(isinstance(field, str) for field in fields)
-    ):
+    if pytree.is_namedtuple_instance(value):
         cls = type(value)
         scope.setdefault(cls.__name__, cls)
-        for field_name in fields:
+        for field_name in cls._fields:
             _add_namedtuple_types_to_scope(getattr(value, field_name), scope)
         return
     if isinstance(value, dict):
@@ -3161,14 +3157,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         the metadata to be serialized is a namedtuple or regular, serializable one.
         """
 
-        def is_namedtuple(obj) -> bool:
-            return (
-                isinstance(obj, tuple)
-                and hasattr(obj, "_asdict")
-                and hasattr(obj, "_fields")
-            )
-
-        if is_namedtuple(metadata):
+        if pytree.is_namedtuple_instance(metadata):
             return metadata._asdict()
         else:
             return metadata

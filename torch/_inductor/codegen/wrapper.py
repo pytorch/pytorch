@@ -349,23 +349,9 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-def _is_namedtuple_type(cls: object) -> bool:
-    """True for collections.namedtuple / typing.NamedTuple classes."""
-    fields = getattr(cls, "_fields", None)
-    return (
-        isinstance(cls, type)
-        and issubclass(cls, tuple)
-        and isinstance(fields, tuple)
-        and all(isinstance(field, str) for field in fields)
-    )
-
-
-def _is_namedtuple_instance(value: object) -> bool:
-    """True for collections.namedtuple / typing.NamedTuple instances."""
-    return _is_namedtuple_type(type(value))
-
-
-def _collect_namedtuple_types(value: Any, seen: OrderedSet[type] | None = None) -> list[type]:
+def _collect_namedtuple_types(
+    value: Any, seen: OrderedSet[type] | None = None
+) -> list[type]:
     """Return NamedTuple types referenced by ``value``, dependencies first.
 
     Used so generated Triton modules can eval ``triton_meta={...!r}`` when a
@@ -376,7 +362,7 @@ def _collect_namedtuple_types(value: Any, seen: OrderedSet[type] | None = None) 
     result: list[type] = []
 
     def visit(obj: Any) -> None:
-        if _is_namedtuple_instance(obj):
+        if pytree.is_namedtuple_instance(obj):
             cls = type(obj)
             # Nested NamedTuple fields first so parents can reference them.
             for field_name in cls._fields:
@@ -397,38 +383,20 @@ def _collect_namedtuple_types(value: Any, seen: OrderedSet[type] | None = None) 
     return result
 
 
-def _namedtuple_type_is_importable(cls: type) -> bool:
-    """Whether ``from {module} import {name}`` reconstructs ``cls``."""
-    mod_name = getattr(cls, "__module__", None)
-    name = getattr(cls, "__name__", None)
-    qualname = getattr(cls, "__qualname__", name)
-    if not mod_name or not name or qualname != name:
-        # Nested / local classes (``qualname`` contains ``.`` / ``<locals>``)
-        # are not importable as top-level names.
-        return False
-    if mod_name in ("__main__", "builtins") or mod_name.startswith("__"):
-        return False
-    try:
-        module = __import__(mod_name, fromlist=[name])
-    except Exception:
-        return False
-    return getattr(module, name, None) is cls
-
-
 def codegen_namedtuple_defs(constants: dict[str, Any] | Any) -> str:
-    """Emit NamedTuple imports/defs so ``repr`` of constexpr constants can eval.
+    """Emit NamedTuple defs so ``repr`` of constexpr constants can eval.
 
-    Prefers ``from user_module import TypeName`` when the type is a top-level
-    importable symbol; otherwise reconstructs with ``collections.namedtuple``
-    so field/attribute access matches the eager NamedTuple.
+    Always reconstructs via ``namedtuple_helpers.namedtuple_type`` (never
+    ``from user_module import ...``): generated sources are cached and may be
+    reloaded on another machine, and classes defined in
+    ``compile_tasks.<hash>`` are not pickle-safe across compile workers.
     """
     # Accept either the constants dict or a single value for unit tests.
     if isinstance(constants, dict):
         types: list[type] = []
         seen: OrderedSet[type] = OrderedSet()
         for value in constants.values():
-            for cls in _collect_namedtuple_types(value, seen):
-                types.append(cls)
+            types.extend(_collect_namedtuple_types(value, seen))
     else:
         types = _collect_namedtuple_types(constants)
 
@@ -436,25 +404,26 @@ def codegen_namedtuple_defs(constants: dict[str, Any] | Any) -> str:
         return ""
 
     buf = IndentedBuffer()
-    needs_collections = False
     lines: list[str] = []
-    emitted_names: OrderedSet[str] = OrderedSet()
+    # Repr binds by ``cls.__name__``; key on name+fields and error on conflicts.
+    emitted: dict[str, tuple[str, ...]] = {}
     for cls in types:
         name = cls.__name__
-        if name in emitted_names:
-            # Two distinct NamedTuple classes sharing __name__ cannot both be
-            # bound under that name; skip the duplicate (repr would be ambiguous).
+        fields = tuple(cls._fields)
+        if name in emitted:
+            if emitted[name] != fields:
+                raise RuntimeError(
+                    f"Cannot embed two NamedTuple types named {name!r} with "
+                    f"different fields ({emitted[name]} vs {fields}) as "
+                    f"tl.constexpr values; rename one so generated repr can eval."
+                )
             continue
-        if _namedtuple_type_is_importable(cls):
-            lines.append(f"from {cls.__module__} import {name}")
-        else:
-            fields = list(cls._fields)
-            needs_collections = True
-            lines.append(f"{name} = collections.namedtuple({name!r}, {fields!r})")
-        emitted_names.add(name)
+        emitted[name] = fields
+        lines.append(f"{name} = namedtuple_type({name!r}, {fields!r})")
 
-    if needs_collections:
-        buf.writeline("import collections")
+    buf.writeline(
+        "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type"
+    )
     for line in lines:
         buf.writeline(line)
     buf.newline()

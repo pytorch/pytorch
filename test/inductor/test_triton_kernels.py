@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import unittest
+from typing import NamedTuple
 from unittest import mock
 
 import torch
@@ -60,6 +61,12 @@ from torch.utils._triton import (
     has_triton_package,
     has_triton_tensor_descriptor_host_tma,
 )
+
+
+# Module-level NamedTuple for CPU unit tests of #192288 (no GPU/triton needed).
+class ModuleLevelStrides(NamedTuple):
+    batch: int
+    token: int
 
 
 @contextlib.contextmanager
@@ -242,11 +249,16 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     def test_codegen_namedtuple_defs_for_triton_meta(self):
         # NamedTuple constexpr values stringify as TypeName(...); the generated
-        # Triton module must define/import those types so triton_meta={...!r}
-        # can eval. See https://github.com/pytorch/pytorch/issues/192288
+        # Triton module must define those types so triton_meta={...!r} can eval.
+        # See https://github.com/pytorch/pytorch/issues/192288
+        import pickle
         from typing import NamedTuple
 
         from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
 
         class LocalStrides(NamedTuple):
             batch: int
@@ -258,10 +270,17 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         strides = LocalStrides(batch=8, token=1)
         defs = codegen_namedtuple_defs({"X_STRIDES": strides})
-        self.assertIn("import collections", defs)
-        self.assertIn("LocalStrides = collections.namedtuple", defs)
-        self.assertIn("'batch'", defs)
-        self.assertIn("'token'", defs)
+        self.assertIn(
+            "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type",
+            defs,
+        )
+        self.assertIn(
+            "LocalStrides = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            defs,
+        )
+        # Never import the user's defining module (remote cache / non-importable).
+        self.assertNotIn("import LocalStrides", defs)
+        self.assertNotIn("collections.namedtuple", defs)
 
         # Round-trip: defs + repr(value) must eval without the original type.
         ns: dict = {}
@@ -272,11 +291,26 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(reconstructed[0], 8)
         self.assertIsInstance(reconstructed, tuple)
 
+        # Reconstructed instances must pickle (compile-worker return path).
+        pickled = pickle.loads(pickle.dumps(reconstructed))
+        self.assertEqual(pickled.batch, 8)
+        self.assertEqual(pickled.token, 1)
+        self.assertIs(
+            type(pickled),
+            namedtuple_type("LocalStrides", ("batch", "token")),
+        )
+
         nested_defs = codegen_namedtuple_defs(
             {"X": Nested(outer=2, strides=strides)}
         )
-        self.assertIn("LocalStrides = collections.namedtuple", nested_defs)
-        self.assertIn("Nested = collections.namedtuple", nested_defs)
+        self.assertIn(
+            "LocalStrides = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            nested_defs,
+        )
+        self.assertIn(
+            "Nested = namedtuple_type('Nested', ('outer', 'strides'))",
+            nested_defs,
+        )
         # Dependency order: nested field type before parent.
         self.assertLess(
             nested_defs.index("LocalStrides ="), nested_defs.index("Nested =")
@@ -285,18 +319,49 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Plain tuples need no defs (already self-contained under ``repr``).
         self.assertEqual(codegen_namedtuple_defs({"t": (8, 1)}), "")
 
-        # Module-level importable NamedTuple prefers ``from ... import`` when
-        # the defining module can be imported; otherwise reconstructs.
-        if HAS_GPU:
-            importable_defs = codegen_namedtuple_defs(
-                {"X_STRIDES": MatrixStrides(batch=8, token=1)}
+        # Same __name__ + same fields: emit once (structurally interchangeable).
+        import collections
+
+        DupA = collections.namedtuple("DupStrides", ["batch", "token"])
+        DupB = collections.namedtuple("DupStrides", ["batch", "token"])
+        dup_defs = codegen_namedtuple_defs(
+            {
+                "a": DupA(batch=1, token=2),
+                "b": DupB(batch=3, token=4),
+            }
+        )
+        self.assertEqual(dup_defs.count("DupStrides = namedtuple_type"), 1)
+
+        # Same __name__ + different fields: clear error (repr would be ambiguous).
+        Conflict = collections.namedtuple("DupStrides", ["token", "batch"])
+        with self.assertRaisesRegex(RuntimeError, "different fields"):
+            codegen_namedtuple_defs(
+                {
+                    "a": DupA(batch=1, token=2),
+                    "b": Conflict(token=3, batch=4),
+                }
             )
-            self.assertTrue(
-                "import MatrixStrides" in importable_defs
-                or "MatrixStrides = collections.namedtuple" in importable_defs,
-                importable_defs,
-            )
-            self.assertNotIn("TritonConstexprStruct", importable_defs)
+
+        # Module-level NamedTuple also uses namedtuple_type (never user import).
+        module_defs = codegen_namedtuple_defs(
+            {"X_STRIDES": ModuleLevelStrides(batch=8, token=1)}
+        )
+        self.assertIn(
+            "ModuleLevelStrides = namedtuple_type("
+            "'ModuleLevelStrides', ('batch', 'token'))",
+            module_defs,
+        )
+        self.assertNotIn("from test.", module_defs)
+        self.assertNotIn("import ModuleLevelStrides", module_defs)
+
+        # Launcher scope helper binds Nested field types too.
+        scope: dict = {}
+        _add_namedtuple_types_to_scope(
+            {"X": Nested(outer=2, strides=strides)}, scope
+        )
+        self.assertIs(scope["Nested"], Nested)
+        self.assertIs(scope["LocalStrides"], LocalStrides)
+        self.assertEqual(eval(repr(strides), scope).batch, 8)
 
     def _run_and_get_triton_compile_options(self, fn, *args):
         # TestCase already gives each test a fresh compile cache. This patch
@@ -372,8 +437,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/192288
         # NamedTuple tl.constexpr args must compile under torch.compile(fullgraph=True).
         # Keep MatrixStrides / kernel at module scope (see above) so FX graph
-        # cache pickling works; parametrize cpp_wrapper because generated
-        # ``code`` is C++ there and must not assert on Python triton_meta text.
+        # cache pickling works.
         config_kwargs = {"cpp_wrapper": cfg == "cpp_wrapper"}
 
         def copy_first_row(x):
@@ -400,14 +464,17 @@ class KernelTests(torch._inductor.test_case.TestCase):
             compiled_result, (code,) = run_and_get_code(compiled, x)
             self.assertEqual(compiled_result, expected)
             self.assertTrue(
-                self._kernel_launched_in_code("copy_first_row_namedtuple_kernel", code)
+                self._kernel_launched_in_code(
+                    "copy_first_row_namedtuple_kernel", code
+                )
                 or "copy_first_row_namedtuple_kernel" in code
             )
-            if cfg == "normal":
-                # Python wrapper embeds triton_meta via !r; NamedTuple type
-                # must be defined/imported in the generated module.
-                self.assertIn("MatrixStrides", code)
-                self.assertNotIn("TritonConstexprStruct", code)
+            # Python wrapper embeds triton_meta via !r (also present under
+            # cpp_wrapper in the Python compile path). Reconstruct via the
+            # pickle-safe helper, never via a user-module import.
+            self.assertIn("namedtuple_type", code)
+            self.assertIn("MatrixStrides = namedtuple_type", code)
+            self.assertNotIn("from test.", code)
 
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton
