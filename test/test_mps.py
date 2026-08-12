@@ -17756,6 +17756,81 @@ class TestMetalLibrary(TestCaseMPS):
         kernel(src, dst, [37, 259], threads=(768, 2, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
 
+    def test_conv_weight_to_dhwio_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        out_channels, in_channels = 5, 3
+        kernel_depth, kernel_height, kernel_width = 2, 2, 4
+        sources = {
+            "contiguous": torch.arange(
+                out_channels * in_channels * kernel_depth * kernel_height * kernel_width,
+                dtype=torch.float32,
+                device="mps",
+            ).reshape(out_channels, in_channels, kernel_depth, kernel_height, kernel_width),
+            "output_channel_major": torch.arange(
+                out_channels * in_channels * kernel_depth * kernel_height * kernel_width,
+                dtype=torch.float32,
+                device="mps",
+            ).reshape(kernel_depth, kernel_height, kernel_width, in_channels, out_channels).permute(4, 3, 0, 1, 2),
+            "strided_width": torch.arange(
+                out_channels * in_channels * kernel_depth * kernel_height * 2 * kernel_width,
+                dtype=torch.float32,
+                device="mps",
+            ).reshape(out_channels, in_channels, kernel_depth, kernel_height, 2 * kernel_width)[..., ::2],
+        }
+        kernel = lib.conv_weight_to_dhwio_float
+        for layout, source in sources.items():
+            with self.subTest(layout=layout):
+                if layout != "contiguous":
+                    self.assertFalse(source.is_contiguous())
+                destination = torch.empty(
+                    kernel_depth, kernel_height, kernel_width, in_channels, out_channels,
+                    dtype=source.dtype, device="mps",
+                )
+                params = [out_channels, in_channels, kernel_height, kernel_width, *source.stride()]
+                kernel(source, destination, params,
+                       threads=(out_channels, in_channels, kernel_depth * kernel_height),
+                       group_size=(min(out_channels, 256), 1, 1), arg_casts="int32")
+                self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
+
+    def test_conv_weight_to_koc_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        out_channels, in_channels, kernel_width = 5, 3, 4
+        sources = {
+            "contiguous": torch.arange(
+                out_channels * in_channels * kernel_width, dtype=torch.float32, device="mps",
+            ).reshape(out_channels, in_channels, 1, kernel_width),
+            "output_channel_major": torch.arange(
+                out_channels * in_channels * kernel_width, dtype=torch.float32, device="mps",
+            ).reshape(1, kernel_width, in_channels, out_channels).permute(3, 2, 0, 1),
+            "strided_width": torch.arange(
+                out_channels * in_channels * 2 * kernel_width, dtype=torch.float32, device="mps",
+            ).reshape(out_channels, in_channels, 1, 2 * kernel_width)[..., ::2],
+        }
+        kernel = lib.conv_weight_to_koc_float
+        for layout, source in sources.items():
+            with self.subTest(layout=layout):
+                if layout != "contiguous":
+                    self.assertFalse(source.is_contiguous())
+                destination = torch.empty(kernel_width, out_channels, in_channels,
+                                          dtype=source.dtype, device="mps")
+                params = [
+                    out_channels,
+                    in_channels,
+                    1,
+                    kernel_width,
+                    source.stride(0),
+                    source.stride(1),
+                    0,
+                    0,
+                    source.stride(3),
+                ]
+                kernel(source, destination, params,
+                       threads=(in_channels, out_channels, 1),
+                       group_size=(min(in_channels, 256), 1, 1), arg_casts="int32")
+                self.assertEqual(destination, source.squeeze(2).permute(2, 0, 1))
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the

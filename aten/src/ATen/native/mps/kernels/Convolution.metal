@@ -460,9 +460,7 @@ INSTANTIATE_CONV1D_DW(bfloat)
 
 // conv1d_sgemm on simdgroup_matrix for hosts without
 // MetalPerformancePrimitives: identical dispatch contract (koc weights,
-// region table, NCL/NLC operands), fp32 accumulation. Unlike conv3d_simd's
-// implicit-GEMM gather this stages dense activation rows, so 1D geometry
-// keeps its memory-bound tiles coalesced.
+// region table, NCL/NLC operands), fp32 accumulation.
 template <typename T, int BM, bool NLC, bool HAS_BIAS, bool GROUPED>
 kernel void conv1d_sgemm_simd(
     device const T* src [[buffer(0)]],
@@ -806,8 +804,13 @@ kernel void conv3d_mpp(
   }
 }
 
-// Source-width shape hint baked into each specialization; the conv1d block
-// redefines it so flat geometries accept lengths up to the header constant.
+// Source-width shape hint baked into each specialization through the
+// convolution2d_descriptor. The compiled kernel assumes the activation never
+// exceeds it: a wider source miscomputes silently and -1 (dynamic, as used
+// for channels) miscomputes too, so the host rejects any activation longer
+// than the hint its entry point was built with. Oversizing measured free, so
+// the conv1d block redefines this to the wide header constant; conv3d keeps
+// 16384, which covers its plane extents.
 #define CONV3D_MPP_SRCW 16384
 
 #define INSTANTIATE_CONV3D_MPP(                                             \
