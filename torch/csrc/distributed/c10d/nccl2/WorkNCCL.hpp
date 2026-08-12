@@ -67,6 +67,9 @@ class WorkNCCL : public c10d::Work {
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
   void synchronize() override;
   std::vector<at::Tensor> result() override;
+  void releaseResultTensors() override {
+    outputs_.clear();
+  }
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
   float getDuration() const override;

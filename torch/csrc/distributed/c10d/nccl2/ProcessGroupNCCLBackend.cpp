@@ -63,6 +63,9 @@ class CompletedWork : public ::c10d::Work {
   std::vector<at::Tensor> result() override {
     return outputs_;
   }
+  void releaseResultTensors() override {
+    outputs_.clear();
+  }
 
  private:
   std::vector<at::Tensor> outputs_;
