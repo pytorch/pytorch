@@ -295,13 +295,17 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return static_cast<double>(time_ms);
   }
 
-  std::string getEventIPCHandle(void** event, const DeviceIndex device_index)
-      const override {
+  std::string getEventIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING),
+        "Cannot create IPC handle for event with timing enabled.");
     if (!*event) {
-      createEvent(
-          reinterpret_cast<cudaEvent_t*>(event), EventFlag::INTERPROCESS);
+      createEvent(reinterpret_cast<cudaEvent_t*>(event), flag);
     }
-    cudaEvent_t cuda_event = static_cast<cudaEvent_t>(*event);
+    cudaEvent_t cuda_event = reinterpret_cast<cudaEvent_t>(*event);
     cudaIpcEventHandle_t ipc_event_handle;
     C10_CUDA_CHECK(cudaIpcGetEventHandle(&ipc_event_handle, cuda_event));
     std::string handle_string(

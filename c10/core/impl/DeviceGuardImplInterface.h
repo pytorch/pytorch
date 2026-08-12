@@ -299,7 +299,8 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual std::string getEventIPCHandle(
       void** /*event*/,
-      const DeviceIndex /*device_index*/) const {
+      const DeviceIndex /*device_index*/,
+      const EventFlag /*flag*/) const {
     TORCH_CHECK(false, "Backend doesn't support IPC events.");
   }
 
