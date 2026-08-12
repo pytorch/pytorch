@@ -107,13 +107,9 @@ int main(int argc, char* argv[]) {
   if (device <= 0) {
     return 0;
   }
-#if SYCL_COMPILER_VERSION < 20260000
-  return 0;
-#else
   if (!c10::xpu::get_raw_device(0).has(sycl::aspect::ext_oneapi_ipc_memory)) {
     return 0;
   }
-#endif
   c10::xpu::XPUCachingAllocator::init(device);
   return RUN_ALL_TESTS();
 }
