@@ -139,11 +139,11 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source});
+      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, source, output, dimensions);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
   return output;
@@ -217,11 +217,11 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights});
+      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output, params, bias ? *bias : activation);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads_per_threadgroup];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
 }
