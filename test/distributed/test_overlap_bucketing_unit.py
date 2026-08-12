@@ -1080,26 +1080,46 @@ class TestOverlapPreservingBucketing(InductorTestCase):
     def test_no_memory_tracking_preserves_in_flight_limit(self):
         """Both memory-increase caps may be disabled without breaking scheduling."""
         from torch._inductor.fx_passes.overlap_scheduling import (
+            OverlapScheduler,
             schedule_overlap_bucketing,
         )
 
         def func(a, b):
             group_name = "0"
             group_size = 1
+            independent_mm = torch.mm(a, b)
             ag = torch.ops._c10d_functional.all_gather_into_tensor(
                 a, group_size, group_name
             )
-            mm_result = torch.mm(a, b)
             ag_out = torch.ops._c10d_functional.wait_tensor(ag)
-            return (mm_result + ag_out).sum()
+            mm_result = torch.mm(ag_out, b)
+            return independent_mm.sum() + mm_result.sum()
 
         with FakeTensorMode():
             a = torch.randn(16, 16, device=self.device)
             b = torch.randn(16, 16, device=self.device)
             gm = make_fx(func)(a, b)
 
+        scheduler = OverlapScheduler(
+            gm,
+            max_in_flight_gb=1e-9,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            max_memory_increase_gb=None,
+            max_memory_increase_ratio=None,
+            enable_fusion_regions=False,
+        )
+        collective = next(iter(scheduler.collective_info))
+        assert scheduler._prefetch_would_exceed_memory_budget(collective)
+
         schedule_overlap_bucketing(
             gm,
+            max_in_flight_gb=1e-9,
             max_memory_increase_gb=None,
             max_memory_increase_ratio=None,
             collective_estimator="analytical",
