@@ -886,6 +886,27 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     return ctx.wrap_tensors(ret)
 
 
+class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
+    """``_VmapCombineFnWrapper`` specialization for ``combine_mode="pointwise"``."""
+
+    def __call__(self, *args: Any) -> Any:
+        if not all(bdim is not None for bdim in self.in_dims):
+            return super().__call__(*args)
+        outputs = self.combine_fn(*args)
+        # All inputs are batched at -1 and combine_fn is elementwise, so every
+        # output leaf is batched at -1 too.
+        out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
+        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
+            raise RuntimeError(
+                "associative_scan under vmap requires the combine_fn outputs to keep "
+                "the same batched arguments as its xs inputs, because the outputs are "
+                "fed back as inputs on later scan levels. Here they diverge: expected "
+                f"output batch dims {self.expected_out_dims} but got {out_dims}."
+            )
+        self.out_dims = out_dims
+        return outputs
+
+
 # Note [associative_scan vmap coverage]
 # This batch rule is dispatched only when the associative_scan_op HOP is present
 # under a vmap layer. The frontend builds that HOP for combine_mode="pointwise";
@@ -895,8 +916,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
 # Consequently only the pointwise cases in the vmap tests exercise the code below;
 # the generic cases guard the frontend decomposition instead. In eager the HOP
 # dense-decomposes on any device, so pointwise+CPU already covers this rule; the
-# CUDA-only restriction and the compile failure (xfail) are properties of the
-# lowered pointwise scan, not of this rule.
+# CUDA-only restriction is a property of the lowered pointwise scan, not this rule.
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     unbatched_args, in_dims = unwrap_batched(
@@ -918,7 +938,7 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
         # args on later levels, reusing after_move_dims; that is only valid if the
         # outputs keep the same batch dims as xs. expected_out_dims makes the wrapper
         # raise a clear error otherwise instead of silently mismatching downstream.
-        wrapper = _VmapCombineFnWrapper(
+        wrapper = _PointwiseVmapCombineFnWrapper(
             combine_fn,
             after_move_dims,
             interpreter.batch_size(),
