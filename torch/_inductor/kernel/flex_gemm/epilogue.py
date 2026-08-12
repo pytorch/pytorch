@@ -1614,6 +1614,139 @@ def grouped_main_output_match(
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmPackedInterleavedB16x2Plan:
+    """Describe packed BF16 pair loads and stores around one physical GEMM."""
+
+    capture: torch.fx.Node
+    capture_view: torch.fx.Node
+    select_indices: dict[torch.fx.Node, int]
+    output_pack: torch.fx.Node
+    output_lane_wrappers: tuple[torch.fx.Node, ...]
+    output_view: torch.fx.Node
+
+
+def packed_interleaved_b16x2_match(
+    outputs: FlexGemmOutputPlan,
+    gemm: torch.fx.Node,
+    local_reduce: FlexGemmLocalReduceAnalysis,
+) -> FlexGemmPackedInterleavedB16x2Plan | None:
+    """Recognize one packed BF16 pair capture, main store, and auxiliary."""
+    if (
+        len(outputs.aux_outputs) != 1
+        or outputs.local_reduce is not None
+        or outputs.indexed_output is not None
+        or outputs.output_storage is not None
+    ):
+        return None
+    output_view = outputs.output
+    view_args = view_or_reshape_args(output_view)
+    if view_args is None:
+        return None
+    output_pack = view_args[0]
+    output_lane_wrappers: tuple[torch.fx.Node, ...] = ()
+    if output_pack.target is torch.ops.aten.stack.default:
+        stack_values = output_pack.args[0]
+        stack_dim = output_pack.args[1] if len(output_pack.args) > 1 else 0
+        if (
+            not isinstance(stack_values, (tuple, list))
+            or len(stack_values) != 2
+            or stack_dim not in (-1, 2)
+        ):
+            return None
+        packed_values = tuple(stack_values)
+    elif output_pack.target is torch.ops.aten.cat.default:
+        cat_values = output_pack.args[0]
+        cat_dim = output_pack.args[1] if len(output_pack.args) > 1 else 0
+        if (
+            not isinstance(cat_values, (tuple, list))
+            or len(cat_values) != 2
+            or cat_dim not in (-1, 2)
+            or any(
+                not isinstance(value, torch.fx.Node)
+                or value.target is not torch.ops.aten.unsqueeze.default
+                or value.args[1] not in (-1, 2)
+                or not isinstance(value.args[0], torch.fx.Node)
+                for value in cat_values
+            )
+        ):
+            return None
+        output_lane_wrappers = tuple(cat_values)
+        packed_values = tuple(value.args[0] for value in cat_values)
+    else:
+        return None
+    if not all(isinstance(value, torch.fx.Node) for value in packed_values):
+        return None
+
+    gemm_meta = gemm.meta.get("val")
+    output_meta = output_view.meta.get("val")
+    aux_meta = outputs.aux_outputs[0].meta.get("val")
+    if (
+        not isinstance(gemm_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or not isinstance(aux_meta, torch.Tensor)
+        or gemm_meta.ndim != 2
+        or gemm_meta.dtype is not torch.bfloat16
+        or output_meta.dtype is not torch.bfloat16
+        or aux_meta.dtype is not torch.bfloat16
+        or not statically_known_shape_equal(
+            output_meta.shape, (gemm_meta.shape[0], 2 * gemm_meta.shape[1])
+        )
+        or not statically_known_shape_equal(aux_meta.shape, gemm_meta.shape)
+    ):
+        return None
+
+    returned_values = (output_view, outputs.aux_outputs[0])
+    candidates: dict[torch.fx.Node, dict[int, torch.fx.Node]] = {}
+    for node in local_reduce.graph.dependencies.get(output_view, ()):
+        if (
+            node.target is not torch.ops.aten.select.int
+            or len(node.args) < 3
+            or node.args[1] not in (-1, 2)
+            or node.args[2] not in (0, 1)
+            or not isinstance(node.args[0], torch.fx.Node)
+        ):
+            continue
+        capture_view = node.args[0]
+        lanes = candidates.setdefault(capture_view, {})
+        lanes[node.args[2]] = node
+    matches = []
+    for capture_view, lanes in candidates.items():
+        capture_view_args = view_or_reshape_args(capture_view)
+        if set(lanes) != {0, 1} or capture_view_args is None:
+            continue
+        capture = capture_view_args[0]
+        capture_meta = capture.meta.get("val")
+        capture_view_meta = capture_view.meta.get("val")
+        if (
+            capture.op != "placeholder"
+            or not isinstance(capture_meta, torch.Tensor)
+            or not isinstance(capture_view_meta, torch.Tensor)
+            or capture_meta.dtype is not torch.bfloat16
+            or not statically_known_shape_equal(capture_meta.shape, output_meta.shape)
+            or not statically_known_shape_equal(
+                capture_view_meta.shape,
+                (gemm_meta.shape[0], gemm_meta.shape[1], 2),
+            )
+            or not all(
+                any(local_reduce.graph.depends_on(value, lane) for value in returned_values)
+                for lane in lanes.values()
+            )
+        ):
+            continue
+        matches.append(
+            FlexGemmPackedInterleavedB16x2Plan(
+                capture,
+                capture_view,
+                {lane: index for index, lane in lanes.items()},
+                output_pack,
+                output_lane_wrappers,
+                output_view,
+            )
+        )
+    return matches[0] if len(matches) == 1 else None
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
 
@@ -1631,6 +1764,7 @@ class FlexGemmEpilogueAnalysis:
     grouped_main_layouts: dict[torch.fx.Node, GroupedTensorSSALayout] = (
         dataclasses.field(default_factory=dict)
     )
+    packed_interleaved_b16x2: FlexGemmPackedInterleavedB16x2Plan | None = None
 
     @classmethod
     def from_graph_module(
@@ -1642,6 +1776,17 @@ class FlexGemmEpilogueAnalysis:
         if outputs.indexed_output is not None and outputs.output_storage_nodes:
             raise NotImplementedError(
                 "FlexGEMM indexed outputs do not compose with terminal dtype views"
+            )
+        packed_interleaved_b16x2 = packed_interleaved_b16x2_match(
+            outputs, gemm, local_reduce
+        )
+        if packed_interleaved_b16x2 is not None:
+            local_reduce.commit_output_guards(outputs)
+            return cls(
+                gemm,
+                outputs,
+                local_reduce,
+                packed_interleaved_b16x2=packed_interleaved_b16x2,
             )
         grouped_main = grouped_main_output_match(
             outputs.output_storage or outputs.output,
@@ -1659,7 +1804,15 @@ class FlexGemmEpilogueAnalysis:
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs or outputs.indexed_output is not None:
+        if outputs.indexed_output is not None or (
+            outputs.aux_outputs
+            and (
+                outputs.aux_outputs != (gemm,)
+                or outputs.local_reduce is not None
+                or grouped_main.transform.group != 2
+                or grouped_main.transform.chunked
+            )
+        ):
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
         if (
             grouped_main.transform.chunked
@@ -1987,6 +2140,7 @@ class FlexGemmEpiModSource:
     name: str
     source: str
     fragmentwise: bool = False
+    packed_interleaved_b16x2: bool = False
     local_reduce_combine: str | None = None
     local_reduce_finalize: str | None = None
     local_reduce_store_finalize: str | None = None
@@ -2398,6 +2552,7 @@ class FlexGemmEpiModEmitter:
         self.analysis = analysis
         self.outputs = analysis.outputs
         self.local_reduce = self.outputs.local_reduce
+        self.packed_interleaved_b16x2 = analysis.packed_interleaved_b16x2
         self.grouped_select_indices = analysis.grouped_select_indices
         self.terminal_rewrites = self.outputs.terminal_rewrites
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
@@ -2463,7 +2618,7 @@ class FlexGemmEpiModEmitter:
                 or self.local_reduce.match.physical_span > 1
             )
         )
-        self.fragmentwise = (
+        self.fragmentwise = self.packed_interleaved_b16x2 is None and (
             fragment_reduced
             or self.local_reduce is None
             or not self.local_reduce.feeds_main
@@ -2503,6 +2658,8 @@ class FlexGemmEpiModEmitter:
         self.mainloop_scale_count = mainloop_scale_count
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
+        if self.packed_interleaved_b16x2 is not None:
+            self.params.append("c")
         self.base_env = self.initial_env_for_params(self.params)
         if self.local_reduce_prepass is not None or (
             self.local_reduce is not None
@@ -2574,6 +2731,10 @@ class FlexGemmEpiModEmitter:
             else:
                 expr = name
             captures[node] = self.value(expr, dtype)
+        if self.packed_interleaved_b16x2 is not None:
+            captures[self.packed_interleaved_b16x2.capture] = self.value(
+                "c", torch.bfloat16
+            )
         return {
             self.gemm: self.value(gemm_value, torch.float32),
             **captures,
@@ -2684,6 +2845,31 @@ class FlexGemmEpiModEmitter:
                 )
         self.local_reduce_prepass_body = tuple(kernel.body.lines)
         self.local_reduce_prepass_result = flex_gemm_epilogue_arg(source, env)
+
+    def lower_packed_interleaved_b16x2_node(self, node: torch.fx.Node) -> bool:
+        """Lower the recognized packed pair transport outside ordinary FX ops."""
+        plan = self.packed_interleaved_b16x2
+        if plan is None:
+            return False
+        if node is plan.capture_view:
+            self.env[node] = self.env[plan.capture]
+            return True
+        if node in plan.select_indices:
+            self.env[node] = self.value(f"c[{plan.select_indices[node]}]", torch.bfloat16)
+            return True
+        if node in plan.output_lane_wrappers:
+            self.env[node] = self.env[node.args[0]]
+            return True
+        if node is plan.output_pack:
+            values = node.args[0]
+            self.env[node] = tuple(
+                flex_gemm_epilogue_arg(value, self.env) for value in values
+            )
+            return True
+        if node is plan.output_view:
+            self.env[node] = self.env[plan.output_pack]
+            return True
+        return False
 
     def lower_grouped_layout(
         self, node: torch.fx.Node, layout: GroupedTensorSSALayout
@@ -2833,6 +3019,8 @@ class FlexGemmEpiModEmitter:
                     raise NotImplementedError(
                         f"unsupported FlexGEMM EpiMod node: {node.format_node()}"
                     )
+                if self.lower_packed_interleaved_b16x2_node(node):
+                    continue
                 if node in self.grouped_layouts:
                     self.lower_grouped_layout(node, self.grouped_layouts[node])
                     continue
@@ -2971,7 +3159,9 @@ class FlexGemmEpiModEmitter:
         )
         key_payload = (
             f"inline_asm={inline_asm_cache_key()}\n"
-            f"fragmentwise={self.fragmentwise}\n{self.graph_module.code}\n"
+            f"fragmentwise={self.fragmentwise}\n"
+            f"packed_interleaved_b16x2={self.packed_interleaved_b16x2 is not None}\n"
+            f"{self.graph_module.code}\n"
             f"{body}return {{{return_source}}}\n"
             f"{combine_body}{finalize_payload}{prepass_payload}"
             f"{self.epilogue_arg_kinds!r}"
@@ -3032,6 +3222,7 @@ class FlexGemmEpiModEmitter:
                 f"{body}    return {{{return_source}}}\n"
             ),
             fragmentwise=self.fragmentwise,
+            packed_interleaved_b16x2=self.packed_interleaved_b16x2 is not None,
             local_reduce_combine=(
                 None if sink is None else combine_name or sink.combine
             ),

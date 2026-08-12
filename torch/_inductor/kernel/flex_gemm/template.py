@@ -112,6 +112,7 @@ class FlexGemmEpilogueConfig:
     indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
+    packed_capture_index: int | None
     fragmentwise: bool
     tuned: bool
 
@@ -277,6 +278,10 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             )
         if config.main_transform is not None:
             kwargs.append(f", main_transform={config.main_transform!r}")
+        if config.packed_capture_index is not None:
+            kwargs.append(
+                f", packed_preact={input_args[config.packed_capture_index]}"
+            )
         return "".join(kwargs)
 
 
