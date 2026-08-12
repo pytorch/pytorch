@@ -1401,5 +1401,29 @@ backward() with non-leaf tensor
         self.assertEqual(compiled_grad, eager_grad)
 
 
+@skipIfTorchDynamo()
+class TestEagerEngineDynamoBoundary(TestCase):
+    def test_backward_does_not_reenter_dynamo(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def fn(x):
+            y = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+            y.sum().backward()
+            return y + 1
+
+        x = torch.randn(4, requires_grad=True)
+        backend = EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            compiled_fn(x)
+
+        self.assertEqual(len(backend.graphs), 2)
+
+
 if __name__ == "__main__":
     run_tests()
