@@ -1,4 +1,4 @@
-"""CuTeDSL override registrations for ``aten::sum`` / ``aten::prod`` (inner-tree).
+"""CuTeDSL overrides for inner-tree ``sum``, ``prod``, ``nansum``, and ``mean``.
 
 CuTeDSL port of the Triton-style inner-tree reduction kernel that
 otherwise lives in ``aten/src/ATen/native/cuda/ReduceSumProdKernel.cu``
@@ -8,14 +8,24 @@ is the feature-rollout gate for these operators -- it is *not* gated by the
 global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
 ``cutedsl_utils`` at registration time).
 
-We register four ATen dispatcher entries on ``CUDA``:
+We register eight ATen dispatcher entries on ``CUDA``:
 
 * ``sum.dim_IntList`` / ``sum.IntList_out`` -- ``x.sum(dim=...)`` + ``.out``.
 * ``prod.dim_int`` / ``prod.int_out`` -- ``x.prod(dim=...)`` + ``.out``.
+* ``nansum`` / ``nansum.out`` -- ``x.nansum(dim=...)`` + ``.out``.
+* ``mean.dim`` / ``mean.out`` -- ``x.mean(dim=...)`` + ``.out``.
 
-sum/prod share the identical inner-tree geometry and eligibility; only the
-combiner (``+`` vs ``*``) and its identity (``0`` vs ``1``) differ, threaded
-through the kernel in ``inner_tree_kernel.py``.
+``nanmean`` is covered compositionally and intentionally has no dispatcher
+entry here. ATen's CompositeImplicitAutograd implementation computes an
+``int64`` count with ``(~isnan(x)).sum(dim)`` and divides the result of its
+nested ``nansum`` / ``nansum.out`` call by that count. Those calls route
+through the overrides above, preserving the inner-tree nansum numerator while
+ATen retains the count, tensor/tensor true division, and composite autograd
+behavior. Registering ``nanmean`` here would shadow that composite.
+
+The reductions share identical inner-tree geometry and eligibility. Their
+combiner, identity, and optional pre/post maps are threaded through the kernel
+in ``inner_tree_kernel.py``.
 
 ``sum.dim_IntList`` is ``structured_delegate: sum.IntList_out``, so its
 delegation to the ``.out`` kernel happens *below* the dispatcher; overriding
@@ -175,6 +185,8 @@ def _geometry(self: torch.Tensor, out: torch.Tensor, it: TensorIterator):
 def _base_cond_ok(self: torch.Tensor, dim, dtype) -> int | None:
     """Shared front gate. Returns the normalized reduced dim if the call is a
     candidate, else ``None``."""
+    if dim is None:
+        return None
     if not _inner_tree_enabled():
         return None
     if not self.is_cuda or is_fake_tensor(self):
@@ -192,7 +204,7 @@ def _base_cond_ok(self: torch.Tensor, dim, dtype) -> int | None:
     return d
 
 
-def _cond(self, dim, keepdim=False, *, dtype=None) -> bool:
+def _cond(self, dim=None, keepdim=False, *, dtype=None) -> bool:
     d = _base_cond_ok(self, dim, dtype)
     if d is None:
         return False
@@ -200,7 +212,7 @@ def _cond(self, dim, keepdim=False, *, dtype=None) -> bool:
     return _eligibility(self, d, out) is not None
 
 
-def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
+def _out_cond(self, dim=None, keepdim=False, *, dtype=None, out) -> bool:
     d = _base_cond_ok(self, dim, dtype)
     if d is None:
         return False
@@ -227,6 +239,18 @@ def _prod_into():
     return inner_tree_prod_into
 
 
+def _nansum_into():
+    from .inner_tree_kernel import inner_tree_nansum_into
+
+    return inner_tree_nansum_into
+
+
+def _mean_into():
+    from .inner_tree_kernel import inner_tree_mean_into
+
+    return inner_tree_mean_into
+
+
 def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
     """Run ``reduce_into`` writing the reduction of ``self`` along ``d`` into
     the keepdim-shaped ``out_kd``. Caller has validated eligibility."""
@@ -242,7 +266,9 @@ def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
 
 
 def _make_impl(reduce_into):
-    def _impl(self, dim, keepdim=False, *, dtype=None):
+    def _impl(self, dim=None, keepdim=False, *, dtype=None):
+        if dim is None:
+            raise AssertionError("_cond guaranteed a non-None dim")
         d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
         out_kd = torch.empty(
             _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
@@ -254,7 +280,9 @@ def _make_impl(reduce_into):
 
 
 def _make_out_impl(reduce_into):
-    def _out_impl(self, dim, keepdim=False, *, dtype=None, out):
+    def _out_impl(self, dim=None, keepdim=False, *, dtype=None, out):
+        if dim is None:
+            raise AssertionError("_out_cond guaranteed a non-None dim")
         d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
         out_kd = _out_keepdim_view(self, d, keepdim, out)
         if out_kd is None:
@@ -269,7 +297,7 @@ def _make_out_impl(reduce_into):
 
 def register_to_dispatch() -> None:
     # Eligibility (_cond/_out_cond) is reduction-agnostic; only the kernel
-    # entry differs between sum and prod.
+    # entry differs among sum, prod, nansum, and mean.
     cu.register_op_override(
         "aten", "sum.dim_IntList", "CUDA", cond=_cond, impl=_make_impl(_sum_into)
     )
@@ -285,4 +313,24 @@ def register_to_dispatch() -> None:
     )
     cu.register_op_override(
         "aten", "prod.int_out", "CUDA", cond=_out_cond, impl=_make_out_impl(_prod_into)
+    )
+    cu.register_op_override(
+        "aten", "nansum", "CUDA", cond=_cond, impl=_make_impl(_nansum_into)
+    )
+    cu.register_op_override(
+        "aten",
+        "nansum.out",
+        "CUDA",
+        cond=_out_cond,
+        impl=_make_out_impl(_nansum_into),
+    )
+    cu.register_op_override(
+        "aten", "mean.dim", "CUDA", cond=_cond, impl=_make_impl(_mean_into)
+    )
+    cu.register_op_override(
+        "aten",
+        "mean.out",
+        "CUDA",
+        cond=_out_cond,
+        impl=_make_out_impl(_mean_into),
     )
