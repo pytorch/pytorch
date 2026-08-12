@@ -6743,6 +6743,66 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
+    def test_sparse_compressed_tensor_creation(self):
+        def csr(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            return torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+
+        def csc(v):
+            ccol = torch.tensor([0, 2, 4])
+            row = torch.tensor([0, 1, 0, 1])
+            return torch.sparse_csc_tensor(ccol, row, v, size=(2, 2))
+
+        def compressed(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            return torch.sparse_compressed_tensor(
+                crow, col, v, size=(2, 2), layout=torch.sparse_csr
+            )
+
+        def bsr(v):
+            crow = torch.tensor([0, 1, 2])
+            col = torch.tensor([0, 1])
+            return torch.sparse_bsr_tensor(crow, col, v, size=(4, 4))
+
+        def bsc(v):
+            ccol = torch.tensor([0, 1, 2])
+            row = torch.tensor([0, 1])
+            return torch.sparse_bsc_tensor(ccol, row, v, size=(4, 4))
+
+        flat_values = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        block_values = torch.randn(2, 2, 2)
+        for fn, v in [
+            (csr, flat_values),
+            (csc, flat_values),
+            (compressed, flat_values),
+            (bsr, block_values),
+            (bsc, block_values),
+        ]:
+            res = torch.compile(fn, backend="eager", fullgraph=True)(v)
+            self.assertEqual(res.to_dense(), fn(v).to_dense())
+
+    def test_sparse_compressed_tensor_creation_requires_grad(self):
+        def fn(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            a = torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+            return torch.mm(a, torch.ones(2, 2)).sum()
+
+        v = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Sparse tensor creation with autograd not supported",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(v)
+
+        res = torch.compile(fn, backend="eager")(v)
+        res.backward()
+        v2 = v.detach().clone().requires_grad_()
+        fn(v2).backward()
+        self.assertEqual(v.grad, v2.grad)
+
     @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"

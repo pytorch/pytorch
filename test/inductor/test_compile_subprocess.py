@@ -63,6 +63,8 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # fake sparse serialization varies by pickler version, skip to avoid xpass
+    "test_sparse_csr_creation": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_remove_noop_slice": TestFailure(
