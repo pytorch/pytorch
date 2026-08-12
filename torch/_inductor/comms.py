@@ -54,7 +54,6 @@ def align_runtime_estimations_across_all_distributed_ranks(
         gathered_runtime_estimations,
         runtime_estimations,
         pg,
-        weights_only=True,
     )
 
     lengths = OrderedSet([len(e) for e in gathered_runtime_estimations])

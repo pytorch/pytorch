@@ -1,0 +1,103 @@
+diff --git a/test/cpython/v3_13/test_index.py b/test/cpython/v3_13/test_index.py
+index cbdc56c801a..febd0fa24dd 100644
+--- a/test/cpython/v3_13/test_index.py
++++ b/test/cpython/v3_13/test_index.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_index.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ from test import support
+ import operator
+@@ -11,8 +29,9 @@ class TrapInt(int):
+     def __index__(self):
+         return int(self)
+ 
+-class BaseTestCase(unittest.TestCase):
++class BaseTestCase(CPythonTestCase):
+     def setUp(self):
++        super().setUp()
+         self.o = newstyle()
+         self.n = newstyle()
+ 
+@@ -94,6 +113,7 @@ class SeqTestCase:
+     # This test case isn't run directly. It just defines common tests
+     # to the different sequence types below
+     def setUp(self):
++        super().setUp()
+         self.o = newstyle()
+         self.n = newstyle()
+         self.o2 = newstyle()
+@@ -160,7 +180,7 @@ class SeqTestCase:
+         self.assertRaises(TypeError, sliceobj, self.n, self)
+ 
+ 
+-class ListTestCase(SeqTestCase, unittest.TestCase):
++class ListTestCase(SeqTestCase, CPythonTestCase):
+     seq = [0,10,20,30,40,50]
+ 
+     def test_setdelitem(self):
+@@ -216,24 +236,24 @@ class NewSeq:
+         return self._list[index]
+ 
+ 
+-class TupleTestCase(SeqTestCase, unittest.TestCase):
++class TupleTestCase(SeqTestCase, CPythonTestCase):
+     seq = (0,10,20,30,40,50)
+ 
+-class ByteArrayTestCase(SeqTestCase, unittest.TestCase):
++class ByteArrayTestCase(SeqTestCase, CPythonTestCase):
+     seq = bytearray(b"this is a test")
+ 
+-class BytesTestCase(SeqTestCase, unittest.TestCase):
++class BytesTestCase(SeqTestCase, CPythonTestCase):
+     seq = b"this is a test"
+ 
+-class StringTestCase(SeqTestCase, unittest.TestCase):
++class StringTestCase(SeqTestCase, CPythonTestCase):
+     seq = "this is a test"
+ 
+-class NewSeqTestCase(SeqTestCase, unittest.TestCase):
++class NewSeqTestCase(SeqTestCase, CPythonTestCase):
+     seq = NewSeq((0,10,20,30,40,50))
+ 
+ 
+ 
+-class RangeTestCase(unittest.TestCase):
++class RangeTestCase(CPythonTestCase):
+ 
+     def test_range(self):
+         n = newstyle()
+@@ -242,9 +262,10 @@ class RangeTestCase(unittest.TestCase):
+         self.assertEqual(range(1, 20).__getitem__(n), 6)
+ 
+ 
+-class OverflowTestCase(unittest.TestCase):
++class OverflowTestCase(CPythonTestCase):
+ 
+     def setUp(self):
++        super().setUp()
+         self.pos = 2**100
+         self.neg = -self.pos
+ 
+@@ -272,4 +293,4 @@ class OverflowTestCase(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

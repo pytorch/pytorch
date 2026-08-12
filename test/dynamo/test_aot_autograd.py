@@ -29,6 +29,10 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.profiler import profile
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -1831,10 +1835,87 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # Should only compile once regardless of batch size changes
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @fx_config.patch(translation_validation=False)
+    def test_partitioner_saves_unreplaced_input_symbols_for_bw(self):
+        shape_env = ShapeEnv(should_record_events=False)
+        s0 = make_symbol(SymT.SIZE, 0, integer=True)
+        shape_env.var_to_range[s0] = ValueRanges(2, 10)
+        shape_env.add_backed_var_to_val(s0, 3)
+        s0_sym = shape_env.create_symintnode(s0, hint=3)
+
+        u0_sym = shape_env.create_unbacked_symint()
+        u0 = u0_sym.node._expr
+        shape_env._set_replacement(u0, s0, "test")
+        u1_sym = shape_env.create_unbacked_symint()
+        u1 = u1_sym.node._expr
+        shape_env._rename_unbacked_to(u0, u1)
+        derived_sym = shape_env.create_symintnode(u0 + 1, hint=None)
+
+        graph = torch.fx.Graph()
+        s0_node = graph.placeholder("primals_1")
+        s0_node.meta["val"] = s0_sym
+        u0_node = graph.call_function(operator.add, (s0_node, 0))
+        u0_node.meta["val"] = u0_sym
+        u0_node.meta["unbacked_bindings"] = {u0: ()}
+        derived_node = graph.call_function(operator.add, (u0_node, 1))
+        derived_node.meta["val"] = derived_sym
+        output = graph.output((s0_node, derived_node))
+        output.meta["desc"] = [None, None]
+        joint = torch.fx.GraphModule({}, graph)
+
+        _, bw_graph = _extract_fwd_bwd_modules(
+            joint, [], [derived_node], num_fwd_outputs=1
+        )
+        bw_placeholders = list(bw_graph.graph.find_nodes(op="placeholder"))
+        # The backward binds the unreplaced symbol u0 (needed by runtime
+        # assertions, which preserve raw placeholder expressions) *and* the
+        # replacement target s0 (needed by sizevar codegen and FxGraphCache
+        # guards, which use ShapeEnv replacements). Binding only u0 leaves s0
+        # undefined in the backward, surfacing as a KeyError during backward
+        # FxGraphCache guard evaluation.
+        self.assertEqual(
+            [node.meta["val"].node._expr for node in bw_placeholders],
+            [s0, u0, u0 + 1],
+        )
+
+        graph_inputs = [node.meta["val"] for node in bw_placeholders]
+        lowering = GraphLowering(
+            bw_graph, graph_inputs, shape_env=shape_env, is_backward=True
+        )
+        with V.set_graph_handler(lowering):
+            lowering.run(*graph_inputs)
+
+        self.assertEqual(
+            [lowering.graph_inputs[name] for name in lowering.graph_input_names],
+            [s0, u1, u1 + 1],
+        )
+        self.assertEqual(
+            [
+                lowering.graph_inputs[name].xreplace({u1: s0})
+                for name in lowering.graph_input_names
+            ],
+            [s0, s0, s0 + 1],
+        )
+
+    def test_batched_matmul_inference_mode(self):
+        # Regression test for torch.compile crash with batched matmul in inference_mode
+        x = torch.randn(2, 4, 8)
+        w = torch.randn(8, 8)
+
+        def f(x, w):
+            with torch.inference_mode():
+                return (x @ w).sum()
+
+        torch._dynamo.reset()
+        result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
+        self.assertIsInstance(result, torch.Tensor)
+
+
+class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
-    def test_partitioner_filters_symbool_saved_for_bw(self):
+    def test_partitioner_filters_symbool_saved_for_bw(self, device):
         """When cross-rank sync injects SymBool nodes (whose only consumers are
         _assert_scalar) into saved_values, the partitioner must filter them out
         so they don't become backward graph inputs that Inductor can't lower.
@@ -1868,9 +1949,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             chunks = torch.split(y, splits, dim=0)
             return torch.cat([c * 2.0 for c in chunks], dim=0).sum()
 
-        x = torch.randn(20, 16, requires_grad=True, device="cuda")
-        splits_tensor = torch.tensor([3, 5], device="cuda")
-        mask = torch.zeros(20, dtype=torch.bool, device="cuda")
+        x = torch.randn(20, 16, requires_grad=True, device=device)
+        splits_tensor = torch.tensor([3, 5], device=device)
+        mask = torch.zeros(20, dtype=torch.bool, device=device)
         mask[:8] = True
 
         with (
@@ -1893,7 +1974,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         from functorch.compile import aot_function, default_partition, nop
 
-        x = torch.randn(20, 16, requires_grad=True, device="cuda")
+        x = torch.randn(20, 16, requires_grad=True, device=device)
         compiled_fn = aot_function(
             fn,
             fw_compiler=fw_compiler,
@@ -1918,75 +1999,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             )
         )
 
-    @fx_config.patch(translation_validation=False)
-    def test_partitioner_saves_unreplaced_input_symbols_for_bw(self):
-        shape_env = ShapeEnv(should_record_events=False)
-        s0 = make_symbol(SymT.SIZE, 0, integer=True)
-        shape_env.var_to_range[s0] = ValueRanges(2, 10)
-        shape_env.add_backed_var_to_val(s0, 3)
-        s0_sym = shape_env.create_symintnode(s0, hint=3)
 
-        u0_sym = shape_env.create_unbacked_symint()
-        u0 = u0_sym.node._expr
-        shape_env._set_replacement(u0, s0, "test")
-        u1_sym = shape_env.create_unbacked_symint()
-        u1 = u1_sym.node._expr
-        shape_env._rename_unbacked_to(u0, u1)
-        derived_sym = shape_env.create_symintnode(u0 + 1, hint=None)
-
-        graph = torch.fx.Graph()
-        s0_node = graph.placeholder("primals_1")
-        s0_node.meta["val"] = s0_sym
-        u0_node = graph.call_function(operator.add, (s0_node, 0))
-        u0_node.meta["val"] = u0_sym
-        u0_node.meta["unbacked_bindings"] = {u0: ()}
-        derived_node = graph.call_function(operator.add, (u0_node, 1))
-        derived_node.meta["val"] = derived_sym
-        output = graph.output((s0_node, derived_node))
-        output.meta["desc"] = [None, None]
-        joint = torch.fx.GraphModule({}, graph)
-
-        _, bw_graph = _extract_fwd_bwd_modules(
-            joint, [], [derived_node], num_fwd_outputs=1
-        )
-        bw_placeholders = list(bw_graph.graph.find_nodes(op="placeholder"))
-        self.assertEqual(
-            [node.meta["val"].node._expr for node in bw_placeholders],
-            [u0, u0 + 1],
-        )
-
-        graph_inputs = [node.meta["val"] for node in bw_placeholders]
-        lowering = GraphLowering(
-            bw_graph, graph_inputs, shape_env=shape_env, is_backward=True
-        )
-        with V.set_graph_handler(lowering):
-            lowering.run(*graph_inputs)
-
-        self.assertEqual(
-            [lowering.graph_inputs[name] for name in lowering.graph_input_names],
-            [u1, u1 + 1],
-        )
-        self.assertEqual(
-            [
-                lowering.graph_inputs[name].xreplace({u1: s0})
-                for name in lowering.graph_input_names
-            ],
-            [s0, s0 + 1],
-        )
-
-    def test_batched_matmul_inference_mode(self):
-        # Regression test for torch.compile crash with batched matmul in inference_mode
-        x = torch.randn(2, 4, 8)
-        w = torch.randn(8, 8)
-
-        def f(x, w):
-            with torch.inference_mode():
-                return (x @ w).sum()
-
-        torch._dynamo.reset()
-        result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
-        self.assertIsInstance(result, torch.Tensor)
-
+instantiate_device_type_tests(AotAutogradFallbackTestsDevice, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
