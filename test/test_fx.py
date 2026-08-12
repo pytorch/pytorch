@@ -4958,10 +4958,9 @@ class TestFXCUDA(JitTestCase):
             )
 
     # This only fails on navi31
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     @blas_library_context("cublaslt")
-    def test_profiler_stack_trace_augmentation(self):
+    def test_profiler_stack_trace_augmentation(self, device):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
         augments profiler events with stack traces from FX metadata registry.
@@ -4981,20 +4980,20 @@ class TestFXCUDA(JitTestCase):
                 x = self.linear2(x)
                 return x
 
-        model = TestModel().cuda()
+        model = TestModel().to(device)
 
         # Compile the model
         compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
 
         # Warmup
         for _ in range(3):
-            _ = compiled_model(torch.randn(10, 10, device="cuda"))
+            _ = compiled_model(torch.randn(10, 10, device=device))
 
         # Profile with the compiled model
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         ) as prof:
-            result = compiled_model(torch.randn(10, 10, device="cuda"))
+            result = compiled_model(torch.randn(10, 10, device=device))
 
         actual_traces = _enrich_profiler_traces(prof)
 
@@ -5035,9 +5034,8 @@ event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
 event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
-    def test_profiler_multiple_modules(self):
+    def test_profiler_multiple_modules(self, device):
         """
         Test that multiple compiled modules under the same profiler session
         have their events correctly augmented with stack traces.
@@ -5051,8 +5049,8 @@ event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             def forward(self, x):
                 return x - 1
 
-        model_a = ModelA().cuda()
-        model_b = ModelB().cuda()
+        model_a = ModelA().to(device)
+        model_b = ModelB().to(device)
 
         # Compile both models
         compiled_a = torch.compile(model_a, backend="aot_eager", fullgraph=True)
@@ -5060,15 +5058,15 @@ event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
 
         # Warmup
         for _ in range(3):
-            _ = compiled_a(torch.randn(10, 10, device="cuda"))
-            _ = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
+            _ = compiled_a(torch.randn(10, 10, device=device))
+            _ = compiled_b(torch.randn(1, 3, 8, 8, device=device))
 
         # Profile both models in the same session
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         ) as prof:
-            result_a = compiled_a(torch.randn(10, 10, device="cuda"))
-            result_b = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
+            result_a = compiled_a(torch.randn(10, 10, device=device))
+            result_b = compiled_b(torch.randn(1, 3, 8, 8, device=device))
 
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
@@ -5079,9 +5077,8 @@ event=aten::sub node=sub stack_trace=return x - 1
 event={kernel_event} node=sub stack_trace=return x - 1"""
             )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
-    def test_profiler_nested_graph_modules(self):
+    def test_profiler_nested_graph_modules(self, device):
         """
         Test that nested graph modules (e.g., graph modules calling subgraphs)
         have their events correctly augmented with stack traces.
@@ -5100,20 +5097,20 @@ event={kernel_event} node=sub stack_trace=return x - 1"""
                 a = s + self.c
                 return a
 
-        model = Mod().cuda()
+        model = Mod().to(device)
 
         # Compile the model (this may create nested graph modules)
         compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
 
         # Warmup
         for _ in range(3):
-            _ = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            _ = compiled_model(torch.randn(10, 10, device=device), torch.randn(10, 10, device=device))
 
         # Profile
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         ) as prof:
-            result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            result = compiled_model(torch.randn(10, 10, device=device), torch.randn(10, 10, device=device))
 
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
@@ -5127,8 +5124,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
 
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_graph_module_with_hop_serialization(self):
+    def test_graph_module_with_hop_serialization(self, device):
         """
         Test that a GraphModule containing HigherOrderOperators that don't take
         callable arguments can be serialized and deserialized via __reduce__.
