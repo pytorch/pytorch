@@ -298,15 +298,10 @@ struct C10_API ExtraMeta {
   // The real tensor this fake shadows, when propagate_real_tensors is on.
   c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
   // The real constant this fake was created from (via
-  // FakeTensorMode::set_constant), or null. Owned here so it dies with the
-  // tensor; TensorImpl::release_resources drops it at strong-refcount 0.
-  // Deliberately NOT copied: a cloned ExtraMeta belongs to a different
-  // (unregistered) fake tensor.
+  // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
 
   ExtraMeta() = default;
-  // defined out-of-line (= default) because members like fake_constant_ /
-  // backend_meta_ hold intrusive_ptrs to types incomplete at this point.
   ~ExtraMeta();
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
@@ -1545,6 +1540,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.
+  // This is for FakeTensor only.
   ExtraMeta* maybe_get_extra_meta() const {
     return extra_meta_.get();
   }
