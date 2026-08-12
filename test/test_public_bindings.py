@@ -421,6 +421,7 @@ class TestPublicBindings(TestCase):
             cuda_dep_prefixes = (
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.polar.",
+                "torch._native.ops.reductions.inner_tree_kernel",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
