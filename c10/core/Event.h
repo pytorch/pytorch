@@ -49,7 +49,7 @@ struct Event final {
       const EventFlag _flag = EventFlag::PYTORCH_DEFAULT)
       : impl_{_device_type, _flag} {}
 
-  Event(const Device _device, std::string handle_string)
+  Event(const Device _device, const std::string& handle_string)
       : impl_{_device.type(), EventFlag::INTERPROCESS} {
     impl_.reconstructFromIPCHandle(_device.index(), handle_string);
   }
@@ -131,7 +131,9 @@ struct Event final {
     return impl_.eventId();
   }
 
-  std::string ipcHandle() const {
+  // Returns an IPC handle string for sharing this event with another process,
+  // lazily initializing the backend event if needed.
+  std::string ipcHandle() {
     return impl_.ipcHandle();
   }
 
