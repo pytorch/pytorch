@@ -220,6 +220,15 @@ class SymNode:
         if (
             isinstance(self._expr, int)
             or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
+            # sympy.true / sympy.false are not Numbers, and a SymBool that has
+            # settled on a constant asks for its expr over and over (25k times
+            # in one inductor compile), each one paying for a replace() that
+            # cannot do anything. is_Atom keeps relationals, which do have
+            # symbols to replace, on the general path below.
+            or (
+                self._expr.is_Boolean  # pyrefly: ignore[missing-attribute]
+                and self._expr.is_Atom  # pyrefly: ignore[missing-attribute]
+            )
         ):
             return self._expr
         if self.shape_env is None:
