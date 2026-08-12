@@ -8,13 +8,14 @@ is the feature-rollout gate for these operators -- it is *not* gated by the
 global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
 ``cutedsl_utils`` at registration time).
 
-We register ten ATen dispatcher entries on ``CUDA``:
+We register eleven ATen dispatcher entries on ``CUDA``:
 
 * ``sum.dim_IntList`` / ``sum.IntList_out`` -- ``x.sum(dim=...)`` + ``.out``.
 * ``prod.dim_int`` / ``prod.int_out`` -- ``x.prod(dim=...)`` + ``.out``.
 * ``nansum`` / ``nansum.out`` -- ``x.nansum(dim=...)`` + ``.out``.
 * ``mean.dim`` / ``mean.out`` -- ``x.mean(dim=...)`` + ``.out``.
 * ``linalg_vector_norm`` / ``linalg_vector_norm.out`` -- p=1 and p=2 norms.
+* ``logsumexp`` -- functional logsumexp, composed over ``sum.IntList_out``.
 
 ``nanmean`` is covered compositionally and intentionally has no dispatcher
 entry here. ATen's CompositeImplicitAutograd implementation computes an
@@ -24,9 +25,15 @@ through the overrides above, preserving the inner-tree nansum numerator while
 ATen retains the count, tensor/tensor true division, and composite autograd
 behavior. Registering ``nanmean`` here would shadow that composite.
 
-The reductions share identical inner-tree geometry and eligibility. Their
-combiner, identity, and optional pre/post maps are threaded through the kernel
-in ``inner_tree_kernel.py``.
+``logsumexp`` is also covered compositionally. Its functional override
+pre-sizes the output and delegates to ATen's ``logsumexp.out`` implementation,
+whose nested ``sum.IntList_out`` call routes through the sum override above.
+The out overload is intentionally not registered, preserving ATen's native
+resize/error behavior for mis-sized outputs.
+
+The kernel-backed reductions share identical inner-tree geometry and
+eligibility. Their combiner, identity, and optional pre/post maps are threaded
+through the kernel in ``inner_tree_kernel.py``.
 
 ``sum.dim_IntList`` is ``structured_delegate: sum.IntList_out``, so its
 delegation to the ``.out`` kernel happens *below* the dispatcher; overriding
@@ -223,6 +230,10 @@ def _cond(self, dim=None, keepdim=False, *, dtype=None) -> bool:
     return _eligibility(self, d, out) is not None
 
 
+def _logsumexp_cond(self, dim, keepdim=False) -> bool:
+    return _cond(self, dim, keepdim)
+
+
 def _out_cond(self, dim=None, keepdim=False, *, dtype=None, out) -> bool:
     d = _base_cond_ok(self, dim, dtype)
     if d is None:
@@ -330,6 +341,17 @@ def _make_out_impl(reduce_into):
     return _out_impl
 
 
+def _logsumexp_impl(self, dim, keepdim=False):
+    d = _single_dim(dim, self.ndim)
+    if d is None:
+        raise AssertionError("_logsumexp_cond guaranteed a single dim")
+    out_kd = torch.empty(
+        _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
+    )
+    out = out_kd if keepdim else out_kd.squeeze(d)
+    return torch.ops.aten.logsumexp.out(self, dim, keepdim=keepdim, out=out)
+
+
 def _vector_norm_impl(self, ord=2, dim=None, keepdim=False, *, dtype=None):
     p = _vector_norm_order(ord)
     if p is None:
@@ -410,4 +432,7 @@ def register_to_dispatch() -> None:
         "CUDA",
         cond=_vector_norm_out_cond,
         impl=_vector_norm_out_impl,
+    )
+    cu.register_op_override(
+        "aten", "logsumexp", "CUDA", cond=_logsumexp_cond, impl=_logsumexp_impl
     )

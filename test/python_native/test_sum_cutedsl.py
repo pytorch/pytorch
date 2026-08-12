@@ -1200,6 +1200,208 @@ class TestSumCuteDSLOverride(TestCase):
             self.assertNotWarn(lambda: torch.nanmean(x, dim=1).sum().backward())
         self.assertIsNotNone(x.grad)
 
+    # --- logsumexp (ATen max masking/exp/log over inner-tree sum) ---
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    @parametrize("m,n", [(128, 15), (128, 8195), (8, 200003)])
+    def test_logsumexp_matches_inner_tree_composition(self, dtype, m, n):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        x = self._make_order_sensitive_input(m, n, dtype)
+        with self._inner_tree_flag():
+            got = torch.logsumexp(x, dim=1)
+            maxes = torch.amax(x, dim=1, keepdim=True)
+            squeezed_maxes = maxes.squeeze(1)
+            safe = torch.where(torch.isfinite(maxes), maxes, 0)
+            expected = squeezed_maxes + torch.log(torch.sum(torch.exp(x - safe), dim=1))
+        self.assertEqual(
+            got.view(view_dtype), expected.view(view_dtype), rtol=0, atol=0
+        )
+
+    @parametrize("m,n", [(128, 15), (128, 8195), (8, 200003)])
+    def test_logsumexp_override_engaged(self, m, n):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(m, n, torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+        ):
+            torch.logsumexp(x, dim=1)
+        self.assertEqual(sum_into.call_count, 1)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    @parametrize("m,n", [(128, 15), (128, 8195), (8, 200003)])
+    def test_logsumexp_matches_aten(self, dtype, m, n):
+        rtol, atol = (1e-5, 1e-6) if dtype == torch.float32 else (1e-12, 1e-12)
+        x = self._make_order_sensitive_input(m, n, dtype)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.logsumexp(x, dim=1)
+        with self._inner_tree_flag():
+            got = torch.logsumexp(x, dim=1)
+        self.assertEqual(got, ref, rtol=rtol, atol=atol)
+
+    @parametrize("keepdim", [False, True])
+    def test_logsumexp_out_variant(self, keepdim):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        with self._inner_tree_flag():
+            functional = torch.logsumexp(x, dim=1, keepdim=keepdim)
+        out_shape = (128, 1) if keepdim else (128,)
+        out = torch.empty(out_shape, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+        ):
+            returned = torch.logsumexp(x, dim=1, keepdim=keepdim, out=out)
+        self.assertEqual(sum_into.call_count, 1)
+        self.assertIs(returned, out)
+        self.assertEqual(
+            out.view(torch.int32), functional.view(torch.int32), rtol=0, atol=0
+        )
+
+    def test_logsumexp_mis_sized_out(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        with (
+            torch.backends.python_native.cutedsl.disabled(),
+            self.assertWarnsRegex(
+                UserWarning, "An output with one or more elements was resized"
+            ),
+        ):
+            native_out = torch.empty(1, device="cuda", dtype=torch.float32)
+            native_returned = torch.logsumexp(x, dim=1, out=native_out)
+        out = torch.empty(1, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+            self.assertWarnsRegex(
+                UserWarning, "An output with one or more elements was resized"
+            ),
+        ):
+            returned = torch.logsumexp(x, dim=1, out=out)
+        self.assertEqual(sum_into.call_count, 0)
+        self.assertIs(native_returned, native_out)
+        self.assertIs(returned, out)
+        self.assertEqual(out.shape, native_out.shape)
+        self.assertEqual(
+            out.view(torch.int32), native_out.view(torch.int32), rtol=0, atol=0
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("m,n", [(64, 32), (8, 4096), (8, 65536)])
+    def test_logsumexp_low_precision_matches_aten(self, dtype, m, n):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(m, n, dtype)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.logsumexp(x, dim=1)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+        ):
+            got = torch.logsumexp(x, dim=1)
+        self.assertEqual(sum_into.call_count, 1)
+        self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_logsumexp_all_negative_infinity(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(2, 8195, torch.float32)
+        x[0].fill_(-float("inf"))
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.logsumexp(x, dim=1)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+        ):
+            got = torch.logsumexp(x, dim=1)
+        self.assertEqual(sum_into.call_count, 1)
+        self.assertTrue(torch.isneginf(got[0]).item())
+        self.assertFalse(torch.isnan(got[0]).item())
+        self.assertEqual(got, ref, rtol=1e-5, atol=1e-6)
+
+    def test_logsumexp_multi_dim_falls_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(4, 32, torch.float32).reshape(2, 2, 32)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.logsumexp(x, dim=[0, 1])
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+        ):
+            got = torch.logsumexp(x, dim=[0, 1])
+        self.assertEqual(sum_into.call_count, 0)
+        self.assertEqual(got, ref, rtol=0, atol=0)
+
+    @parametrize(
+        "kwargs,error",
+        [
+            ({"dim": None}, "argument 'dim' must be tuple of ints"),
+            (
+                {"dim": 1, "dtype": torch.float64},
+                "unexpected keyword argument 'dtype'",
+            ),
+        ],
+    )
+    def test_logsumexp_schema_errors(self, kwargs, error):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(4, 32, torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+            self.assertRaisesRegex(TypeError, error),
+        ):
+            torch.logsumexp(x, **kwargs)
+        self.assertEqual(sum_into.call_count, 0)
+
+    def test_logsumexp_requires_grad(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(4, 32, torch.float32).requires_grad_()
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_sum_into",
+                wraps=inner_tree_kernel.inner_tree_sum_into,
+            ) as sum_into,
+            self._inner_tree_flag(),
+        ):
+            self.assertNotWarn(lambda: torch.logsumexp(x, dim=1).sum().backward())
+        self.assertEqual(sum_into.call_count, 1)
+        self.assertIsNotNone(x.grad)
+
 
 instantiate_parametrized_tests(TestSumCuteDSLOverride)
 
