@@ -22,7 +22,6 @@ from unittest.mock import patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
-from torch.cuda._graph_annotations import _is_tools_id_unavailable
 from torch.profiler import (
     kineto_available,
     profile,
@@ -45,13 +44,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
 )
-
-
-# get_graph_data() -- how the tests below read a graph's node ids -- needs
-# cudaGraphNodeGetToolsId, i.e. cuda.bindings >= 13.1 and a driver >= 13.1 (or cuda-compat on
-# LD_LIBRARY_PATH); it raises otherwise. Probed only under CUDA, since the probe calls into the
-# CUDA runtime.
-TEST_GRAPH_TOOLS_ID = TEST_CUDA and not _is_tools_id_unavailable()
 
 
 def setUpModule():
