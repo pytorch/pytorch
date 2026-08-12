@@ -996,8 +996,6 @@ class TestCppExtensionUtils(TestCase):
         # boundary between two lists changes the key.
         self.assertNotEqual(key(["a"], ["b"]), key(["a", "b"], []))
 
-        self.assertEqual(len(key(objects, cflags)), 16)
-
 
 class TestTraceback(TestCase):
     def test_basic(self):

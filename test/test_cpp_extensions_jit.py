@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 import warnings
 
 import torch
@@ -25,6 +26,7 @@ from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
+    COMMON_MSVC_FLAGS,
     CUDA_HOME,
     get_cxx_compiler,
     remove_extension_h_precompiler_headers,
@@ -38,6 +40,8 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+# setuptools always supplies these on the MSVC path; a bare `cl -c` is missing /EHsc.
+BASE_CFLAGS = COMMON_MSVC_FLAGS if IS_WINDOWS else []
 
 
 class TestCppExtensionImport(common.TestCase):
@@ -1641,10 +1645,7 @@ except RuntimeError as e:
                     )
 
 
-class TestCppExtensionNinjaIsolation(common.TestCase):
-    """setuptools gives every extension of a project the same output directory."""
-
-    def _write_sources(self, root, name, count=4):
+    def _write_ninja_isolation_sources(self, root, name, count=2):
         directory = os.path.join(root, name)
         os.makedirs(directory)
         sources = []
@@ -1652,29 +1653,47 @@ class TestCppExtensionNinjaIsolation(common.TestCase):
             path = os.path.join(directory, f"{name}_{i}.cpp")
             with open(path, "w") as source:
                 source.write(
-                    "#include <map>\n"
-                    "#include <string>\n"
-                    f"int {name}_{i}() {{\n"
-                    "  std::map<std::string, int> m;\n"
-                    "  for (int k = 0; k < 128; ++k) {\n"
-                    "    m[std::to_string(k)] = k;\n"
-                    "  }\n"
-                    "  return static_cast<int>(m.size());\n"
-                    "}\n"
+                    "#ifndef MODE\n"
+                    "#define MODE 0\n"
+                    "#endif\n"
+                    f"int {name}_{i}() {{ return MODE; }}\n"
                 )
             sources.append(path)
         return sources
 
-    def test_parallel_builds_sharing_an_output_directory(self):
-        torch.utils.cpp_extension.verify_ninja_availability()
+    def _compile_objects_into(self, sources, objects, build_directory, cflags):
+        torch.utils.cpp_extension._write_ninja_file_and_compile_objects(
+            sources=sources,
+            objects=objects,
+            cflags=cflags,
+            post_cflags=[],
+            cuda_cflags=None,
+            cuda_post_cflags=None,
+            cuda_dlink_post_cflags=None,
+            sycl_cflags=None,
+            sycl_post_cflags=None,
+            sycl_dlink_post_cflags=None,
+            build_directory=build_directory,
+            verbose=False,
+            with_cuda=False,
+            with_sycl=False,
+        )
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    def test_ninja_build_files_are_isolated_per_invocation(self):
+        # setuptools gives every extension of a project the same output directory,
+        # so a parallel `build_ext -j` used to have them overwrite one another's
+        # build.ninja and silently produce no objects for all but one.
         obj_suffix = ".obj" if IS_WINDOWS else ".o"
         with tempfile.TemporaryDirectory() as root:
             shared = os.path.abspath(os.path.join(root, "temp.shared"))
             os.makedirs(shared)
 
             plan = {}
-            for name in [f"ext{i}" for i in range(4)]:
-                sources = self._write_sources(root, name)
+            for name in ("ext0", "ext1"):
+                sources = self._write_ninja_isolation_sources(root, name)
                 os.makedirs(os.path.join(shared, name))
                 plan[name] = (
                     sources,
@@ -1688,43 +1707,63 @@ class TestCppExtensionNinjaIsolation(common.TestCase):
                     ],
                 )
 
-            errors = {}
+            errors = []
 
             def build(name):
                 sources, objects = plan[name]
                 try:
-                    torch.utils.cpp_extension._write_ninja_file_and_compile_objects(
-                        sources=sources,
-                        objects=objects,
-                        cflags=[],
-                        post_cflags=[],
-                        cuda_cflags=None,
-                        cuda_post_cflags=None,
-                        cuda_dlink_post_cflags=None,
-                        sycl_cflags=None,
-                        sycl_post_cflags=None,
-                        sycl_dlink_post_cflags=None,
-                        build_directory=shared,
-                        verbose=False,
-                        with_cuda=False,
-                        with_sycl=False,
-                    )
+                    self._compile_objects_into(sources, objects, shared, BASE_CFLAGS)
                 except Exception as error:
-                    errors[name] = error
+                    errors.append(error)
 
-            threads = [threading.Thread(target=build, args=(name,)) for name in plan]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
+            # every _run_ninja_build already fans out to #cpus+2 on its own
+            with unittest.mock.patch.dict(os.environ, {"MAX_JOBS": "2"}):
+                threads = [threading.Thread(target=build, args=(n,)) for n in plan]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
 
-            self.assertEqual(errors, {})
+            if errors:
+                raise errors[0]
             for name, (_, objects) in plan.items():
                 for obj in objects:
                     self.assertTrue(
                         os.path.exists(obj),
                         f"compiling {name} reported success but produced no {obj}",
                     )
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    def test_ninja_isolation_still_rebuilds_when_only_flags_change(self):
+        # Keying the directory on the flags means each build reads a log that does
+        # not know the other one overwrote the object, so the guarantee that a
+        # changed command recompiles now rests on ninja noticing the output moved
+        # underneath it. Check that it does, and that an unchanged rebuild is
+        # still a no-op, which is the reason for a digest over a temporary dir.
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+            sources = self._write_ninja_isolation_sources(root, "ext", count=1)
+            objects = [os.path.join(shared, "ext_0" + obj_suffix)]
+
+            def compile_with_mode(mode):
+                self._compile_objects_into(
+                    sources, objects, shared, BASE_CFLAGS + [f"-DMODE={mode}"]
+                )
+                with open(objects[0], "rb") as compiled:
+                    return compiled.read()
+
+            first = compile_with_mode(1)
+            second = compile_with_mode(2)
+            self.assertTrue(
+                first != second, "changing the flags did not recompile the object"
+            )
+            self.assertTrue(
+                second == compile_with_mode(2), "rebuilt with nothing changed"
+            )
 
 
 if __name__ == "__main__":

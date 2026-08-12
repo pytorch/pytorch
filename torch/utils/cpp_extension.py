@@ -2422,7 +2422,7 @@ def _get_hipcc_path():
     else:
         return _join_rocm_home('bin', 'hipcc')
 
-def _ninja_build_key(*parts) -> str:
+def _ninja_build_key(*parts: list[str] | None) -> str:
     """Short stable digest of everything that determines a build.ninja's contents."""
     digest = hashlib.sha256()
     for part in parts:
@@ -2462,24 +2462,16 @@ def _write_ninja_file_and_compile_objects(
         raise AssertionError(
             "cannot have both SYCL and CUDA files in the same extension"
         )
-    # setuptools hands every extension of a project the same output directory,
-    # so writing build.ninja (and letting ninja keep .ninja_log / .ninja_deps
-    # beside it) straight into build_directory makes concurrent `build_ext -j`
-    # invocations clobber one another. Keep each invocation's bookkeeping in its
-    # own subdirectory. Every path written into the file is absolute, so
-    # relocating the file does not change what gets built.
-    #
-    # The key is everything that decides the contents of build.ninja: the objects
-    # and the flags used to produce them. Objects alone are not enough, because a
-    # project may compile one source set twice under different defines and get the
-    # same object paths both times (DeepSpeed builds transformer and
-    # stochastic_transformer that way). Hashing rather than using a fresh
-    # temporary directory keeps the directory stable across runs, so an
-    # incremental rebuild still finds ninja's log and skips up-to-date objects.
+    # setuptools gives every extension of a project the same output directory, and
+    # ninja keeps .ninja_log / .ninja_deps beside build.ninja, so a concurrent
+    # `build_ext -j` has those clobber one another. Give each invocation its own
+    # subdirectory, keyed on every input that decides the file's contents. A digest
+    # rather than a fresh temporary directory keeps the path stable across runs, so
+    # incremental rebuilds still find ninja's log.
     build_directory = os.path.join(
         build_directory,
         '.ninja-' + _ninja_build_key(
-            objects, cflags, post_cflags, cuda_cflags, cuda_post_cflags,
+            sources, objects, cflags, post_cflags, cuda_cflags, cuda_post_cflags,
             cuda_dlink_post_cflags, sycl_cflags, sycl_post_cflags,
             sycl_dlink_post_cflags))
     build_file_path = os.path.join(build_directory, 'build.ninja')
