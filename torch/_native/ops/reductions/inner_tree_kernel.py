@@ -53,6 +53,8 @@ import cutlass.cute as cute
 # fp64 is part of the bitwise contract; import Float64 directly so an
 # unsupported runtime surfaces a clear error rather than silently dropping it.
 from cutlass import BFloat16, const_expr, Float16, Float32, Float64, Int32
+from cutlass._mlir.dialects import llvm
+from cutlass.cutlass_dsl import dsl_user_op
 
 import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
@@ -136,10 +138,73 @@ def _divide_by_n(v, N):
     return v / v.dtype(N)
 
 
+# Keep x*x and the final sqrt as distinct IEEE-rounded instructions. Without
+# the inline multiply, CuTe contracts the square into a reduction add.
+def _ptx_float_type(v):
+    dtype = v.dtype
+    if dtype is Float32:
+        return dtype, "f32", "f"
+    if dtype is Float64:
+        return dtype, "f64", "d"
+    raise TypeError(f"rounded PTX operation requires fp32 or fp64, got {dtype}")
+
+
+@dsl_user_op
+def _mul_rn(a, b, *, loc=None, ip=None):
+    dtype, suffix, register = _ptx_float_type(a)
+    return dtype(
+        llvm.inline_asm(
+            dtype.mlir_type,
+            [a.ir_value(loc=loc, ip=ip), b.ir_value(loc=loc, ip=ip)],
+            f"mul.rn.{suffix} $0, $1, $2;",
+            f"={register},{register},{register}",
+            has_side_effects=False,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+            loc=loc,
+            ip=ip,
+        )
+    )
+
+
+@dsl_user_op
+def _sqrt_rn(v, *, loc=None, ip=None):
+    dtype, suffix, register = _ptx_float_type(v)
+    return dtype(
+        llvm.inline_asm(
+            dtype.mlir_type,
+            [v.ir_value(loc=loc, ip=ip)],
+            f"sqrt.rn.{suffix} $0, $1;",
+            f"={register},{register}",
+            has_side_effects=False,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+            loc=loc,
+            ip=ip,
+        )
+    )
+
+
+def _square(v):
+    return _mul_rn(v, v)
+
+
+def _abs(v):
+    return abs(v)
+
+
+def _sqrt(v, _N):
+    return _sqrt_rn(v)
+
+
 _SUM = _Reduction("sum", _add, 0.0)
 _PROD = _Reduction("prod", _mul, 1.0)
 _NANSUM = _Reduction("nansum", _add, 0.0, pre=_nan_to_zero)
 _MEAN = _Reduction("mean", _add, 0.0, post=_divide_by_n)
+_VECTOR_NORM_P2 = _Reduction(
+    "linalg_vector_norm_p2", _add, 0.0, pre=_square, post=_sqrt
+)
+_VECTOR_NORM_P1 = _Reduction("linalg_vector_norm_p1", _add, 0.0, pre=_abs)
 
 
 # ---------------------------------------------------------------------------
@@ -760,3 +825,16 @@ def inner_tree_nansum_into(out: torch.Tensor, src: torch.Tensor) -> None:
 def inner_tree_mean_into(out: torch.Tensor, src: torch.Tensor) -> None:
     """Row-wise inner-tree ``mean`` (see ``_inner_tree_reduce_into``)."""
     _inner_tree_reduce_into(out, src, _MEAN)
+
+
+def inner_tree_vector_norm_into(
+    out: torch.Tensor, src: torch.Tensor, p: int | float
+) -> None:
+    """Row-wise inner-tree vector norm (see ``_inner_tree_reduce_into``)."""
+    if p == 1:
+        red = _VECTOR_NORM_P1
+    elif p == 2:
+        red = _VECTOR_NORM_P2
+    else:
+        raise ValueError(f"unsupported vector norm order: {p}")
+    _inner_tree_reduce_into(out, src, red)
