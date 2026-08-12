@@ -593,6 +593,9 @@ exclude_patterns = [
     'test/cpp/**',
     'test/cpp_extensions/**',
     'third_party/concurrentqueue/**',
+    # Headers Kineto vendors from dynolog. Kineto's own sources are clean;
+    # this subtree is upstream code that is not ours to rewrite here.
+    'third_party/kineto/libkineto/third_party/**',
     'tools/autograd/**',
     'torch/csrc/*.cpp',
     'torch/csrc/*.h',
