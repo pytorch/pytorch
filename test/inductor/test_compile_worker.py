@@ -915,6 +915,31 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @config.patch(
+        {
+            "numerics": "strict",
+            "eager_numerics.use_pytorch_libdevice": False,
+            "emulate_precision_casts": False,
+            "force_disable_caches": True,
+        }
+    )
+    def test_strict_numerics_sets_libdevice_path(self):
+        """Test strict numerics sets libdevice path without legacy numerics flags."""
+        from triton import knobs
+
+        old_env = os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+        old_knob = knobs.nvidia.libdevice_path
+        knobs.nvidia.libdevice_path = None
+        try:
+            self._test_libdevice_path_with_compilation()
+        finally:
+            if old_env is not None:
+                os.environ["TRITON_LIBDEVICE_PATH"] = old_env
+            else:
+                os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+            knobs.nvidia.libdevice_path = old_knob
+
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
