@@ -328,6 +328,25 @@ class LazyBackend : public Backend {
       channel->unregisterAbortHook(hook_id);
     }
   }
+  bool supportsCompletionHooks() const override {
+    return primary_->supportsCompletionHooks();
+  }
+  void registerCompletionHook(int64_t hook_id, CompletionHook hook) override {
+    completion_hooks_.emplace(hook_id, hook);
+    primary_->registerCompletionHook(hook_id, hook);
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    for (auto& [_, channel] : pair_comms_) {
+      channel->registerCompletionHook(hook_id, hook);
+    }
+  }
+  void unregisterCompletionHook(int64_t hook_id) override {
+    completion_hooks_.erase(hook_id);
+    primary_->unregisterCompletionHook(hook_id);
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    for (auto& [_, channel] : pair_comms_) {
+      channel->unregisterCompletionHook(hook_id);
+    }
+  }
 
   // Reconfigure: the primary reconfigures in place; stale pair comms (built
   // for the previous membership) are aborted and rebuilt lazily on demand.
@@ -415,10 +434,13 @@ class LazyBackend : public Backend {
       sub->setBoundDeviceId(getBoundDeviceId());
     }
 
-    // Fan registered hooks out to the new channel so user-registered abort
-    // hooks observe events from every comm we own.
+    // Fan registered hooks out to the new channel so user-registered abort and
+    // completion hooks observe events from every comm we own.
     for (const auto& [hook_id, hook] : abort_hooks_) {
       sub->registerAbortHook(hook_id, hook);
+    }
+    for (const auto& [hook_id, hook] : completion_hooks_) {
+      sub->registerCompletionHook(hook_id, hook);
     }
 
     std::lock_guard<std::mutex> lk(pair_mu_);
@@ -476,6 +498,7 @@ class LazyBackend : public Backend {
 
   bool coalescing_active_{false};
   std::unordered_map<int64_t, AbortHook> abort_hooks_;
+  std::unordered_map<int64_t, CompletionHook> completion_hooks_;
 };
 
 } // namespace c10d

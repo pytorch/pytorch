@@ -111,6 +111,8 @@ std::vector<at::Tensor> Work::result() {
   TORCH_CHECK(false, "result() not implemented.");
 }
 
+void Work::releaseResultTensors() {}
+
 void Work::synchronize() {
   if (c10d::allow_inflight_collective_as_graph_input()) {
     c10d::unregister_work(
