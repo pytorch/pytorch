@@ -229,9 +229,12 @@ def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
     )
 
     result = []
+    seen_names: OrderedSet[str] = OrderedSet()
     for kernel in kernels:
         if kernel.metadata.operator_class is not PersistentDenseGemmEFCOperator:
-            result.append(kernel)
+            if kernel.metadata.operator_name not in seen_names:
+                seen_names.add(kernel.metadata.operator_name)
+                result.append(kernel)
             continue
         design = kernel.metadata.design
         tile_m, tile_n, tile_k = design.tile_shape
@@ -255,6 +258,9 @@ def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
                     design, tile_shape=(tile_m, vendored_tile_n, tile_k)
                 ),
             )
+            if operator_name in seen_names:
+                continue
+            seen_names.add(operator_name)
             result.append(VendoredDenseGemmEFCOperator(metadata))
     return result
 
