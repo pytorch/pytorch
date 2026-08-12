@@ -1,17 +1,5 @@
 name: Refresh release runner groups
 
-# Release binaries build from tags, and the self-hosted runner groups they need
-# are allow-listed per exact ref. That allow-list is reconciled by
-# pytorch/test-infra, which cannot see a tag push in this repo -- so tell it.
-#
-# Without this, a freshly cut RC is not authorized for the release runner groups
-# and every one of its build jobs queues indefinitely with no error, until
-# somebody notices and dispatches the reconcile by hand. That happened on
-# v2.14.0-rc2: https://github.com/pytorch/pytorch/actions/runs/31597398139
-#
-# This must exist on the branch the tag is cut from, since a tag build runs the
-# workflow as of the tagged commit. Cherry-pick it to release branches.
-
 on:
   push:
     tags:
@@ -23,17 +11,8 @@ permissions:
 
 jobs:
   dispatch:
-    # A fork has neither the token nor any business reconciling pytorch's
-    # runner groups.
     if: github.repository_owner == 'pytorch'
-    # GH_PYTORCHBOT_TOKEN is an environment secret; the job only sees it if it
-    # declares the environment. Note pytorchbot-env restricts which refs may
-    # deploy to it, and the tag patterns currently allow-listed there do not
-    # cover GA tags or rc>=10 on a two-digit minor (e.g. v2.14.0, v2.14.0-rc10).
-    # Those pushes fail here until v2.??.? and v2.??.?-rc?? are added to the
-    # environment's deployment tag policies.
     environment: pytorchbot-env
-    # Never gate this on the very runner groups it exists to unblock.
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch test-infra reconcile
@@ -41,8 +20,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           set -euo pipefail
-          # Dispatched on main, not at this tag: the reconcile discovers the new
-          # tag itself, and it only exists in test-infra's default branch.
           gh workflow run release-manage-runner-groups.yml \
             --repo pytorch/test-infra \
             --ref main \
