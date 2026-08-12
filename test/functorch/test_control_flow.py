@@ -7021,7 +7021,16 @@ class GraphModule(torch.nn.Module):
 
     @requires_cuda
     def test_associative_scan_in_vmap_pointwise_compile_nonpointwise(self):
-        x = torch.randn(4, 3, 3, device="cuda")
+        # A dim-sensitive combine_fn (transpose) passes the frontend pointwise gate
+        # but is not truly elementwise. The lane must be rank >= 2 so transpose(-1, -2)
+        # is valid and the call actually reaches the batch rule (a rank-1 lane would
+        # fail earlier during frontend meta tracing, making this test vacuous). Under
+        # compile the batch rule's fast path calls combine_fn directly on last-axis-
+        # batched args, and the transpose then misaligns the batch axis, so the
+        # pointwise lowering rejects it loudly rather than silently miscomputing.
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        x = torch.randn(4, 5, 3, 3, device="cuda")
 
         def combine_fn(a, b):
             return a + b.transpose(-1, -2)
@@ -7032,8 +7041,38 @@ class GraphModule(torch.nn.Module):
 
             return torch.vmap(inner_fn, in_dims=0)(x)
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(BackendCompilerFailed):
             torch.compile(fn, fullgraph=True)(x)
+
+    @parametrize("batch_size", [2, 3, 5])
+    def test_associative_scan_in_vmap_eager_nonpointwise(self, batch_size):
+        # Eager counterpart of the compile nonpointwise test: a dim-sensitive
+        # combine_fn passes the frontend pointwise gate but is not elementwise. The
+        # batch rule must NOT take the direct-call fast path in eager (it would parse
+        # the trailing batch axis as data and silently miscompute -- notably when
+        # batch_size equals the lane feature dim). It must fall back to the base
+        # re-vmap path, which vmaps over the true batch axis and stays correct.
+        lane_dim = 3
+        x = torch.randn(batch_size, 4, lane_dim, lane_dim)
+
+        def combine_fn(a, b):
+            return a + b.transpose(-1, -2)
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        # combine_fn is non-associative, so the reference must use the same tree
+        # reduction (combine_mode="generic") per lane, not the sequential fake scan.
+        exp = torch.stack(
+            [
+                associative_scan(combine_fn, x[i], dim=0, combine_mode="generic")
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(fn(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
