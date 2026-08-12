@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     MI350_ARCH,
     parametrize,
@@ -659,6 +660,7 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     return kwargs[format]
 
 class TestFP8Matmul(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
