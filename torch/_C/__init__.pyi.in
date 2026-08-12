@@ -2345,6 +2345,7 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
+    max_threads_per_block: _int
     gcnArchName: str
     warp_size: _int
     uuid: str
@@ -2354,6 +2355,14 @@ class _CudaDeviceProperties:
     memory_bus_width: _int
     shared_memory_per_block: _int
     shared_memory_per_multiprocessor: _int
+    # Registered under `#ifndef USE_ROCM` in torch/csrc/cuda/Module.cpp, so absent at
+    # runtime on a HIP build. Declared unconditionally anyway: the stub cannot be
+    # platform-conditional, and gcnArchName above is the mirror case (HIP-only).
+    shared_memory_per_block_optin: _int
+    regs_per_multiprocessor: _int
+    pci_bus_id: _int
+    pci_device_id: _int
+    pci_domain_id: _int
 
 # Functions related to SDPA
 class _SDPAParams:
