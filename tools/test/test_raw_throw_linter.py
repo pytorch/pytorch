@@ -32,9 +32,7 @@ def names(source: str, path: str = PATH) -> list[str]:
 
 
 def lines_flagged(source: str, path: str = PATH) -> list[int | None]:
-    return [
-        m.line for m in check_source(path, source) if m.name == "raw throw statement"
-    ]
+    return [m.line for m in check_source(path, source) if m.name == "raw-throw"]
 
 
 class TestScanSource(unittest.TestCase):
@@ -120,6 +118,35 @@ class TestFindThrows(unittest.TestCase):
         self.assertEqual(throws[0].line, 1)
         self.assertEqual(throws[0].expression, "( ErrorReport(loc) << what)")
 
+    def test_macro_body_without_a_semicolon_stops_at_the_newline(self) -> None:
+        source = "#define SHAPE_ASSERT(c) if (!(c)) throw propagation_error()\nint x;\n"
+        throws = find_throws(code_of(source))
+        self.assertEqual([t.expression for t in throws], ["propagation_error()"])
+
+    def test_a_continued_macro_line_keeps_going(self) -> None:
+        source = (
+            "#define C10_THROW(t, m) \\\n  throw ::c10::t( \\\n      {__func__}, m)\n"
+        )
+        throws = find_throws(code_of(source))
+        self.assertEqual(throws[0].expression, "::c10::t( {__func__}, m)")
+
+    def test_throw_ending_a_macro_is_not_taken_for_a_rethrow(self) -> None:
+        # Only `throw;` counts as a rethrow. A macro that expands to a bare
+        # `throw` runs on to the next line and is reported rather than allowed.
+        source = "#define RETHROW throw\n#define OTHER 1\n"
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_operand_on_the_next_line_is_not_a_bare_rethrow(self) -> None:
+        for source in (
+            "if (x)\n  throw\n      std::runtime_error(y);\n",
+            "throw // NOLINT\n    std::runtime_error(y);\n",
+        ):
+            with self.subTest(source=source):
+                throws = find_throws(code_of(source))
+                self.assertEqual(
+                    [t.expression for t in throws], ["std::runtime_error(y)"]
+                )
+
     def test_bare_rethrow(self) -> None:
         throws = find_throws(code_of("throw;\n"))
         self.assertEqual([t.expression for t in throws], [""])
@@ -149,7 +176,7 @@ class TestBuckets(unittest.TestCase):
         ):
             source = f"throw {expression};\n"
             with self.subTest(expression=expression):
-                self.assertEqual(names(source), ["raw throw statement"])
+                self.assertEqual(names(source), ["raw-throw"])
 
     def test_word_throw_in_comment_or_string_is_not_flagged(self) -> None:
         source = (
@@ -176,25 +203,39 @@ class TestAllowMarker(unittest.TestCase):
 
     def test_trailing_marker_does_not_allow_the_throw(self) -> None:
         source = "throw Foo(); // @allow-raw-throw: nope\n"
-        self.assertEqual(
-            names(source), ["orphaned-allow-raw-throw", "raw throw statement"]
-        )
+        self.assertEqual(names(source), ["orphaned-allow-raw-throw", "raw-throw"])
 
     def test_file_level_marker_is_orphaned(self) -> None:
         source = "// @allow-raw-throw\n#include <x.h>\nthrow Foo();\n"
-        self.assertEqual(
-            names(source), ["orphaned-allow-raw-throw", "raw throw statement"]
-        )
+        self.assertEqual(names(source), ["orphaned-allow-raw-throw", "raw-throw"])
 
     def test_marker_separated_by_blank_line_is_orphaned(self) -> None:
         source = "// @allow-raw-throw: reason\n\nthrow Foo();\n"
-        self.assertEqual(
-            names(source), ["orphaned-allow-raw-throw", "raw throw statement"]
-        )
+        self.assertEqual(names(source), ["orphaned-allow-raw-throw", "raw-throw"])
+
+    def test_prose_mentioning_the_marker_licenses_nothing(self) -> None:
+        source = "// Use @allow-raw-throw: <reason> to keep a throw.\nthrow Foo();\n"
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_marker_must_be_the_whole_comment(self) -> None:
+        source = "int y; // see @allow-raw-throw: below\nthrow Foo();\n"
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_a_longer_word_is_not_the_marker(self) -> None:
+        source = "// @allow-raw-throwing nonsense\nthrow Foo();\n"
+        self.assertEqual(names(source), ["raw-throw"])
+
+    def test_block_comment_marker(self) -> None:
+        source = "/* @allow-raw-throw: reason */\nthrow Foo();\n"
+        self.assertEqual(names(source), [])
+
+    def test_punctuation_is_not_a_reason(self) -> None:
+        source = "// @allow-raw-throw: .\nthrow Foo();\n"
+        self.assertEqual(names(source), ["allow-raw-throw-without-reason"])
 
     def test_marker_in_string_is_not_a_marker(self) -> None:
         source = 'const char* s = "@allow-raw-throw: x";\nthrow Foo();\n'
-        self.assertEqual(names(source), ["raw throw statement"])
+        self.assertEqual(names(source), ["raw-throw"])
 
     def test_marker_allows_only_the_next_throw(self) -> None:
         source = "// @allow-raw-throw: reason\nthrow Foo();\nthrow Bar();\n"
@@ -206,7 +247,7 @@ class TestAllowMarker(unittest.TestCase):
 
     def test_marker_licenses_only_one_throw_on_the_target_line(self) -> None:
         source = "// @allow-raw-throw: reason\nif (a) throw A(); else throw B();\n"
-        self.assertEqual(names(source), ["raw throw statement"])
+        self.assertEqual(names(source), ["raw-throw"])
 
     def test_form_feed_does_not_desync_marker_and_throw_lines(self) -> None:
         source = "\f\n// @allow-raw-throw: reason\nthrow Foo();\n"
