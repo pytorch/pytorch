@@ -520,12 +520,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             for read in node.read_writes.reads
         )
 
-    def can_fuse_reduction_chain(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        # Keep standalone chains materialized until the NVGEMM template owns them.
-        return False
-
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -534,8 +528,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             and isinstance(node.node.data, Reduction)
             for node in node1.get_nodes()
         )
-        if has_reduction and self.can_fuse_reduction_chain(node1, node2):
-            return 0
         if not has_reduction:
             node1_ir = node1.node if isinstance(node1, SchedulerNode) else None
             if self._has_nvgemm_choice(node1_ir) and any(
@@ -848,13 +840,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         pointwise_nodes,
                         removed_buffers_with_gemm,
                     )
-                    if (
-                        ctb.variant == GemmVariant.SCALED_GEMM
-                        and len(lowered_epilogue.writes) > 1
-                    ):
-                        raise NotImplementedError(
-                            "NVGEMM block-scaled multi-store epilogues are unsupported"
-                        )
                     if feeds_main and reduction_plan is not None:
                         d_buf = lowered_epilogue.renames.get("D")
                         if isinstance(d_buf, str):
