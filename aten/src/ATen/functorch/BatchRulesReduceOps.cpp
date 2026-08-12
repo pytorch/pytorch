@@ -7,6 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/ScalarOps.h>
 
 #include <utility>
 
@@ -412,6 +413,17 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+static Tensor searchsorted_scalar_decomp(
+    const Tensor& sorted_sequence,
+    const Scalar& self,
+    bool out_int32,
+    bool right,
+    std::optional<std::string_view> side,
+    const std::optional<Tensor>& sorter) {
+  auto self_tensor = at::native::wrapped_scalar_tensor(self, sorted_sequence.device());
+  return at::searchsorted(sorted_sequence, self_tensor, out_int32, right, side, sorter);
+}
+
 static Tensor bucketize_decomp_Tensor(
     const Tensor& self,
     const Tensor& boundaries,
@@ -457,6 +469,7 @@ static Tensor bucketize_decomp_Scalar(
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(searchsorted, Tensor, searchsorted_batch_rule);
+  m.impl("searchsorted.Scalar", searchsorted_scalar_decomp);
   REDUCTION_NO_KEEPDIM_ARG(_fft_r2c);
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2r);
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);

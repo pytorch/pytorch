@@ -44,6 +44,7 @@
 #include <ATen/ATen.h>
 
 #include <structmember.h>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -1165,7 +1166,7 @@ class NativeOpSchema {
       }
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 
  private:
@@ -1229,7 +1230,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(ss.str());
+  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
 }
 } // namespace
 
@@ -1631,11 +1632,12 @@ py::object dispatchDTensorOp(
   // enough for now.
   const bool is_inplace_op =
       !operator_name.name.empty() && operator_name.name.back() == '_';
-  // Simple analysis of function schema to determine if this is an
-  // ou variant. It might not be entirely correct, but it's good
-  // enough for now.
+  const auto& schema_arguments = op.schema().arguments();
   const bool is_out_variant_op = !is_inplace_op &&
-      operator_name.overload_name.find("out") != std::string::npos;
+      std::any_of(
+          schema_arguments.begin(),
+          schema_arguments.end(),
+          [](const c10::Argument& argument) { return argument.is_out(); });
 
   // Fast path for default or view ops.
   const auto output_spec =
@@ -1997,7 +1999,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
       const auto placement_type_name =
-          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+          py::str(py::reinterpret_steal<py::object>(
+              PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
       const auto placement_type_name =
           py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))

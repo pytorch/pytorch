@@ -19,7 +19,7 @@ Two kernels, picked by (K, N) - see ``cutedsl_kernels.py``:
         Faster (~5-10%); indices may differ across runs on threshold ties.
 
 Common eligibility (see ``_cond``):
-  - fp32 input, CUDA, not COW
+  - fp32 input, CUDA on SM100 or newer, not COW
   - ``largest=True``, ``sorted=True``
   - reducing over the last axis, ``self`` contiguous (2D flatten is a view)
   - row count at least one full wave of SMs (perf gate)
@@ -92,6 +92,12 @@ def _kernel_for(k: int, n: int) -> str | None:
 
 
 @functools.cache
+def _sm100_or_above(device: int) -> bool:
+    major, _ = torch.cuda.get_device_capability(device)
+    return major >= 10
+
+
+@functools.cache
 def _min_rows_for_full_wave(device_idx: int) -> int:
     """Row threshold below which the one-CTA-per-row kernel underutilises
     the GPU. A full wave is SM-count CTAs; below that, aten's multi-CTA
@@ -103,6 +109,8 @@ def _eligible(
     self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
 ) -> bool:
     if not self.is_cuda or self.dtype != torch.float32:
+        return False
+    if not _sm100_or_above(self.device.index or 0):
         return False
     if any_cow(self):
         return False
@@ -162,14 +170,28 @@ def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     self_2d = flatten_last_dim(self)
     N = self_2d.shape[-1]
     kernel = _kernel_for(k, N)
-    if kernel == "register":
-        values_2d, indices_2d = topk_register(self_2d, k)
-    else:
+
+    def _launch() -> tuple[torch.Tensor, torch.Tensor]:
+        if kernel == "register":
+            return topk_register(self_2d, k)
         # Pick the deterministic kernel under torch.use_deterministic_algorithms
         # (kept off by default for perf; the non-det kernel still produces
         # correct top-K values but indices may differ on ties).
         deterministic = torch.are_deterministic_algorithms_enabled()
-        values_2d, indices_2d = topk_radix(self_2d, k, deterministic=deterministic)
+        return topk_radix(self_2d, k, deterministic=deterministic)
+
+    # The Python-native dispatch path does not get an automatic CUDA device
+    # guard before launching the kernel (unlike the generated C++ ATen path),
+    # so the CuTeDSL kernel runs on the current device's stream. Guard the
+    # launch when the input is not already on the current device, while leaving
+    # the common already-current path direct to avoid the context-manager
+    # overhead. See #187983 for the same fix on the bmm override.
+    device = self.get_device()
+    if device == torch.cuda.current_device():
+        values_2d, indices_2d = _launch()
+    else:
+        with torch.cuda.device(device):
+            values_2d, indices_2d = _launch()
     return unflatten_last_dim(values_2d, indices_2d, self, k)
 
 

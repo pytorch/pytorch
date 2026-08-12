@@ -13,6 +13,7 @@ from torch._subclasses.complex_tensor._ops.common import (
     COMPLEX_OPS_TABLE,
     COMPLEX_TO_REAL,
     FORCE_TEST_LIST,
+    is_binary_nonlinear_op,
     OpOverloadPacket,
 )
 from torch.autograd.gradcheck import gradcheck
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from torch.testing._internal.opinfo.core import OpInfo
 
 COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
+
+# Native complex BLAS uses a single GEMM; ComplexTensor uses four real GEMMs.
+BINARY_NONLINEAR_CUDA_TOL = {"rtol": 5e-6, "atol": 2e-5}
 
 
 class Variant(Enum):
@@ -106,7 +110,7 @@ class TestCase(PytorchTestCase):
             self.assertIs(
                 type(exception_e),
                 type(exception_a),
-                f"\n{exception_e=}\n{exception_a=}",
+                lambda msg: f"{msg}\n{exception_e=}\n{exception_a=}",
             )
 
         if exception_e is None:
@@ -142,6 +146,13 @@ class TestCase(PytorchTestCase):
         for extra_info, extra_kw in EXTRA_KWARGS.items():
             if extra_info.matches(desc):
                 return extra_kw
+
+        if (
+            desc.device_type == "cuda"
+            and desc.variant in {Variant.Op, Variant.Distributed}
+            and is_binary_nonlinear_op(desc.op)
+        ):
+            return BINARY_NONLINEAR_CUDA_TOL
 
         return {}
 

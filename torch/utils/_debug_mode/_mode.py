@@ -34,9 +34,11 @@ Usage::
 
 import contextlib
 import functools
+import json
 import logging
+import os
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any, IO, TYPE_CHECKING
 
 import torch
 from torch._logging import warning_once
@@ -46,10 +48,12 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._debug_mode import _utils
 from torch.utils._debug_mode._calls import (
     _AnnotateCall,
+    _deserialize_debug_call,
     _get_call_name,
     _OpCall,
     _OutputPlacementCall,
     _RedistributeCall,
+    _serialize_debug_call,
     _TritonKernelCall,
 )
 from torch.utils._debug_mode._utils import (
@@ -81,6 +85,9 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_SERIALIZED_LOG_FORMAT = "torch.utils._debug_mode.DebugMode.logs"
+_SERIALIZED_LOG_VERSION = 1
 
 
 # Counter for active DebugMode instances (fast path for get_active_debug_mode)
@@ -440,7 +447,7 @@ class DebugMode(TorchDispatchMode):
                 self._record_call(call)
 
         # Run pre-hooks before executing the operation to hash inputs
-        # We have to run becore the func() call in case there's any
+        # We have to run before the func() call in case there's any
         # in-place mutation
         if call:
             _run_dispatch_pre_log_hooks(call, func, types, args, kwargs)
@@ -824,6 +831,65 @@ class DebugMode(TorchDispatchMode):
     def logs(self):
         return list(self.operators)
 
+    @staticmethod
+    def save_logs(logs: list, destination: str | os.PathLike | IO[str]) -> None:
+        """
+        Save DebugMode logs to a JSON file so they can be loaded and compared in
+        another Python process.
+
+        Args:
+            logs: logs from a DebugMode run (from debug_mode.logs)
+            destination: path or text file object to write
+        """
+        data = {
+            "format": _SERIALIZED_LOG_FORMAT,
+            "version": _SERIALIZED_LOG_VERSION,
+            "logs": [_serialize_debug_call(call) for call in logs],
+        }
+        if isinstance(destination, (str, os.PathLike)):
+            with open(destination, "w", encoding="utf-8") as f:
+                json.dump(data, f, allow_nan=False)
+                f.write("\n")
+        else:
+            json.dump(data, destination, allow_nan=False)
+            destination.write("\n")
+
+    @staticmethod
+    def load_logs(source: str | os.PathLike | IO[str]) -> list:
+        """
+        Load logs saved by DebugMode.save_logs().
+
+        Args:
+            source: path or text file object to read
+
+        Returns:
+            A list of DebugMode log records suitable for check_hash_mismatches().
+        """
+        if isinstance(source, (str, os.PathLike)):
+            with open(source, encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = json.load(source)
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Serialized DebugMode logs must be a dict, but found {type(data).__name__}"
+            )
+        if data.get("format") != _SERIALIZED_LOG_FORMAT:
+            raise ValueError(
+                "Serialized DebugMode logs have an unrecognized format: "
+                f"{data.get('format')!r}"
+            )
+        if data.get("version") != _SERIALIZED_LOG_VERSION:
+            raise ValueError(
+                "Serialized DebugMode logs have an unsupported version: "
+                f"{data.get('version')!r}"
+            )
+        logs = data.get("logs")
+        if not isinstance(logs, list):
+            raise ValueError("Serialized DebugMode logs must contain a logs list")
+        return [_deserialize_debug_call(call) for call in logs]
+
     def _handle_annotate(self, tag):
         """Handles DebugMode._annotate()"""
         call = _AnnotateCall(tag, "annotate", self.call_depth, self.record_stack_trace)
@@ -872,16 +938,18 @@ class DebugMode(TorchDispatchMode):
 
         Usage::
 
-            # Run model first time
+            # Process 1: run the first model config and save its logs
             with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-                model(x)
-                logs1 = debug_mode.logs
+                model_config_1(x)
+            DebugMode.save_logs(debug_mode.logs, "run1.json")
 
-            # Run again, in exactly the same way
+            # Process 2: run the second model config and save its logs
             with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-                model(x)
-                logs2 = debug_mode.logs
+                model_config_2(x)
+            DebugMode.save_logs(debug_mode.logs, "run2.json")
 
+            logs1 = DebugMode.load_logs("run1.json")
+            logs2 = DebugMode.load_logs("run2.json")
             mismatches = DebugMode.check_hash_mismatches(logs1, logs2)
             for m in mismatches:
                 print(f"{m['call']}: hash diff {m['rel_diff']:.2e}")
@@ -916,7 +984,7 @@ class DebugMode(TorchDispatchMode):
 
             # Redistribute: call args should be the same
             if isinstance(log1, _RedistributeCall):
-                if tuple(log1) != tuple(log2):
+                if log1.render([]) != log2.render([]):
                     raise ValueError(
                         f"Redistribute calls don't match at index {i}: {log1} vs {log2}"
                     )

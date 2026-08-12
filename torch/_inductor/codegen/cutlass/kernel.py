@@ -205,7 +205,8 @@ class CUTLASSKernel(Kernel):
         if V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return _normalize_idx(-2, len(strides))
 
-        assert V.graph.sizevars.statically_known_equals(strides[-2], 1), strides[-2]
+        if not V.graph.sizevars.statically_known_equals(strides[-2], 1):
+            raise AssertionError(strides[-2])
         return _normalize_idx(-1, len(strides))
 
 
@@ -311,7 +312,11 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
             )
 
         if input_reorder is not None:
-            assert len(inputs) == len(input_reorder)
+            if len(inputs) != len(input_reorder):
+                raise AssertionError(
+                    f"expected len(inputs) == len(input_reorder), got "
+                    f"{len(inputs)} != {len(input_reorder)}"
+                )
         else:
             input_reorder = list(range(len(inputs)))
 
@@ -371,7 +376,10 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
-            assert isinstance(wrapper, CppWrapperCpu)
+            if not isinstance(wrapper, CppWrapperCpu):
+                raise AssertionError(
+                    f"expected wrapper to be CppWrapperCpu, got {type(wrapper)}"
+                )
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
             # we replace with the real kernel name passed as an arg to this function.
@@ -626,11 +634,13 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to not be None")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to not be None")
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)

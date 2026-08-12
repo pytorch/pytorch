@@ -82,16 +82,41 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
+    "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
-# Architectures we additionally emit PTX for (forward-compat for newer GPUs).
+# Architectures we additionally emit PTX for on nightly/dev builds
+# (forward-compat for newer GPUs). Release/RC wheels ship SASS-only to keep
+# libtorch_cuda.so size down; see _ptx_arches().
 _PTX_ARCHES: set[int] = {120}
+
+
+def _is_release_build() -> bool:
+    """True for release / RC binary builds (vs nightly / dev builds).
+
+    Binary builds off a git tag (releases and RCs, e.g. v2.13.0 / v2.13.0-rc1)
+    get a ``PYTORCH_BUILD_VERSION`` with no ``.dev<date>`` suffix, while
+    nightlies do -- see .ci/pytorch/binary_populate_env.sh, which relies on the
+    same ``dev`` check for Triton pinning. A missing/empty version (local or
+    non-binary builds) is treated as non-release, so PTX is kept.
+    """
+    version = os.environ.get("PYTORCH_BUILD_VERSION", "")
+    return bool(version) and "dev" not in version
+
+
+def _ptx_arches() -> set[int]:
+    """PTX arches for this build: empty on release/RC, forward-compat set otherwise."""
+    return set() if _is_release_build() else _PTX_ARCHES
 
 
 def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
     """Format TORCH_CUDA_ARCH_LIST for the wheel build (";"-separated).
 
-    Returns e.g. "8.0;9.0;10.0;11.0;12.0+PTX" for cuda 13.x aarch64.
+    Returns e.g. "8.0;9.0;10.0;11.0;12.0+PTX" for cuda 13.x aarch64 on
+    nightly builds; release/RC builds omit the +PTX suffix (see _ptx_arches()).
 
     CUDA 13.x dropped sm_50/60/70, so we must NOT leave this empty --
     CMake's defaults still include compute_50 which nvcc 13 rejects with
@@ -102,8 +127,9 @@ def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
     archs = TORCH_CUDA_ARCH_LIST_TABLE[cuda_version].get(arch)
     if not archs:
         raise SystemExit(f"no TORCH_CUDA_ARCH_LIST for cuda {cuda_version} on {arch}")
+    ptx_arches = _ptx_arches()
     return ";".join(
-        f"{cc // 10}.{cc % 10}" + ("+PTX" if cc in _PTX_ARCHES else "")
+        f"{cc // 10}.{cc % 10}" + ("+PTX" if cc in ptx_arches else "")
         for cc in sorted(archs)
     )
 
@@ -123,6 +149,14 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
     if arch == "aarch64":
         # Pre-built MAGMA tarballs are x86-only.
         env["USE_MAGMA"] = "0"
+    # Bundle the CUDA 13.4 ptxas binary into nightly wheels so that users on
+    # Rubin (sm_107) hardware can use torch.compile without needing to
+    # install the CUDA 13.4 toolkit separately. Triton's default ptxas only
+    # goes up to CUDA 13.3 and will fail with "Value 'sm_107a' is not defined".
+    # torch/_inductor/runtime/compile_tasks.py picks up torch/bin/ptxas via
+    # _set_triton_ptxas_path() automatically.
+    if cuda_version == "13.4":
+        env.setdefault("BUILD_BUNDLE_PTXAS", "1")
     return env
 
 
@@ -145,8 +179,6 @@ XPU_BUILD_ENV: dict[str, str] = {
 # ROCm builds use static linking and skip debug info; mirror the original
 # build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to discover libs.
 ROCM_BUILD_ENV_STATIC: dict[str, str] = {
-    "ROCM_HOME": "/opt/rocm",
-    "MAGMA_HOME": "/opt/rocm/magma",
     "BUILD_DEBUG_INFO": "0",
     "TH_BINARY_BUILD": "1",
     "USE_STATIC_CUDNN": "1",
@@ -156,6 +188,41 @@ ROCM_BUILD_ENV_STATIC: dict[str, str] = {
     "INSTALL_TEST": "0",
     "FORCE_RPATH": "--force-rpath",
 }
+
+
+def discover_rocm_home() -> str:
+    """Locate the ROCm install root.
+
+    Supports both the OS/tarball layout (/opt/rocm) and the TheRock multi-arch
+    wheel layout, where ROCm is pip-installed under <site-packages>/_rocm_sdk_core
+    and its real path is recorded in /etc/rocm_env.sh by install_rocm_wheel.sh.
+    ROCM_HOME is read by repair_wheel.py to discover the libs to bundle.
+    """
+    for key in ("ROCM_HOME", "ROCM_PATH"):
+        val = os.environ.get(key)
+        if val:
+            return val
+    env_file = Path("/etc/rocm_env.sh")
+    if env_file.is_file():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            for key in ("ROCM_PATH", "ROCM_HOME"):
+                prefix = f"export {key}="
+                if line.startswith(prefix):
+                    return line[len(prefix) :].strip().strip('"').strip("'")
+    try:
+        out = subprocess.run(
+            ["rocm-sdk", "path", "--root"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except FileNotFoundError:
+        pass
+    return "/opt/rocm"
+
 
 PLATFORM_TAGS: dict[str, str] = {
     "x86_64": "manylinux_2_28_x86_64",
@@ -439,12 +506,18 @@ def main() -> None:
         print("XPU environment configured")
     elif gpu_arch_type == "rocm":
         env_out.update(ROCM_BUILD_ENV_STATIC)
+        # ROCM_HOME is read by repair_wheel.py to choose RPATH (wheel layout) vs
+        # bundling (OS layout). cmake finds ROCm itself via LoadHIP.cmake, and
+        # MAGMA is auto-disabled by find_package(MAGMA) when it is absent (as in
+        # the wheel layout), so no MAGMA_HOME/USE_MAGMA handling is needed here.
+        rocm_home = discover_rocm_home()
+        env_out["ROCM_HOME"] = rocm_home
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
         if desired and not desired.startswith("rocm"):
             env_out["DESIRED_CUDA"] = f"rocm{desired}"
-        print(f"ROCm environment configured ({desired})")
+        print(f"ROCm environment configured ({desired}) ROCM_HOME={rocm_home}")
 
     write_env_exports(env_out, args.env_out)
     print("before-all setup complete")
