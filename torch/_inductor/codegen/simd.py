@@ -2301,11 +2301,6 @@ class SIMDScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
 
-        sub_parent = self._sub_parent_epilogue_decision(node1, node2)
-        if sub_parent.leaf_violation:
-            why("sub-parent epilogue output must be a leaf")
-            return False
-
         if node1.is_split_scan() and not node2.is_split_scan():
             if node2.is_reduction():
                 why("Split scan cannot fuse with reductions")
@@ -2470,8 +2465,16 @@ class SIMDScheduling(BaseScheduling):
             raise AssertionError(
                 "expected node1 to be a reduction and node2 not a reduction"
             )
-        if sub_parent.consumer_is_planned_epilogue:
-            return True
+        if node1.get_operation_names() & node2.ancestors:
+            sub_parent = self._sub_parent_epilogue_decision(node1, node2)
+            if sub_parent.leaf_violation:
+                why("sub-parent epilogue output must be a leaf")
+                return False
+            if sub_parent.consumer_is_planned_epilogue:
+                return True
+        elif has_standalone_stage:
+            why("standalone staged reduction only accepts epilogue consumers")
+            return False
         # swap args to hit the case above
         return self.can_fuse_horizontal(node2, node1)
 

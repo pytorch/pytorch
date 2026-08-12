@@ -119,9 +119,7 @@ class SIMDKernelFeatures:
     ):
         self.node_schedule = node_schedule
         self.indexing_node_schedule = (
-            node_schedule
-            if indexing_node_schedule is None
-            else indexing_node_schedule
+            node_schedule if indexing_node_schedule is None else indexing_node_schedule
         )
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)

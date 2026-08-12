@@ -939,9 +939,7 @@ class _NestedReductionBase:
 
         def f(x, z):
             y = torch.sin(z)
-            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(
-                min=1e-12, max=448.0
-            )
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
             x_pairs = x.view(B, D // 2, 2)
             y_pairs = y.view(B, D // 2, 2)
             scale = scale.unsqueeze(-1)
@@ -1136,9 +1134,7 @@ class _NestedReductionBase:
         B, D = 4, 512
 
         def f(x):
-            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(
-                min=1e-12, max=448.0
-            )
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
             shifted_scale = torch.roll(scale, 1).unsqueeze(-1)
             pairs = x.view(B, D // 2, 2)
             even = pairs[..., 0].float() / shifted_scale

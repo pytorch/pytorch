@@ -519,14 +519,6 @@ class MixOrderReduction:
 # the final plan from the post-fusion nodes rather than carrying the approval
 # plan across phases. The staged identity is the stable contract: codegen cannot
 # decline the fusion and treats a missing final plan as a compiler error.
-#
-# Persistent codegen splits planned parent-tile loads while their register values
-# are live. Looped codegen closes the reduction loop first, invalidating loop-local
-# CSE entries, and reloads external sources in the derived domain. It must never
-# forward a loop-local store-cache value across that boundary; internally produced
-# sources must be available in the derived scope or the fusion must be rejected.
-
-
 class NestedReduction:
     """
     Detects when an outer reduction and a dependent grouped reduction can be
@@ -632,32 +624,31 @@ class NestedReduction:
         Note [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
+        # TODO: No fundamental limitation; track aliases and mutation versions here.
         if any(node.has_aliasing_or_mutation() for node in nodes):
             return None
+        if not all(isinstance(node, SchedulerNode) for node in nodes):
+            return None
+        scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
 
-        reduction_names: OrderedSet[str] = OrderedSet()
-        reduction_buffer_names: OrderedSet[str] = OrderedSet()
+        has_reduction = False
         fused_buffer_names: OrderedSet[str] = OrderedSet()
         reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
-        for node in nodes:
+        for node in scheduler_nodes:
             fused_buffer_names |= node.get_buffer_names()
             if node.is_reduction():
-                reduction_names |= node.get_operation_names()
-                reduction_buffer_names |= node.get_buffer_names()
+                has_reduction = True
                 for dep in node.read_writes.reads:
                     if isinstance(dep, MemoryDep):
                         reduction_reads[dep.name].append(dep)
-        if not reduction_names:
+        if not has_reduction:
             return None
 
         full_numel = V.graph.sizevars.simplify(numel * rnumel)
         candidate = cls._sub_parent_epilogue_candidate_nodes(
-            nodes,
+            scheduler_nodes,
             numel,
             rnumel,
-            full_numel=full_numel,
-            reduction_names=reduction_names,
-            reduction_buffer_names=reduction_buffer_names,
         )
         if candidate is None:
             return None
@@ -676,24 +667,26 @@ class NestedReduction:
         planned_source_deps = tuple(dep for dep, _layout in source_deps)
         epilogue_node_set = OrderedSet(epilogue_nodes)
         if not cls._sub_parent_epilogue_source_loads_are_unambiguous(
-            nodes,
+            scheduler_nodes,
             epilogue_node_set,
             planned_source_deps,
         ):
             return None
         if check_leaves and not cls._sub_parent_epilogue_outputs_unread(
-            nodes, epilogue_node_set
+            scheduler_nodes, epilogue_node_set
         ):
             return None
         if check_leaves and not cls._sub_parent_siblings_are_source_free(
-            nodes,
+            scheduler_nodes,
             epilogue_node_set,
             numel,
             OrderedSet(reduction_reads),
         ):
             return None
         return StagedReductionPlan(
-            parent_nodes=tuple(node for node in nodes if node not in epilogue_node_set),
+            parent_nodes=tuple(
+                node for node in scheduler_nodes if node not in epilogue_node_set
+            ),
             parent_numel=numel,
             parent_rnumel=parent_rnumel,
             nested_stage=None,
@@ -711,48 +704,43 @@ class NestedReduction:
     @classmethod
     def _sub_parent_epilogue_candidate_nodes(
         cls,
-        nodes: Sequence[BaseSchedulerNode],
+        nodes: Sequence[SchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
-        *,
-        full_numel: sympy.Expr,
-        reduction_names: OrderedSet[str],
-        reduction_buffer_names: OrderedSet[str],
     ) -> tuple[tuple[SchedulerNode, ...], int] | None:
-        """The consumers that can run at lane resolution, and their lane factor.
+        """The pointwise nodes that can run at lane resolution.
 
-        Shape alone does not make a node an epilogue -- it must also depend on
-        the reduction, or an unrelated node of the right size would be pulled
-        into the lane space.
+        Their group is ``(numel * rnumel / factor, 1)`` and their ranges must be
+        compatible with ``(numel, rnumel / factor)``.
         """
-        from .codegen.simd import SIMDKernel
-
-        candidates: list[SchedulerNode] = []
         factor = cls.INTERLEAVED_SUB_PARENT_FACTOR
-        for node in nodes:
-            if node.is_reduction():
-                continue
-            if not isinstance(node, SchedulerNode):
-                return None
-            _, (node_numel, node_rnumel) = node.group
-            if not V.graph.sizevars.statically_known_equals(node_rnumel, 1):
-                continue
-            if not V.graph.sizevars.statically_known_equals(
-                factor * node_numel, full_numel
-            ):
-                continue
-            if not SIMDKernel.is_compatible(
-                (numel, FloorDiv(rnumel, factor)), node.get_ranges()
-            ):
-                continue
-            reads_reduction_output = any(
-                dep.name in reduction_buffer_names for dep in node.read_writes.reads
+        expected_groups = (numel, FloorDiv(rnumel, factor))
+        candidates = tuple(
+            node
+            for node in nodes
+            if not node.is_reduction()
+            and cls._pointwise_node_is_compatible(
+                node, sympy_product(expected_groups), expected_groups
             )
-            if reduction_names & node.ancestors or reads_reduction_output:
-                candidates.append(node)
+        )
         if not candidates:
             return None
-        return tuple(candidates), factor
+        return candidates, factor
+
+    @staticmethod
+    def _pointwise_node_is_compatible(
+        node: SchedulerNode,
+        expected_numel: sympy.Expr,
+        expected_groups: Sequence[sympy.Expr],
+    ) -> bool:
+        from .codegen.simd import SIMDKernel
+
+        _, (node_numel, node_rnumel) = node.group
+        return (
+            V.graph.sizevars.statically_known_equals(node_rnumel, 1)
+            and V.graph.sizevars.statically_known_equals(node_numel, expected_numel)
+            and SIMDKernel.is_compatible(expected_groups, node.get_ranges())
+        )
 
     @staticmethod
     def sub_parent_extent_subs(
@@ -1139,6 +1127,7 @@ class NestedReduction:
         """
         grouped_reduction = domain_context.grouped_reduction
         reduction_names = grouped_reduction.get_operation_names()
+        reduction_buffer_names = grouped_reduction.get_buffer_names()
         full_numel = V.graph.sizevars.simplify(
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
@@ -1153,7 +1142,9 @@ class NestedReduction:
 
             sn_names = sn.get_operation_names()
             is_producer = bool(sn_names & grouped_reduction.ancestors)
-            is_consumer = bool(reduction_names & sn.ancestors)
+            is_consumer = bool(reduction_names & sn.ancestors) or any(
+                dep.name in reduction_buffer_names for dep in sn.read_writes.reads
+            )
             if is_producer and is_consumer:
                 # Supportable by splitting/modeling a multi-stage pointwise,
                 # but not as one nested pipeline stage today.
@@ -1198,10 +1189,7 @@ class NestedReduction:
         domain: PointwiseDomain,
         domain_context: PointwiseDomainContext,
     ) -> bool:
-        from .codegen.simd import SIMDKernel
-
         iter_ranges, _ = domain_context.grouped_reduction.get_ranges()
-        _, (sn_numel, _) = sn.group
         if domain is cls.PointwiseDomain.REDUCED:
             expected_numel = domain_context.grouped_numel
             expected_groups: Sequence[sympy.Expr] = tuple(iter_ranges)
@@ -1217,9 +1205,7 @@ class NestedReduction:
                 domain_context.grouped_numel * domain_context.grouped_rnumel
             )
             expected_groups = domain_context.parent_full_domain
-        return V.graph.sizevars.statically_known_equals(
-            sn_numel, expected_numel
-        ) and SIMDKernel.is_compatible(expected_groups, sn.get_ranges())
+        return cls._pointwise_node_is_compatible(sn, expected_numel, expected_groups)
 
     @classmethod
     def _min_block_unprofitable_for_kernel(
