@@ -812,8 +812,11 @@ class CodeGen:
 
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_coo,
                     torch.sparse_csc,
                     torch.sparse_csr,
+                    torch.sparse_bsc,
+                    torch.sparse_bsr,
                 ):
                     # Fake tensors cause tests to wobble, so do not custom print them.
                     is_plain = type(meta_val) is torch.Tensor or isinstance(
