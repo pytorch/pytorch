@@ -2867,6 +2867,14 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_unbacked_symint_predicate(self):
+        x = torch.randn((28, 28), device=self.device)
+        input_true = (x, torch.tensor(1, device=self.device))
+        input_false = (x, torch.tensor(-1, device=self.device))
+        self.check_model_with_multiple_inputs(
+            CondModels.UnbackedSymIntPredicate(), [input_true, input_false]
+        )
+
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_unbacked_symint_closure(self, dynamic):
         inputs = (
