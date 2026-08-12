@@ -51,16 +51,24 @@ def _idx_sentinel(idx_dtype):
 
 def _pos_id(acc):
     # "Largest" identity for a min-reduction's init / the value that loses every
-    # max. For floats this is +inf; integer accumulators (a later family) will
-    # override with their max representable value. Wrap in `acc(...)` so the result
-    # carries the accumulator dtype -- `acc.inf` is a bare Python float, which the
-    # DSL treats as Float32, breaking the ifexp type-match in `_pick` for fp64.
+    # max. +inf for floats; the max representable value for integer accumulators
+    # (Int32/Int64 have no .inf). Wrap in `acc(...)` so the result carries the
+    # accumulator dtype -- a bare Python number would be treated as Float32,
+    # breaking the ifexp type-match in `_pick` for fp64.
+    if acc is Int32:
+        return acc(_INT32_MAX)
+    if acc is Int64:
+        return acc(_INT64_MAX)
     return acc(acc.inf)
 
 
 def _neg_id(acc):
-    # "Smallest" identity for a max-reduction's init. -inf for floats; typed via
-    # `acc(...)` for the same reason as `_pos_id`.
+    # "Smallest" identity for a max-reduction's init: -inf for floats, the min
+    # representable value for integer accumulators; typed via `acc(...)` as above.
+    if acc is Int32:
+        return acc(-_INT32_MAX - 1)
+    if acc is Int64:
+        return acc(-_INT64_MAX - 1)
     return acc(-acc.inf)
 
 
@@ -141,6 +149,18 @@ class NormOps:
             return cute.math.exp(cute.math.log(s) / self.acc(self.p))
 
 
+@cute.jit
+def _welford_denom(acc_dtype, nf, correction):
+    # var/std divisor, CLAMPED AT ZERO like aten: `correction >= n` must divide by 0
+    # (-> +inf, which is what aten returns and what the numpy-reference tests expect
+    # after their inf->nan mapping), NOT by a negative number. Unclamped, a
+    # correction larger than the reduced extent returned a NEGATIVE variance.
+    # `nf` is a runtime value, so this is a select, not a python max().
+    d = nf - acc_dtype(correction)
+    z = acc_dtype(0.0)
+    return d if d > z else z  # noqa: FURB136 -- builtin max()/min() do not lower
+
+
 class WelfordOps:
     # acc = (mean, m2, nf) all in the accumulator dtype.
     #   reduce  = ONLINE (Welford) update of a single element.
@@ -198,7 +218,7 @@ class WelfordOps:
         mean, m2, nf = acc
         if const_expr(self.return_mean):
             return mean
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         if const_expr(self.take_sqrt):
             return cute.math.sqrt(var)
         return var
@@ -684,6 +704,68 @@ def block_reduce(
     return out
 
 
+@cute.jit
+def cluster_reduce(
+    trait,
+    acc,
+    bufs,
+    mbar_ptr,
+    cluster_n: cutlass.Constexpr,
+    warps_per_row: cutlass.Constexpr,
+    rows_per_block: cutlass.Constexpr,
+    phase=None,
+):
+    # Cross-CTA reduction over a launch cluster of cluster_n CTAs (each owns a
+    # distinct N/cluster_n column slice of the row). Trait-aware analogue of quack's
+    # scalar cluster_reduce (reduce.py:32): a SINGLE combined pass that folds BOTH
+    # the warps-per-row AND the cluster ranks, so it REPLACES block_reduce (do not
+    # block-reduce first). `acc` must be the WARP-reduced per-warp partial.
+    #
+    # bufs[f] is laid out (rows_per_block, (warps_per_row, cluster_n)); every warp
+    # writes its partial to slot (row_idx, (col_idx, cta_rank)) in each peer CTA, so
+    # after the barrier all warps_per_row*cluster_n partials for a row group are
+    # present and each thread folds them. The expected-tx byte count MUST match the
+    # exact set of stores issued (num_warps*cluster_n fields), or the barrier hangs.
+    from torch._vendor.quack import utils as _qu
+
+    lane = cute.arch.lane_idx()
+    warp = cute.arch.warp_idx()
+    # Linearized cluster rank; our cluster is [1, cluster_n, 1] so it is the y-rank.
+    cta_rank = cute.arch.block_idx_in_cluster()
+    row_idx = warp // const_expr(warps_per_row)
+    col_idx = warp % const_expr(warps_per_row)
+    nf = const_expr(trait.nfields)
+    num_warps = const_expr(rows_per_block * warps_per_row)
+
+    # One elected thread declares the total bytes ALL peers will deposit: every one
+    # of num_warps warps in each of cluster_n CTAs stores nf fields. Must equal the
+    # stores below exactly.
+    if warp == 0:
+        with cute.arch.elect_one():
+            nbytes = 0
+            for f in cutlass.range_constexpr(nf):
+                nbytes += num_warps * cluster_n * (trait.fdtypes[f].width // 8)
+            cute.arch.mbarrier_arrive_and_expect_tx(mbar_ptr, nbytes)
+
+    # Each warp's lanes 0..cluster_n-1 push this warp's partial to peer `lane`'s
+    # buffer at this warp's fixed slot (row_idx, (col_idx, cta_rank)).
+    if lane < cluster_n:
+        for f in cutlass.range_constexpr(nf):
+            ptr = _qu.elem_pointer(bufs[f], (row_idx, (col_idx, cta_rank)))
+            _qu.store_shared_remote(
+                trait.fdtypes[f](acc[f]), ptr, mbar_ptr, peer_cta_rank_in_cluster=lane
+            )
+    cute.arch.mbarrier_wait(mbar_ptr, phase if phase is not None else Int32(0))
+
+    # Fold all warps_per_row*cluster_n partials for this warp's row group.
+    merged = trait.init()
+    for c in cutlass.range_constexpr(warps_per_row):
+        for r in cutlass.range_constexpr(cluster_n):
+            part = tuple(bufs[f][(row_idx, (c, r))] for f in range(nf))
+            merged = trait.combine(merged, part)
+    return merged
+
+
 # --- Two-output traits (var_mean / std_mean, max.dim / min.dim, aminmax). They
 # reuse the single-output accumulators above and only change project() to return
 # a tuple of `nouts` values; nouts (1 or 2) tells the kernel how many outputs to
@@ -702,7 +784,7 @@ class VarMeanOps(WelfordOps):
     @cute.jit
     def project(self, acc, n):
         mean, m2, nf = acc
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
 
