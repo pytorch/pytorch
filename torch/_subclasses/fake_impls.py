@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import functools
 import itertools
 import math
@@ -607,13 +608,24 @@ def sparse_compressed_constructors(
     if "size" not in new_kwargs:
         # without an explicit size, it is inferred from plain_indices.max()
         raise DataDependentOutputException(func)
-    out_device = new_kwargs.pop("device", None)
-    out_device = out_device if out_device is not None else new_kwargs["values"].device
+    out_device, _ = FakeTensor._find_common_device(func, list(new_kwargs.values()))
+    requested_device = new_kwargs.pop("device", None)
+    if requested_device is not None:
+        requested_device = torch.device(requested_device)
+        torch._check(
+            requested_device.type == out_device.type,
+            lambda: "Values and compressed tensor instance need to be on the same device.",
+        )
+        out_device = requested_device
     new_kwargs["device"] = torch.device("meta")
-    with in_kernel_invocation_manager(fake_mode):
-        # Invariant checks read index data, which meta tensors do not have.
-        with torch.sparse.check_sparse_tensor_invariants(False):
-            out = func(**new_kwargs)
+    # Invariant checks read index data, which meta tensors do not have.
+    suppress_invariants = (
+        torch.sparse.check_sparse_tensor_invariants(False)
+        if torch.sparse.check_sparse_tensor_invariants.is_enabled()
+        else contextlib.nullcontext()
+    )
+    with in_kernel_invocation_manager(fake_mode), suppress_invariants:
+        out = func(**new_kwargs)
     return fake_mode.fake_tensor_converter.from_meta_and_device(
         fake_mode, out, out_device
     )

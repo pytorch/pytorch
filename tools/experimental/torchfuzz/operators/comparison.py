@@ -102,7 +102,8 @@ class ComparisonOperatorBase(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype == torch.bool
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         dtype_a = random.choice(_NUMERIC_INPUT_DTYPES)
         dtype_b = random.choice(_NUMERIC_INPUT_DTYPES)
         input_dtypes = [dtype_a, dtype_b]
@@ -247,7 +248,8 @@ class WhereOperator(Operator):
         )
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._form = random.choice(("A", "B", "C"))
         self._scalar_value = _random_scalar_for_dtype(output_spec.dtype)
         cond_spec = TensorSpec(
@@ -288,7 +290,8 @@ class WhereOperator(Operator):
         input_names: list[str],
         output_spec: Spec,
     ) -> str:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         scalar_val = self._scalar_value
         if self._form == "A":
             out = (

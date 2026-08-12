@@ -207,6 +207,45 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(len(self.messages), 1)
         self.assertIn("error", self.messages[0])
 
+    def test_callable_op_label_used_in_log(self):
+        # op may be a callable evaluated per-call (e.g. to derive the aten
+        # symbol from the compile args).
+        fake = _FakeJitCache()
+        compile_fn = instrument_cutedsl_compile(lambda N, K: f"aten::topk_{N}")(fake)
+
+        compile_fn(256, 64)
+
+        self.assertIn("aten::topk_256", self.messages[0])
+
+    def test_op_label_failure_preserves_result(self):
+        # The label callback runs in the finally block; if it raises it must not
+        # turn a successful compile into a failure. Falls back to a safe label.
+        fake = _FakeJitCache()
+
+        def bad_op(*args, **kwargs):
+            raise ValueError("label boom")
+
+        compile_fn = instrument_cutedsl_compile(bad_op)(fake)
+
+        result = compile_fn(256, 64)  # must not raise
+        self.assertIsNotNone(result)
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("<op-label-error>", self.messages[0])
+
+    def test_op_label_failure_preserves_original_error(self):
+        # If the wrapped fn raises, a failing label callback must not mask the
+        # original exception.
+        fake = _FakeJitCache()
+        fake.raise_on_call = True
+
+        def bad_op(*args, **kwargs):
+            raise ValueError("label boom")
+
+        compile_fn = instrument_cutedsl_compile(bad_op)(fake)
+
+        with self.assertRaises(RuntimeError):  # original "boom", not ValueError
+            compile_fn(256, 64)
+
     def test_cache_attrs_forwarded(self):
         fake = _FakeJitCache()
         compile_fn = instrument_cutedsl_compile("aten::topk")(fake)

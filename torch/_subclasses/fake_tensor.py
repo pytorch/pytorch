@@ -1380,15 +1380,17 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     # Read layout/sparseness once (hot-path Python properties on FakeTensor).
     layout = t.layout
     _is_sparse_any: bool = is_sparse_any(t)
-    memory_format = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
-    # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or _is_sparse_any
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
-        memory_format = None  # type: ignore[assignment]
+    # will go badly (guards will be messed up?). suggest_memory_format walks
+    # sizes and strides, which is symbolic arithmetic for such a tensor, so
+    # skip it too rather than computing a value we are about to discard.
+    memory_format: torch.memory_format | None
+    if t._has_symbolic_sizes_strides or _is_sparse_any:
+        memory_format = None
+    else:
+        memory_format = suggest_memory_format(t)
+        if not t.is_contiguous(memory_format=memory_format):
+            memory_format = None
 
     storage_offset = t.storage_offset()
 
@@ -2358,10 +2360,15 @@ class FakeTensorMode(TorchDispatchMode):
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
+        # The set_ below replaces the size, stride and storage of the tensor
+        # created here, so for a view op don't pay to derive them twice. On
+        # symbolic shapes that derivation is the bulk of the cost of both calls.
+        is_view = isinstance(func, torch._ops.OpOverload) and func.is_view
+
         with in_kernel_invocation_manager(self), maybe_suppress():
             empty = torch.empty_strided(
-                shape,
-                stride,
+                () if is_view else shape,
+                () if is_view else stride,
                 dtype=metadata.dtype,
                 layout=metadata.layout,
                 device="meta",
@@ -2373,7 +2380,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
 
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        if is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
             if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
@@ -3206,7 +3213,8 @@ class FakeTensorMode(TorchDispatchMode):
             # sparse invariant checks read index data, which meta tensors lack
             suppress_invariants = (
                 torch.sparse.check_sparse_tensor_invariants(False)
-                if any(is_sparse_any(t) for t in flat_arg_fake_tensors)
+                if torch.sparse.check_sparse_tensor_invariants.is_enabled()
+                and any(is_sparse_any(t) for t in flat_arg_fake_tensors)
                 else contextlib.nullcontext()
             )
             with in_kernel_invocation_manager(self), suppress_invariants:

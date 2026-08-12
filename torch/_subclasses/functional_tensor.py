@@ -23,7 +23,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch, TorchBindOpOverload
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import is_sparse_any, is_sparse_compressed
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
@@ -215,7 +215,7 @@ class FunctionalTensor(torch.Tensor):
             elem.requires_grad,  # requires_grad
             None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
-            is_sparse_any(elem),  # dispatch_layout
+            is_sparse_compressed(elem),  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
