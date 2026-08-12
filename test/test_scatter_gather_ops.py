@@ -721,11 +721,16 @@ def _build_alignment_case(case):
 @skipIfNoCuteDSL
 class TestScatterAddOverrideConds(TestCase):
     """Unit tests for the dispatch predicates in
-    torch._native.ops.scatter_add.cutedsl_impl. The accepts-cases assert
-    the predicates fire, which the leading _has_sm90_plus() gate makes
-    arch-dependent; below sm_90 every predicate is uniformly False and
-    the class tests nothing (correctness-on-fallback is covered by
-    TestScatterAddOverrideCorrectness, which is not arch-gated)."""
+    torch._native.ops.scatter_add.cutedsl_impl.
+
+    The accepts-cases assert the predicates FIRE, which the leading
+    _has_sm90_plus() gate makes arch-dependent; below sm_90 (e.g. the L4
+    runners in trunk CI) every predicate is uniformly False and the class
+    tests nothing. ROCm is excluded explicitly: SM90OrLater is a raw
+    capability compare, and gfx942/gfx950 report (9, 4)/(9, 5), but the
+    predicates also reject ROCm outright. Correctness-on-fallback is
+    covered by TestScatterAddOverrideCorrectness, which is deliberately
+    not arch-gated."""
 
     @classmethod
     def setUpClass(cls):
