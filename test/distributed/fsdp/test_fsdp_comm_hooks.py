@@ -11,15 +11,18 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
     requires_nccl_version,
-    skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -32,8 +35,6 @@ if not dist.is_available():
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-
-BFLOAT16_AVAILABLE = torch.cuda.is_bf16_supported() or torch.xpu.is_bf16_supported()
 
 
 class Net(nn.Module):
@@ -109,7 +110,13 @@ class DummyHook:
 
 
 class TestCommunicationHooks(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy",
         [
@@ -119,7 +126,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_behavior(
-        self, sharding_strategy: ShardingStrategy | None
+        self, device, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's default communication hook's behavior and correctness.
@@ -181,6 +188,10 @@ class TestCommunicationHooks(FSDPTest):
         ).to(device)
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("has_wrapping", [True, False])
     @parametrize(
         "sharding_strategy",
@@ -191,7 +202,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_initialization(
-        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
+        self, device, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook interface behavior.
@@ -232,6 +243,10 @@ class TestCommunicationHooks(FSDPTest):
             self.assertEqual(fsdp_module._comm_hook_state, dummy_state)
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy",
         [
@@ -241,7 +256,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_non_root(
-        self, sharding_strategy: ShardingStrategy | None
+        self, device, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -272,7 +287,11 @@ class TestCommunicationHooks(FSDPTest):
             submodules[1].register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
-    def test_registering_hook_hybrid_strategy(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_registering_hook_hybrid_strategy(self, device):
         for sharding_strategy in (
             ShardingStrategy.HYBRID_SHARD,
             ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -292,6 +311,10 @@ class TestCommunicationHooks(FSDPTest):
                 fsdp_model.register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy",
         [
@@ -301,7 +324,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_submodules(
-        self, sharding_strategy: ShardingStrategy | None
+        self, device, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -378,7 +401,10 @@ class TestCommunicationHooks(FSDPTest):
         ):
             self.assertEqual(hook_param.grad, mp_param.grad)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
     @parametrize(
@@ -390,7 +416,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_fp16_hook(
-        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
+        self, device, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
@@ -399,12 +425,12 @@ class TestCommunicationHooks(FSDPTest):
             state, hook, sharding_strategy, torch.float16, has_wrapping
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
-    @skip_but_pass_in_sandcastle_if(
-        not BFLOAT16_AVAILABLE,
-        "BFloat16 is only supported by CUDA 11+ or XPU",
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+        Capability.dtype.bf16,
     )
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
     @parametrize(
@@ -416,7 +442,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_bf16_hook(
-        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
+        self, device, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook
@@ -426,7 +452,7 @@ class TestCommunicationHooks(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestCommunicationHooks)
+instantiate_device_type_tests(TestCommunicationHooks, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
