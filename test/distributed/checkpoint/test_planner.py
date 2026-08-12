@@ -48,6 +48,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _merge_delta_local_plans,
     create_read_items_for_chunk_list,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -104,6 +105,11 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
 
 
 class TestCheckpointableTensorDistributed(DTensorTestBase):
+    # `device_type` is hard-coded to "cpu" below rather than derived from
+    # whatever accelerator is present, so this is tied to CPU by
+    # construction -- CPU, not GENERIC.
+    hw_classification = HardwareClassification.CPU
+
     @property
     def world_size(self) -> int:
         return 4
@@ -114,7 +120,7 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    def test_checkpointable_tensor_shard_save_load(self):
+    def test_checkpointable_tensor_shard_save_load(self, device):
         shard_size = 4
         rank = dist.get_rank()
         start = rank * shard_size
@@ -798,5 +804,8 @@ class TestLoadPlanner(TestCase):
         self.assertEqual(planner.metadata.version, CURRENT_DCP_VERSION)
 
 
+instantiate_device_type_tests(
+    TestCheckpointableTensorDistributed, globals(), only_for="cpu"
+)
 if __name__ == "__main__":
     run_tests()
