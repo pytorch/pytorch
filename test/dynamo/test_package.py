@@ -2739,6 +2739,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with open(second) as handle:
             self.assertEqual(text, handle.read())
 
+    def test_invariants_path_is_a_file_not_a_directory(self):
+        # save() treats its path as a directory to put the artifact in; this one
+        # is a plain text file written exactly where asked, parent directories
+        # included. The two are easy to confuse, so pin it.
+        path = os.path.join(self.path(), "snapshots", "invariants.txt")
+        self.assertFalse(os.path.exists(os.path.dirname(path)))
+        with precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4, 8),)],
+            invariants=path,
+        ):
+            pass
+        self.assertTrue(os.path.isfile(path))
+        self.assertFalse(os.path.isdir(path))
+        with open(path) as handle:
+            self.assertIn("# precompile invariants for", handle.read())
+
     def test_invariants_marks_unenforced_preconditions(self):
         # An invariant whose guard could not be serialized is a precondition
         # nothing rechecks at load. It has to be visibly distinct.

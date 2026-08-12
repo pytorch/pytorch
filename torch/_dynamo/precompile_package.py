@@ -37,6 +37,11 @@ graphs apart. Intersection is per frame because guards from different frames are
 not comparable: the entry frame guards its arguments, a resume frame guards
 whatever crossed the break. See ``PrecompileSession.invariants``.
 
+Note the asymmetry with ``save``: ``invariants`` names a FILE and writes exactly
+it, creating parent directories, so ``snapshots/invariants.txt`` is a text file
+you can commit and diff. ``save`` names a DIRECTORY and puts the artifact
+inside it.
+
     # later, in a fresh process
     compiled = precompile_load(model, path, backend="inductor")
     with serving():  # no compilation permitted
@@ -876,7 +881,18 @@ class PrecompileSession:
         return tuple(out)
 
     def write_invariants(self, path: str) -> None:
-        """Write :meth:`invariants` to ``path`` in human-readable form."""
+        """
+        Write :meth:`invariants` to ``path`` in human-readable form.
+
+        ``path`` is a FILE, written exactly as given, with parent directories
+        created -- ``snapshots/invariants.txt`` is a text file, not a directory.
+        That is the opposite of :meth:`save`, which treats its path as a
+        directory to put the artifact in.
+
+        Output is stable across runs of the same capture: object ids and
+        Dynamo's per-process counters are normalized away, so the file can be
+        committed and diffed to see what a model change did to its guards.
+        """
         frames = self.invariants()
         target = getattr(self._fn, "__qualname__", None) or type(self._fn).__qualname__
         lines = [
