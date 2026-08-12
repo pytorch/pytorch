@@ -111,9 +111,11 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     impl_->synchronizeDevice(device_index);
   }
 
-  std::string getEventIPCHandle(void** event, const DeviceIndex device_index)
-      const override {
-    return impl_->getEventIPCHandle(event, device_index);
+  std::string getEventIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    return impl_->getEventIPCHandle(event, device_index, flag);
   }
 
   void reconstructEventFromIPCHandle(
