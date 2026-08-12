@@ -2154,6 +2154,14 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ]
     preprocess_mm_configs: Callable[..., Generator[TritonConfig, None, None]]
 
+    # Whether to render the K loop ascending (range(0, tl.cdiv(K, BLOCK_K)))
+    # instead of descending (range(K, 0, -BLOCK_K)). XPU's Triton->SPIR-V
+    # backend miscompiles the descending form when the loop runs more than one
+    # iteration, so the XPU heuristics set this to True. Off XPU the flag stays
+    # False and ASCENDING_K is never injected (see get_extra_kwargs), so those
+    # kernels are unaffected.
+    ascending_k: bool = False
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -2178,9 +2186,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         else:
             allow_tf32 = False
 
-        return {
+        extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
         }
+        # Scoped to XPU (self.ascending_k) and to the templates that reference
+        # the key. The mm/addmm/... ops via mm_template are excluded because
+        # triton_mm.py.jinja already renders ascending unconditionally.
+        if self.ascending_k and op_name in ("bmm", "baddbmm", "mm_plus_mm"):
+            extra_kwargs["ASCENDING_K"] = True
+        return extra_kwargs
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
         return True
@@ -3525,6 +3539,10 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
+    # See MMTemplateConfigMixin.ascending_k. Applies to the bmm template
+    # (also used by baddbmm via XPUAddmmTemplateConfigHeuristic).
+    ascending_k = True
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -3595,6 +3613,9 @@ class XPUMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
 ):
     """MM Plus MM template heuristic for XPU"""
+
+    # See MMTemplateConfigMixin.ascending_k.
+    ascending_k = True
 
     def __init__(self) -> None:
         super().__init__()

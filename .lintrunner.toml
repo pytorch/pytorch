@@ -209,7 +209,7 @@ exclude_patterns = [
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
-    'c10/util/complex_utils.h',
+    'torch/headeronly/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -1288,6 +1288,8 @@ exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/utils/model_dump/preact.mjs',
+    # Generated: mirrors the label names on GitHub verbatim
+    'tools/linter/adapters/pytorch_labels.json',
 ]
 is_formatter = true
 

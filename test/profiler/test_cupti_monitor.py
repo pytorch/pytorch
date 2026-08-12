@@ -228,6 +228,46 @@ class TestCuptiRecords(TestCase):
         self.assertIsNone(m.push_external_correlation_id())
         self.assertIsNone(m.pop_external_correlation_id())
 
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_kernel_latency_timestamps_track_the_field_union(self):
+        # The per-subscriber latency-timestamp attribute is only wanted while some
+        # observer selects the QUEUED kernel field. It used to latch on and never
+        # come back off, so one observer asking for QUEUED left the feature enabled
+        # for the rest of the process -- including after that observer unregistered.
+        from cupti.cupti import ActivityKind
+
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        m = CuptiMonitor()
+        calls = []
+
+        with patch.object(
+            type(m._cupti),
+            "enable_kernel_latency_timestamps",
+            lambda _self, _sub, enable: calls.append(enable) or True,
+        ):
+            timing = m.register(
+                {ActivityKind.CONCURRENT_KERNEL: [Kernel.START.id, Kernel.END.id]},
+                lambda columns: None,
+            )
+            self.assertEqual(calls, [], "no observer wants QUEUED yet")
+            self.assertFalse(m._latency_enabled)
+
+            queued = m.register(
+                {ActivityKind.CONCURRENT_KERNEL: [Kernel.START.id, Kernel.QUEUED.id]},
+                lambda columns: None,
+            )
+            self.assertEqual(calls, [True], "QUEUED selected -> enable once")
+            self.assertTrue(m._latency_enabled)
+
+            # Dropping the QUEUED observer must turn it back off, not leave it armed.
+            m.unregister(queued)
+            self.assertEqual(calls, [True, False])
+            self.assertFalse(m._latency_enabled)
+
+            m.unregister(timing)
+
     def test_external_correlation_id_mirror(self):
         # The native per-thread mirror of CUPTI's external-correlation stack lets
         # the current id be read (CUPTI has push/pop but no peek). Pure: the mirror
