@@ -2739,9 +2739,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
-        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
-        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
-        if dp == 2 and block_m not in (128, 256):
+        if dp > 1 and block_m != 256:
             return False
         if template_kwargs.get("TWO_CTAS", False):
             # 2-CTA deadlocks without the TMA epilogue store to drive the cluster
