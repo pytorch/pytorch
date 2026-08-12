@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     parametrize,
+    skipIfRocmVersionAtLeast,
     skipIfXpu,
     slowTest,
 )
@@ -153,8 +154,12 @@ class TestGpuWrapper(InductorTestCase):
         debug_sync = IndentedBuffer()
         wrapper.generate_debug_sync(debug_sync)
         code = debug_sync.getvalue()
-        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-        self.assertIn("DeviceSynchronize", code)
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
         self.assertNotIn("torch.cuda.synchronize()", code)
 
         wrapper.prefix = IndentedBuffer()
@@ -166,8 +171,12 @@ class TestGpuWrapper(InductorTestCase):
         ):
             wrapper._codegen_entry_impl_prologue()
         code = wrapper.prefix.getvalue()
-        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-        self.assertIn("DeviceSynchronize", code)
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
         self.assertNotIn("torch.cuda.synchronize()", code)
 
         wrapper.device = "xpu"
@@ -514,6 +523,8 @@ class TestGpuWrapper(InductorTestCase):
         self.assertEqual(actual, expected)
         self.assertIn("needs_vec_isa=False", code)
 
+    # The vec-ISA probe child cannot resolve ROCm SDK libraries in CI.
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -1017,6 +1028,7 @@ if RUN_GPU:
         BaseTest("test_custom_op_1"),
         BaseTest("test_custom_op_2"),
         BaseTest("test_custom_op_3"),
+        BaseTest("test_efficient_zero_tensor_avoids_oom"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),

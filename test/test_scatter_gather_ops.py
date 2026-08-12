@@ -11,12 +11,12 @@ from torch.testing._internal.common_utils import \
     (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
      subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, onlyAccelerator, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -80,7 +80,7 @@ class TestScatterGather(TestCase):
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
-            if device != "cpu":
+            if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
@@ -259,7 +259,7 @@ class TestScatterGather(TestCase):
         else:
             # When we are running opportunistic_fastatomics, we will expect some floating point rounding
             # errors as the order of operation is not guaranteed.
-            if TEST_WITH_ROCM and CDNA3OrLater() \
+            if TEST_WITH_ROCM and gfx_arch_supports_opportunistic_fastatomics() \
                     and not torch.are_deterministic_algorithms_enabled():
                 self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
             else:
@@ -319,7 +319,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
     @serialTest()
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.half, torch.bfloat16)
     def test_scatter_add_large(self, device, dtype):
         # test larger shapes that exercise the vectorized/TMA scatter_add path
@@ -338,7 +338,7 @@ class TestScatterGather(TestCase):
         else:
             shapes.append((4, 4, 16384 * 256))
         for (m, n, k) in shapes:
-            if device != "cpu":
+            if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
@@ -634,9 +634,10 @@ def _misaligned_view(rows, cols, dtype):
     # Sanity check: if the allocator ever hands us a base such that the
     # +1-element slice is still 16B-aligned, the test silently passes
     # without exercising the misalignment path.
-    assert t.data_ptr() % 16 != 0, (  # noqa: S101
-        f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
-    )
+    if t.data_ptr() % 16 == 0:
+        raise AssertionError(
+            f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
+        )
     return t
 
 
@@ -926,6 +927,45 @@ class TestScatterAddOverrideCorrectness(TestCase):
         ).reshape(self_t.shape)
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("path", ["tma", "vec"])
+    def test_inner_dim_change_no_recompile(self, path):
+        # The kernels take the slice extent N as a runtime arg, so a single
+        # compile must serve every inner-dim size. Call the kernel host entry
+        # at several N and assert the compile cache runs exactly one real
+        # compile (misses advances once, then only hits). We drive the host
+        # entry directly rather than through torch.scatter_add: TMA is
+        # registered first and strictly narrower, so on sm_90+ it would win
+        # every contiguous shape and the vec cache would never move.
+        from torch._native.ops.scatter_add import tma_kernel, vec_scatter_kernel
+        if path == "tma":
+            if not SM90OrLater:
+                self.skipTest("TMA path requires sm_90+")
+            compile_fn = tma_kernel._compile_tma_scatter
+            run = tma_kernel.tma_scatter_add_into
+        else:
+            compile_fn = vec_scatter_kernel._compile_vec_scatter
+            run = vec_scatter_kernel.vec_scatter_add_into
+
+        torch.manual_seed(0)
+        # Same dtype and contiguity across all sizes so only N varies.
+        Ns = [128, 256, 512, 1024, 2048]
+        compile_fn.cache_clear()
+        for N in Ns:
+            self_t, _, src, idx_1d = _make_override_triple(200, 100, (N,))
+            out = self_t.clone()
+            run(out, idx_1d, src)
+            self.assertEqual(out, _naive_scatter_add(self_t, idx_1d, src),
+                             atol=1e-4, rtol=1e-4)
+            misses = compile_fn.cache_info().misses
+            # Every N after the first must be served from cache: misses
+            # tops out at 1 (0 if the .o was already warm on disk). If N
+            # were still in the key, misses would climb with each size.
+            self.assertLessEqual(misses, 1, msg=f"recompiled at N={N}")
+        # The decisive invariant, independent of on-disk cache state: one
+        # in-memory entry serves every N. If N were in the key there'd be
+        # len(Ns) entries.
+        self.assertEqual(compile_fn.cache_info().currsize, 1)
 
     @parametrize("variant", ["functional", "out", "inplace"])
     def test_op_variants(self, variant):

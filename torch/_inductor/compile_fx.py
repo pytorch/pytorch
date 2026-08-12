@@ -101,7 +101,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -142,10 +142,11 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.output_code import _StrideExprStr
+    from torch._inductor.output_code import _StrideExprStr, CompiledFnRunner
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .codecache import CacheInfo
     from .ir import ExternKernelNode
 
 
@@ -247,6 +248,142 @@ static_inputs_log = torch._logging.getArtifactLogger(
 inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
+# Note: [static_input_idxs semantics]
+#
+# static_input_idxs, confusingly, describes the compiler's expectations about
+# inputs sent to the compiled function in two ways:
+#
+# - ADDRESS-stable: we expect the same data_ptr every call. cudagraphs cares
+#   about this, since stable inputs can be burned into the recorded cudagraph
+#   instead of being copied into graph-owned buffers.
+#
+# - ALIGNMENT-stable: we expect data_ptr % 16 is the same every call. Most Triton
+#   kernels are more efficient if they can assume alignment, and if we chose to
+#   compile kernels for aligned inputs (because the input to be compiled
+#   happened to be aligned), if we run into an unaligned input we will
+#   copy_if_misaligned at runtime (nonstatic inputs only -- see the tables).
+#
+# Note that an ADDRESS-stable input doesn't have to be aligned, but it will
+# be ALIGNMENT-stable (since the alignment will always be the same each
+# time around.)
+#
+# Both of these properties are tracked together via `static_input_idxs`.
+# However, this is mostly for the benefit of the wrapper code (in this file);
+# when we do triton codegen, whether or not it gets to do aligned or unaligned
+# code simply depends on the precise real tensors it happens to get
+# JIT-compiled with (see Note: [Input Alignment handling in Inductor]).
+# Although traditional triton launcher would check (and recompile) a kernel if
+# alignment on inputs changed, for performance reasons Inductor bypasses this:
+# the wrapper code here is responsible for safety checks / recompiling if
+# necessary.
+#
+# Another confusing thing about these properties is that in some cases, a user
+# can SAFELY violate the compiler expectation.  If you obey the expectation you
+# get good performance, but the runtime wrapper can (inefficiently) fix things
+# up if you had got it wrong.  For example, if a param's address changes
+# (because you used one torch.compile for multiple instances, e.g.,
+# inline_inbuilt_nn_modules, #126822).  But there's quite a lot of variation
+# of WHO notices and WHAT repairs the problem, and it has also been a bit
+# of a bug farm (thus this comment!)
+#
+# Every input is classified into one of three classes:
+#
+#   STATIC-G  static, guarded:
+#       Only explicitly via mark_static_address(guard=True).
+#   STATIC-U  static, unguarded:
+#       Inferred from nn.Module params/buffers (#130391),
+#       some saved-for-backward tensors (see the backward table) and
+#       explicitly via mark_static_address(guard=False).
+#   NONSTATIC everything else:
+#       plain user inputs, tangents.
+#
+# We now enumerate the detector/repair apparatus for each property under
+# certain situations:
+#
+# ADDRESS changes. Addresses are only baked in where a CUDA graph records
+# the input (no cudagraphs => addresses are passed fresh to every kernel
+# launch and nothing needs detecting). Under cudagraphs:
+#
+#   class     | detector on address change               | repair
+#   ----------+------------------------------------------+-----------
+#   STATIC-U  | data_ptr comparison at replay            | re-record
+#             | (check_invariants /                      |
+#             | cudagraphify_impl assert)                |
+#             |                                          |
+#   STATIC-G  | dynamo data_ptr guard                    | recompile
+#             |                                          |
+#   NONSTATIC | no detector needed: copied into graph-owned buffer
+#             | every replay
+#
+# Without cudagraphs, we do nothing (but the alignment checks, see below.)
+#
+# ALIGNMENT changes. Alignment is only baked in if the example input was
+# statically known 16-byte aligned (tensor_is_aligned; a symbolic
+# storage_offset that cannot be proven aligned counts as misaligned even
+# if the example happens to be). A misaligned example produces
+# no-assumption codegen: correct for any alignment, nothing to detect.
+# (config.assume_aligned_inputs, non-default, disables that escape:
+# everything is assumed aligned.) For an aligned example:
+#
+#   class     | detector on align change                 | repair
+#   ----------+------------------------------------------+-----------
+#   STATIC-U  | NOBODY: misaligned-address crash.        | (TODO: needs
+#             | A misaligned static at cudagraph record  | a dynamo
+#             | time is demoted to NONSTATIC             | alignment
+#             | (remove_unaligned_input_idxs), but that  | guard ->
+#             | only helps if the flip happens to        | recompile)
+#             | coincide with a record                   |
+#             |                                          |
+#   STATIC-G  | dynamo data_ptr guard                    | recompile
+#             | (same ptr => same alignment)             |
+#             |                                          |
+#   NONSTATIC | per-call check emitted before first use  | clone
+#             | (copy_if_misaligned)                     |
+#
+# BACKWARD inputs are tangents plus saved tensors.  We infer a class
+# for these as follows:
+#
+#   backward input                    | class
+#   ----------------------------------+------------------------------------
+#   saved fw input                    | same class as that input in the
+#                                     | forward (requires the
+#                                     | is_static_input stamp; see below)
+#                                     |
+#   saved inductor intermediate       | STATIC-U; sound with NO detector [1]
+#                                     |
+#   saved fallback (custom) op output | STATIC-U, but alignment can
+#                                     | genuinely vary: detector is NOBODY.
+#                                     | KNOWN HOLE [2]
+#                                     |
+#   tangent                           | NONSTATIC
+#
+# [1] Alignment cannot change: allocator-aligned base + deterministic
+#     codegen offsets (a saved odd-offset view is *stably* misaligned and
+#     gets no-assumption codegen). Address is baked in only where a CUDA
+#     graph records the backward, and then the same pool serves the
+#     forward, so replay keeps pool offsets stable. Piecewise caveat:
+#     "cudagraphs is on" does not imply pool-owned. Tensors allocated by
+#     eager code BETWEEN graph partitions (graph_partition mode) or
+#     between dynamo graphs move per call; partitioned forwards therefore
+#     demote ALL saved activations, conservatively including pool-owned
+#     ones (forward_is_partitioned -> get_static_bw_input_idxs, see
+#     compile_fx_backward), and across dynamo graph breaks staticness only
+#     transfers within a pool lineage (cudagraph_managed_idxs, cudagraph
+#     trees).
+# [2] Allocated by arbitrary user code, so alignment may differ call to
+#     call with no address-stability contract to lean on; but it is
+#     classified static (unstamped, non-primal) and gets no runtime check,
+#     so an alignment flip IMAs in the backward. Inductor judges fallback
+#     output alignment from the fake tensor (ir.py,
+#     V.graph.unaligned_buffers), which cannot express "sometimes
+#     misaligned". TORCHINDUCTOR_ALIGNMENT_ASSERTS (default on in OSS)
+#     catches the fake-vs-real mismatch in the forward;
+#     TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT=1 is the workaround.
+#
+# A part of the bug farm is that static_input_idxs covers both address changes
+# and alignment changes.  In particular, it's easy to elide a test for
+# alignment which is OK assuming the address checks are on (cudagraphs), but
+# then forget to restore this test when cudagraphs are off.
 def get_static_input_idxs(num_fixed: int) -> list[int]:
     # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
     # of cudagraphs. Rather than copying these into cudagraph-owned memory
@@ -262,6 +399,12 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
 
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
+
+    # Don't overwrite strides that were already recorded (e.g., before
+    # joint_graph_passes which can introduce padded strides via pad_mm).
+    if "original_output_strides" in output_node.meta:
+        return
+
     output_strides = []
 
     if not isinstance(output_node.args[0], torch.fx.Node):
@@ -513,6 +656,47 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_nested_region_inductor_config_patches(
+    gm: GraphModule,
+) -> dict[str, Any] | None:
+    nested_config = getattr(gm, "meta", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    return patches or None
+
+
+def _patch_nested_region_inductor_config(
+    gm: GraphModule,
+) -> AbstractContextManager[None]:
+    patches = _get_nested_region_inductor_config_patches(gm)
+    if patches is None:
+        return contextlib.nullcontext()
+    return config.patch(patches)
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph_node = node.args[0]
+        if (
+            not isinstance(subgraph_node, torch.fx.Node)
+            or subgraph_node.op != "get_attr"
+            or not isinstance(subgraph_node.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_node.target, None)
+        if isinstance(subgraph, GraphModule):
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -522,17 +706,19 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
-        if not config.use_pre_grad_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_pre_grad_passes:
+                return gm
 
-        add_passes = config.add_pre_grad_passes
-        remove_passes = config.remove_pre_grad_passes
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            # as we don't have recursive example inputs, passing empty set here
-            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-            setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
+            add_passes = config.add_pre_grad_passes
+            remove_passes = config.remove_pre_grad_passes
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                # as we don't have recursive example inputs, passing empty set here
+                new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+                setattr(gm, subgraph_name, new_subgraph)
+            return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(
@@ -552,29 +738,35 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        if not config.use_joint_graph_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_joint_graph_passes:
+                return gm
 
-        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
-        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
-        # invoke_subgraph HOP before calling the partitioner on the outer graph.
-        # AOTAutograd has access to partition_fn, which internally calls the
-        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
-        # skip_invoke_subgraph.
-        old_subgraph_names = OrderedSet(_get_subgraph_names(gm, skip_invoke_subgraph))
-        for subgraph_name in old_subgraph_names:
-            _run_on_sub_graph_module(subgraph_name)
-
-        out_gm = joint_graph_passes(gm, input_device)
-
-        # Some joint graph passes may create new sub graph module. Run one round
-        # for the newly created graph modules.
-        # We should not skip graphs for invoke_subgraph HOPs for newly
-        # generated subgraphs.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
-            if subgraph_name not in old_subgraph_names:
+            # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+            # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+            # invoke_subgraph HOP before calling the partitioner on the outer graph.
+            # AOTAutograd has access to partition_fn, which internally calls the
+            # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+            # skip_invoke_subgraph.
+            old_subgraph_names = OrderedSet(
+                _get_subgraph_names(gm, skip_invoke_subgraph)
+            )
+            for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
-        return out_gm
+
+            out_gm = joint_graph_passes(gm, input_device)
+
+            # Some joint graph passes may create new sub graph module. Run one round
+            # for the newly created graph modules.
+            # We should not skip graphs for invoke_subgraph HOPs for newly
+            # generated subgraphs.
+            for subgraph_name in _get_subgraph_names(
+                out_gm, skip_invoke_subgraph=False
+            ):
+                if subgraph_name not in old_subgraph_names:
+                    _run_on_sub_graph_module(subgraph_name)
+            return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -583,13 +775,15 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
-        if not config.use_post_grad_passes:
-            return
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_post_grad_passes:
+                return
 
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference)
-        post_grad_passes(gm, is_inference)
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+            post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -827,6 +1021,19 @@ def compile_fx_inner(
             stack.enter_context(
                 config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
             )
+        # Host-side TMA only selects the descriptor flavor; it needs the TMA path
+        # itself enabled. Warn (don't silently no-op) if it's set without its
+        # prerequisites.
+        if config.triton.enable_host_side_tma and not (
+            config.triton.use_tensor_descriptor and config.assume_aligned_inputs
+        ):
+            warnings.warn(
+                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.use_tensor_descriptor and "
+                "config.assume_aligned_inputs are also enabled; host-side TMA "
+                "will be skipped.",
+                stacklevel=2,
+            )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
@@ -920,6 +1127,8 @@ def _compile_fx_inner(
             f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
         )
 
+    _propagate_invoke_subgraph_nested_region_config(gm)
+
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     if config.save_args:
@@ -982,7 +1191,7 @@ def _compile_fx_inner(
 
         mb_compiled_graph: OutputCode | None = None
         key_info = None
-        cache_info = None
+        cache_info: CacheInfo | None = None
         remote_cache = None
         constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
@@ -1171,7 +1380,7 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
+        cache_event_metadata = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
             metadata=cache_event_metadata,
@@ -1357,11 +1566,22 @@ class _InProcessFxCompile(FxCompile):
                 f"graph {graph_id}",
             )
 
-            fd = io.StringIO()
-            torch._dynamo.repro.after_aot.save_graph_repro(
-                fd, gm, example_inputs, "inductor", save_dir=None
-            )
-            runnable_graph_str = fd.getvalue()
+            # Building this parses the source of every Triton kernel in the
+            # graph, and it is only ever used as a structured-trace artifact:
+            # logged here, and logged again by the FX graph cache when this
+            # graph is loaded from it. Produce it from payload_fn so that
+            # trace_structured's own "is anyone listening" check decides
+            # whether the work happens at all, and keep what it produced for
+            # the cache to replay.
+            produced: list[str] = []
+
+            def _fx_graph_runnable_payload() -> str:
+                fd = io.StringIO()
+                torch._dynamo.repro.after_aot.save_graph_repro(
+                    fd, gm, example_inputs, "inductor", save_dir=None
+                )
+                produced.append(fd.getvalue())
+                return produced[0]
 
             trace_structured(
                 "artifact",
@@ -1369,8 +1589,9 @@ class _InProcessFxCompile(FxCompile):
                     "name": "fx_graph_runnable",
                     "encoding": "string",
                 },
-                payload_fn=lambda: runnable_graph_str,
+                payload_fn=_fx_graph_runnable_payload,
             )
+            runnable_graph_str = produced[0] if produced else ""
 
             V.debug.fx_graph(gm, example_inputs)
             # TODO: Should we actually dump this?  It should be redundant with the aot
@@ -1598,7 +1819,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    compiled_fn_runner = None
+                    compiled_fn_runner: CompiledFnRunner | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1936,6 +2157,10 @@ def get_input_idxs_to_check(
         with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
             # do not add guards on input's storage offset
+            #
+            # Static inputs are address-stable, so compile-time alignment
+            # holds for every call and cloning would break the address
+            # cudagraphs recorded; see Note: [static_input_idxs semantics].
             if i in static_input_idxs and tensor_is_aligned(input):
                 continue
             if not should_assume_input_aligned(input):
@@ -2580,6 +2805,11 @@ def compile_fx_forward(
             for arg in output.args[0]  # type: ignore[union-attr]
         ]
 
+        # Record original output strides BEFORE joint_graph_passes, because
+        # pad_mm (run as part of joint_graph_passes) can introduce views with
+        # padded strides that would be incorrectly captured as "original".
+        _recursive_record_original_output_strides(gm)
+
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
@@ -2717,13 +2947,27 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
-        # When the forward was partitioned, saved activations from inline
-        # code between partitions are NOT at fixed addresses. Only mark
-        # primals (params/buffers) as static.
+        # Static backward inputs (see Note: [static_input_idxs semantics])
+        # are the saved tensors, minus two over-approximations of the
+        # name-based classification:
+        # 1. When the forward was partitioned, saved activations from inline
+        #    code between partitions are NOT at fixed addresses; keep only
+        #    "primals_*" (get_static_bw_input_idxs).
+        # 2. A saved-for-backward plain user input is a "primals_*" but gets
+        #    a fresh tensor every call; the partitioner stamps
+        #    meta["is_static_input"] to demote it to the runtime
+        #    copy_if_misaligned treatment. Unstamped placeholders default to
+        #    static, preserving the name-based classification.
         if compiler_config_extra.forward_is_partitioned.value:
-            static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
+            candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
-            static_input_idxs = list(range(fixed))
+            candidate_idxs = range(fixed)
+        placeholders = gm.graph.find_nodes(op="placeholder")
+        static_input_idxs = [
+            i
+            for i in candidate_idxs
+            if placeholders[i].meta.get("is_static_input", True)
+        ]
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -2870,6 +3114,28 @@ def compile_fx(
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
     if config.cpp_wrapper or config.fx_wrapper:
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        if _coor_enabled():
+            # cpp_wrapper/AOTInductor bakes the compile-time device index into the C++
+            # device guard, and fx_wrapper's device-context codegen is a no-op (see
+            # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
+            # emit a non-portable artifact.
+            #
+            # NB cudagraphs is deliberately NOT refused here. Its device dependence
+            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
+            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
+            # artifact is not shared across ranks today: the FX graph cache key embeds the
+            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
+            # and that is what the device-agnostic launcher handles. Whoever makes the FX
+            # graph cache key device-agnostic must revisit device_idxs (and re-check that
+            # graph-partition functions still define _coor_device_idx in their own scope)
+            # before cudagraphs can ride on a shared artifact.
+            raise RuntimeError(
+                "compile-on-one-rank (device-as-parameter) is not supported with "
+                "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "
+                "compile-time device index, which is not rank-portable."
+            )
         from torch._export.non_strict_utils import _fakify_script_objects
 
         cpp_wrapper_config = config.cpp_wrapper
@@ -3151,7 +3417,7 @@ def _compile_fx_main(
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
-                        elif isinstance(target, torch.ScriptObject) or is_opaque_type(
+                        elif isinstance(target, torch.ScriptObject) or is_custom_class(
                             type(target)
                         ):
                             node.meta["val"] = (
@@ -3245,6 +3511,7 @@ def make_graph_return_tuple(
     with gm.graph.inserting_before(node):
         gm.graph.output(rv)
     gm.graph.erase_node(node)
+    gm.recompile()
     if not graph_returns_tuple(gm):
         raise AssertionError("Expected graph to return a tuple")
 

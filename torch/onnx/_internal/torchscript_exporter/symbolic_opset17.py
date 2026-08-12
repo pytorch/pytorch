@@ -124,7 +124,7 @@ def stft(
         g: Graph to write the ONNX representation into
         input: Input tensor for the transformation
         n_fft: FFT size
-        hop_length: Size of the hop. Defaults to `floot(n_fft // 4)`
+        hop_length: Size of the hop. Defaults to `floor(n_fft // 4)`
         win_length: Size of the analysis window. Defaults to `n_fft`
         window: Analysis window. Defaults to a window of all ones
         normalized: Whether to return a normalized STFT

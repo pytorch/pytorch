@@ -1166,7 +1166,7 @@ class NativeOpSchema {
       }
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 
  private:
@@ -1230,7 +1230,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(ss.str());
+  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
 }
 } // namespace
 
@@ -1999,7 +1999,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
       const auto placement_type_name =
-          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+          py::str(py::reinterpret_steal<py::object>(
+              PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
       const auto placement_type_name =
           py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
