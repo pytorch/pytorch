@@ -625,7 +625,7 @@ def init_reductions():
     # so import it explicitly here to ensure torch.xpu.Event is available for IPC registration.
     import torch.xpu
 
-    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event]
+    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event, torch.Event]
     for event_cls in ipc_event_classes:
         reduction.register(event_cls, reduce_event)
 
