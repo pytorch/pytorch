@@ -7710,6 +7710,41 @@ class Scheduler:
             return True
         return False
 
+    def _reindexing_cannot_help_vertical(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """True when the vertical fusion is blocked by graph topology.
+
+        Reindexing rewrites the pointwise's index expressions, so it can only
+        rescue a fusion that failed because reads and writes of the *same*
+        buffer indexed differently. A dependency of node2 on a buffer node1
+        never writes cannot be matched whatever the indexing, and if that
+        buffer is produced between the two nodes the fusion stays illegal, so
+        can_fuse_vertical will reject the retry for the same reason. Buffer
+        names and the ancestor graph do not change under loop mutation, which
+        is what makes the answer stable across the reindex.
+
+        Worth checking first: the reindex costs a speculative loop mutation and
+        a memory-coalescing analysis, and on one model's backward graph 560 of
+        the 576 reindexes it performed were rejected for exactly this reason.
+        """
+        node1_buf_names = node1.get_buffer_names()
+        node1_op_names = node1.get_operation_names()
+        for dep in node2.unmet_dependencies:
+            name = self.mutation_renames.get(dep.name, dep.name)
+            if name in node1_buf_names:
+                # node1 writes it, so matching may yet succeed after reindexing.
+                continue
+            if isinstance(dep, WeakDep) and self.fusable_weak_dep(dep, node1, node2):
+                continue
+            buf = self.name_to_buf.get(name)
+            if buf is None:
+                continue
+            fused_node = self.name_to_fused_node.get(buf.defining_op_name())
+            if fused_node is not None and node1_op_names & fused_node.ancestors:
+                return True
+        return False
+
     def _try_reindex_pointwise_for_reduction(
         self,
         node1: BaseSchedulerNode,
@@ -8448,19 +8483,29 @@ class Scheduler:
             # reduction's domain and retry.
             if (
                 config.loop_reindexing_after_fusion
-                and self._try_reindex_pointwise_for_reduction(node1, node2)
+                and not self._reindexing_cannot_help_vertical(node1, node2)
             ):
-                return (
-                    self.can_fuse_vertical(
-                        node1,
-                        node2,
-                        index_equivalent_dep_names=index_equivalent_dep_names,
-                    )
-                    and V.choices.can_fuse_vertical(
-                        self, node1, node2, shared_data_score
-                    )
-                    and self.get_backend(device).can_fuse_vertical(node1, node2)
-                )
+                # The reindex mutates the pointwise's loops. If the retried
+                # checks still reject the fusion, undo it: leaving a rejected
+                # candidate's reindex applied changes the node for everyone
+                # else, and costs a reindex per rejected pair (on one model's
+                # backward graph, 414 pairs were reindexed and none of them
+                # fused).
+                reindex_snapshot = _LoopStateSnapshot.create((node1, node2))
+                if self._try_reindex_pointwise_for_reduction(node1, node2):
+                    if (
+                        self.can_fuse_vertical(
+                            node1,
+                            node2,
+                            index_equivalent_dep_names=index_equivalent_dep_names,
+                        )
+                        and V.choices.can_fuse_vertical(
+                            self, node1, node2, shared_data_score
+                        )
+                        and self.get_backend(device).can_fuse_vertical(node1, node2)
+                    ):
+                        return True
+                    reindex_snapshot.restore()
 
             return False
         else:  # nodes don't depend on each other, but may have common reads

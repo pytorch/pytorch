@@ -669,6 +669,24 @@ class OutputGraphCommon(OutputGraphGuardsState):
         raise NotImplementedError
 
 
+def is_noop_graph(gm: torch.fx.GraphModule) -> bool:
+    """True if the graph runs nothing and returns nothing.
+
+    Weaker than OutputGraph.is_empty_graph, which wants no nodes at all: a graph
+    that only holds an empty output node computes nothing either.
+    """
+    if count_calls(gm.graph) != 0:
+        return False
+    for node in gm.graph.find_nodes(op="output"):
+        if pytree.tree_leaves(node.args) != []:
+            return False
+    return True
+
+
+def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+    return ()
+
+
 class OutputGraph(OutputGraphCommon):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -939,6 +957,9 @@ class OutputGraph(OutputGraphCommon):
 
         # Bytecode to insert right before we call the graph
         self.pregraph_bytecode: list[Instruction] = []
+        # ids of GraphArgs whose requires_grad_(True) was hoisted in front of
+        # the graph, see TensorVariable.hoist_requires_grad_to_pregraph.
+        self.hoisted_requires_grad_args: set[int] = set()
 
         # Maps SyntheticLocalSource → (fn, args, arg_sources) for hoisted
         # graph inputs created by synthetic_graph_input, so invoke_subgraph
@@ -2989,8 +3010,17 @@ class OutputGraph(OutputGraphCommon):
                     example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
 
             gm.graph.lint()
-            with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm, example_inputs)
+            if is_noop_graph(gm):
+                # The graph can still be empty here even though the early check
+                # in this function passed: we decided to compile because there
+                # were outputs, and pruning then established that every one of
+                # them is an input or a constant that codegen emits directly.
+                # Handing that to the backend costs a metadata pass, a joint
+                # trace and a cache miss for a function with nothing in it.
+                compiled_fn = noop_graph_call
+            else:
+                with self.restore_global_state():
+                    compiled_fn = self.call_user_compiler(gm, example_inputs)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -3291,7 +3321,19 @@ class OutputGraph(OutputGraphCommon):
         return next_name
 
     def example_inputs(self) -> list[torch.Tensor]:
-        result = [arg.example for arg in self.graphargs]
+        result = []
+        for arg in self.graphargs:
+            # A hoisted requires_grad_() input is traced as requiring grad while
+            # the real tensor still does not (the mutation happens in the
+            # pregraph bytecode, at runtime). The backend has to see the traced
+            # state or it will build an inference-only graph.
+            if (
+                arg.fake_tensor is not None
+                and id(arg) in self.hoisted_requires_grad_args
+            ):
+                result.append(arg.fake_tensor)
+            else:
+                result.append(arg.example)
         # pyrefly: ignore[bad-return]
         return result
 
