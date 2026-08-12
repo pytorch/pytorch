@@ -158,12 +158,14 @@ class _VmapCombineFnWrapper:
         batch_size: int,
         randomness: str,
         expected_out_dims: tuple[Any, ...] | None = None,
+        op_name: str = "associative_scan",
     ) -> None:
         self.combine_fn = combine_fn
         self.in_dims = in_dims
         self.batch_size = batch_size
         self.randomness = randomness
         self.expected_out_dims = expected_out_dims
+        self.op_name = op_name
         self.out_dims: tuple[Any, ...] | None = None
 
     def __call__(self, *args: Any) -> Any:
@@ -178,7 +180,7 @@ class _VmapCombineFnWrapper:
         out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
         if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
             raise RuntimeError(
-                "associative_scan under vmap requires the combine_fn outputs to keep "
+                f"{self.op_name} under vmap requires the combine_fn outputs to keep "
                 "the same batched arguments as its xs inputs, because the outputs are "
                 "fed back as inputs on later scan levels. Here they diverge (e.g. "
                 "batched additional_inputs with unbatched xs, or a pytree where an "
