@@ -39,7 +39,7 @@ types = [torch.float, torch.bfloat16, torch.half]
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
