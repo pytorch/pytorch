@@ -868,9 +868,13 @@ def run(
             with_index,
         ),
     )
-    if not inputs and not out:
+    if inputs:
+        dev = inputs[0].device
+    elif out:
+        dev = out[0].device
+    else:
+        # nin == 0 (fill_ / the constructors): the target is the only source of device.
         raise AssertionError("nullary pointwise run needs a target tensor")
-    dev = inputs[0].device if inputs else out[0].device
     outs = (
         list(out)
         if out is not None
