@@ -511,7 +511,9 @@ class TestLookupTable(BaseLookupTableTest):
             if result is None:
                 raise AssertionError(f"Result should not be None for {description}")
             self.assertIn(
-                "triton", result, f"Should have triton result for {description}"
+                "triton",
+                result,
+                lambda msg: f"{msg}\nShould have triton result for {description}",
             )
             self.assertEqual(
                 len(result["triton"]),
@@ -522,7 +524,7 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertNotIn(
                 "template_hash",
                 result["triton"][0],
-                f"template_hash should be removed from result for {description}",
+                lambda msg: f"{msg}\ntemplate_hash should be removed from result for {description}",
             )
             # Other config fields should be preserved
             self.assertEqual(
