@@ -2,6 +2,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <torch/csrc/dynamo/cache_entry.h>
@@ -19,12 +20,54 @@
 namespace {
 // Short-term fix for: https://github.com/pytorch/pytorch/issues/166926
 bool use_lru = true;
+
+bool enable_guard_lookup_memo() {
+  PyObject* modules = PyImport_GetModuleDict();
+  if (modules == nullptr) {
+    if (PyErr_Occurred()) {
+      throw python_error();
+    }
+    return false;
+  }
+  PyObject* config_module = nullptr;
+  if (PyDict_GetItemStringRef(modules, "torch._dynamo.config", &config_module) <
+      0) {
+    throw python_error();
+  }
+  if (config_module == nullptr) {
+    return false;
+  }
+  py::object config_module_ref =
+      py::reinterpret_steal<py::object>(config_module);
+
+  PyObject* enabled = PyObject_GetAttrString(
+      config_module_ref.ptr(), "enable_guard_lookup_memo");
+  if (enabled == nullptr) {
+    throw python_error();
+  }
+  py::object enabled_ref = py::reinterpret_steal<py::object>(enabled);
+
+  int result = PyObject_IsTrue(enabled_ref.ptr());
+  if (result < 0) {
+    throw python_error();
+  }
+  return result != 0;
+}
+
+std::vector<std::shared_ptr<PrecompileEntry>> snapshot_precompile_entries(
+    ExtraState* extra_state) {
+  std::lock_guard<std::mutex> lock(extra_state->precompile_entries_mutex);
+  return {
+      extra_state->precompile_entries.begin(),
+      extra_state->precompile_entries.end()};
+}
 } // namespace
 
 Py_ssize_t extra_index = -1;
 
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
-    : orig_code(orig_code_arg) {}
+    : orig_code(orig_code_arg),
+      guard_lookup_memo_enabled(enable_guard_lookup_memo()) {}
 
 std::list<CacheEntry>& ExtraState::cache_entry_list(
     int64_t isolate_recompiles_id) {
@@ -220,8 +263,15 @@ static CacheEntry* lookup_in_list(
               torch::dynamo::run_root_guard_manager(
                       cache_entry.diff_guard_root_mgr, f_locals);
         } else {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
+          valid = cache_entry.last_success_receipt == nullptr
+              ? torch::dynamo::run_root_guard_manager(
+                    cache_entry.root_mgr, f_locals)
+              : torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+                    cache_entry.last_success_receipt,
+                    &cache_entry,
+                    cache_entry.root_mgr,
+                    f_locals,
+                    /*is_skip_guard_eval_unsafe=*/false);
         }
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
@@ -277,15 +327,30 @@ void lookup(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
+    PyObject** matched_precompile_code_owner,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
+  *matched_precompile_code_owner = nullptr;
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      *maybe_cached_code = entry.code.ptr();
-      return;
+  if (extra_state->has_precompile_entries.load(std::memory_order_relaxed)) {
+    for (const auto& entry : snapshot_precompile_entries(extra_state)) {
+      const bool valid = entry->last_success_receipt == nullptr
+          ? torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)
+          : torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+                entry->last_success_receipt,
+                entry.get(),
+                entry->root_mgr,
+                f_locals,
+                is_skip_guard_eval_unsafe);
+      if (valid) {
+        PyObject* code = entry->code.ptr();
+        Py_INCREF(code);
+        *matched_precompile_code_owner = code;
+        *maybe_cached_code = code;
+        return;
+      }
     }
   }
 
@@ -332,18 +397,26 @@ bool try_lookup_without_guard_eval(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
+    PyObject** matched_precompile_code_owner,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
-  if (!extra_state->precompile_entries.empty()) {
-    // Only the first precompile entry can be safely fast-pathed: a later
-    // guardless entry must not preempt an earlier guarded entry whose guards
-    // may pass.
-    const auto& entry = extra_state->precompile_entries.front();
-    if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
-      *maybe_cached_code = entry.code.ptr();
-      return true;
+  *matched_precompile_code_owner = nullptr;
+  if (extra_state->has_precompile_entries.load(std::memory_order_relaxed)) {
+    auto precompile_entries = snapshot_precompile_entries(extra_state);
+    if (!precompile_entries.empty()) {
+      // Only the first precompile entry can be safely fast-pathed: a later
+      // guardless entry must not preempt an earlier guarded entry whose guards
+      // may pass.
+      const auto& entry = precompile_entries.front();
+      if (torch::dynamo::root_guard_manager_has_no_guards(entry->root_mgr)) {
+        PyObject* code = entry->code.ptr();
+        Py_INCREF(code);
+        *matched_precompile_code_owner = code;
+        *maybe_cached_code = code;
+        return true;
+      }
+      return false;
     }
-    return false;
   }
 
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
@@ -385,10 +458,12 @@ CacheEntry* create_cache_entry(
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
   if (use_lru) {
-    entries.emplace_front(guarded_code, backend);
+    entries.emplace_front(
+        guarded_code, backend, extra_state->guard_lookup_memo_enabled);
     new_iter = entries.begin();
   } else {
-    entries.emplace_back(guarded_code, backend);
+    entries.emplace_back(
+        guarded_code, backend, extra_state->guard_lookup_memo_enabled);
     new_iter = std::prev(entries.end());
   }
   new_iter->_owner = extra_state;
@@ -461,12 +536,22 @@ size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   return extra->total_cache_entry_count;
 }
 
-PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
+PrecompileEntry::PrecompileEntry(
+    py::object gm,
+    py::object c,
+    bool enable_guard_lookup_memo)
     : guard_manager(std::move(gm)), code(std::move(c)) {
   TORCH_CHECK(
       PyCode_Check(code.ptr()), "Expecting CodeType from PrecompileEntry.");
   root_mgr =
       torch::dynamo::convert_to_root_guard_manager(guard_manager.attr("root"));
+  if (enable_guard_lookup_memo) {
+    last_success_receipt = torch::dynamo::create_guard_last_success_receipt();
+  }
+}
+
+PrecompileEntry::~PrecompileEntry() {
+  torch::dynamo::destroy_guard_last_success_receipt(last_success_receipt);
 }
 
 void _reset_precompile_entries(const py::handle& code_obj) {
@@ -475,9 +560,13 @@ void _reset_precompile_entries(const py::handle& code_obj) {
       "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
-  py::list result;
   if (extra != nullptr) {
-    extra->precompile_entries.clear();
+    std::list<std::shared_ptr<PrecompileEntry>> retired_entries;
+    {
+      std::lock_guard<std::mutex> lock(extra->precompile_entries_mutex);
+      retired_entries.swap(extra->precompile_entries);
+      extra->has_precompile_entries.store(false, std::memory_order_relaxed);
+    }
   }
 }
 
@@ -494,9 +583,15 @@ void _load_precompile_entry(
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);
   }
-  auto entry =
-      PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
-  extra->precompile_entries.push_back(std::move(entry));
+  auto entry = std::make_shared<PrecompileEntry>(
+      std::move(guard_manager),
+      std::move(dynamo_code),
+      extra->guard_lookup_memo_enabled);
+  {
+    std::lock_guard<std::mutex> lock(extra->precompile_entries_mutex);
+    extra->precompile_entries.emplace_back(std::move(entry));
+    extra->has_precompile_entries.store(true, std::memory_order_relaxed);
+  }
 }
 
 void _set_lru_cache(py::object boolean) {
@@ -515,8 +610,8 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
-    for (PrecompileEntry& e : extra->precompile_entries) {
-      result.append(py::cast(e, py::return_value_policy::reference));
+    for (const auto& entry : snapshot_precompile_entries(extra)) {
+      result.append(py::cast(entry));
     }
   }
   return result;

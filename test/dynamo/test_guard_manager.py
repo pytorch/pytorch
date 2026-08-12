@@ -4,7 +4,9 @@ import functools
 import gc
 import inspect
 import os
+import subprocess
 import sys
+import textwrap
 import unittest
 import weakref
 from unittest import mock
@@ -382,6 +384,28 @@ user_stack=None)
         self.assertTrue(guard_manager.check(f_locals))
 
         self.assertFalse(guard_manager.check(f_locals_unaliased))
+
+    @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)
+    def test_dict_tag_does_not_skip_immutable_object_aliasing_guard(self):
+        value = (1, 2)
+        different = (1, 3)
+        container = {"value": value}
+
+        root = RootGuardManager()
+        dict_manager = root.list_getitem_manager(0, "", container, default_mgr_enum)
+        dict_value_manager = dict_manager.dict_getitem_manager(
+            "value", "", value, default_mgr_enum
+        )
+        peer_manager = root.list_getitem_manager(1, "", value, default_mgr_enum)
+        install_object_aliasing_guard(
+            dict_value_manager,
+            peer_manager,
+            ["container['value'] is peer"],
+            None,
+        )
+
+        self.assertTrue(root.check([container, value]))
+        self.assertFalse(root.check([container, different]))
 
     def test_dict_version_guard(self):
         root = RootGuardManager()
@@ -2177,6 +2201,2025 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn({"a": 10, "b": 20, "c": 30}, expected))
         self.assertFalse(handler.eval_fn({"a": 1, "b": 2}, expected))
         self.assertFalse(handler.eval_fn({"x": 1, "y": 2, "z": 3}, expected))
+
+
+class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
+    @staticmethod
+    def _run_guard_lookup_memo_script(script):
+        prefix = (
+            "import torch\n"
+            "torch._dynamo.config.enable_guard_lookup_memo = True\n"
+            "from torch._dynamo.eval_frame import _debug_get_cache_entry_list\n"
+            "def _only_cache_entry(code):\n"
+            "    entries = _debug_get_cache_entry_list(code)\n"
+            "    assert len(entries) == 1, len(entries)\n"
+            "    return entries[0]\n"
+            "def _guard_tree_shapes(entry):\n"
+            "    leaves = []\n"
+            "    accessors = []\n"
+            "    pending = [entry.guard_manager.root]\n"
+            "    while pending:\n"
+            "        manager = pending.pop()\n"
+            "        source = manager.get_source()\n"
+            "        leaves.extend(\n"
+            "            (source, type(guard).__name__)\n"
+            "            for guard in manager.get_leaf_guards()\n"
+            "        )\n"
+            "        accessors.extend(\n"
+            "            (source, type(accessor).__name__)\n"
+            "            for accessor in manager.get_accessors()\n"
+            "        )\n"
+            "        pending.extend(manager.get_child_managers())\n"
+            "    return leaves, accessors\n"
+            "from torch._dynamo.testing import CompileCounter\n"
+            "def _warm_model(model, enabled=True):\n"
+            "    counter = CompileCounter()\n"
+            "    compiled = torch.compile(model, backend=counter, fullgraph=True)\n"
+            "    x = torch.zeros(2)\n"
+            "    expected = model(x)\n"
+            "    for _ in range(8):\n"
+            "        torch.testing.assert_close(compiled(x), expected)\n"
+            "    assert counter.frame_count == 1, counter.frame_count\n"
+            "    entry = _only_cache_entry(type(model).forward.__code__)\n"
+            "    assert entry._debug_fast_guard_enabled is enabled\n"
+            "    return compiled, counter, entry, x\n"
+        )
+        subprocess.run(
+            [sys.executable, "-c", prefix + textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            check=True,
+        )
+
+    def test_extra_state_reads_loaded_config_without_import(self):
+        script = """
+            import builtins
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+
+            class SourceModel(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = SourceModel()
+            compiled, counter, source_entry, x = _warm_model(model)
+            fresh_code = SourceModel.forward.__code__.replace()
+
+            config_imports = []
+            original_import = builtins.__import__
+
+            def recording_import(name, globals=None, locals=None, fromlist=(), level=0):
+                if name == "torch._dynamo.config":
+                    config_imports.append(name)
+                return original_import(name, globals, locals, fromlist, level)
+
+            builtins.__import__ = recording_import
+            try:
+                _load_precompile_entry(
+                    fresh_code,
+                    source_entry.guard_manager,
+                    source_entry.code,
+                )
+            finally:
+                builtins.__import__ = original_import
+
+            SourceModel.forward.__code__ = fresh_code
+            expected = model(x)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), expected)
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            assert entries[0]._debug_fast_guard_enabled
+            assert config_imports == [], config_imports
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_selects_cloned_self_by_framelocals_key(self):
+        script = """
+            from torch._C._dynamo import guards as cpp_guards
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+            from torch._dynamo.guards import GuardManagerType, GuardManagerWrapper
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.ones(2)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            source_entry = _only_cache_entry(Model.forward.__code__)
+            fresh_code = Model.forward.__code__.replace()
+            root = cpp_guards.RootGuardManager()
+            self_manager = root.framelocals_manager(
+                ("self", 0),
+                "<structural-self>",
+                model,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            self_manager.add_id_match_guard(
+                id(model), ["self identity changed"], None
+            )
+            root = root.clone_manager(lambda _: True)
+            _load_precompile_entry(
+                fresh_code,
+                GuardManagerWrapper(root),
+                source_entry.code,
+            )
+
+            Model.forward.__code__ = fresh_code
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            assert entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_ignores_self_source_decoy(self):
+        script = """
+            from torch._C._dynamo import guards as cpp_guards
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+            from torch._dynamo.guards import GuardManagerType, GuardManagerWrapper
+            from torch._dynamo.testing import CompileCounter
+
+            class Decoy:
+                def __init__(self):
+                    self.value = 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x, decoy):
+                    return x + decoy.value
+
+            model = Model()
+            decoy = Decoy()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.ones(2)
+            torch.testing.assert_close(compiled(x, decoy), model(x, decoy))
+            assert counter.frame_count == 1, counter.frame_count
+
+            source_entry = _only_cache_entry(Model.forward.__code__)
+            fresh_code = Model.forward.__code__.replace()
+            root = cpp_guards.RootGuardManager()
+            self_manager = root.framelocals_manager(
+                ("self", 0),
+                "<structural-self>",
+                model,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            self_manager.add_id_match_guard(
+                id(model), ["self identity changed"], None
+            )
+            decoy_manager = root.framelocals_manager(
+                ("decoy", 2),
+                "L['self']",
+                decoy,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            decoy_manager.add_lambda_guard(
+                lambda value: value.value == 1,
+                ["decoy value changed"],
+                None,
+            )
+            _load_precompile_entry(
+                fresh_code,
+                GuardManagerWrapper(root),
+                source_entry.code,
+            )
+
+            Model.forward.__code__ = fresh_code
+            for _ in range(8):
+                torch.testing.assert_close(
+                    compiled(x, decoy), model(x, decoy)
+                )
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            original_entry = entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            decoy.value = 2
+            torch.testing.assert_close(compiled(x, decoy), model(x, decoy))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_unsupported_leaf_by_self_membership(self):
+        script = """
+            from torch._C._dynamo import guards as cpp_guards
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+            from torch._dynamo.guards import GuardManagerType, GuardManagerWrapper
+            from torch._dynamo.testing import CompileCounter
+
+            class Holder:
+                def __init__(self):
+                    self.value = 1
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return x + self.holder.value
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.ones(2)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            source_entry = _only_cache_entry(Model.forward.__code__)
+            fresh_code = Model.forward.__code__.replace()
+            root = cpp_guards.RootGuardManager()
+            self_manager = root.framelocals_manager(
+                ("self", 0),
+                "L['self']",
+                model,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            self_manager.add_id_match_guard(
+                id(model), ["self identity changed"], None
+            )
+            holder_manager = self_manager.getattr_manager(
+                "holder",
+                "<opaque-holder-source>",
+                model.holder,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            holder_manager.add_lambda_guard(
+                lambda value: value.value == 1,
+                ["holder value changed"],
+                None,
+            )
+            _load_precompile_entry(
+                fresh_code,
+                GuardManagerWrapper(root),
+                source_entry.code,
+            )
+
+            Model.forward.__code__ = fresh_code
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            assert not entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_module_and_residual_guards(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            global_bias = torch.tensor(3.0)
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.scale = 2.0
+                    self.offsets = [1.0]
+
+                def forward(self, x):
+                    return x * self.scale + self.offsets[0] + global_bias
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+
+            x = torch.ones(4)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            cache_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(cache_entries) == 1, len(cache_entries)
+            original_entry = cache_entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            model.scale = 4.0
+            torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
+
+            model.offsets[0] = 5.0
+            torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
+
+            global_bias = torch.tensor(7.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
+
+            model.scale = 6.0
+            x = torch.ones(9)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
+
+            def alias_sensitive(a, b):
+                return a + b if a is b else a - b
+
+            compiled_alias = torch.compile(
+                alias_sensitive, backend="eager", fullgraph=True
+            )
+            a = torch.ones(4)
+            b = torch.full((4,), 2.0)
+            torch.testing.assert_close(compiled_alias(a, a), alias_sensitive(a, a))
+            torch.testing.assert_close(compiled_alias(a, b), alias_sensitive(a, b))
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_fail_closed_leaf_and_container_shapes(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class ExactContainerModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [torch.ones(2)]
+                    self.options = (torch.full((2,), 2.0),)
+
+                def forward(self, x):
+                    return (
+                        x
+                        + self.values[0]
+                        + len(self.values)
+                        + self.options[0]
+                        + len(self.options)
+                    )
+
+            exact_model = ExactContainerModel()
+            exact_counter = CompileCounter()
+            exact_compiled = torch.compile(
+                exact_model, backend=exact_counter, fullgraph=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(exact_compiled(x), exact_model(x))
+            assert exact_counter.frame_count == 1, exact_counter.frame_count
+            exact_entry = _only_cache_entry(ExactContainerModel.forward.__code__)
+            _, exact_accessors = _guard_tree_shapes(exact_entry)
+            assert any(
+                kind == "ListGetItemGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in exact_accessors
+            ), exact_accessors
+            assert any(
+                kind == "TupleGetItemGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in exact_accessors
+            ), exact_accessors
+            assert exact_entry._debug_fast_guard_enabled
+
+            class Holder:
+                pass
+
+            class NoHasattrModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    if hasattr(self.holder, "scale"):
+                        return x + self.holder.scale
+                    return x + 1
+
+            no_hasattr_model = NoHasattrModel()
+            no_hasattr_counter = CompileCounter()
+            no_hasattr_compiled = torch.compile(
+                no_hasattr_model, backend=no_hasattr_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    no_hasattr_compiled(x), no_hasattr_model(x)
+                )
+            assert no_hasattr_counter.frame_count == 1, no_hasattr_counter.frame_count
+            no_hasattr_entry = _only_cache_entry(NoHasattrModel.forward.__code__)
+            leaves, _ = _guard_tree_shapes(no_hasattr_entry)
+            assert any(
+                kind == "NO_HASATTR" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            assert not no_hasattr_entry._debug_fast_guard_enabled
+
+            no_hasattr_model.holder.scale = torch.full((2,), 4.0)
+            torch.testing.assert_close(
+                no_hasattr_compiled(x), no_hasattr_model(x)
+            )
+            assert no_hasattr_counter.frame_count == 2, no_hasattr_counter.frame_count
+
+            class MutableEqualsModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = [1, 2]
+
+                def forward(self, x):
+                    if self.mode == [1, 2]:
+                        return x + 1
+                    return x - 1
+
+            mutable_model = MutableEqualsModel()
+            mutable_counter = CompileCounter()
+            mutable_compiled = torch.compile(
+                mutable_model, backend=mutable_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(mutable_compiled(x), mutable_model(x))
+            assert mutable_counter.frame_count == 1, mutable_counter.frame_count
+            mutable_entry = _only_cache_entry(MutableEqualsModel.forward.__code__)
+            leaves, _ = _guard_tree_shapes(mutable_entry)
+            assert any(
+                kind == "EQUALS_MATCH" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            assert not mutable_entry._debug_fast_guard_enabled
+
+            mutable_model.mode.append(3)
+            torch.testing.assert_close(mutable_compiled(x), mutable_model(x))
+            assert mutable_counter.frame_count == 2, mutable_counter.frame_count
+
+            class FancyList(list):
+                pass
+
+            class NonExactListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = FancyList([1.0])
+
+                def forward(self, x):
+                    return x + self.values[0] + len(self.values)
+
+            nonexact_model = NonExactListModel()
+            nonexact_counter = CompileCounter()
+            nonexact_compiled = torch.compile(
+                nonexact_model, backend=nonexact_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(nonexact_compiled(x), nonexact_model(x))
+            assert nonexact_counter.frame_count == 1, nonexact_counter.frame_count
+            nonexact_entry = _only_cache_entry(NonExactListModel.forward.__code__)
+            leaves, accessors = _guard_tree_shapes(nonexact_entry)
+            assert any(
+                kind == "LENGTH_CHECK" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            assert any(
+                kind == "ListGetItemGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in accessors
+            ), accessors
+            assert not nonexact_entry._debug_fast_guard_enabled
+
+            nonexact_model.values.append(2.0)
+            torch.testing.assert_close(nonexact_compiled(x), nonexact_model(x))
+            assert nonexact_counter.frame_count == 2, nonexact_counter.frame_count
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_instance_attr_binding_and_type_refresh(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class Holder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+            class OtherHolder:
+                pass
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            Holder._fastguard_unrelated_type_change = None
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 1, counter.frame_count
+                assert original_entry._debug_fast_guard_enabled
+            finally:
+                del Holder._fastguard_unrelated_type_change
+
+            original_scale = model.holder.scale
+            model.holder.scale = torch.full((2,), 3.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.scale = original_scale
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            Holder.scale = property(lambda self: torch.full((2,), 5.0))
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 3, counter.frame_count
+                assert original_entry._debug_fast_guard_enabled
+            finally:
+                del Holder.scale
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.__class__ = OtherHolder
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.__class__ = Holder
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_default_getattribute_change(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class InitiallyCustomHolder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+                def __getattribute__(self, name):
+                    return object.__getattribute__(self, name)
+
+            class InitiallyCustomModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = InitiallyCustomHolder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            initial_model = InitiallyCustomModel()
+            initial_counter = CompileCounter()
+            initial_compiled = torch.compile(
+                initial_model, backend=initial_counter, fullgraph=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(initial_compiled(x), initial_model(x))
+            assert initial_counter.frame_count == 1, initial_counter.frame_count
+            initial_entry = _only_cache_entry(
+                InitiallyCustomModel.forward.__code__
+            )
+            assert not initial_entry._debug_fast_guard_enabled
+
+            class InitiallyGetattrHolder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+                def __getattr__(self, name):
+                    raise AttributeError(name)
+
+            class InitiallyGetattrModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = InitiallyGetattrHolder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            getattr_model = InitiallyGetattrModel()
+            getattr_counter = CompileCounter()
+            getattr_compiled = torch.compile(
+                getattr_model, backend=getattr_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    getattr_compiled(x), getattr_model(x)
+                )
+            assert getattr_counter.frame_count == 1, getattr_counter.frame_count
+            getattr_entry = _only_cache_entry(
+                InitiallyGetattrModel.forward.__code__
+            )
+            assert not getattr_entry._debug_fast_guard_enabled
+
+            class Holder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            replacement_scale = torch.full((2,), 5.0)
+
+            def replacement_getattribute(self, name):
+                if name == "scale":
+                    return replacement_scale
+                return object.__getattribute__(self, name)
+
+            Holder.__getattribute__ = replacement_getattribute
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 2, counter.frame_count
+                assert original_entry._debug_fast_guard_enabled
+            finally:
+                del Holder.__getattribute__
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_generic_dict_binding_proof(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class Holder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return self.holder.__dict__["scale"] + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            _, accessors = _guard_tree_shapes(original_entry)
+            assert any(
+                kind == "GetGenericDictGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in accessors
+            ), accessors
+            assert original_entry._debug_fast_guard_enabled
+
+            original_dict = model.holder.__dict__
+            model.holder.__dict__ = {"scale": torch.full((2,), 4.0)}
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.__dict__ = original_dict
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_plan_is_per_cache_entry(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = 1
+
+                def forward(self, x):
+                    return x + self.mode + GLOBAL_DICT["used"]
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=False
+            )
+            inputs = (torch.zeros(2), torch.zeros(3))
+            for i in range(8):
+                GLOBAL_DICT["noise"] = [i]
+                for x in inputs:
+                    torch.testing.assert_close(
+                        compiled(x), torch.full_like(x, 2.0)
+                    )
+            assert counter.frame_count == 2, counter.frame_count
+            original_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entries) == 2, len(original_entries)
+            assert all(
+                entry._debug_fast_guard_enabled for entry in original_entries
+            ), [entry._debug_fast_guard_enabled for entry in original_entries]
+
+            model.mode = 5
+            for i, x in enumerate(inputs):
+                GLOBAL_DICT["noise"] = [100 + i]
+                torch.testing.assert_close(
+                    compiled(x), torch.full_like(x, 6.0)
+                )
+            assert counter.frame_count == 4, counter.frame_count
+            assert all(
+                entry._debug_fast_guard_enabled for entry in original_entries
+            ), [entry._debug_fast_guard_enabled for entry in original_entries]
+
+            model.mode = 1
+            for i, x in enumerate(inputs):
+                GLOBAL_DICT["noise"] = [200 + i]
+                torch.testing.assert_close(
+                    compiled(x), torch.full_like(x, 2.0)
+                )
+            assert counter.frame_count == 4, counter.frame_count
+            assert all(
+                entry._debug_fast_guard_enabled for entry in original_entries
+            ), [entry._debug_fast_guard_enabled for entry in original_entries]
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_cross_slice_alias_relations(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("value", torch.ones(2))
+
+                def forward(self, x):
+                    return self.value + x + GLOBAL_DICT["used"]
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            same = model.value
+            for i in range(8):
+                GLOBAL_DICT["noise"] = [i]
+                torch.testing.assert_close(compiled(same), torch.full((2,), 3.0))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entry) == 1, len(original_entry)
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            GLOBAL_DICT["noise"] = [100]
+            different = torch.zeros_like(same)
+            torch.testing.assert_close(compiled(different), torch.full((2,), 2.0))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            GLOBAL_DICT["noise"] = [200]
+            torch.testing.assert_close(compiled(same), torch.full((2,), 3.0))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            class DistinctModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("value", torch.ones(2))
+
+                def forward(self, x):
+                    return self.value + x + GLOBAL_DICT["used"]
+
+            distinct_model = DistinctModel()
+            distinct_counter = CompileCounter()
+            distinct = torch.compile(
+                distinct_model, backend=distinct_counter, fullgraph=True
+            )
+            for i in range(8):
+                GLOBAL_DICT["noise"] = [i + 300]
+                current = torch.full((2,), float(i + 2))
+                torch.testing.assert_close(
+                    distinct(current), distinct_model.value + current + 1
+                )
+            assert distinct_counter.frame_count == 1, distinct_counter.frame_count
+            distinct_entry = _debug_get_cache_entry_list(
+                DistinctModel.forward.__code__
+            )
+            assert len(distinct_entry) == 1, len(distinct_entry)
+            assert distinct_entry[0]._debug_fast_guard_enabled
+
+            GLOBAL_DICT["noise"] = [400]
+            torch.testing.assert_close(
+                distinct(distinct_model.value), torch.full((2,), 3.0)
+            )
+            assert distinct_counter.frame_count == 2, distinct_counter.frame_count
+            assert distinct_entry[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_all_residual_alias_relations(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+
+            def relation_source_groups(entry):
+                groups = {}
+                pending = [entry.guard_manager.root]
+                while pending:
+                    manager = pending.pop()
+                    source = manager.get_source()
+                    for guard in manager.get_leaf_guards():
+                        if type(guard).__name__ in {
+                            "OBJECT_ALIASING",
+                            "NO_TENSOR_ALIASING",
+                        }:
+                            # Keep the pybind guard wrapper alive as the key.  The
+                            # same C++ relation guard is exposed as the same wrapper,
+                            # while retaining it prevents Python id reuse.
+                            groups.setdefault(guard, []).append(source)
+                    pending.extend(manager.get_child_managers())
+                return list(groups.values())
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.bias = 1.0
+
+                def forward(self, x, y):
+                    if x is y:
+                        return x + y + self.bias
+                    return x - y + self.bias
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            same = torch.ones(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(same, same), model(same, same))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entries) == 1, len(original_entries)
+            original_entry = original_entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            groups = relation_source_groups(original_entry)
+            assert any(
+                len(group) >= 2
+                and all(not source.startswith("L['self']") for source in group)
+                for group in groups
+            ), groups
+
+            different = torch.zeros_like(same)
+            torch.testing.assert_close(
+                compiled(same, different), model(same, different)
+            )
+            assert counter.frame_count == 2, counter.frame_count
+            assert len(_debug_get_cache_entry_list(Model.forward.__code__)) == 2
+            assert original_entry._debug_fast_guard_enabled
+
+            torch.testing.assert_close(compiled(same, same), model(same, same))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_all_self_alias_relations(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+
+            def relation_source_groups(entry):
+                groups = {}
+                pending = [entry.guard_manager.root]
+                while pending:
+                    manager = pending.pop()
+                    source = manager.get_source()
+                    for guard in manager.get_leaf_guards():
+                        if type(guard).__name__ in {
+                            "OBJECT_ALIASING",
+                            "NO_TENSOR_ALIASING",
+                        }:
+                            # Keep the pybind guard wrapper alive as the key.  The
+                            # same C++ relation guard is exposed as the same wrapper,
+                            # while retaining it prevents Python id reuse.
+                            groups.setdefault(guard, []).append(source)
+                    pending.extend(manager.get_child_managers())
+                return list(groups.values())
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    shared = torch.ones(2)
+                    self.register_buffer("left", shared)
+                    self.register_buffer("right", shared)
+
+                def forward(self, x):
+                    if self.left is self.right:
+                        return x + self.left + self.right
+                    return x + self.left - self.right
+
+            model = Model()
+            original_right = model.right
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entries) == 1, len(original_entries)
+            original_entry = original_entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            groups = relation_source_groups(original_entry)
+            assert any(
+                len(group) >= 2
+                and all(source.startswith("L['self']") for source in group)
+                for group in groups
+            ), groups
+
+            model.right = torch.zeros(2)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert len(_debug_get_cache_entry_list(Model.forward.__code__)) == 2
+            assert original_entry._debug_fast_guard_enabled
+
+            model.right = original_right
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_dict_tagged_alias_relations(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            def run_case(recursive_tags):
+                torch._dynamo.reset()
+                torch._dynamo.config.skip_tensor_guards_with_matching_dict_tags = True
+                torch._dynamo.config.use_recursive_dict_tags_for_guards = recursive_tags
+                torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+                torch._dynamo.config.skip_no_tensor_aliasing_guards_on_parameters = False
+
+                alias_dict = {}
+
+                class Model(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.register_buffer("value", torch.ones(2))
+                        alias_dict["peer"] = self.value
+
+                    def forward(self):
+                        if self.value is alias_dict["peer"]:
+                            return self.value + 2
+                        return self.value - 2
+
+                model = Model()
+                counter = CompileCounter()
+                compiled = torch.compile(model, backend=counter, fullgraph=True)
+                for _ in range(8):
+                    torch.testing.assert_close(compiled(), torch.full((2,), 3.0))
+                assert counter.frame_count == 1, counter.frame_count
+                original_entry = _debug_get_cache_entry_list(Model.forward.__code__)
+                assert len(original_entry) == 1, len(original_entry)
+                assert original_entry[0]._debug_fast_guard_enabled
+
+                old_value = model.value
+                model.value = torch.zeros(2)
+                torch.testing.assert_close(compiled(), torch.full((2,), -2.0))
+                assert counter.frame_count == 2, counter.frame_count
+                assert original_entry[0]._debug_fast_guard_enabled
+
+                model.value = old_value
+                torch.testing.assert_close(compiled(), torch.full((2,), 3.0))
+                assert counter.frame_count == 2, counter.frame_count
+                assert original_entry[0]._debug_fast_guard_enabled
+
+            run_case(False)
+            run_case(True)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_dimension_marking_guard(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            GLOBAL_DICT = {"used": 1, "noise": [0]}
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self._cached_tensor = torch.ones(2)
+                    self.weight = torch.nn.Parameter(torch.ones(2))
+
+                def forward(self, x):
+                    return (
+                        self._cached_tensor
+                        + self.weight
+                        + x
+                        + GLOBAL_DICT["used"]
+                    )
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+            x = torch.zeros(2)
+            for i in range(8):
+                GLOBAL_DICT["noise"] = [i]
+                torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entry) == 1, len(original_entry)
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            model._cached_tensor._dynamo_dynamic_indices = {0}
+            model._cached_tensor._has_dynamo_dim_marking = True
+            GLOBAL_DICT["noise"] = [100]
+            torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            del model._cached_tensor._dynamo_dynamic_indices
+            del model._cached_tensor._has_dynamo_dim_marking
+            GLOBAL_DICT["noise"] = [200]
+            torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            model.weight._has_dynamo_dim_marking = None
+            GLOBAL_DICT["noise"] = [300]
+            torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            del model.weight._has_dynamo_dim_marking
+            GLOBAL_DICT["noise"] = [400]
+            torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+
+            torch.Tensor._has_dynamo_dim_marking = False
+            try:
+                GLOBAL_DICT["noise"] = [500]
+                torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+                assert counter.frame_count == 4, counter.frame_count
+                assert original_entry[0]._debug_fast_guard_enabled
+            finally:
+                del torch.Tensor._has_dynamo_dim_marking
+
+            GLOBAL_DICT["noise"] = [600]
+            torch.testing.assert_close(compiled(x), torch.full((2,), 3.0))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_existing_dimension_marking(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self._cached_tensor = torch.ones(2)
+                    self._cached_tensor._dynamo_dynamic_indices = {0}
+                    self._cached_tensor._has_dynamo_dim_marking = True
+
+                def forward(self, x):
+                    return self._cached_tensor + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), torch.ones(2))
+            assert counter.frame_count == 1, counter.frame_count
+            entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(entries) == 1, len(entries)
+            assert not entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_tensor_subclass(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            class TensorSubclass(torch.Tensor):
+                pass
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self._cached_tensor = torch.ones(2).as_subclass(TensorSubclass)
+
+                def forward(self, x):
+                    return self._cached_tensor + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(entries) == 1, len(entries)
+            assert not entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_dimension_marking_descriptor(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            class MissingSentinel:
+                def __get__(self, instance, owner):
+                    raise AttributeError("sentinel remains absent")
+
+            torch.Tensor._has_dynamo_dim_marking = MissingSentinel()
+            try:
+                class Model(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self._cached_tensor = torch.ones(2)
+
+                    def forward(self, x):
+                        return self._cached_tensor + x
+
+                model = Model()
+                counter = CompileCounter()
+                compiled = torch.compile(
+                    model, backend=counter, fullgraph=True, dynamic=True
+                )
+                x = torch.zeros(2)
+                for _ in range(8):
+                    torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 1, counter.frame_count
+                entries = _debug_get_cache_entry_list(Model.forward.__code__)
+                assert len(entries) == 1, len(entries)
+                assert not entries[0]._debug_fast_guard_enabled
+            finally:
+                del torch.Tensor._has_dynamo_dim_marking
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_retains_exact_list_items(self):
+        script = """
+            import gc
+            import weakref
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [torch.ones(2)]
+
+                def forward(self, x):
+                    return x + self.values[0] + len(self.values)
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            original_value = model.values[0]
+            original_ref = weakref.ref(original_value)
+            model.values[0] = torch.full((2,), 4, dtype=torch.int64)
+            del original_value
+            gc.collect()
+            assert original_ref() is not None
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.values[0] = original_ref()
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_bounds_unstable_and_large_list_training(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class UnstableListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [object()]
+
+                def forward(self, x):
+                    return x + len(self.values)
+
+            unstable_model = UnstableListModel()
+            unstable_counter = CompileCounter()
+            unstable_compiled = torch.compile(
+                unstable_model, backend=unstable_counter, fullgraph=True
+            )
+            x = torch.zeros(2)
+            torch.testing.assert_close(
+                unstable_compiled(x), unstable_model(x)
+            )
+            unstable_model.values[0] = object()
+            torch.testing.assert_close(
+                unstable_compiled(x), unstable_model(x)
+            )
+            for _ in range(8):
+                unstable_model.values[0] = object()
+                torch.testing.assert_close(
+                    unstable_compiled(x), unstable_model(x)
+                )
+            assert unstable_counter.frame_count == 1, unstable_counter.frame_count
+            unstable_entry = _only_cache_entry(
+                UnstableListModel.forward.__code__
+            )
+
+            # Once the changing signature exhausts its training budget, later
+            # stable calls stay on the original guard path instead of resuming
+            # unbounded recording and eventually enabling a plan.
+            for _ in range(8):
+                torch.testing.assert_close(
+                    unstable_compiled(x), unstable_model(x)
+                )
+            assert unstable_counter.frame_count == 1, unstable_counter.frame_count
+            assert not unstable_entry._debug_fast_guard_enabled
+
+            class BoundaryListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [object()]
+
+                def forward(self, x):
+                    return x + len(self.values)
+
+            boundary_model = BoundaryListModel()
+            boundary_counter = CompileCounter()
+            boundary_compiled = torch.compile(
+                boundary_model, backend=boundary_counter, fullgraph=True
+            )
+            torch.testing.assert_close(boundary_compiled(x), boundary_model(x))
+            boundary_model.values[0] = object()
+            torch.testing.assert_close(boundary_compiled(x), boundary_model(x))
+            for _ in range(7):
+                boundary_model.values[0] = object()
+                torch.testing.assert_close(
+                    boundary_compiled(x), boundary_model(x)
+                )
+            for _ in range(3):
+                torch.testing.assert_close(
+                    boundary_compiled(x), boundary_model(x)
+                )
+            assert boundary_counter.frame_count == 1, boundary_counter.frame_count
+            boundary_entry = _only_cache_entry(
+                BoundaryListModel.forward.__code__
+            )
+            assert boundary_entry._debug_fast_guard_enabled
+
+            class OversizedListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [object() for _ in range(4097)]
+
+                def forward(self, x):
+                    return x + len(self.values)
+
+            oversized_model = OversizedListModel()
+            oversized_counter = CompileCounter()
+            oversized_compiled = torch.compile(
+                oversized_model, backend=oversized_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    oversized_compiled(x), oversized_model(x)
+                )
+            assert oversized_counter.frame_count == 1, oversized_counter.frame_count
+            oversized_entry = _only_cache_entry(
+                OversizedListModel.forward.__code__
+            )
+            assert not oversized_entry._debug_fast_guard_enabled
+
+            class AggregateWithinBudgetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    marker = object()
+                    self.groups = tuple(
+                        [marker] * 4096 for _ in range(16)
+                    )
+
+                def forward(self, x):
+                    return x + sum(len(group) for group in self.groups)
+
+            within_model = AggregateWithinBudgetModel()
+            within_counter = CompileCounter()
+            within_compiled = torch.compile(
+                within_model, backend=within_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    within_compiled(x), within_model(x)
+                )
+            assert within_counter.frame_count == 1, within_counter.frame_count
+            within_entry = _only_cache_entry(
+                AggregateWithinBudgetModel.forward.__code__
+            )
+            assert within_entry._debug_fast_guard_enabled
+
+            class AggregateOverBudgetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    marker = object()
+                    self.groups = tuple(
+                        [marker] * 4096 for _ in range(17)
+                    )
+
+                def forward(self, x):
+                    return x + sum(len(group) for group in self.groups)
+
+            over_model = AggregateOverBudgetModel()
+            over_counter = CompileCounter()
+            over_compiled = torch.compile(
+                over_model, backend=over_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(over_compiled(x), over_model(x))
+            assert over_counter.frame_count == 1, over_counter.frame_count
+            over_entry = _only_cache_entry(
+                AggregateOverBudgetModel.forward.__code__
+            )
+            assert not over_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_local_state_transitions(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("scale", torch.ones(2))
+
+                def forward(self, x):
+                    state = 0
+                    if torch.is_grad_enabled():
+                        state += 1
+                    if torch.is_inference_mode_enabled():
+                        state += 2
+                    if torch.is_autocast_enabled("cpu"):
+                        state += 4
+                    return x + self.scale + state
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            with torch.no_grad():
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            with torch.inference_mode():
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            with torch.autocast("cpu"):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_static_module_attr_binding(self):
+        script = """
+            import types
+
+            namespace = types.ModuleType("fastguard_static_module")
+            original = torch.ones(2)
+            namespace.scale = original
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = namespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+
+            namespace.scale = torch.full((2,), 3.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            namespace.scale = original
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            dynamic_values = [torch.ones(2)]
+            dynamic_namespace = types.ModuleType("fastguard_dynamic_module")
+
+            def module_getattr(name):
+                if name == "scale":
+                    return dynamic_values[0]
+                raise AttributeError(name)
+
+            dynamic_namespace.__getattr__ = module_getattr
+
+            class DynamicModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = dynamic_namespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            dynamic_model = DynamicModel()
+            _warm_model(dynamic_model, enabled=False)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_static_type_attr_binding(self):
+        script = """
+            original = torch.ones(2)
+
+            class Namespace:
+                scale = original
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = Namespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+
+            Namespace.scale = torch.full((2,), 3.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            Namespace.scale = original
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            class DescriptorValue:
+                def __init__(self, value):
+                    self.value = value
+
+            original_value = DescriptorValue(torch.ones(2))
+            replacement_value = DescriptorValue(torch.full((2,), 5.0))
+
+            class MutableDescriptorNamespace:
+                scale = original_value
+
+            class MutableDescriptorModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = MutableDescriptorNamespace
+
+                def forward(self, x):
+                    return self.namespace.scale.value + x
+
+            mutable_descriptor_model = MutableDescriptorModel()
+            mutable_compiled, mutable_counter, mutable_entry, mutable_x = (
+                _warm_model(mutable_descriptor_model)
+            )
+
+            def descriptor_get(self, obj, owner):
+                return replacement_value
+
+            DescriptorValue.__get__ = descriptor_get
+            try:
+                torch.testing.assert_close(
+                    mutable_compiled(mutable_x),
+                    mutable_descriptor_model(mutable_x),
+                )
+                assert mutable_counter.frame_count == 2, mutable_counter.frame_count
+            finally:
+                del DescriptorValue.__get__
+
+            torch.testing.assert_close(
+                mutable_compiled(mutable_x), mutable_descriptor_model(mutable_x)
+            )
+            assert mutable_counter.frame_count == 2, mutable_counter.frame_count
+            assert mutable_entry._debug_fast_guard_enabled
+
+            class Descriptor:
+                def __init__(self):
+                    self.value = torch.ones(2)
+
+                def __get__(self, obj, owner):
+                    return self.value
+
+            class DynamicNamespace:
+                scale = Descriptor()
+
+            class DynamicModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = DynamicNamespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            dynamic_model = DynamicModel()
+            _warm_model(dynamic_model, enabled=False)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_type_method_binding(self):
+        script = """
+            import types
+
+            class Model(torch.nn.Module):
+                def helper(self, x):
+                    return x + 1
+
+                def forward(self, x):
+                    return self.helper(x)
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+
+            def replacement(self, value):
+                return value + 4
+
+            model.helper = types.MethodType(replacement, model)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            del model.helper
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            original_helper = Model.helper
+            Model.helper = replacement
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 3, counter.frame_count
+            finally:
+                Model.helper = original_helper
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            class ClassMethodModel(torch.nn.Module):
+                @classmethod
+                def helper(cls, value):
+                    return value + 1
+
+                def forward(self, value):
+                    return self.helper(value)
+
+            class_method_model = ClassMethodModel()
+            _warm_model(class_method_model, enabled=False)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_function_code_binding(self):
+        script = """
+            def helper(value):
+                return value + 1
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.helper = helper
+
+                def forward(self, x):
+                    return self.helper(x)
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+            _, accessors = _guard_tree_shapes(original_entry)
+            assert any(
+                kind == "CodeGuardAccessor" and source.startswith("L['self']")
+                for source, kind in accessors
+            ), accessors
+            original_code = helper.__code__
+
+            def replacement(value):
+                return value + 4
+
+            helper.__code__ = replacement.__code__
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 2, counter.frame_count
+            finally:
+                helper.__code__ = original_code
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_exact_set_equals_token(self):
+        script = """
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = {1, 2}
+
+                def forward(self, x):
+                    if self.mode == {1, 2}:
+                        return x + 1
+                    return x - 1
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+            leaves, _ = _guard_tree_shapes(original_entry)
+            assert any(
+                kind == "EQUALS_MATCH" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            model.mode.add(3)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            model.mode.remove(3)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            class FancySet(set):
+                pass
+
+            class FancySetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = FancySet({1, 2})
+
+                def forward(self, value):
+                    if self.mode == {1, 2}:
+                        return value + 1
+                    return value - 1
+
+            fancy_model = FancySetModel()
+            _warm_model(fancy_model, enabled=False)
+
+            class Comparable(int):
+                __hash__ = int.__hash__
+
+                def __eq__(self, other):
+                    return int.__eq__(self, other)
+
+            expected_mode = {Comparable(1), Comparable(2)}
+
+            class CallbackSetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = {Comparable(1), Comparable(2)}
+
+                def forward(self, value):
+                    if self.mode == expected_mode:
+                        return value + 1
+                    return value - 1
+
+            callback_model = CallbackSetModel()
+            _, _, callback_entry, _ = _warm_model(callback_model, enabled=False)
+            callback_leaves, _ = _guard_tree_shapes(callback_entry)
+            assert any(
+                kind == "EQUALS_MATCH" and source.startswith("L['self']")
+                for source, kind in callback_leaves
+            ), callback_leaves
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_precompile_entry_owns_actual_partial_receipt(self):
+        script = """
+            import threading
+
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+                _reset_precompile_entries,
+            )
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.scale = 2.0
+
+                def forward(self, x):
+                    return x * self.scale
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+            x = torch.ones(4)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            code = Model.forward.__code__
+            source_entry = _only_cache_entry(code)
+            should_block = threading.Event()
+            guard_entered = threading.Event()
+            guard_release = threading.Event()
+
+            def blocking_guard(_):
+                if should_block.is_set():
+                    guard_entered.set()
+                    assert guard_release.wait(10), "timed out waiting for reset"
+                return True
+
+            source_entry.guard_manager.root.add_lambda_guard(
+                blocking_guard, ["blocking precompile guard"], None
+            )
+            _reset_precompile_entries(code)
+            _load_precompile_entry(
+                code, source_entry.guard_manager, source_entry.code
+            )
+
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+
+            precompile_entries = _debug_get_precompile_entries(code)
+            assert len(precompile_entries) == 1, len(precompile_entries)
+            assert precompile_entries[0]._debug_fast_guard_enabled
+
+            # Do not let the debug wrapper mask the container/lookup ownership
+            # race that this reset is intended to exercise.
+            del precompile_entries
+
+            errors = []
+
+            def run_lookup():
+                try:
+                    torch.testing.assert_close(compiled(x), model(x))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            should_block.set()
+            worker = threading.Thread(target=run_lookup)
+            worker.start()
+            assert guard_entered.wait(10), "guard lookup did not block"
+            _reset_precompile_entries(code)
+            guard_release.set()
+            worker.join(10)
+            assert not worker.is_alive(), "guard lookup did not finish"
+            assert not errors, errors
+            assert _debug_get_precompile_entries(code) == []
+            torch.testing.assert_close(compiled(x), model(x))
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_guard_lookup_memo_defaults_off(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            assert torch._dynamo.config.enable_guard_lookup_memo is False
+            torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+
+            def relation_guard_names(entry):
+                names = set()
+                pending = [entry.guard_manager.root]
+                while pending:
+                    manager = pending.pop()
+                    names.update(
+                        type(guard).__name__
+                        for guard in manager.get_leaf_guards()
+                    )
+                    pending.extend(manager.get_child_managers())
+                return names
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            compiled = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.ones(3)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+
+            cache_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(cache_entries) == 1, len(cache_entries)
+            assert not cache_entries[0]._debug_fast_guard_enabled
+
+            class Holder:
+                def __init__(self, value):
+                    self.scale = torch.full((3,), value)
+                    self.bias = torch.full((3,), value + 1)
+
+            class OrdinaryAccessorModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holders = [Holder(float(i)) for i in range(32)]
+
+                def forward(self, x):
+                    result = x
+                    for holder in self.holders:
+                        result = (
+                            result
+                            + holder.scale
+                            + holder.__dict__["bias"]
+                        )
+                    return result
+
+            accessor_model = OrdinaryAccessorModel()
+            accessor_counter = CompileCounter()
+            accessor_compiled = torch.compile(
+                accessor_model, backend=accessor_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    accessor_compiled(x), accessor_model(x)
+                )
+            assert (
+                accessor_counter.frame_count == 1
+            ), accessor_counter.frame_count
+            accessor_entries = _debug_get_cache_entry_list(
+                OrdinaryAccessorModel.forward.__code__
+            )
+            assert len(accessor_entries) == 1, len(accessor_entries)
+            assert not accessor_entries[0]._debug_fast_guard_enabled
+
+            class ObjectAliasModel(torch.nn.Module):
+                def forward(self, x, y):
+                    if x is y:
+                        return x + y
+                    return x - y
+
+            object_model = ObjectAliasModel()
+            object_counter = CompileCounter()
+            object_compiled = torch.compile(
+                object_model, backend=object_counter, fullgraph=True
+            )
+            same = torch.ones(3)
+            for _ in range(8):
+                torch.testing.assert_close(
+                    object_compiled(same, same), object_model(same, same)
+                )
+            assert object_counter.frame_count == 1, object_counter.frame_count
+            object_entries = _debug_get_cache_entry_list(
+                ObjectAliasModel.forward.__code__
+            )
+            assert len(object_entries) == 1, len(object_entries)
+            assert "OBJECT_ALIASING" in relation_guard_names(object_entries[0])
+            assert not object_entries[0]._debug_fast_guard_enabled
+
+            different = torch.zeros_like(same)
+            torch.testing.assert_close(
+                object_compiled(same, different), object_model(same, different)
+            )
+            assert object_counter.frame_count == 2, object_counter.frame_count
+            torch.testing.assert_close(
+                object_compiled(same, same), object_model(same, same)
+            )
+            assert object_counter.frame_count == 2, object_counter.frame_count
+            assert all(
+                not entry._debug_fast_guard_enabled
+                for entry in _debug_get_cache_entry_list(
+                    ObjectAliasModel.forward.__code__
+                )
+            )
+
+            class NoTensorAliasModel(torch.nn.Module):
+                def forward(self, x, y):
+                    return x + 2 * y
+
+            no_tensor_model = NoTensorAliasModel()
+            no_tensor_counter = CompileCounter()
+            no_tensor_compiled = torch.compile(
+                no_tensor_model, backend=no_tensor_counter, fullgraph=True
+            )
+            left = torch.ones(3)
+            right = torch.zeros(3)
+            for _ in range(8):
+                torch.testing.assert_close(
+                    no_tensor_compiled(left, right), no_tensor_model(left, right)
+                )
+            assert (
+                no_tensor_counter.frame_count == 1
+            ), no_tensor_counter.frame_count
+            no_tensor_entries = _debug_get_cache_entry_list(
+                NoTensorAliasModel.forward.__code__
+            )
+            assert len(no_tensor_entries) == 1, len(no_tensor_entries)
+            assert "NO_TENSOR_ALIASING" in relation_guard_names(
+                no_tensor_entries[0]
+            )
+            assert not no_tensor_entries[0]._debug_fast_guard_enabled
+
+            torch.testing.assert_close(
+                no_tensor_compiled(left, left), no_tensor_model(left, left)
+            )
+            assert (
+                no_tensor_counter.frame_count == 2
+            ), no_tensor_counter.frame_count
+            torch.testing.assert_close(
+                no_tensor_compiled(left, right), no_tensor_model(left, right)
+            )
+            assert (
+                no_tensor_counter.frame_count == 2
+            ), no_tensor_counter.frame_count
+            assert all(
+                not entry._debug_fast_guard_enabled
+                for entry in _debug_get_cache_entry_list(
+                    NoTensorAliasModel.forward.__code__
+                )
+            )
+        """
+        subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            check=True,
+        )
 
 
 if __name__ == "__main__":
