@@ -211,9 +211,15 @@ class SymNode:
 
     @property
     def expr(self) -> sympy.Basic:
+        # is_Number is a class attribute, equivalent to isinstance of
+        # sympy.Number without needing sympy imported here. Deliberately not
+        # is_number, which walks the whole expression tree uncached: _expr is
+        # not expected to be an unsimplified non-symbolic expression, and one
+        # that slipped through would just take the general path below, where
+        # replace() is a no-op on it anyway.
         if (
             isinstance(self._expr, int)
-            or self._expr.is_number  # pyrefly: ignore[missing-attribute]
+            or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
         ):
             return self._expr
         if self.shape_env is None:
