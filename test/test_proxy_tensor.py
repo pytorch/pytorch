@@ -2242,21 +2242,20 @@ class TestProxyTensorOpInfo(TestCase):
         _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestProxyTensorOpInfo, globals())
 
 
 class TestGenericProxyTensorCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def test_amp_cache(self):
-        layer = torch.nn.Conv2d(3, 3, 3).cuda()
+    def test_amp_cache(self, device):
+        layer = torch.nn.Conv2d(3, 3, 3).to(device)
 
         def f(x, w):
             return torch.nn.functional.conv2d(x, w, stride=layer.stride)
 
-        inp = torch.randn(4, 3, 10, 10, device='cuda')
-        with torch.autocast('cuda'):
+        inp = torch.randn(4, 3, 10, 10, device=device)
+        with torch.autocast(device):
             out_graph = make_fx(f)(inp, layer.weight).graph
             out_graph2 = make_fx(f)(inp, layer.weight).graph
 
@@ -2265,13 +2264,13 @@ class TestGenericProxyTensorCUDA(TestCase):
             self.assertEqual(a.op, b.op)
 
     @xfailIfNoAcceleratorTriton
-    def test_T244632748(self):
+    def test_T244632748(self, device):
         class TestModule(torch.nn.Module):
             def forward(self, x):
                 return x + (x.shape[0] * 2)
 
         mod = TestModule()
-        sample = torch.randn((5, 5)).to("cuda")
+        sample = torch.randn((5, 5)).to(device)
         dim0 = torch.export.Dim.DYNAMIC(max=100)
         dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
         ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
@@ -2291,14 +2290,14 @@ instantiate_device_type_tests(TestGenericProxyTensorCUDA, globals(), only_for='c
 class TestSymbolicTracingCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def test_cpu_scalar_cuda(self):
+    def test_cpu_scalar_cuda(self, device):
         # Extracted from wave2vec2
         def f(a, b):
             return (a * b) @ b
 
         r = str(
             make_fx(f, tracing_mode="symbolic")(
-                torch.tensor(1.0), torch.randn(2, 2, device='cuda')
+                torch.tensor(1.0), torch.randn(2, 2, device=device)
             ).code
         ).strip()
         self.assertExpectedInline(r, """\
@@ -2307,7 +2306,7 @@ def forward(self, a_1, b_1):
     mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
     return mm""")
 
-    def test_view_divisibility_unbacked_relatively_prime(self):
+    def test_view_divisibility_unbacked_relatively_prime(self, device):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
             i0 = x.item()
@@ -2316,10 +2315,10 @@ def forward(self, a_1, b_1):
             torch._check(i0 > 0)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device=device))
 
     @unittest.expectedFailure
-    def test_unbacked_unify_guard_transitivity(self):
+    def test_unbacked_unify_guard_transitivity(self, device):
         def f(x1, x2, y):
             z1 = torch.zeros(x1.item())
             z2 = torch.zeros(x2.item())
@@ -2331,9 +2330,9 @@ def forward(self, a_1, b_1):
                 return y + 2
 
         gm = make_fx(f, tracing_mode="symbolic")(
-            torch.tensor(10, device="cuda"),
-            torch.tensor(10, device="cuda"),
-            torch.randn(10, device="cuda")
+            torch.tensor(10, device=device),
+            torch.tensor(10, device=device),
+            torch.randn(10, device=device)
         )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
@@ -2342,7 +2341,7 @@ def forward(self, a_1, b_1):
         #     r, """"""
         # )
 
-    def test_unbacked_unify_dependency_violation(self):
+    def test_unbacked_unify_dependency_violation(self, device):
         def f(x1, x2, x3, y):
             z1 = x1.item()
             torch._check(z1 // 9 == 1)
@@ -2354,20 +2353,20 @@ def forward(self, a_1, b_1):
         # backed
 
         gm = make_fx(f, tracing_mode="symbolic")(
-            torch.tensor(10, device="cuda"), torch.tensor(5, device="cuda"),
-            torch.tensor(5, device="cuda"), torch.randn(1, device="cuda")
+            torch.tensor(10, device=device), torch.tensor(5, device=device),
+            torch.tensor(5, device=device), torch.randn(1, device=device)
         )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
         self.assertEqual(gm(
-            torch.tensor(12, device="cuda"), torch.tensor(6, device="cuda"),
-            torch.tensor(6, device="cuda"), torch.tensor([1.0], device="cuda")),
-            torch.tensor([2.0], device="cuda")
+            torch.tensor(12, device=device), torch.tensor(6, device=device),
+            torch.tensor(6, device=device), torch.tensor([1.0], device=device)),
+            torch.tensor([2.0], device=device)
         )
         with self.assertRaises(RuntimeError):
             gm(
-                torch.tensor(20, device="cuda"), torch.tensor(10, device="cuda"),
-                torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
+                torch.tensor(20, device=device), torch.tensor(10, device=device),
+                torch.tensor(10, device=device), torch.tensor([1.0], device=device)
             )
 
 instantiate_device_type_tests(TestSymbolicTracingCUDA, globals(), only_for='cuda')
