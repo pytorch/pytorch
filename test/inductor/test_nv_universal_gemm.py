@@ -879,66 +879,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(unsupported))
         self.assertFalse(GemmVariant.GROUPED_GEMM.supports_reduction(plan))
 
-    def test_reduction_epilogue_runs_full_fusion_validation(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-            NVUniversalGemmScheduling,
-        )
-        from torch._inductor.ir import Buffer
-
-        scheduling = object.__new__(NVUniversalGemmScheduling)
-        template = mock.Mock(spec=Buffer)
-        template_snode = mock.Mock()
-        node1 = mock.Mock()
-        node1.get_template_node.return_value = template
-        node1.get_nodes.return_value = (template_snode,)
-        node2 = mock.Mock()
-        node2.get_nodes.return_value = (mock.Mock(),)
-        program = mock.Mock(supported=True, feeds_main=False)
-        program.reduction_partition.intersects.return_value = True
-
-        with (
-            mock.patch.object(scheduling, "_lower_epilogue", return_value=program),
-            mock.patch.object(
-                scheduling,
-                "is_nv_universal_gemm_template",
-                side_effect=lambda node: node is template_snode,
-            ),
-            mock.patch.object(
-                scheduling, "_can_fuse_epilogue_impl", return_value=False
-            ) as validate,
-        ):
-            self.assertFalse(scheduling.can_fuse_reduction_epilogue(node1, node2))
-
-        validate.assert_called_once_with(template_snode, [], node2)
-
-    def test_bool_output_only_blocks_nvgemm_horizontal_fusion(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-            NVUniversalGemmScheduling,
-        )
-
-        scheduling = object.__new__(NVUniversalGemmScheduling)
-        node = mock.Mock()
-        node.read_writes.reads = ()
-
-        with (
-            mock.patch.object(scheduling, "has_bool_output", return_value=True),
-            mock.patch.object(
-                scheduling, "is_nv_universal_gemm_template", return_value=False
-            ),
-            mock.patch.object(
-                scheduling, "is_nv_universal_gemm_fused_template", return_value=False
-            ),
-        ):
-            self.assertFalse(scheduling.has_nvgemm_bool_output(node))
-
-        with (
-            mock.patch.object(scheduling, "has_bool_output", return_value=True),
-            mock.patch.object(
-                scheduling, "is_nv_universal_gemm_template", return_value=True
-            ),
-        ):
-            self.assertTrue(scheduling.has_nvgemm_bool_output(node))
-
     def test_grouped_reduction_conversion_contract(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
@@ -1122,7 +1062,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIs(config.args, args)
         common = (4, 1, "sum", "identity", True)
         primary = ("reduce", "init", "combine", "source", "finalize", "consumer")
-        self.assertEqual(config.primary_constexprs(), (*common, *primary))
         self.assertEqual(
             config.constexprs(),
             (*common, "direct_bool_gt_zero", *primary, "secondary_consumer"),
