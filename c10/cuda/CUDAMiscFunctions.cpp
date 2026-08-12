@@ -64,8 +64,7 @@ const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
       return "";
     }
     default:
-      return "\nFor more detailed error information, run with"
-             " CUDA_LOG_FILE=stderr";
+      return "";
   }
 }
 

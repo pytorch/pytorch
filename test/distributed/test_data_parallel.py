@@ -579,7 +579,7 @@ class TestDataParallel(TestCase):
             self.assertEqual(out_single.dtype, out_dp.dtype)
             self.assertTrue(
                 torch.allclose(out_single, out_dp, atol=atol),
-                f"Epoch {epoch}: outputs differ",
+                lambda msg: f"{msg}\nEpoch {epoch}: outputs differ",
             )
 
             loss_single = out_single.abs().sum()
@@ -601,7 +601,7 @@ class TestDataParallel(TestCase):
                 self.assertEqual(p1.grad.dtype, p2.grad.dtype)
                 self.assertTrue(
                     torch.allclose(p1.grad, p2.grad, atol=atol),
-                    f"Epoch {epoch}: gradients differ for {n1}",
+                    lambda msg: f"{msg}\nEpoch {epoch}: gradients differ for {n1}",
                 )
 
             for (n1, p1), (n2, p2) in zip(
@@ -609,7 +609,7 @@ class TestDataParallel(TestCase):
             ):
                 self.assertTrue(
                     torch.allclose(p1.data, p2.data, atol=atol),
-                    f"Epoch {epoch}: weights differ for {n1} after optimizer step",
+                    lambda msg: f"{msg}\nEpoch {epoch}: weights differ for {n1} after optimizer step",
                 )
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -678,7 +678,7 @@ class TestDataParallel(TestCase):
                 self.assertEqual(p1.grad.dtype, p2.grad.dtype)
                 self.assertTrue(
                     torch.allclose(p1.grad, p2.grad, atol=atol),
-                    f"Epoch {epoch}: gradients differ for {n1}",
+                    lambda msg: f"{msg}\nEpoch {epoch}: gradients differ for {n1}",
                 )
 
             for (n1, p1), (n2, p2) in zip(
@@ -686,7 +686,7 @@ class TestDataParallel(TestCase):
             ):
                 self.assertTrue(
                     torch.allclose(p1.data, p2.data, atol=atol),
-                    f"Epoch {epoch}: weights differ for {n1} after optimizer step",
+                    lambda msg: f"{msg}\nEpoch {epoch}: weights differ for {n1} after optimizer step",
                 )
 
     def _test_gather(self, output_device):
