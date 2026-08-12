@@ -272,7 +272,7 @@ def _make_cond(row: PointwiseDef, variant):
             if not (
                 isinstance(tgt, torch.Tensor)
                 and tgt.is_contiguous()
-                and tgt.device == _device_ref(ins).device
+                and tgt.device == ref.device
                 and K._is_16b_aligned(tgt)
                 and not cap.is_traced(tgt)
             ):
@@ -370,12 +370,12 @@ def _make_impl(row: PointwiseDef, variant):
         #                  match aten (which keeps the out tensor's dtype).
         #   self   (in-place): operand 0 (its shape already == broadcast shape via cond).
         bshape = torch.broadcast_shapes(*(t.shape for t in ins))
+        ref = _device_ref(ins)
+        if ref is None:  # the cond declines an all-scalar operand set
+            raise AssertionError("pointwise impl reached with no device operand")
         if variant.out_from == "alloc":
             _, _, promo_out = _promo(in_dtypes, promotion)
-            return [
-                torch.empty(bshape, device=_device_ref(ins).device, dtype=d)
-                for d in promo_out
-            ]
+            return [torch.empty(bshape, device=ref.device, dtype=d) for d in promo_out]
         if variant.out_from == "out_kw":
             out = kwargs["out"]
             tgts = list(out) if isinstance(out, (tuple, list)) else [out]
@@ -740,6 +740,10 @@ def _arange_out_cond(start, end, step=1, *, out=None):
 
 
 def _arange_out_impl(start, end, step=1, *, out=None):
+    # `out` is Optional only to mirror the schema's keyword form; aten's
+    # arange.start_out always supplies it (and _range_out_serveable rejects None).
+    if out is None:
+        raise AssertionError("arange.start_out requires an out tensor")
     compute = _range_compute(out.dtype)
     ct = _L.torch2cute[compute]
     key = (
@@ -788,6 +792,11 @@ def _linspace_out_impl(start, end, steps, *, out=None):
     # scalar_t BEFORE deriving the step, which TRUNCATES for an integer output, so
     # linspace(2.5, 3.5, 3, dtype=int32) steps 2 -> 3 and yields [2, 2, 3], not [2, 3, 3].
     # That changes which values exist, so reproduce it.
+    #
+    # `out` is Optional only to mirror the schema's keyword form; aten's linspace.out
+    # always supplies it (and _range_out_serveable rejects None).
+    if out is None:
+        raise AssertionError("linspace.out requires an out tensor")
     if not out.dtype.is_floating_point:
         start, end = int(start), int(end)
     compute = (
