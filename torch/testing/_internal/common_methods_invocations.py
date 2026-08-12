@@ -6715,31 +6715,18 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
 
-def _broadcasts_input(input, *args):
-    input_shape = tuple(input.shape)
-    arg_shapes = [tuple(arg.shape) for arg in args if isinstance(arg, torch.Tensor)]
-    return input_shape != torch.broadcast_shapes(input_shape, *arg_shapes)
-
-def _set_requires_grad_for_bound(op, requires_grad, arg, output_shape):
-    if not isinstance(arg, torch.Tensor) or not (arg.dtype.is_floating_point or arg.dtype.is_complex):
-        return arg
-
-    if op.name == "clamp" and tuple(arg.shape) != tuple(output_shape):
-        return arg.requires_grad_(False)
-
-    return arg.requires_grad_(requires_grad)
-
-def _arg_shape(arg):
-    return tuple(arg.shape) if isinstance(arg, torch.Tensor) else ()
-
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
 
     def make_sample(input, arg0, arg1):
-        output_shape = torch.broadcast_shapes(_arg_shape(input), _arg_shape(arg0), _arg_shape(arg1))
-        arg0 = _set_requires_grad_for_bound(op, requires_grad, arg0, output_shape)
-        arg1 = _set_requires_grad_for_bound(op, requires_grad, arg1, output_shape)
-        return SampleInput(input, args=(arg0, arg1), broadcasts_input=_broadcasts_input(input, arg0, arg1))
+        args = (input, arg0, arg1)
+        shapes = [tuple(arg.shape) for arg in args if isinstance(arg, torch.Tensor)]
+        output_shape = torch.broadcast_shapes(*shapes)
+        return SampleInput(
+            input,
+            args=(arg0, arg1),
+            broadcasts_input=tuple(input.shape) != output_shape,
+        )
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_scalar_tensor = partial(make_tensor, (), device='cpu', dtype=dtype, requires_grad=requires_grad)
@@ -6758,15 +6745,9 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     )
 
     for a, b, c in cases:
-        input = make_arg(a, requires_grad=False)
-        argb = make_arg(b, requires_grad=False)
-        argc = make_arg(c, requires_grad=False)
-        yield make_sample(input, argb, argc)
-
-        input = make_arg(a, noncontiguous=True, requires_grad=False)
-        argb = make_arg(b, requires_grad=False).transpose(0, -1)
-        argc = make_arg(c, noncontiguous=True, requires_grad=False).transpose(0, -1)
-        yield make_sample(input, argb, argc)
+        yield make_sample(make_arg(a), make_arg(b), make_arg(c))
+        yield make_sample(make_arg(a, noncontiguous=True),
+                          make_arg(b).transpose(0, -1), make_arg(c, noncontiguous=True).transpose(0, -1))
 
     # scalar cases
     if supports_scalars:
@@ -6785,13 +6766,12 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         for a, b, c in cases:
             yield make_sample(make_arg(a), b, c)
 
-
     # type promotion cases
     # int x float
     if torch.float in supported_dtypes and torch.long in supported_dtypes:
-        a = make_arg((), dtype=torch.long, requires_grad=False)
-        b = make_arg((1, 4), dtype=torch.float, requires_grad=False)
-        c = make_arg((3, 4), requires_grad=False)
+        a = make_arg((), dtype=torch.long)
+        b = make_arg((1, 4), dtype=torch.float)
+        c = make_arg((3, 4))
 
         cases = (
             (a, b, c),
@@ -6808,10 +6788,10 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         a = make_arg((12,))
         a[4] = nan
         a[7] = nan
-        b = make_arg((12,), requires_grad=False)
+        b = make_arg((12,))
         b[1] = nan
         b[7] = nan
-        c = make_arg((12,), requires_grad=False)
+        c = make_arg((12,))
         c[9] = nan
 
         yield make_sample(a, b, c)
