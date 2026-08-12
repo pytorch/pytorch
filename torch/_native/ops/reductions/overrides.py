@@ -12,11 +12,12 @@ here IS a performance decision, because running K0 would regress vs the very ker
 we fall back to. Host-bound cases on the served (fast) regimes are addressed
 elsewhere (CUDA-graph capture, dynamic-M).
 
-This first cut wires the two highest-traffic, cleanest-semantics ops -- ``sum``
-and ``mean`` -- end to end (fp32-accumulated, optional out ``dtype``). The
-remaining reductions (amax/amin, prod, var/std, norm, arg*, *_mean, aminmax,
-all/any, count_nonzero) follow the same (cond, impl) template and are added
-incrementally once this vertical is validated in-tree.
+The single-output value/sum reductions are wired here: ``sum`` and ``mean``
+(fp32-accumulated, optional out ``dtype``) plus ``amax`` / ``amin`` / ``prod``
+(output dtype follows the input). The remaining reductions (var/std, norm, arg*,
+*_mean, aminmax, all/any, count_nonzero) carry an index or a second output and
+follow the same (cond, impl) template; they are added incrementally as the
+trait/kernel support for those shapes lands.
 """
 
 from __future__ import annotations
@@ -231,6 +232,38 @@ def _mean_impl(self, dim=None, keepdim=False, *, dtype=None):
     return _run1(lambda acc: T.MeanOps(acc=acc), "mean", self, red, keepdim, odt)
 
 
+# --- amax / amin / prod: single-output VALUE reductions; output dtype follows the
+# input (amax/amin) or the optional out dtype= (prod). ---
+
+
+def _amax_impl(self, dim=(), keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    return _run1(lambda acc: T.AMaxOps(acc=acc), "amax", self, red, keepdim, self.dtype)
+
+
+def _amin_impl(self, dim=(), keepdim=False):
+    red = _normalize_dims(dim, self.dim())
+    return _run1(lambda acc: T.AMinOps(acc=acc), "amin", self, red, keepdim, self.dtype)
+
+
+def _prod_impl(self, dim, keepdim=False, *, dtype=None):
+    red = _normalize_dims(dim, self.dim())
+    odt = _out_dtype(self, dtype)
+    return _run1(lambda acc: T.ProdOps(acc=acc), "prod", self, red, keepdim, odt)
+
+
+def _amax_cond(self, dim=(), keepdim=False):
+    return _base_cond(self, dim)
+
+
+def _amin_cond(self, dim=(), keepdim=False):
+    return _base_cond(self, dim)
+
+
+def _prod_cond(self, dim, keepdim=False, *, dtype=None):
+    return _base_cond(self, dim) and _supported_out_dtype(dtype)
+
+
 def register_reduction_overrides() -> None:
     # CUDA overrides; cu.register_op_override short-circuits when the CuteDSL
     # runtime is unavailable, so this is safe to call unconditionally at import.
@@ -239,4 +272,10 @@ def register_reduction_overrides() -> None:
     )
     cu.register_op_override(
         "aten", "mean.dim", "CUDA", cond=_mean_cond, impl=_mean_impl
+    )
+    # Group A: amax / amin / prod (single-output value reductions).
+    cu.register_op_override("aten", "amax", "CUDA", cond=_amax_cond, impl=_amax_impl)
+    cu.register_op_override("aten", "amin", "CUDA", cond=_amin_cond, impl=_amin_impl)
+    cu.register_op_override(
+        "aten", "prod.dim_int", "CUDA", cond=_prod_cond, impl=_prod_impl
     )
