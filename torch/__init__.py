@@ -2936,7 +2936,10 @@ class _TorchCompileInductorWrapper:
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
-            if attr_name not in current_config:
+            # Aliased entries (e.g. cuda.*/xpu.* aliasing cutlass.*) are absent
+            # from get_config_copy() but remain settable by name, so also accept
+            # any key present in config._config.
+            if attr_name not in current_config and attr_name not in config._config:  # type: ignore[attr-defined]
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
@@ -2947,7 +2950,7 @@ class _TorchCompileInductorWrapper:
             if _get_origin(attr_type) is None:
                 if not isinstance(val, attr_type):
                     val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
+                    expected_type_str = attr_type.__name__
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )

@@ -410,7 +410,15 @@ def list_options() -> list[str]:
 
     current_config: dict[str, Any] = config.get_config_copy()
 
-    return list(current_config.keys())
+    # Aliased entries (e.g. cuda.*/xpu.* aliasing cutlass.*) are skipped by
+    # get_config_copy() but are still settable via torch.compile(options=...),
+    # so surface them here too.
+    aliased = [
+        name
+        for name, entry in config._config.items()  # type: ignore[attr-defined]
+        if entry.alias is not None
+    ]
+    return list(current_config.keys()) + aliased
 
 
 def cudagraph_mark_step_begin():
