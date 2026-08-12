@@ -58,7 +58,7 @@ class TestUtils(TestCase):
         ],
     )
     @skip_if_lt_x_gpu(1)
-    def test_apply_to_tensors(self, device_list):
+    def test_apply_to_tensors(self, device, device_list):
         expected = 0
 
         def get_a_tensor():
@@ -108,7 +108,7 @@ class TestUtils(TestCase):
             self.assertEqual(type(new_data[i]), type(v))
 
     @skip_if_lt_x_gpu(1)
-    def test_replace_by_prefix(self):
+    def test_replace_by_prefix(self, device):
         state_dict = {
             "layer.a": torch.tensor(1),
             "abc.layer.def": torch.tensor(2),
@@ -133,7 +133,7 @@ class TestUtils(TestCase):
             )
 
     @skip_if_lt_x_gpu(1)
-    def test_packed_sequence(self):
+    def test_packed_sequence(self, device):
         """Test to ensure RNN packed sequences are modified correctly."""
         rnn = nn.RNN(5, 5)
 
@@ -149,7 +149,7 @@ class TestUtils(TestCase):
         x, _ = nn.utils.rnn.pad_packed_sequence(x)
         self.assertEqual(torch.sum(x), 0)
 
-    def test_get_param_to_fqns_scales_linearly(self):
+    def test_get_param_to_fqns_scales_linearly(self, device):
         """Regression test for https://github.com/pytorch/pytorch/issues/168329.
 
         _apply_to_modules had O(N_submodules * N_params) complexity when
