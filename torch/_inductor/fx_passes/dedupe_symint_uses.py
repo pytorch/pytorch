@@ -8,6 +8,13 @@ from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 
 
+_ASSERT_TARGETS = (
+    torch._check,
+    torch._assert_scalar,
+    torch.ops.aten._assert_scalar.default,
+)
+
+
 @dataclass
 class _SymExprHash:
     """
@@ -53,6 +60,34 @@ class _SymHashingDict:
         return _SymExprHash(key) if isinstance(key, py_sym_types) else key
 
 
+def _assertion_condition(node: torch.fx.Node) -> Any:
+    if node.args:
+        return node.args[0]
+    return node.kwargs.get("cond", node.kwargs.get("self"))
+
+
+def _runtime_assert_condition_nodes(graph: torch.fx.Graph) -> OrderedSet[torch.fx.Node]:
+    protected: OrderedSet[torch.fx.Node] = OrderedSet()
+
+    def add_ancestors(node: torch.fx.Node) -> None:
+        pending = [node]
+        while pending:
+            current = pending.pop()
+            if current in protected:
+                continue
+            protected.add(current)
+            pending.extend(current.all_input_nodes)
+
+    for node in graph.nodes:
+        if node.target not in _ASSERT_TARGETS:
+            continue
+        condition = _assertion_condition(node)
+        if isinstance(condition, torch.fx.Node):
+            add_ancestors(condition)
+
+    return protected
+
+
 def dedupe_symints(graph: torch.fx.Graph):
     """
     Dedupes sym ints in the graph to nodes are resolvable to symint graph inputs.
@@ -64,6 +99,7 @@ def dedupe_symints(graph: torch.fx.Graph):
 
     sym_dict = _SymHashingDict()
     resolvable_from_input_symints = OrderedSet[Any]()
+    runtime_assert_condition_nodes = _runtime_assert_condition_nodes(graph)
 
     for node in graph.nodes:
         val = node.meta.get("val", None)
@@ -74,8 +110,14 @@ def dedupe_symints(graph: torch.fx.Graph):
             resolvable_from_input_symints.add(node)
             sym_dict[val] = node
         elif existing_node := sym_dict.get(val):
-            node.replace_all_uses_with(existing_node)
-            graph.erase_node(node)
+            if node in runtime_assert_condition_nodes:
+                # Preserve the runtime provenance used by the assertion. The
+                # existing canonical node proves this symbolic value is
+                # resolvable, so descendants can still participate in CSE.
+                resolvable_from_input_symints.add(node)
+            else:
+                node.replace_all_uses_with(existing_node)
+                graph.erase_node(node)
         elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
             sym_dict[val] = node
             resolvable_from_input_symints.add(node)

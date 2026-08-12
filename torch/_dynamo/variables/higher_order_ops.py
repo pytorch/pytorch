@@ -2475,11 +2475,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # "merge" is too strong a word: we mostly assert that
         # the resulting graphstates have to be the same.
         #
-        # We only permit guards to diverge (we union the guards from
-        # both branches).  In particular, this means that side
-        # effects are NOT permitted inside true/false branches; this
-        # would be difficult to implement, because of the path
-        # explosion problem.
+        # During export, branch-local guards and range refinements must not
+        # become top-level input constraints. The predicate determines which
+        # branch runs at runtime, so export isolates those constraints and puts
+        # them in the branch graph as runtime assertions instead. Regular
+        # torch.compile must retain branch guards on the parent ShapeEnv so a
+        # failed specialization triggers recompilation. Side effects are still
+        # NOT permitted inside true/false branches; this would be difficult to
+        # implement because of the path explosion problem.
 
         def speculate_branch(
             branch: bool,
@@ -2489,23 +2492,55 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if self._HOP_NAME is None:
                 raise AssertionError("_HOP_NAME must be set")
             # TODO: Support kwargs
-            (
-                (ret_val, ret_spec),
-                ret_graph,
-                ret_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                args[ix],
-                operands_seq,
-                {},
-                self._HOP_NAME,
-                source_target=self.value,
-                should_flatten_outputs=True,
-                # TODO - removing consts from control flow ops need more work
-                remove_consts_from_outputs=False,
-                supports_input_mutation=self.supports_input_mutation,
-                supports_aliasing=self.supports_aliasing,
-            )
+            shape_env = tx.output.shape_env
+            guard_start = None
+            deferred_runtime_asserts_start = None
+            var_to_range_start = None
+            branch_shape_env_context = contextlib.nullcontext()
+            is_export = tx.output.export or torch.compiler.is_exporting()
+            if is_export:
+                guard_start = len(shape_env.guards)
+                deferred_runtime_asserts_start = (
+                    shape_env._snapshot_deferred_runtime_asserts()
+                )
+                var_to_range_start = dict(shape_env.var_to_range)
+                branch_shape_env_context = shape_env.isolate_branch_shape_env()
+
+            with branch_shape_env_context:
+                (
+                    (ret_val, ret_spec),
+                    ret_graph,
+                    ret_lifted_freevars,
+                ) = speculate_subgraph(
+                    tx,
+                    args[ix],
+                    operands_seq,
+                    {},
+                    self._HOP_NAME,
+                    source_target=self.value,
+                    should_flatten_outputs=True,
+                    # TODO - removing consts from control flow ops need more work
+                    remove_consts_from_outputs=False,
+                    supports_input_mutation=self.supports_input_mutation,
+                    supports_aliasing=self.supports_aliasing,
+                )
+                if is_export:
+                    if (
+                        guard_start is None
+                        or deferred_runtime_asserts_start is None
+                        or var_to_range_start is None
+                    ):
+                        raise AssertionError(
+                            "branch ShapeEnv snapshot was not captured"
+                        )
+                    shape_env._insert_branch_runtime_asserts(
+                        torch.fx.GraphModule(dict(tx.output.nn_modules), ret_graph),
+                        f"{self._HOP_NAME}_branch",
+                        guard_start,
+                        deferred_runtime_asserts_start,
+                        var_to_range_start,
+                        export=tx.output.export,
+                    )
 
             # need to ensure we increase epoch so we don't memoize unbacked bindings
             # across different subgraphs which can interfere with runtime assertion

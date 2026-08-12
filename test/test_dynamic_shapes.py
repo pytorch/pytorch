@@ -1230,6 +1230,99 @@ def forward(self, x_1):
         self.assertTrue(shape_env.evaluate_expr(test1))
         self.assertTrue(shape_env.evaluate_expr(test2))
 
+    def test_isolate_branch_shape_env_clears_runtime_assert_cache(self):
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        a = shape_env.create_unbacked_symint()
+        expr = (a > 3).node.expr
+
+        with shape_env.isolate_branch_shape_env():
+            shape_env.guard_or_defer_runtime_assert(expr, "same check")
+            self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 0)
+
+        shape_env.guard_or_defer_runtime_assert(expr, "same check")
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+
+    def test_isolate_branch_shape_env_clears_axiom_cache(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5)
+        expr = (a > 3).node.expr
+
+        with shape_env.isolate_branch_shape_env():
+            self.assertTrue(shape_env.evaluate_expr(expr))
+            self.assertEqual(len(shape_env.get_axioms()), 1)
+
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertEqual(shape_env.get_axioms(), ())
+
+    def test_isolate_branch_shape_env_clears_replace_cache(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False).node.expr
+        b = create_symint(shape_env, 6, duck=False).node.expr
+
+        shape_env._set_replacement(a, b, "parent")
+        with shape_env.isolate_branch_shape_env():
+            shape_env._set_replacement(a, sympy.Integer(5), "branch")
+            self.assertEqual(shape_env.replace(a), sympy.Integer(5))
+
+        self.assertEqual(shape_env.replacements[a], b)
+        self.assertEqual(shape_env.replace(a), b)
+
+    def test_insert_branch_runtime_asserts_drops_reified_self_equality(self):
+        from torch.fx.experimental.symbolic_shapes import RuntimeAssert
+        from torch.utils._traceback import CapturedTraceback
+
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        a = shape_env.create_unbacked_symint()
+        symbol = a.node.expr
+
+        graph = torch.fx.Graph()
+        arg = graph.placeholder("arg")
+        arg.meta["val"] = a
+        add = graph.call_function(operator.add, (arg, 1))
+        add.meta["val"] = a + 1
+        graph.output(add)
+        gm = torch.fx.GraphModule({}, graph)
+
+        deferred_runtime_asserts_start = shape_env._snapshot_deferred_runtime_asserts()
+        var_to_range_start = dict(shape_env.var_to_range)
+        stack = CapturedTraceback.extract()
+        self_equality = sympy.Eq(symbol, symbol, evaluate=False)
+        shape_env.deferred_runtime_asserts[None] = [
+            RuntimeAssert(self_equality, "self equality", stack),
+            RuntimeAssert(
+                sympy.And(
+                    self_equality,
+                    sympy.Ne(symbol, 0, evaluate=False),
+                    evaluate=False,
+                ),
+                "nonzero",
+                stack,
+            ),
+        ]
+        shape_env.num_deferred_runtime_asserts = 2
+
+        shape_env._insert_branch_runtime_asserts(
+            gm,
+            "test_branch",
+            len(shape_env.guards),
+            deferred_runtime_asserts_start,
+            var_to_range_start,
+        )
+
+        assertions = [
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assertions), 1)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(2), 3)
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            gm(0)
+
     def test_sympy_optimized_add(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 2)

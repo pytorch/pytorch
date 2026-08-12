@@ -2165,6 +2165,27 @@ def forward(self, child : torch.Tensor, const_unused : int):
                     )
                     self.assertEqual(num_placeholders, 4)
 
+    def test_cond_branch_shape_specialization_recompiles(self):
+        def fn(x):
+            def true_fn(x):
+                if x.shape[0] == 4:
+                    return x + 1
+                return x - 1
+
+            def false_fn(x):
+                return x * 2
+
+            return control_flow.cond(x.sum() > 0, true_fn, false_fn, [x])
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        x4 = torch.ones(4, 3)
+        x5 = torch.ones(5, 3)
+
+        self.assertEqual(opt_fn(x4), fn(x4))
+        self.assertEqual(opt_fn(x5), fn(x5))
+        self.assertEqual(cnt.frame_count, 2)
+
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
