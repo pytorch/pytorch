@@ -4,6 +4,10 @@
 
 See https://github.com/pytorch/pytorch/issues/189607
 
+Lives at test/test_cpython_diff_sync.py (not under test/cpython/) so run_test.py
+does not exclude it via the version-prefix filter, and so it is picked up by
+normal pull shards rather than the Dynamo-wrapped cpython suite.
+
 CI enforcement for the full tree also runs via the CPYTHON_DIFF_SYNC lintrunner
 adapter (tools/linter/adapters/cpython_diff_sync_linter.py).
 """
@@ -12,14 +16,16 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shutil
 import tempfile
+import unittest
 from pathlib import Path
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 def _load_diff_sync():
-    path = Path(__file__).resolve().parents[2] / "tools" / "cpython_diff_sync.py"
+    path = Path(__file__).resolve().parents[1] / "tools" / "cpython_diff_sync.py"
     spec = importlib.util.spec_from_file_location("torch_cpython_diff_sync", path)
     if spec is None or spec.loader is None:
         raise AssertionError(f"cannot load {path}")
@@ -41,6 +47,7 @@ def _bool_pair():
     raise AssertionError("test_bool.py pair not found")
 
 
+@unittest.skipIf(shutil.which("git") is None, "git binary required")
 class CPythonDiffSyncTests(TestCase):
     def test_verify_all_passes_on_checked_in_tree(self):
         errors = diff_sync.verify_all()
@@ -48,7 +55,8 @@ class CPythonDiffSyncTests(TestCase):
             errors,
             [],
             "CPython .diff sync check failed. Regenerate with:\n"
-            "  python tools/regenerate_cpython_diffs.py\n" + "\n".join(errors),
+            "  python tools/regenerate_cpython_diffs.py\n"
+            + "\n".join(f"{rel}: {msg}" for rel, msg in errors),
         )
 
     def test_parse_header_requires_source_url(self):
@@ -75,22 +83,27 @@ class CPythonDiffSyncTests(TestCase):
             tmp_diff.write_bytes(corrupted.encode("utf-8"))
             errors = diff_sync.verify_pair(py_path, tmp_diff)
         self.assertTrue(
-            any("stale" in e or "adapted file hash" in e for e in errors),
+            any("stale" in msg or "adapted file hash" in msg for _, msg in errors),
             errors,
         )
 
     def test_missing_index_line_fails_verify(self):
         py_path, diff_path = _bool_pair()
-        text = "\n".join(
-            line
-            for line in diff_path.read_text(encoding="utf-8").splitlines()
-            if not line.startswith("index ")
-        ) + "\n"
+        text = (
+            "\n".join(
+                line
+                for line in diff_path.read_text(encoding="utf-8").split("\n")
+                if not line.startswith("index ")
+            )
+            + "\n"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             tmp_diff = Path(tmp) / "test_bool.diff"
             tmp_diff.write_bytes(text.encode("utf-8"))
             errors = diff_sync.verify_pair(py_path, tmp_diff)
-        self.assertTrue(any("missing git index line" in e for e in errors), errors)
+        self.assertTrue(
+            any("missing git index line" in msg for _, msg in errors), errors
+        )
 
     def test_all_pairs_share_one_upstream_tag(self):
         # Do not hardcode a CPython tag — the suite will move (e.g. to 3.15).
@@ -103,9 +116,7 @@ class CPythonDiffSyncTests(TestCase):
 
     def test_index_hashes_match_blob_objects(self):
         py_path, diff_path = _bool_pair()
-        before, after = diff_sync.parse_index(
-            diff_path.read_text(encoding="utf-8")
-        )
+        before, after = diff_sync.parse_index(diff_path.read_text(encoding="utf-8"))
         adapted = diff_sync.normalize_bytes(py_path.read_bytes())
         self.assertEqual(diff_sync.git_hash_object(adapted), after)
         pristine = diff_sync.reverse_apply_to_pristine(py_path, diff_path)

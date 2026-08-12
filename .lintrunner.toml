@@ -1079,9 +1079,13 @@ command = [
 
 [[linter]]
 code = 'CPYTHON_DIFF_SYNC'
+# Trigger set only: the adapter always runs verify_all() over the whole tree.
 include_patterns = [
     'test/cpython/v3_13/**',
     'tools/cpython_diff_sync.py',
+    'tools/regenerate_cpython_diffs.py',
+    'tools/linter/adapters/cpython_diff_sync_linter.py',
+    'test/test_cpython_diff_sync.py',
 ]
 command = [
     'python3',

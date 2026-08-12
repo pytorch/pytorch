@@ -2,6 +2,10 @@
 
 Runs the offline verify from tools/cpython_diff_sync.py whenever any file under
 test/cpython/v3_13/ is in the lint path set. Not a Dynamo test; repo hygiene.
+
+verify_all() always checks the whole tree. include_patterns are only a trigger
+so the linter runs; do not "optimize" the adapter to per-file verify or drift
+under untouched pairs will silently slip through.
 """
 
 from __future__ import annotations
@@ -54,15 +58,13 @@ def main() -> None:
     parser.add_argument(
         "filenames",
         nargs="*",
-        help="paths to lint (ignored beyond triggering a full offline verify)",
+        help="paths to lint (trigger only; verify_all always checks the whole tree)",
     )
     parser.parse_args()
 
     diff_sync = _load_diff_sync()
-    for err in diff_sync.verify_all():
-        rel = err.split(":", 1)[0]
+    for rel, err in diff_sync.verify_all():
         candidate = REPO_ROOT / "test" / "cpython" / "v3_13" / rel
-        # Orphan .diff messages use the .diff relative path as the prefix.
         if not candidate.is_file() and not rel.endswith(".diff"):
             candidate = REPO_ROOT / "test" / "cpython" / "v3_13" / (rel + ".diff")
         path = str(candidate if candidate.exists() else diff_sync.CPYTHON_DIR)
@@ -76,7 +78,8 @@ def main() -> None:
             original=None,
             replacement=None,
             description=(
-                f"{err}\nRegenerate with: python tools/regenerate_cpython_diffs.py"
+                f"{rel}: {err}\n"
+                "Regenerate with: python tools/regenerate_cpython_diffs.py"
             ),
         )
         print(json.dumps(msg._asdict()), flush=True)
