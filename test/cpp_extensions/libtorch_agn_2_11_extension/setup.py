@@ -98,5 +98,5 @@ setup(
         "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
         "clean": clean,
     },
-    options={"bdist_wheel": {"py_limited_api": "cp39"}},
+    options={"bdist_wheel": {"py_limited_api": "cp310"}},
 )
