@@ -915,7 +915,6 @@ False
     pinverse
     saddmm
     spmm
-    qr
     svd
     svd_lowrank
     pca_lowrank
