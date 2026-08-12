@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     subtest,
     suppress_warnings,
+    TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
 )
@@ -3051,6 +3052,10 @@ def _event_multiprocess_child(event, p2c, c2p):
 
 @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
 @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 @unittest.skipIf(
     int(torch.version.xpu) < 20260200,
     "XPU IPC events require SYCL compiler 2026.2 or later",
