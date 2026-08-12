@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for richcompare_impl: unified comparison protocol in Dynamo."""
+"""Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
 import unittest
