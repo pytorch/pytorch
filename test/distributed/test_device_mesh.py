@@ -47,9 +47,7 @@ device_type = (
     if (acc := torch.accelerator.current_accelerator(check_available=True))
     else "cpu"
 )
-device_count = (
-    torch.accelerator.device_count() if torch.accelerator.is_available() else 0
-)
+device_count = torch.accelerator.device_count()
 
 try:
     import torch._C._distributed_c10d.ProcessGroupNCCL
