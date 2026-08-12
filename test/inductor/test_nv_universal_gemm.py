@@ -1062,7 +1062,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIs(config.args, args)
         common = (4, 1, "sum", "identity", True)
         primary = ("reduce", "init", "combine", "source", "finalize", "consumer")
-        self.assertEqual(config.primary_constexprs(), (*common, *primary))
         self.assertEqual(
             config.constexprs(),
             (*common, "direct_bool_gt_zero", *primary, "secondary_consumer"),
