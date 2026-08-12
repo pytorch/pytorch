@@ -7,21 +7,24 @@ import torch
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import Backend
 
-_PRIOR_FP32_PRECISION: str | None = None
+_PRIOR_FP32_PRECISION: bool | str | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
-    torch.backends.cuda.matmul.allow_tf32 = False
+    device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+    device_module = torch.get_device_module(device_type)
+    if hasattr(device_module, "matmul") and hasattr(device_module.matmul, "fp32_precision"):
+        _PRIOR_FP32_PRECISION = device_module.matmul.fp32_precision
+        device_module.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
-    if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+    device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+    device_module = torch.get_device_module(device_type)
+    if _PRIOR_FP32_PRECISION is not None and hasattr(device_module, "matmul") and hasattr(device_module.matmul, "fp32_precision"):
+        device_module.matmul.fp32_precision = _PRIOR_FP32_PRECISION
         _PRIOR_FP32_PRECISION = None
 
 
@@ -29,7 +32,7 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed.distributed_test import (
     DistributedTest,
     TestDistBackend,
@@ -64,11 +67,15 @@ BACKEND = os.environ["BACKEND"]
 if BACKEND in _allowed_backends:
 
     class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self._spawn_processes()
-            if torch.cuda.is_available():
-                torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+            device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+            device_module = torch.get_device_module(device_type)
+            if hasattr(device_module, "cudnn") and device_module.is_available():
+                device_module.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
