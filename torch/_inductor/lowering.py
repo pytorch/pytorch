@@ -3810,6 +3810,7 @@ make_fallback(aten.resize_)
 make_fallback(aten.resize_as_)
 
 # Linalg
+make_fallback(aten.linalg_vector_norm, override_decomp=True, warn=False)
 make_fallback(aten._linalg_det)
 make_fallback(aten.linalg_householder_product)
 make_fallback(aten.linalg_inv_ex)
