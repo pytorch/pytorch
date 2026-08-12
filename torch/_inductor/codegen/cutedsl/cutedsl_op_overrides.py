@@ -8,10 +8,9 @@ template kernels, particularly for flex attention modifications.
 
 import dataclasses
 import math
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import cast
 
 import sympy
 
@@ -63,81 +62,20 @@ class TensorSSAReduction:
     cute_op: str
     init_val: str
     combine_expr: str
-    combine: Callable
-    materialize_init: Callable[[], object]
-
-
-@dataclasses.dataclass(frozen=True)
-class MaterializedTensorSSAReduction:
-    """CuTeDSL compile-time operands for a TensorSSA reduction."""
-
-    reduce_op: object
-    init_val: object
-    combine: Callable
-    source: Callable
-    finalize: Callable
-
-
-def _sum_combine(lhs, rhs):
-    return lhs + rhs
-
-
-def _prod_combine(lhs, rhs):
-    return lhs * rhs
-
-
-def _max_combine(lhs, rhs):
-    import cutlass
-
-    return cutlass.max(lhs, rhs)
-
-
-def _min_combine(lhs, rhs):
-    import cutlass
-
-    return cutlass.min(lhs, rhs)
-
-
-def _zero_init():
-    return 0.0
-
-
-def _one_init():
-    return 1.0
-
-
-def _negative_inf_init():
-    import cutlass
-
-    return -cutlass.Float32.inf
-
-
-def _positive_inf_init():
-    import cutlass
-
-    return cutlass.Float32.inf
 
 
 TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
-    "sum": TensorSSAReduction(
-        "cute.ReductionOp.ADD", "0.0", "lhs + rhs", _sum_combine, _zero_init
-    ),
-    "prod": TensorSSAReduction(
-        "cute.ReductionOp.MUL", "1.0", "lhs * rhs", _prod_combine, _one_init
-    ),
+    "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
+    "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
     "max": TensorSSAReduction(
         "cute.ReductionOp.MAX",
         'float("-inf")',
         "cutlass.max(lhs, rhs)",
-        _max_combine,
-        _negative_inf_init,
     ),
     "min": TensorSSAReduction(
         "cute.ReductionOp.MIN",
         'float("inf")',
         "cutlass.min(lhs, rhs)",
-        _min_combine,
-        _positive_inf_init,
     ),
 }
 
@@ -150,75 +88,6 @@ def tensorssa_reduction(reduction_type: ReductionType) -> TensorSSAReduction:
             f"{reduction_type} does not map to a CuTe TensorSSA reduction"
         )
     return reduction
-
-
-def _identity_source(value):
-    return value
-
-
-def _square_source(value):
-    return value * value
-
-
-def _abs_source(value):
-    import cutlass.cute as cute
-
-    return cute.math.abs(value)
-
-
-def _abs_scale_source(value):
-    import cutlass.cute as cute
-
-    return cute.math.max(cute.math.abs(value), cute.full_like(value, 1e-12)) / 448.0
-
-
-def _identity_finalize(value, group):
-    return value
-
-
-def _mean_finalize(value, group):
-    return value / group
-
-
-def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
-    """Return the associative primitive used by a composed reduction plan."""
-    if reduction_type == "logsumexp":
-        return "max"
-    if reduction_type in (
-        "online_softmax",
-        "direct_bool_gt_zero",
-    ) or reduction_type.startswith(("mean", "normalize_sum", "variance")):
-        return "sum"
-    if reduction_type == "normalize_absmax":
-        return "max"
-    return cast(ReductionType, reduction_type)
-
-
-def materialize_tensorssa_reduction(
-    reduction_type: ReductionType,
-    source_type: str = "identity",
-    plan_type: str | None = None,
-) -> MaterializedTensorSSAReduction:
-    """Materialize a TensorSSA descriptor as CuTeDSL compile-time operands."""
-    import cutlass.cute as cute
-
-    reduction = tensorssa_reduction(reduction_type)
-    reduce_op = getattr(cute.ReductionOp, reduction.cute_op.rpartition(".")[2])
-    init_val = reduction.materialize_init()
-    source = {
-        "identity": _identity_source,
-        "square": _square_source,
-        "abs": _abs_source,
-        "abs_scale": _abs_scale_source,
-    }[source_type]
-    finalize = (
-        _mean_finalize
-        if plan_type is not None and plan_type.startswith("mean")
-        else _identity_finalize
-    )
-    return MaterializedTensorSSAReduction(
-        reduce_op, init_val, reduction.combine, source, finalize
-    )
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
