@@ -27,28 +27,6 @@ OpOverload = torch._ops.OpOverload
 LoweringDict = dict[OpOverload | str, Callable[..., Any]]
 TargetType = Callable[..., Any] | str
 
-aten = torch.ops.aten
-# Layout-only ops that are the identity on a 0-d scalar value. In the per-lane
-# pointwise subgraph domain every input is a scalar (ranges=[]), so these carry
-# no computation. vmap batching wraps an elementwise combine core in permutes;
-# treating them as identity lets such combines lower as plain pointwise scans.
-# Deliberately an explicit allowlist, not is_view: is_view is True for the
-# value-changing aten.view.dtype bitcast and False for aten._unsafe_view.
-_SCALAR_IDENTITY_VIEW_OPS = OrderedSet(
-    [
-        aten.permute.default,
-        aten.view.default,
-        aten._unsafe_view.default,
-        aten.expand.default,
-        aten.t.default,
-        aten.transpose.int,
-        aten.squeeze.default,
-        aten.squeeze.dim,
-        aten.unsqueeze.default,
-        aten.alias.default,
-    ]
-)
-
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
     """
@@ -64,7 +42,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     additional_lowerings: LoweringDict | None
     buffers: list[ir.Buffer]
     mutated_buffers: OrderedSet[str]
-    scalar_view_identity: bool
 
     def __init__(
         self,
@@ -72,14 +49,12 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         root_graph_lowering: GraphLowering,
         allowed_mutations: OrderedSet[OpOverload] | None = None,
         additional_lowerings: LoweringDict | None = None,
-        scalar_view_identity: bool = False,
     ) -> None:
         super().__init__(gm)
         self.graph_outputs = None
         self.root_graph = root_graph_lowering
         self.allowed_mutations = allowed_mutations
         self.additional_lowerings = additional_lowerings
-        self.scalar_view_identity = scalar_view_identity
         self._current_op = None
 
         # Used to track buffers created during lowering
@@ -137,10 +112,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         with self._op_context(target):
             if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
                 return super().call_function(target, args, kwargs)
-
-            if self.scalar_view_identity and target in _SCALAR_IDENTITY_VIEW_OPS:
-                # layout-only op on a 0-d scalar lane; see _SCALAR_IDENTITY_VIEW_OPS
-                return args[0]
 
             # These takes precedence over the main lowerings
             if self.additional_lowerings is not None:
@@ -213,9 +184,7 @@ def lower_pointwise_subgraph(
         else:
             graph_inputs.append(desc)
     gm = subgraph.graph_module
-    pw_subgraph = PointwiseSubgraphLowering(
-        gm, root_graph_lowering=V.graph, scalar_view_identity=True
-    )
+    pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*graph_inputs)
 
