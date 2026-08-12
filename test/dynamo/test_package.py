@@ -261,6 +261,20 @@ class PrecompileNoDispatchSlot(torch.nn.Module):
         return (y + 1).sum()
 
 
+PRECOMPILE_INV_CONFIG = {"mode": "sum"}
+
+
+class PrecompileInvariantModel(torch.nn.Module):
+    """Reads a global across a graph break, so the resume frame guards it."""
+
+    def forward(self, x):
+        y = x * 2
+        torch._dynamo.graph_break()
+        if PRECOMPILE_INV_CONFIG["mode"] == "sum":
+            return y.sum()
+        return y.mean()
+
+
 class PrecompileSharedBlock(torch.nn.Module):
     """A library block reused by two different models; its frame graph-breaks."""
 
@@ -2646,6 +2660,101 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # entries are gone, so this is a miss, and fail_on_recompile makes
             # the miss loud instead of letting it recompile.
             self.assertEqual(a(x), want_a)
+
+    def test_example_inputs_drive_the_capture(self):
+        # example_inputs is just "run these for me": capture is by execution, so
+        # the block body becomes optional.
+        session = precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+        )
+        with session:
+            pass
+        summary = session.summary()
+        self.assertEqual(summary.frames, 2)
+        self.assertEqual(summary.guarded_codes, 4)
+
+    def test_invariants_separate_what_holds_from_what_varies(self):
+        # Two shapes, one config value. The config read is on both sides of the
+        # break, so it is invariant; the shapes are what tell the graphs apart.
+        session = precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+        )
+        with session:
+            pass
+
+        frames = {f.frame: f for f in session.invariants()}
+        resume = next(k for k in frames if k.startswith("torch_dynamo_resume_in"))
+        entry = frames["forward"]
+        self.assertEqual(entry.variants, 2)
+        self.assertEqual(frames[resume].variants, 2)
+
+        def rendered(facts):
+            return [f.render() for f in facts]
+
+        # The global read survives into every variant of the resume frame.
+        self.assertTrue(
+            any("['mode'] == 'sum'" in r for r in rendered(frames[resume].invariant)),
+            rendered(frames[resume].invariant),
+        )
+        # The shapes differ between variants, so they are NOT invariant. This is
+        # the half that needs the value fingerprint: TENSOR_MATCH's code_list
+        # carries no shape, so without it both variants would look identical and
+        # land in the intersection.
+        for frame in (entry, frames[resume]):
+            varies = rendered(frame.varying)
+            self.assertTrue(any("shape=(4, 8)" in r for r in varies), varies)
+            self.assertTrue(any("shape=(5, 8)" in r for r in varies), varies)
+            self.assertFalse(any("shape=(" in r for r in rendered(frame.invariant)))
+
+    def test_invariants_file_is_written_and_reproducible(self):
+        def capture(path):
+            torch._dynamo.reset()
+            with precompile_capture(
+                PrecompileInvariantModel(),
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+                invariants=path,
+            ):
+                pass
+
+        first = os.path.join(self.path(), "a.invariants")
+        second = os.path.join(self.path(), "b.invariants")
+        capture(first)
+        capture(second)
+        with open(first) as handle:
+            text = handle.read()
+        self.assertIn("frame forward", text)
+        self.assertIn("invariant [enforced]", text)
+        self.assertIn("varies", text)
+        # Object ids are normalized out, so the file is stable enough to commit
+        # and diff across runs.
+        self.assertNotRegex(text, r"\b\d{9,}\b")
+        with open(second) as handle:
+            self.assertEqual(text, handle.read())
+
+    def test_invariants_marks_unenforced_preconditions(self):
+        # An invariant whose guard could not be serialized is a precondition
+        # nothing rechecks at load. It has to be visibly distinct.
+        session = precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+        )
+        with session:
+            pass
+        rendered = [
+            f.render() for frame in session.invariants() for f in frame.invariant
+        ]
+        self.assertTrue(any(r.startswith("[dropped ]") for r in rendered))
+        self.assertTrue(any(r.startswith("[enforced]") for r in rendered))
 
     def test_load_rejects_artifact_from_a_different_callable(self):
         x = torch.randn(4, 8)

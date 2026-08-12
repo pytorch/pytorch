@@ -16,6 +16,27 @@ Usage::
                 compiled(*args)
     session.save(path)
 
+``example_inputs`` runs the calls for you, so a capture with nothing
+conditional in it is one statement, and ``invariants`` writes a readable
+report of what the capture established::
+
+    with precompile_capture(
+        model,
+        backend="inductor",
+        example_inputs=[(x1,), (x2,)],  # or ExampleInput(args, kwargs)
+        invariants="model.invariants",
+    ) as compiled:
+        pass
+
+Per frame, that report separates the guards that held in EVERY compiled variant
+from the ones that differed. The first set are the preconditions the artifact is
+only valid under -- a call violating one cannot be served by any graph in it --
+and each is marked enforced or dropped, so a precondition nothing rechecks at
+load is visible rather than implied. The second set is what tells the compiled
+graphs apart. Intersection is per frame because guards from different frames are
+not comparable: the entry frame guards its arguments, a resume frame guards
+whatever crossed the break. See ``PrecompileSession.invariants``.
+
     # later, in a fresh process
     compiled = precompile_load(model, path, backend="inductor")
     with serving():  # no compilation permitted
@@ -130,6 +151,8 @@ import contextlib
 import dataclasses
 import functools
 import logging
+import os
+import re
 import sys
 import types
 from collections.abc import Callable, Iterator, Sequence
@@ -158,6 +181,8 @@ log = logging.getLogger(__name__)
 # import *` in a debugging session pulls the entry points rather than every
 # private helper, and so linters do not flag them as unused.
 __all__ = [
+    "ExampleInput",
+    "FrameInvariants",
     "PrecompileSession",
     "PrecompileSummary",
     "PrecompiledCallable",
@@ -195,6 +220,56 @@ def default_guard_filter_fn(
         and not any(d in unsupported for d in g.derived_guard_types)
         for g in guard_entries
     ]
+
+
+@dataclasses.dataclass(frozen=True)
+class ExampleInput:
+    """One call to make during capture, when args alone are not enough."""
+
+    args: tuple[object, ...] = ()
+    kwargs: dict[str, object] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class _GuardFact:
+    """
+    One guard as it appeared in one compilation.
+
+    Identity is (type, source, rendered code). The code carries the concrete
+    value, so the same guard specialized two ways -- ``size=[4,8]`` against
+    ``size=[5,8]`` -- is two facts, which is what makes them fall out of the
+    intersection instead of collapsing into it.
+    """
+
+    guard_type: str
+    source: str
+    code: tuple[str, ...]
+    value: str
+    enforced: bool
+
+    def render(self) -> str:
+        # The rendered code already names the value when it has one; the
+        # fingerprint is only needed for guards whose check lives in C++.
+        if self.code:
+            body = " ; ".join(self.code)
+        else:
+            body = f"<{self.guard_type}>"
+            if self.value:
+                body = f"{body} {self.value}"
+        where = f" on {self.source}" if self.source else ""
+        return f"[{'enforced' if self.enforced else 'dropped '}] {body}{where}"
+
+
+@dataclasses.dataclass(frozen=True)
+class FrameInvariants:
+    """What held in every compiled variant of one frame, and what did not."""
+
+    frame: str
+    filename: str
+    lineno: int
+    variants: int
+    invariant: tuple[_GuardFact, ...]
+    varying: tuple[_GuardFact, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -549,6 +624,78 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
     )
 
 
+# Object ids and the per-tensor _dynamo_*_indices probes are noise in a file
+# meant to be read and diffed: the first differs every run, the second is
+# identical on every tensor guard.
+_OBJ_ID = re.compile(r"\b\d{9,}\b")
+_DYNAMO_INDICES = re.compile(r"_dynamo_\w*indices")
+# Dynamo appends a per-process counter to the globals it installs, so the same
+# guard reads __builtins_dict___6 in one compilation and ___8 in the next.
+# Leaving that in makes identical guards look like they differ.
+_DYNAMO_COUNTER = re.compile(
+    r"(__builtins_dict__|__compiled_fn|__resume_at)_*\d+(_\d+)?"
+)
+
+
+def _normalize(text: str) -> str:
+    return _DYNAMO_COUNTER.sub(r"\1_<n>", _OBJ_ID.sub("<id>", text))
+
+
+def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(
+        _normalize(part)
+        for part in (code_list or ())
+        if not _DYNAMO_INDICES.search(part)
+    )
+
+
+def _value_fingerprint(entry: GuardFilterEntry) -> str:
+    """
+    What the guard checks, when the rendered code does not say.
+
+    TENSOR_MATCH is the case that matters: its code_list carries only the
+    _dynamo_*_indices hasattr checks, while dtype/shape/stride/device live in
+    the C++ leaf. Without them two shape specializations of one frame look
+    identical and wrongly land in the intersection. Objects are deliberately
+    left blank -- their repr is an address, which would make every fact unique.
+    """
+    if not entry.has_value:
+        return ""
+    value = entry.value
+    if isinstance(value, torch.Tensor):
+        try:
+            stride = tuple(value.stride())
+        except Exception:
+            stride = ()
+        return (
+            f"dtype={value.dtype}, shape={tuple(value.shape)}, stride={stride}, "
+            f"device={value.device}, requires_grad={value.requires_grad}"
+        )
+    if value is None or isinstance(value, (int, float, bool, complex, str, bytes)):
+        return f"== {value!r}"[:160]
+    return ""
+
+
+def _fact_order(fact: _GuardFact) -> tuple[str, str, str, str]:
+    # value is part of the key: once the boilerplate code parts are filtered a
+    # TENSOR_MATCH renders no code, so two shape specializations would otherwise
+    # tie and sort unstably, making the file differ run to run.
+    return (fact.source, fact.guard_type, " ".join(fact.code), fact.value)
+
+
+def _example_call(
+    example: ExampleInput | tuple[object, ...],
+) -> tuple[tuple[object, ...], dict[str, object]]:
+    if isinstance(example, ExampleInput):
+        return example.args, example.kwargs
+    if isinstance(example, tuple):
+        return example, {}
+    raise TypeError(
+        f"example_inputs takes tuples of positional args or ExampleInput, got "
+        f"{type(example).__name__}. Wrap keyword arguments in ExampleInput."
+    )
+
+
 def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
     counts: collections.Counter[str] = collections.Counter()
     for guard_type, _ in pairs:
@@ -602,12 +749,18 @@ class PrecompileSession:
         | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
+        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
+        invariants: str | None = None,
     ) -> None:
+        self._example_inputs = tuple(example_inputs or ())
+        self._invariants_path = invariants
         self._fn = fn
         self._backend = backend
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
+        # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
+        self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._guard_filter_fn = self._recording_filter(
             guard_filter_fn or default_guard_filter_fn
         )
@@ -633,12 +786,20 @@ class PrecompileSession:
             recompile_limit=self._recompile_limit,
             dynamic=self._dynamic,
         )(self._fn)
+        # Capture is by execution, so example_inputs is just "run these for me".
+        # Done before yielding so the block body can add calls on top.
+        for example in self._example_inputs:
+            args, kwargs = _example_call(example)
+            with torch.no_grad():
+                self._compiled(*args, **kwargs)
         return self._compiled
 
     def __exit__(self, *exc: object) -> None:
         if self._stack is not None:
             self._stack.close()
             self._stack = None
+        if self._invariants_path is not None and exc[0] is None:
+            self.write_invariants(self._invariants_path)
 
     def _recording_filter(
         self,
@@ -653,14 +814,113 @@ class PrecompileSession:
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
             namespaces = _module_namespaces(entries)
+            facts = set()
             for keep, entry in zip(decisions, entries):
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add((entry.guard_type, entry.name))
                 if not keep and _is_risky_drop(entry, namespaces):
                     self._risky_dropped_guards.add((entry.guard_type, entry.name))
+                facts.add(
+                    _GuardFact(
+                        guard_type=entry.guard_type,
+                        source=_normalize(entry.name),
+                        code=_render_code(entry.orig_guard.code_list),
+                        value=_value_fingerprint(entry),
+                        enforced=keep,
+                    )
+                )
+            # One filter call is one compilation, and the package knows which
+            # frame is being compiled, which is the only place that mapping is
+            # available to us.
+            current = self._package._current_entry
+            code = current.python_code if current is not None else None
+            key = (
+                (code.co_name, code.co_filename, code.co_firstlineno)
+                if code is not None
+                else ("<unknown>", "<unknown>", 0)
+            )
+            self._guard_sets.setdefault(key, []).append(frozenset(facts))
             return decisions
 
         return filter_fn
+
+    def invariants(self) -> tuple[FrameInvariants, ...]:
+        """
+        Per frame, the guards that held in EVERY compiled variant of it.
+
+        Intersection is per frame rather than global because guards from
+        different frames are not comparable: the entry frame guards its
+        arguments, a resume frame guards whatever crossed the graph break, so a
+        global intersection would be empty for any model that breaks.
+
+        A frame compiled once reports everything as invariant, which is true but
+        uninformative -- exercise more than one variant for the diff to mean
+        anything.
+        """
+        out = []
+        for (name, filename, lineno), sets in sorted(self._guard_sets.items()):
+            shared = frozenset.intersection(*sets) if sets else frozenset()
+            everything: set[_GuardFact] = set()
+            for one in sets:
+                everything |= one
+            out.append(
+                FrameInvariants(
+                    frame=name,
+                    filename=filename,
+                    lineno=lineno,
+                    variants=len(sets),
+                    invariant=tuple(sorted(shared, key=_fact_order)),
+                    varying=tuple(sorted(everything - shared, key=_fact_order)),
+                )
+            )
+        return tuple(out)
+
+    def write_invariants(self, path: str) -> None:
+        """Write :meth:`invariants` to ``path`` in human-readable form."""
+        frames = self.invariants()
+        target = getattr(self._fn, "__qualname__", None) or type(self._fn).__qualname__
+        lines = [
+            f"# precompile invariants for {target}",
+            "#",
+            "# Conditions that held in EVERY compiled variant of a frame. A call",
+            "# violating one cannot be served by any graph in this artifact, so",
+            "# these are the preconditions the artifact is only valid under.",
+            "# 'varies' lists what differed between variants -- those are what",
+            "# distinguish one compiled graph from another, not preconditions.",
+            "#",
+            "# enforced = the guard is serialized and rechecked when the artifact",
+            "#            is loaded.",
+            "# dropped  = it could not be serialized, so it is a precondition",
+            "#            NOTHING checks at serving time. See",
+            "#            PrecompileSummary.dropped_guards.",
+            "#",
+            f"# {len(frames)} frame(s), "
+            f"{sum(f.variants for f in frames)} compilation(s)",
+        ]
+        if any(f.variants < 2 for f in frames):
+            lines.append(
+                "# NOTE: some frames were compiled once, so their invariants are"
+                " just every guard. Exercise more variants for a real diff."
+            )
+        for f in frames:
+            where = f"{os.path.basename(f.filename)}:{f.lineno}"
+            lines.append("")
+            lines.append(
+                f"frame {f.frame} ({where})  {f.variants} variant(s), "
+                f"{len(f.invariant)} invariant, {len(f.varying)} varying"
+            )
+            if not f.invariant:
+                lines.append("  invariant: (none)")
+            for fact in f.invariant:
+                lines.append(f"  invariant {fact.render()}")
+            for fact in f.varying:
+                lines.append(f"  varies    {fact.render()}")
+        os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+        with open(path, "w") as handle:
+            handle.write("\n".join(lines) + "\n")
+        log.info(
+            "precompile: wrote invariants for %d frame(s) to %s", len(frames), path
+        )
 
     def summary(self) -> PrecompileSummary:
         return _summarize(
@@ -832,6 +1092,8 @@ def precompile_capture(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
+    example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
+    invariants: str | None = None,
 ) -> PrecompileSession:
     """
     Begin capturing ``fn`` into a multi-graph artifact.
@@ -846,6 +1108,8 @@ def precompile_capture(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         dynamic=dynamic,
+        example_inputs=example_inputs,
+        invariants=invariants,
     )
 
 
