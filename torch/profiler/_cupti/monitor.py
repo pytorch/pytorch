@@ -700,6 +700,10 @@ class CuptiMonitor:
         # Disable everything we enabled, then tear down the activity session.
         self._disable(self._enabled.keys())
         self._enabled = {}
+        # Latency timestamps are a property of the subscription we are dropping, so
+        # forget them too -- otherwise the next session sees a stale "already on" and
+        # never arms them for a fresh subscriber.
+        self._latency_enabled = False
         if self._subscriber is not None:
             # Release CUPTI without poisoning it for the next session: turn
             # user-defined-record mode back off (it changes CUPTI's record layout),
@@ -1055,14 +1059,20 @@ class CuptiMonitor:
             self._reconfigure(target)
             self._enabled = target
         # queued needs the per-subscriber latency-timestamp attribute (which also gates
-        # submitted, not surfaced here). Enable it once, iff an observer selected the
-        # QUEUED kernel field -- so the always-on timing path pays no latency overhead.
-        if self._subscriber is not None and not self._latency_enabled:
-            if Kernel.QUEUED.id in target.get(
+        # submitted, not surfaced here). Track the target rather than latching it on:
+        # enabled iff some observer selects the QUEUED kernel field, and turned back
+        # off once the last such observer unregisters -- so the always-on timing path
+        # pays no latency overhead. Best-effort, like the enable side: if CUPTI refuses
+        # the attribute the session just keeps its current behaviour.
+        if self._subscriber is not None:
+            want_latency = Kernel.QUEUED.id in target.get(
                 int(ActivityKind.CONCURRENT_KERNEL), frozenset()
-            ):
-                self._cupti.enable_kernel_latency_timestamps(self._subscriber, True)
-                self._latency_enabled = True
+            )
+            if want_latency != self._latency_enabled:
+                self._cupti.enable_kernel_latency_timestamps(
+                    self._subscriber, want_latency
+                )
+                self._latency_enabled = want_latency
         # Device-side CUDA_EVENT timestamps (the deviceTimestamp field, off by default) are
         # needed to place graph event-record nodes as spans. Enable once, iff an observer
         # selected the CUDA_EVENT device-timestamp field.
@@ -1421,8 +1431,10 @@ class CuptiMonitor:
                 obs.callback(chunk)
 
     def _account_dropped_records(self, ctx: int, stream_id: int) -> None:
+        if self._subscriber is None:
+            return
         self._dropped_records += self._cupti.activity_get_num_dropped_records(
-            ctx, stream_id
+            self._subscriber, ctx, stream_id
         )
 
 
