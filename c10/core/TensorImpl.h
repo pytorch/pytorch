@@ -245,8 +245,8 @@ struct C10_API FakeTensorMode {
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
-  // when true (torch._functorch.config.fake_tensor_propagate_real_tensors),
-  // fake tensors carry a real tensor and the fallback runs the real op to
+  // when true, fake tensors carry a real tensor and the fallback runs the
+  // real op to
   // hint unbacked symbols. Read once at mode creation, matching Python.
   bool propagate_real_tensors_ = false;
 
@@ -304,12 +304,9 @@ struct C10_API ExtraMeta {
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
   // The real tensor this fake shadows, when propagate_real_tensors is on.
-  // Deliberately NOT copied: a cloned ExtraMeta belongs to a different fake
-  // tensor whose real is (re)set by the op that produced it.
   std::shared_ptr<at::Tensor> real_tensor_ = nullptr;
   // set when this fake tensor has a tracked constant in
-  // fake_tensor_mode_->tensor_to_constant_. Deliberately NOT copied: a cloned
-  // ExtraMeta belongs to a different (unregistered) fake tensor.
+  // fake_tensor_mode_->tensor_to_constant_.
   bool has_fake_constant_ = false;
 
   ExtraMeta() = default;
@@ -1515,7 +1512,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // the fake device recorded for this tensor, or nullopt if none
   std::optional<c10::Device> fake_device() const {
-    // error is caught by caller
     if (!extra_meta_) {
       return std::nullopt;
     }
@@ -1523,9 +1519,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   // Make a fake tensor report the mkldnn (opaque) layout without real mkldnn
-  // storage: the Fake key still outranks MkldnnCPU in dispatch, so ops route to
-  // the fake fallback rather than real oneDNN kernels. Mirrors how a Python
-  // FakeTensor fakes is_mkldnn/layout, but at the C++ key-set level.
+  // storage.
   void set_fake_mkldnn(bool value) {
     key_set_ = value ? key_set_.add(DispatchKey::MkldnnCPU)
                      : key_set_.remove(DispatchKey::MkldnnCPU);
