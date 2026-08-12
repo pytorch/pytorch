@@ -2198,5 +2198,11 @@ class TestForeachMM(TestCase):
 instantiate_parametrized_tests(TestForeachMM)
 
 
+class TestGpuCoverageProbe(TestCase):
+    @unittest.skipIf(not SM90OrLater, "needs sm90 or later")
+    def test_gpu_coverage_probe(self):
+        self.assertTrue(True)
+
+
 if __name__ == "__main__":
     run_tests()
