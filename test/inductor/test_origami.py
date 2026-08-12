@@ -12,7 +12,12 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -59,7 +64,6 @@ def tearDownModule():
         _PRIOR_FP32_MATMUL_PRECISION = None
 
 
-@unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
 @unittest.skipIf(not IS_ROCM, "Origami integration is ROCm-only")
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
 @unittest.skipIf(
@@ -68,23 +72,25 @@ def tearDownModule():
     "Set TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_ORIGAMI=1 to run.",
 )
 class TestOrigami(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _make_fn_and_inputs(
-        self, op_name: str, size: int
+        self, op_name: str, size: int, device: str
     ) -> tuple[Callable[..., torch.Tensor], tuple[torch.Tensor, ...]]:
         torch.manual_seed(0)
 
         if op_name == "bmm":
             batch = 4
-            a = torch.randn(batch, size, size, device=GPU_TYPE, dtype=torch.float16)
-            b = torch.randn(batch, size, size, device=GPU_TYPE, dtype=torch.float16)
+            a = torch.randn(batch, size, size, device=device, dtype=torch.float16)
+            b = torch.randn(batch, size, size, device=device, dtype=torch.float16)
 
             def fn(x, y):
                 return torch.bmm(x, y)
 
             return fn, (a, b)
 
-        a = torch.randn(size, size, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(size, size, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(size, size, device=device, dtype=torch.float16)
+        b = torch.randn(size, size, device=device, dtype=torch.float16)
 
         if op_name == "mm":
 
@@ -94,7 +100,7 @@ class TestOrigami(TestCase):
             return fn, (a, b)
 
         if op_name == "addmm":
-            bias = torch.randn(size, size, device=GPU_TYPE, dtype=torch.float16)
+            bias = torch.randn(size, size, device=device, dtype=torch.float16)
 
             def fn(inp, x, y):
                 return torch.addmm(inp, x, y)
@@ -116,8 +122,9 @@ class TestOrigami(TestCase):
         patch_config: dict[str, object],
         *,
         size: int,
+        device: str,
     ) -> dict[str, object]:
-        fn, args = self._make_fn_and_inputs(op_name, size)
+        fn, args = self._make_fn_and_inputs(op_name, size, device)
         expected = fn(*args)
 
         torch._dynamo.reset()
@@ -177,13 +184,15 @@ class TestOrigami(TestCase):
             "triton.native_matmul": False,
         }
 
-    def test_origami_respects_gemm_search_space(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_origami_respects_gemm_search_space(self, device):
         for op_name in ("mm", "addmm", "bmm"):
             with self.subTest(op_name=op_name, search_space="DEFAULT"):
                 default_case = self._compile_with_config(
                     op_name,
                     self._origami_default_config(ORIGAMI_TOPK_VALUES[0]),
                     size=256,
+                    device=device,
                 )
                 self.assertGreater(default_case["topk_calls"], 0)
 
@@ -192,10 +201,12 @@ class TestOrigami(TestCase):
                     op_name,
                     self._origami_exhaustive_config(),
                     size=256,
+                    device=device,
                 )
                 self.assertEqual(exhaustive_case["topk_calls"], 0)
 
-    def test_origami_reduces_compile_work_vs_regular_max_autotune(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_origami_reduces_compile_work_vs_regular_max_autotune(self, device):
         """Test that origami reduces compile work (GPU benchmarking calls) vs regular max_autotune.
 
         Uses benchmark_gpu_calls count instead of wall-clock timing to avoid flakiness
@@ -207,11 +218,13 @@ class TestOrigami(TestCase):
                     op_name,
                     self._origami_default_config(ORIGAMI_COMPILE_TOPK),
                     size=256,
+                    device=device,
                 )
                 max_autotune_case = self._compile_with_config(
                     op_name,
                     self._max_autotune_default_config(),
                     size=256,
+                    device=device,
                 )
                 # Origami with topk should benchmark fewer configs than full max_autotune
                 self.assertLess(
@@ -221,11 +234,12 @@ class TestOrigami(TestCase):
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not DO_PERF_TEST,
         "Perf test not enabled; set DO_PERF_TEST=1 to enable runtime perf benchmarks",
     )
-    def test_origami_runtime_matches_regular_max_autotune(self):
+    def test_origami_runtime_matches_regular_max_autotune(self, device):
         for op_name in ("mm", "addmm", "bmm"):
             for size in (8192, 16384):
                 for topk in ORIGAMI_TOPK_VALUES:
@@ -234,11 +248,13 @@ class TestOrigami(TestCase):
                             op_name,
                             self._origami_default_config(topk),
                             size=size,
+                            device=device,
                         )
                         max_autotune_case = self._compile_with_config(
                             op_name,
                             self._max_autotune_default_config(),
                             size=size,
+                            device=device,
                         )
 
                         origami_runtime_ms = benchmarker.benchmark(
@@ -286,7 +302,8 @@ class TestOrigami(TestCase):
                             max_autotune_runtime_ms * PERF_SLOWDOWN_TOLERANCE,
                         )
 
-    def test_origami_topk_edge_cases(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_origami_topk_edge_cases(self, device):
         """Test edge cases for origami_topk parameter.
 
         This test validates:
@@ -305,6 +322,7 @@ class TestOrigami(TestCase):
                     op_name,
                     self._origami_default_config(0),
                     size=size,
+                    device=device,
                 )
                 # Should complete compilation even with topk=0
                 self.assertIsNotNone(result["compiled"])
@@ -319,6 +337,7 @@ class TestOrigami(TestCase):
                     op_name,
                     self._origami_default_config(1),
                     size=size,
+                    device=device,
                 )
                 self.assertIsNotNone(result["compiled"])
                 # With topk=1, origami should still be invoked for selection
@@ -334,6 +353,7 @@ class TestOrigami(TestCase):
                     op_name,
                     self._origami_default_config(1000),
                     size=size,
+                    device=device,
                 )
                 self.assertIsNotNone(result["compiled"])
                 # Large topk should not cause issues, just select all available
@@ -350,6 +370,7 @@ class TestOrigami(TestCase):
                     op_name,
                     self._origami_default_config(-1),
                     size=size,
+                    device=device,
                 )
                 # If compilation succeeds with negative topk, that is also valid
                 # (implementation may coerce to 0 or similar)
@@ -368,6 +389,7 @@ class TestOrigami(TestCase):
                 op_name,
                 self._origami_default_config(3),
                 size=size,
+                device=device,
             )
             self.assertIsNotNone(result["compiled"])
 
@@ -380,6 +402,7 @@ class TestOrigami(TestCase):
                         op_name,
                         self._origami_default_config(topk_val),
                         size=size,
+                        device=device,
                     )
                     self.assertIsNotNone(result["compiled"])
                     # Valid topk should always trigger origami selection
@@ -391,14 +414,14 @@ class TestOrigami(TestCase):
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
 
-    def test_origami_configs_use_device_specific_values(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_origami_configs_use_device_specific_values(self, device):
         """Verify that origami configs use architecture-specific num_stages and num_warps.
 
         Tests that configurations are derived from device properties (MI300 vs MI350X)
         rather than hardcoded values. This ensures portability across AMD GPU models.
         """
-        device = torch.device("cuda:0")
-        device_props = torch.cuda.get_device_properties(device)
+        device_props = torch.get_device_module(device).get_device_properties(device)
 
         # Compile a simple MM operation with origami enabled
         torch.manual_seed(0)
@@ -434,7 +457,8 @@ class TestOrigami(TestCase):
             },
         )
 
-    def test_origami_fallback_when_disabled(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_origami_fallback_when_disabled(self, device):
         """Test that compilation succeeds when origami import fails or is disabled.
 
         Verifies that:
@@ -444,7 +468,7 @@ class TestOrigami(TestCase):
         """
         for op_name in ("mm", "addmm", "bmm"):
             with self.subTest(op_name=op_name):
-                fn, args = self._make_fn_and_inputs(op_name, 256)
+                fn, args = self._make_fn_and_inputs(op_name, 256, device)
                 expected = fn(*args)
 
                 torch._dynamo.reset()
@@ -471,6 +495,10 @@ class TestOrigami(TestCase):
                 # Verify compilation succeeded and produces correct results
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertIsNotNone(compiled)
+
+
+class TestOrigamiGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_origami_module_gate_when_env_var_disabled(self):
         """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI=0.
@@ -520,7 +548,7 @@ class TestOrigami(TestCase):
 
 
 @unittest.skipIf(
-    HAS_GPU_AND_TRITON and IS_ROCM, "Skipped on ROCm where origami is available"
+    IS_ROCM, "Skipped on ROCm where origami is available"
 )
 class TestOrigamiSkippedOnNonROCm(TestCase):
     """Test that origami is properly skipped on non-ROCm devices (CUDA/CPU).
@@ -531,6 +559,8 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
     3. Compilation succeeds with regular config generator as fallback
     4. origami gracefully no-ops on unsupported hardware
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_origami_skipped_on_non_rocm(self):
         """Verify that origami is properly skipped on non-ROCm devices.
@@ -637,6 +667,10 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
                 torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-5)
 
 
+instantiate_device_type_tests(
+    TestOrigami, globals(), only_for=("cuda",)
+)
+
+
 if __name__ == "__main__":
-    if HAS_GPU_AND_TRITON and IS_ROCM:
-        run_tests()
+    run_tests()
