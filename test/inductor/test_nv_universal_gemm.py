@@ -901,7 +901,13 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(
             analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
-            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+            GemmReductionConfig(
+                output_name="out",
+                group=4,
+                axis=1,
+                reduction_type="sum",
+                source_type="identity",
+            ),
         )
 
     def test_grouped_reduction_rejects_ambiguous_composite(self):
