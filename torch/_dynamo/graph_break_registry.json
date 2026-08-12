@@ -5575,6 +5575,16 @@
       ]
     }
   ],
+  "GB5219": [
+    {
+      "Gb_type": "Sparse tensor creation with autograd not supported",
+      "Context": "function: {self.value.__name__}",
+      "Explanation": "torch.compile does not support tracing sparse tensor creation when an input tensor requires grad.",
+      "Hints": [
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
+      ]
+    }
+  ],
   "GB4307": [
     {
       "Gb_type": "torch.switch: empty branches",

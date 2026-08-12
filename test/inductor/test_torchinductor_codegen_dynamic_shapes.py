@@ -112,6 +112,8 @@ def check_codegen(
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # sparse mm has no meta kernel, so it cannot trace with symbolic shapes
+    "test_sparse_csr_creation_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     #
     # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
     #

@@ -719,7 +719,7 @@ class TensorVariable(VariableTracker):
         if (
             isinstance(fake_val, torch.Tensor)
             and is_sparse_any(fake_val)
-            and (not tx.export or not config.capture_sparse_compute)
+            and not config.capture_sparse_compute
         ):
             unimplemented(
                 gb_type="Attempted to wrap sparse Tensor",

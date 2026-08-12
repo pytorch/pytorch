@@ -89,7 +89,6 @@ from .functions import (
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
-    SparseTensorCreationSkipVariable,
     StaticMethodVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,

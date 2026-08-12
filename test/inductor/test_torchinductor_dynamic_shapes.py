@@ -81,6 +81,8 @@ test_failures = {
         ("cpu",), is_skip=True
     ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
+    # sparse mm has no meta kernel, so it cannot trace with symbolic shapes
+    "test_sparse_csr_creation_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
