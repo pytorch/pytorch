@@ -318,6 +318,7 @@ try:
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
+            torch.sym_not: lift(z3.Not),
             operator.and_: lift(ops.bitwise_and),
             operator.or_: lift(ops.bitwise_or),
             operator.lshift: lift(ops.lshift),
