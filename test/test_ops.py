@@ -464,7 +464,6 @@ class TestCommon(TestCase):
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
-    # XPU test will be enabled step by step. Skip the tests temporarily.
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -3047,7 +3046,7 @@ class TestFakeTensor(TestCase):
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         if "xpu" in device and (
-            "fft" in op.name or "nn.functional.max_unpool2d" in op.name
+            "fft" in op.name
         ):
             self.skipTest("Skip on XPU for torch-xpu-ops/issues/3599")
 
