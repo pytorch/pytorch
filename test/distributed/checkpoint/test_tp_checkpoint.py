@@ -44,7 +44,8 @@ class TestTpCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_tp_checkpoint(self):
+    def test_tp_checkpoint(self, device):
+        self.device_type = torch.device(device).type
         CHECKPOINT_DIR = self.temp_dir
         mesh_shpe = (self.world_size,)
         tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
@@ -91,7 +92,8 @@ class TestTpCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_tp_checkpoint_load_on_meta_device(self):
+    def test_tp_checkpoint_load_on_meta_device(self, device):
+        self.device_type = torch.device(device).type
         CHECKPOINT_DIR = self.temp_dir
         mesh_shpe = (self.world_size,)
         tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
@@ -153,6 +155,7 @@ class TestTpCheckpoint(DTensorTestBase):
 instantiate_device_type_tests(
     TestTpCheckpoint,
     globals(),
+    except_for="cpu",
     allow_xpu=True
 )
 
