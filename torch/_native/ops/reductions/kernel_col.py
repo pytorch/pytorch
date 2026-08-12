@@ -40,7 +40,17 @@ from .._cutedsl.plan_cache import cached_plan
 _cute = _L.cute_tensor
 _compile = _L.compile  # cute.compile + options="--enable-tvm-ffi"
 _stream = _L.stream
-_PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
+# Accumulator cute dtype -> the torch dtype of K2's stage-1 partial buffers. Int64 is here
+# because aten accumulates INTEGER reductions in int64 (gpu_reduce_kernel<scalar_t,
+# int64_t>), so an int trait's partials need an int64 buffer; kernel_general and
+# kernel_xcta already listed it, and its absence here made K2 the one path that KeyError'd
+# on an integer reduction.
+_PART_TORCH = {
+    Float32: torch.float32,
+    Float64: torch.float64,
+    Int32: torch.int32,
+    Int64: torch.int64,
+}
 
 # Threads along the column (kept) axis per block. The dispatcher in kernel_general
 # uses this to size grid_x when deciding the K2 column path, so it must match the
