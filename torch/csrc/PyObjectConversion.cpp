@@ -8,16 +8,15 @@ namespace {
 
 // Error message shared by all no-op entry points.
 constexpr const char* kNoImplMsg =
-    "Converting between a Python object and its torch::stable equivalent "
-    "requires libtorch_python to be loaded (e.g. `import torch` in the "
-    "running process). This process linked only libtorch.";
+    "Using APIs relating to conversion between a Python object and its "
+    "torch::stable equivalent requires libtorch_python to be loaded (e.g. "
+    "`import torch` in the running process). This process linked only "
+    "libtorch.";
 
 // Default implementation used until libtorch_python registers the real one.
 // Mirrors NoopPyInterpreterVTable: calling a method is a hard error rather than
 // silent misbehavior.
 struct NoopPyObjectConversion final : PyObjectConversionInterface {
-  // Errors like the rest of the family (rather than returning false): a silent
-  // false would mask libtorch_python not being loaded.
   bool is_tensor_pyobject(PyObject* /*obj*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }

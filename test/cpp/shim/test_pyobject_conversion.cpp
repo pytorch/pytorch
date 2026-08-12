@@ -1,6 +1,6 @@
-// Checks that the PyObject<->Tensor/dtype/device conversion shims fall back to
-// a clean error (rather than crashing) when libtorch_python is not loaded. This
-// binary links only libtorch, so the conversion vtable is the default no-op.
+// Checks that the Python interop conversion shims fall back to a clean error
+// (rather than crashing) when libtorch_python is not loaded. This binary links
+// only libtorch, so the conversion vtable is the default no-op.
 
 #include <gtest/gtest.h>
 
@@ -30,8 +30,7 @@ TEST(TorchPyObjectConversion, NoopErrorsWithoutLibtorchPython) {
 }
 
 TEST(TorchPyObjectConversion, IsTensorNoopErrorsWithoutLibtorchPython) {
-  // The no-op errors (rather than answering false): a silent false would mask
-  // libtorch_python not being loaded.
+  // The no-op errors rather than answering false.
   int dummy = 0;
   bool is_tensor_out = false;
   EXPECT_EQ(

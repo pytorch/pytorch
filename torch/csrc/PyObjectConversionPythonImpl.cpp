@@ -1,7 +1,6 @@
 // Concrete PyObjectConversionInterface, compiled into libtorch_python (it uses
 // THPVariable_* &co and the CPython C API). Registered with libtorch at load
-// time so the libtorch-only stable shims (torch_{tensor,dtype,device}_
-// {from,to}_pyobject) can reach it through
+// time so the libtorch-only stable shims can reach it through
 // torch::detail::getPyObjectConversionImpl().
 
 #include <torch/csrc/PyObjectConversion.h>

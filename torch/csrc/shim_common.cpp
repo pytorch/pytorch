@@ -681,7 +681,7 @@ torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
   });
 }
 
-// PyObject <-> Tensor/dtype/device conversions. These are the only stable
+// Python interop conversions. These are the only stable
 // shims that need functionality from libtorch_python; they reach it through a
 // vtable that libtorch_python registers at load time
 // (torch::detail::PyObjectConversion*).

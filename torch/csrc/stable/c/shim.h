@@ -319,12 +319,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
 // still links only libtorch; if libtorch_python is not loaded at runtime the
 // call errors. The GIL must be held.
 
-// Whether py_obj is a Python torch.Tensor (or a subclass). A cheap probe for
-// callers that want to type-check before torch_tensor_from_pyobject (which
-// errors on non-tensors).
-AOTI_TORCH_EXPORT AOTITorchError
-torch_is_tensor_pyobject(void* py_obj, bool* ret);
-
 // Wrap a Python torch.Tensor as a new AtenTensorHandle that shares the
 // underlying TensorImpl with the input.
 AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(
@@ -338,6 +332,22 @@ AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
     AtenTensorHandle ath,
     void* py_type,
     void** ret); // returns new reference
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+/**
+ * The beginning of all shims added in 2.15.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
+// More Python interop shims; see the Python interop section above for the
+// libtorch_python / GIL contract.
+
+// Whether py_obj is a Python torch.Tensor (or a subclass). A probe for callers
+// that want to type-check before torch_tensor_from_pyobject (which errors on
+// non-tensors).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_tensor_pyobject(void* py_obj, bool* ret);
 
 // Read the dtype out of a Python torch.dtype object. The returned code uses
 // the same encoding as aoti_torch_dtype_*().
@@ -364,7 +374,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
     int32_t device_index,
     void** ret); // returns new reference
 
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 
 #ifdef __cplusplus
 } // extern "C"
