@@ -945,6 +945,7 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(torch.allclose(result_1, result_2))
 
 
+@instantiate_parametrized_tests
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
