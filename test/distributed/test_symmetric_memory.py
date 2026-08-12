@@ -378,16 +378,23 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             ag_entries = [
                 e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
             ]
-            # On NVLink-fabric hardware both the RendezvousRequest and handle
-            # exchange go through pg_all_gather → 2 allgathers. On hardware
-            # without NVLink fabric only the RendezvousRequest uses
-            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
-            self.assertIn(
-                len(ag_entries),
-                [1, 2],
-                lambda msg: f"{msg}\nexpected 1 or 2 NCCL _all_gather_base from rendezvous, "
-                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            bc_entries = [e for e in entries if e["profiling_name"] == "nccl:broadcast"]
+            has_mc = symm_mem_hdl.multicast_ptr != 0
+            # Exchanges routed through the PG: the RendezvousRequest allgather
+            # (always), the handle exchange allgather (NVLink-fabric hardware
+            # only; elsewhere handles go through ipc_channel), and, when
+            # multicast is set up, a success-flag allgather plus a multicast
+            # handle broadcast (fabric only).
+            lo, hi = (2, 3) if has_mc else (1, 2)
+            self.assertTrue(
+                lo <= len(ag_entries) <= hi,
+                f"expected {lo} to {hi} NCCL _all_gather_base from rendezvous "
+                f"(multicast={has_mc}), got {len(ag_entries)}: "
+                f"{[e['profiling_name'] for e in entries]}",
             )
+            self.assertLessEqual(len(bc_entries), 1)
+            if bc_entries:
+                self.assertTrue(has_mc)
 
             symm_mem_hdl.barrier()
             for peer in range(self.world_size):
@@ -786,6 +793,31 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
         torch.ops.symm_mem._barrier(sm)
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    def test_cuda_multimem_barrier_kernel(self) -> None:
+        self._init_process()
+
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        group_name = dist.group.WORLD.group_name
+        with _enable_multicast_for_test(self, self.device.index):
+            t = symm_mem.empty(64, device=self.device)
+            symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA],
+            ) as prof:
+                symm_mem_hdl.barrier()
+                torch.cuda.synchronize()
+            self.assertTrue(
+                any("multimem_barrier_kernel" in event.key for event in prof.events()),
+                "expected multimem_barrier_kernel in profiler events",
+            )
+
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
@@ -1072,6 +1104,43 @@ class AsyncTPTest(MultiProcContinuousTest):
             raise AssertionError(
                 f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_fused_matmul_reduce_scatter_bfloat16_custom_reduce(self) -> None:
+        self._init_process()
+
+        M = 64
+        N = 32
+        K = 1024
+        group = dist.group.WORLD
+        rank = self.rank
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.rand(K, N, device="cuda", dtype=torch.bfloat16)
+
+        output_0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+        output_1 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+
+        torch.testing.assert_close(output_0, output_1, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_1.stride())
+
+        # The fused reducer is only selected under graph capture, so the eager
+        # call above does not cover it. output_1 already sized the symmetric
+        # memory workspace, which cannot grow during capture.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            output_2 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "avg", scatter_dim=0, group_name=group.group_name
+            )
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_2.stride())
 
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
@@ -1406,6 +1475,50 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         if max_channel > 1:
             symm_mem_hdl.barrier(channel=max_channel - 1)
         torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = symm_mem_hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+        peer = (self.rank + 1) % self.world_size
+
+        # An over-capacity channel would write past the signal pad, into the
+        # peer's tensor data (see #191618). Both ops must reject it host-side.
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.put_signal(dst_rank=peer, channel=max_channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.wait_signal(src_rank=peer, channel=max_channel)
+
+        # The boundary channel is accepted: ring-exchange a signal on it.
+        src = (self.rank - 1) % self.world_size
+        symm_mem_hdl.put_signal(dst_rank=peer, channel=max_channel - 1)
+        symm_mem_hdl.wait_signal(src_rank=src, channel=max_channel - 1)
+        torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal_rank_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        # An out-of-range rank indexes a wild signal pad pointer (put_signal)
+        # or a slot past the signal pad, in the tensor data (wait_signal).
+        # get_signal_pad wraps the wild pointer in a tensor handed to the user.
+        for bad_rank in (-1, self.world_size):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.put_signal(dst_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.wait_signal(src_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.get_signal_pad(bad_rank)
 
 
 @instantiate_parametrized_tests
@@ -2253,6 +2366,36 @@ class LoweringTest(MultiProcContinuousTest):
 
         # Verify that exactly one symm_mem allocation call is generated
         FileCheck().check_count("empty_strided_p2p(", 1, exactly=True).run(code)
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_symm_mem_alloc_id_no_collision_after_reseed(self):
+        """Regression test for issue #192087.
+
+        The persistent symm_mem alloc_id must stay unique across graphs even
+        when the global random module is reseeded between compilations, as
+        TestCase.setUp does via random.seed(). Otherwise different-sized
+        allocations collide in the process-global persistent allocation map and
+        fail with an allocation-size-mismatch error.
+        """
+        self._init_process()
+
+        def alloc_id(n):
+            def func(x):
+                return torch.ops.symm_mem.one_shot_all_reduce(x + 1, "sum", "0")
+
+            x = torch.rand(n, n, device=self.device)
+            code = run_and_get_triton_code(torch.compile(func, fullgraph=True), x)
+            match = re.search(r"alloc_id=(\d+)", code)
+            self.assertIsNotNone(match, "expected a symm_mem allocation in the code")
+            return match.group(1)
+
+        random.seed(1234)
+        id_small = alloc_id(4)
+        random.seed(1234)
+        id_large = alloc_id(8)
+        self.assertNotEqual(id_small, id_large)
 
 
 class SymmMemSingleProcTest(TestCase):

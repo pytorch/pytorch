@@ -14136,6 +14136,7 @@ op_db: list[OpInfo] = [
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -14166,14 +14167,11 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
-               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -14204,10 +14202,6 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
-               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -16067,8 +16061,20 @@ op_db: list[OpInfo] = [
                    'TestOperators', 'test_jvpvjp', device_type="cuda"
                ),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_jvpvjp', device_type="xpu"
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=4e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_vjp', device_type="xpu"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-4, rtol=5e-5)}),
+                   'TestOperators', 'test_grad', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -16085,6 +16091,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
                    'TestOperators', 'test_grad', device_type="cuda",
                    active_if=TEST_WITH_ROCM,
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
@@ -19549,23 +19559,13 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,  # vmap complains of the sizes
-           sample_inputs_func=sample_inputs_put,
-           skips=(
-               # NotImplementedError: The operator 'aten::put_' is not currently
-               # implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
-           )),
-
+           sample_inputs_func=sample_inputs_put),
     OpInfo('take',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_grad=False,  # vmap complains of the sizes
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_take,
-           skips=(
-               # The operator 'aten::take' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
-           ),
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -20407,6 +20407,12 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
                # Align dtypes with CUDA for fallback ops
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='xpu'),
+           ),
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_operator', device_type="xpu",
+               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),

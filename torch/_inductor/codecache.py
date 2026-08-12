@@ -1614,6 +1614,15 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
 
+        # compile-on-one-rank changes wrapper and kernel codegen (runtime device
+        # resolution, DeviceProperties(index=None)) even for graphs that contain no
+        # coor::current_device node, so an entry compiled with it off must not be served
+        # to a compile with it on -- that would hand back the device-baked artifact CooR
+        # exists to avoid.
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        self.compile_on_one_rank = _coor_enabled()
+
         # Include cudagraph annotation in cache key only when it changes
         # behavior. When both fwd and bwd are overridden to the same value,
         # normalize to a simple boolean (equivalent to flipping the config).
@@ -2244,7 +2253,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
             check = bool(evaluate_guards(graph.guards_expr, symints))
-            assert check is True  # noqa: S101
+            if check is not True:
+                raise AssertionError(f"expected check to be True, got {check}")
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
