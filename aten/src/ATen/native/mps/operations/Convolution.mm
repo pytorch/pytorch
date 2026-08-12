@@ -195,48 +195,6 @@ static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
   return output;
 }
 
-// DHWIO weight copy; ATen's strided permute copy is launch-bound at typical
-// weight sizes (~0.14 ms for 1 MB), the flat kernel is ~10x faster.
-static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
-  using namespace mps;
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-  const int64_t output_channels = weight.size(0);
-  const int64_t input_channels_per_group = weight.size(1);
-  const int64_t kernel_depth = weight.size(2);
-  const int64_t kernel_height = weight.size(3);
-  const int64_t kernel_width = weight.size(4);
-  const auto [min_stride, max_stride] = std::minmax_element(weight.strides().begin(), weight.strides().end());
-  if (weight.numel() == 0 || weight.numel() > kInt32Max || *max_stride > kInt32Max || *min_stride < -kInt32Max) {
-    return weight.permute({2, 3, 4, 1, 0}).contiguous();
-  }
-  auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
-                          weight.options());
-  ConvWeightPermuteParams params;
-  params.output_channels = static_cast<int32_t>(output_channels);
-  params.input_channels_per_group = static_cast<int32_t>(input_channels_per_group);
-  params.kernel_height = static_cast<int32_t>(kernel_height);
-  params.kernel_width = static_cast<int32_t>(kernel_width);
-  params.output_channel_stride = static_cast<int32_t>(weight.stride(0));
-  params.input_channel_stride = static_cast<int32_t>(weight.stride(1));
-  params.depth_stride = static_cast<int32_t>(weight.stride(2));
-  params.height_stride = static_cast<int32_t>(weight.stride(3));
-  params.width_stride = static_cast<int32_t>(weight.stride(4));
-  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(weight)));
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_dhwio", {weight});
-      [encoder setComputePipelineState:pipeline];
-      mtl_setArgs(encoder, weight, output, params);
-      [encoder dispatchThreads:MTLSizeMake(output_channels, input_channels_per_group, kernel_depth * kernel_height)
-          threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(output_channels, 256), 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
-    }
-  });
-  return output;
-}
-
 struct Conv3dMppSpecialization {
   std::string dtype;
   int kernel_depth, kernel_height, kernel_width;
