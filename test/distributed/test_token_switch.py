@@ -6,11 +6,13 @@ import logging
 import torch
 import torch.distributed as dist
 from torch.distributed._token_switch import _import_nccl_ep, TokenSwitchNCCL
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
 )
@@ -60,12 +62,12 @@ def _generate_topk(rank, world_size, num_tokens, top_k, device):
 
 
 @requires_nccl_ep()
-class TokenSwitchNCCLTest(MultiProcContinuousTest):
+class TokenSwitchTestBase(MultiProcContinuousTest):
     _cached_token_switch: TokenSwitchNCCL | None = None
 
     @classmethod
-    def backend_str(cls):
-        return "nccl"
+    def backend_str(cls) -> str:
+        raise NotImplementedError
 
     @property
     def device(self):
@@ -89,7 +91,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         dist.barrier()
 
     @skip_if_lt_x_gpu(2)
-    def test_create_routing(self):
+    def _test_create_routing(self):
         self._init()
         ts = self.get_token_switch()
         num_experts = self.world_size
@@ -107,7 +109,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         torch.cuda.synchronize()
 
     @skip_if_lt_x_gpu(2)
-    def test_dispatch(self):
+    def _test_dispatch(self):
         self._init()
         ts = self.get_token_switch()
         num_recv_tokens = self.world_size * NUM_TOKENS
@@ -151,7 +153,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_dispatch_combine_roundtrip(self):
+    def _test_dispatch_combine_roundtrip(self):
         self._init()
         ts = self.get_token_switch()
         num_recv_tokens = self.world_size * NUM_TOKENS
@@ -197,7 +199,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(combined.cpu(), expected)
 
     @skip_if_lt_x_gpu(2)
-    def test_dispatch_autograd_backward(self):
+    def _test_dispatch_autograd_backward(self):
         self._init()
         ts = self.get_token_switch()
         num_recv_tokens = self.world_size * NUM_TOKENS
@@ -228,7 +230,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(tokens.grad, torch.ones_like(tokens))
 
     @skip_if_lt_x_gpu(2)
-    def test_combine_autograd_backward(self):
+    def _test_combine_autograd_backward(self):
         self._init()
         ts = self.get_token_switch()
         num_recv_tokens = self.world_size * NUM_TOKENS
@@ -277,7 +279,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(expert_tokens.grad, torch.ones_like(expert_tokens))
 
     @skip_if_lt_x_gpu(2)
-    def test_dispatch_combine_autograd_roundtrip(self):
+    def _test_dispatch_combine_autograd_roundtrip(self):
         self._init()
         ts = self.get_token_switch()
         num_recv_tokens = self.world_size * NUM_TOKENS
@@ -311,7 +313,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(tokens.grad, torch.ones_like(tokens))
 
     @skip_if_lt_x_gpu(2)
-    def test_dispatch_combine_multiple_rounds(self):
+    def _test_dispatch_combine_multiple_rounds(self):
         self._init()
         ts = self.get_token_switch()
         num_recv_tokens = self.world_size * NUM_TOKENS
@@ -363,12 +365,68 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(combined, expected)
 
 
-class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
-    _cached_token_switch: TokenSwitchNCCL | None = None
+@requires_nccl_ep()
+class TokenSwitchNCCLTest(TokenSwitchTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    def test_create_routing(self):
+        self._test_create_routing()
+
+    def test_dispatch(self):
+        self._test_dispatch()
+
+    def test_dispatch_combine_roundtrip(self):
+        self._test_dispatch_combine_roundtrip()
+
+    def test_dispatch_autograd_backward(self):
+        self._test_dispatch_autograd_backward()
+
+    def test_combine_autograd_backward(self):
+        self._test_combine_autograd_backward()
+
+    def test_dispatch_combine_autograd_roundtrip(self):
+        self._test_dispatch_combine_autograd_roundtrip()
+
+    def test_dispatch_combine_multiple_rounds(self):
+        self._test_dispatch_combine_multiple_rounds()
+
+
+@requires_nccl_ep()
+class TokenSwitchNCCL2Test(TokenSwitchTestBase):
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def backend_str(cls):
         return "nccl2"
+
+    def test_create_routing(self):
+        self._test_create_routing()
+
+    def test_dispatch(self):
+        self._test_dispatch()
+
+    def test_dispatch_combine_roundtrip(self):
+        self._test_dispatch_combine_roundtrip()
+
+    def test_dispatch_autograd_backward(self):
+        self._test_dispatch_autograd_backward()
+
+    def test_combine_autograd_backward(self):
+        self._test_combine_autograd_backward()
+
+    def test_dispatch_combine_autograd_roundtrip(self):
+        self._test_dispatch_combine_autograd_roundtrip()
+
+    def test_dispatch_combine_multiple_rounds(self):
+        self._test_dispatch_combine_multiple_rounds()
+
+
+instantiate_device_type_tests(TokenSwitchNCCLTest, globals(), only_for="cuda")
+instantiate_device_type_tests(TokenSwitchNCCL2Test, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
