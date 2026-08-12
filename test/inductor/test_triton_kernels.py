@@ -300,9 +300,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             namedtuple_type("LocalStrides", ("batch", "token")),
         )
 
-        nested_defs = codegen_namedtuple_defs(
-            {"X": Nested(outer=2, strides=strides)}
-        )
+        nested_defs = codegen_namedtuple_defs({"X": Nested(outer=2, strides=strides)})
         self.assertIn(
             "LocalStrides = namedtuple_type('LocalStrides', ('batch', 'token'))",
             nested_defs,
@@ -356,9 +354,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         # Launcher scope helper binds Nested field types too.
         scope: dict = {}
-        _add_namedtuple_types_to_scope(
-            {"X": Nested(outer=2, strides=strides)}, scope
-        )
+        _add_namedtuple_types_to_scope({"X": Nested(outer=2, strides=strides)}, scope)
         self.assertIs(scope["Nested"], Nested)
         self.assertIs(scope["LocalStrides"], LocalStrides)
         self.assertEqual(eval(repr(strides), scope).batch, 8)
@@ -464,9 +460,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             compiled_result, (code,) = run_and_get_code(compiled, x)
             self.assertEqual(compiled_result, expected)
             self.assertTrue(
-                self._kernel_launched_in_code(
-                    "copy_first_row_namedtuple_kernel", code
-                )
+                self._kernel_launched_in_code("copy_first_row_namedtuple_kernel", code)
                 or "copy_first_row_namedtuple_kernel" in code
             )
             # Python wrapper embeds triton_meta via !r (also present under

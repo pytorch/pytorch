@@ -23,7 +23,9 @@ _CACHE: dict[tuple[str, tuple[str, ...]], type] = {}
 
 
 def _attr_name(name: str, fields: tuple[str, ...]) -> str:
-    payload = name.encode("utf-8") + b"\0" + b"\0".join(f.encode("utf-8") for f in fields)
+    payload = (
+        name.encode("utf-8") + b"\0" + b"\0".join(f.encode("utf-8") for f in fields)
+    )
     digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()[:20]
     return f"_NamedTuple_{digest}"
 
