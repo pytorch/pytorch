@@ -324,6 +324,10 @@ def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
     return True
 
 
+def profiler_should_teardown_cupti():
+    return True
+
+
 def deprecated():
     """
     When we deprecate a function that might still be in use, we make it internal

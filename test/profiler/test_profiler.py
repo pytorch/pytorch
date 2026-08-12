@@ -442,6 +442,55 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize(
+        "knob_value,explicit_value,expected_value",
+        [
+            (True, None, "1"),
+            (False, None, "0"),
+            (True, "0", "0"),
+            (False, "1", "1"),
+        ],
+    )
+    def test_teardown_cupti_environment(
+        self, knob_value, explicit_value, expected_value
+    ):
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch(
+                "torch.profiler.profiler.profiler_should_teardown_cupti",
+                return_value=knob_value,
+            ) as teardown_cupti,
+            patch("torch.profiler.profiler.is_fbcode", return_value=True),
+        ):
+            if explicit_value is None:
+                os.environ.pop("TEARDOWN_CUPTI", None)
+            else:
+                os.environ["TEARDOWN_CUPTI"] = explicit_value
+
+            with profile(activities=[ProfilerActivity.CPU]):
+                pass
+
+            self.assertEqual(expected_value, os.environ["TEARDOWN_CUPTI"])
+            self.assertEqual(explicit_value is None, teardown_cupti.called)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_teardown_cupti_environment_oss(self):
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch(
+                "torch.profiler.profiler.profiler_should_teardown_cupti"
+            ) as teardown_cupti,
+            patch("torch.profiler.profiler.is_fbcode", return_value=False),
+        ):
+            os.environ.pop("TEARDOWN_CUPTI", None)
+
+            with profile(activities=[ProfilerActivity.CPU]):
+                pass
+
+            self.assertNotIn("TEARDOWN_CUPTI", os.environ)
+            teardown_cupti.assert_not_called()
+
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )

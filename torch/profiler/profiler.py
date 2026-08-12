@@ -24,7 +24,10 @@ from torch._C._profiler import (
     _remove_execution_trace_observer,
 )
 from torch._environment import is_fbcode
-from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
+from torch._utils_internal import (
+    profiler_allow_cudagraph_cupti_lazy_reinit_cuda12,
+    profiler_should_teardown_cupti,
+)
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
@@ -406,6 +409,10 @@ class _KinetoProfile:
             self.execution_trace_observer.start()
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
+        if kineto_available() and is_fbcode() and "TEARDOWN_CUPTI" not in os.environ:
+            os.environ["TEARDOWN_CUPTI"] = (
+                "1" if profiler_should_teardown_cupti() else "0"
+            )
         self.profiler._start_trace()
         if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
             # Open the trace window here (stamps the start boundary, native clock, no
