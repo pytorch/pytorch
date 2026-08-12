@@ -466,6 +466,7 @@ test_python_smoke_b200() {
       test_varlen_attention \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 

@@ -1075,7 +1075,7 @@ def _nest_track_slices(groups: list, track_uuids: set) -> None:
 
 # GPU render-stage definitions: (column key, stage iid, stage name, RenderStageCategory).
 # COMPUTE == 2 (matches the reference); the rest are OTHER (0). Stage iids are small and
-# share the gpu_specifications iid space with the hardware-queue lanes below.
+# share the gpu_specifications iid space with the stream lanes below.
 _RENDER_STAGES = (
     ("kernel", 1, "Kernel", 2),
     ("gpu_memcpy", 2, "Memcpy", 0),
@@ -1090,7 +1090,7 @@ _RENDER_STAGES = (
     ("graph_event_node", 5, "EventRecord", 0),
     ("graph_host_node", 6, "HostNode", 0),
 )
-_HW_QUEUE_IID_BASE = 100  # hardware-queue iids start past the stage iids
+_STREAM_IID_BASE = 100  # stream-lane iids start past the stage iids
 
 # Chrome-trace categories NOT rendered as CPU track_event slices: "Trace" metadata, and the
 # GPU-side kinds we emit from the columnar window instead (kernels/transfers as GPU Render
@@ -1337,13 +1337,14 @@ def _build_render_stages(
     event_wait: tuple,
 ):
     """Build the GpuRenderStageEvent payload (gpu_specs, gfx_contexts, stage_cols, extra,
-    launch, tables) for the native GPU Render Stages hardware-queue lanes, or None if there are
-    no GPU ops. Each GPU op becomes one event on a (gpu_id, hardware-queue) lane tagged by stage
+    launch, tables) for the native GPU Render Stages stream lanes, or None if there are
+    no GPU ops. Each GPU op becomes one event on a (gpu_id, stream) lane tagged by stage
     (kind). Compute kernels additionally carry kernel_iid -> InternedComputeKernel (which names
     the slice) and a structured ComputeKernelLaunch (grid/workgroup Dim3 + args named via
     name_iid -> InternedComputeArgName) -> the viewer's GPU Compute "Launch Statistics" panel;
-    memcpy/memset carry their byte count as generic extra_data. The hardware queue is the CUDA
-    stream (one lane per stream), so all streams are preserved; the scalar kernel args
+    memcpy/memset carry their byte count as generic extra_data. Perfetto calls the lane a
+    hardware queue (hw_queue_iid on the wire); for CUDA it is the stream, so all streams are
+    preserved -- as are the synthetic logical lanes, which share that id space. The scalar args
     (device/stream/correlation/channel/...) ride along as extra_data. Each event has its own
     duration -- no stack pairing -- so durations are exact (no nesting)."""
     ts_p, dur_p, gpu_p, stage_p, kname_p = [], [], [], [], []
@@ -1352,14 +1353,14 @@ def _build_render_stages(
     extra_p: dict[str, list] = {k: [] for k, _g, _s in _RENDER_EXTRA}
     meta_p: list = []  # per-row spread blob (graph annotation + collective descriptor)
     stream_p: list = []
-    lane_names_by_id: dict[int, str] = {}  # reassigned logical lane -> resolver name
+    lane_names: dict[tuple[int, int], str] = {}  # (device, lane) -> resolver name
     for _ks, stage_iid, _name, _cat, c in _render_stage_cols(columns):
         n = len(c["start_ns"])
         z = np.zeros(n, dtype=np.int64)
         ts_p.append(np.ascontiguousarray(c["start_ns"], dtype=np.int64))
         dur_p.append(np.maximum(c["end_ns"] - c["start_ns"], 0).astype(np.int64))
         gpu_p.append(np.ascontiguousarray(c["device_id"], dtype=np.int64))
-        # One lane per stream (the hardware queue); preserves all streams (channel is
+        # One lane per stream; preserves all streams (channel is
         # 0/unpopulated in many captures, which would otherwise collapse every stream
         # into a single lane). The CUPTI channel is kept as extra_data instead.
         # Reassign graphed ops onto their logical lane (mirrors the chrome path): CUPTI piles
@@ -1375,11 +1376,14 @@ def _build_render_stages(
                 reassign &= gnid_col != 0
             lname_col = c.get("lane_name")
             if lname_col is not None:
-                for lv, nm, rs in zip(
-                    lane_col.tolist(), lname_col.tolist(), reassign.tolist()
+                for dv, lv, nm, rs in zip(
+                    c["device_id"].tolist(),
+                    lane_col.tolist(),
+                    lname_col.tolist(),
+                    reassign.tolist(),
                 ):
                     if rs and nm is not None:
-                        lane_names_by_id[int(lv)] = str(nm)
+                        lane_names[(int(dv), int(lv))] = str(nm)
             stream_p.append(np.where(reassign, lane_col, stream_col).astype(np.int64))
         else:
             stream_p.append(stream_col)
@@ -1434,8 +1438,10 @@ def _build_render_stages(
     ann_iid = next(i for ks, i, _n, _c in _RENDER_STAGES if ks == "gpu_annotation")
     end = ts + dur
     sub = np.nonzero(stage != ann_iid)[0]
+    # A lane is (gpu, stream), never a bare stream: the same stream id on two devices is two
+    # lanes. Shared by the clamp below and the stream-lane interning further down.
+    lane = (gpu.astype(np.int64) << np.int64(32)) | (stream & 0xFFFFFFFF)
     if len(sub):
-        lane = (gpu.astype(np.int64) << np.int64(32)) | (stream & 0xFFFFFFFF)
         order = sub[np.lexsort((ts[sub], lane[sub]))]
         nxt_ts = np.empty(len(order), dtype=np.int64)
         nxt_ts[:-1] = ts[order][1:]
@@ -1445,23 +1451,30 @@ def _build_render_stages(
         cap = np.where(same, nxt_ts, np.iinfo(np.int64).max)
         end[order] = np.maximum(ts[order], np.minimum(end[order], cap))
         dur = end - ts
-    # One hardware-queue lane per stream; lanes are split per gpu_id by Perfetto from
-    # (gpu_id, hw_queue_iid). The spanning annotation and its kernels share the lane and the
-    # viewer depth-nests them (annotation at depth 0, kernels at depth 1) once the kernels are
-    # clamped to not overlap each other. Perfetto sorts lanes lexicographically by name, so
-    # prefix every lane (resolver-named or "stream N") with a bracketed zero-padded lane id ->
-    # the lane order matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts
-    # after "stream 26674", and resolver-named lanes like "DP" interleave alphabetically). The
-    # "[" is a constant leading char, so the padded digits still decide the order.
-    uniq, inv = np.unique(stream, return_inverse=True)
-    width = len(str(int(uniq.max()))) if len(uniq) else 1
-    labels = [lane_names_by_id.get(int(k), f"stream {int(k)}") for k in uniq.tolist()]
+    # One lane per (gpu, stream); lanes are split per gpu_id by Perfetto from
+    # (gpu_id, stream_iid). Interning on the same (gpu, stream) key keeps each device's names
+    # its own -- the iid table is global, so interning on the bare stream would let one device's
+    # resolver name ("DP") relabel another device's identically-numbered CUDA stream. The
+    # spanning annotation and its kernels share the lane and the viewer depth-nests them
+    # (annotation at depth 0, kernels at depth 1) once the kernels are clamped to not overlap
+    # each other. Perfetto sorts lanes lexicographically by name, so prefix every lane
+    # (resolver-named or "stream N") with a bracketed zero-padded lane id -> the lane order
+    # matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts after
+    # "stream 26674", and resolver-named lanes like "DP" interleave alphabetically). The "["
+    # is a constant leading char, so the padded digits still decide the order.
+    uniq, inv = np.unique(lane, return_inverse=True)
+    uniq_dev, uniq_lane = (uniq >> 32).tolist(), (uniq & 0xFFFFFFFF).tolist()
+    width = len(str(max(uniq_lane))) if len(uniq) else 1
     specs = [(iid, name, cat) for _ks, iid, name, cat in _RENDER_STAGES]
     specs += [
-        (_HW_QUEUE_IID_BASE + j, f"[{int(k):0{width}d}] {labels[j]}", 0)
-        for j, k in enumerate(uniq.tolist())
+        (
+            _STREAM_IID_BASE + j,
+            f"[{k:0{width}d}] {lane_names.get((d, k), f'stream {k}')}",
+            0,
+        )
+        for j, (d, k) in enumerate(zip(uniq_dev, uniq_lane))
     ]
-    hw_queue_iid = (inv + _HW_QUEUE_IID_BASE).astype(np.uint64)
+    stream_iid = (inv + _STREAM_IID_BASE).astype(np.uint64)
     # event_id is a unique per-row id (assigned by _assign_render_event_ids and passed in, in
     # this exact row order). The CPU launch's gpu_correlation lists the event_ids of the
     # render stages it launched (a graph replay -> all its nodes); event_wait_ids (below) draw
@@ -1498,7 +1511,7 @@ def _build_render_stages(
         dur,
         event_id,
         gpu,
-        hw_queue_iid,
+        stream_iid,
         stage,
         context,
         name_iid,
@@ -1819,7 +1832,7 @@ def _build_chrome_counters(counters, base_ns: int) -> list[dict]:
 def _gpu_annotation_render_column(
     trace_window: dict, base_ns: int
 ) -> dict[str, Any] | None:
-    """Synthetic ``gpu_annotation`` render-stage column for the pftrace GPU hardware queues,
+    """Synthetic ``gpu_annotation`` render-stage column for the pftrace GPU stream lanes,
     built from the columnar window via the same synthesizer as the chrome gpu_user_annotation
     events -- so it lands on the kernels' capture stream, never a reassigned logical lane.
     None when there are no GPU annotations. Kineto emits no gpu_user_annotation in
@@ -2307,7 +2320,7 @@ def _window_to_pftrace(
     )
     active_devices = _active_devices(columns)
     # GPU counters (power/temp/clocks) -> GpuCounterEvents: the viewer renders them under
-    # "GPU / Counters / <gpu>", a sibling of the render-stage hardware queues, keyed by gpu_id.
+    # "GPU / Counters / <gpu>", a sibling of the render-stage stream lanes, keyed by gpu_id.
     counters = _merge_counters(
         _build_gpu_counters(columns.get("environment"), active_devices),
         _build_pm_counters(columns.get("pm_sampling"), active_devices),
