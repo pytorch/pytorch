@@ -1068,11 +1068,15 @@ def _engine_run_backward(
     # Need to save the context so compiler config will be visible in device threads
     torch._C._stash_obj_in_tls("context", contextvars.copy_context())
 
+    # Python autograd nodes can run on the calling thread. Do not let an ambient
+    # Dynamo callback trace them as part of the surrounding compiled function.
+    prior_dynamo_callback = torch._C._dynamo.eval_frame.set_eval_frame(None)
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
         )  # Calls into the C++ engine to run the backward pass
     finally:
+        torch._C._dynamo.eval_frame.set_eval_frame(prior_dynamo_callback)
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
         # Erase rather than overwrite-with-None so the thread_local map is
