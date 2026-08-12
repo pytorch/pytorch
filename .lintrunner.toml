@@ -37,6 +37,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -49,6 +51,7 @@ code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
     'aten/src/ATen/cpu/vec/**/*.h',
+    'aten/src/ATen/cuda/Atomic.cuh',
     'aten/src/ATen/accelerator/**/*.h',
     'aten/src/ATen/accelerator/**/*.cpp',
     'aten/src/ATen/mps/**/*.mm',
@@ -63,11 +66,13 @@ include_patterns = [
     'aten/src/ATen/native/mps/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
+    'aten/src/ATen/native/cuda/KernelUtils.cuh',
     'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
-    'aten/src/ATen/native/cuda/group_norm_kernel.cu',
+    'aten/src/ATen/native/group_norm*',
+    'aten/src/ATen/native/**/group_norm*',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
@@ -134,6 +139,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
@@ -160,6 +167,8 @@ include_patterns = [
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
+    'aten/src/ATen/native/group_norm*',
+    'aten/src/ATen/native/cpu/group_norm*',
     'aten/src/ATen/native/nested/cuda/*.cpp',
     'aten/src/ATen/native/nested/cuda/*.h',
     'aten/src/ATen/native/nested/*.cpp',
@@ -200,7 +209,7 @@ exclude_patterns = [
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
-    'c10/util/complex_utils.h',
+    'torch/headeronly/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -408,6 +417,8 @@ include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -420,6 +431,8 @@ include_patterns=['.github/workflows/**/*.yml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -718,6 +731,31 @@ command = [
 ]
 
 [[linter]]
+code = 'ISINSTANCE_FAKE_TENSOR'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]*\bFakeTensor\b',
+    '--line-allowlist-pattern=noqa: ISINSTANCE_FAKE_TENSOR',
+    '--linter-name=ISINSTANCE_FAKE_TENSOR',
+    '--error-name=isinstance(x, FakeTensor)',
+    """--error-description=\
+        Do not use isinstance(x, FakeTensor) because it only matches \
+        Python FakeTensors and misses C++ FakeTensors. \
+        Use is_fake_tensor(x) for a leaf fake check. \
+        If you must match only a Python FakeTensor instance, keep isinstance \
+        and add a `# noqa: ISINSTANCE_FAKE_TENSOR` comment to the line.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYBIND11_SPECIALIZATION'
 include_patterns = [
     '**/*.cpp',
@@ -835,6 +873,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDAMallocAsyncAllocator.cpp',
     '**/fb/**',
 ]
 command = [
@@ -955,6 +994,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -973,6 +1014,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1023,6 +1066,15 @@ command = [
     'tools/linter/adapters/testowners_linter.py',
     '--',
     '@{{PATHSFILE}}',
+]
+
+[[linter]]
+code = 'CODEOWNERS_TAXONOMY'
+include_patterns = ['**']
+command = [
+    'python3',
+    'scripts/codeowners/check_taxonomy.py',
+    '--lintrunner',
 ]
 
 [[linter]]
@@ -1091,6 +1143,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1177,6 +1231,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1195,6 +1251,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1206,6 +1264,8 @@ code = 'CODESPELL'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1228,6 +1288,8 @@ exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/utils/model_dump/preact.mjs',
+    # Generated: mirrors the label names on GitHub verbatim
+    'tools/linter/adapters/pytorch_labels.json',
 ]
 is_formatter = true
 
@@ -1241,6 +1303,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1524,6 +1588,8 @@ code = 'PYPROJECT'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1538,6 +1604,8 @@ code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1622,6 +1690,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
@@ -1872,7 +1942,10 @@ command = [
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',
-    'torch/csrc/inductor/aoti_torch/c/shim.h'
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_xpu.h',
 ]
 command = [
     'python3',
@@ -1889,6 +1962,9 @@ include_patterns = [
     # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want
     # to update that file.
     'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_xpu.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h',
@@ -1936,4 +2012,16 @@ command = [
     'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
