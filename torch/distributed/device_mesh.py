@@ -560,20 +560,22 @@ else:
                 None,
                 None,
             ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
-                # Otherwise, create new pg.
-                ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(
-                        backend=backend,
-                        ranks=ranks,
-                        group_desc="mesh_default",
+                sub_ranks = pg_ranks_by_dim.flatten().tolist()
+                sequential_ranks = list(range(get_world_size()))
+                if sub_ranks == sequential_ranks:
+                    # Append default pg to first dim groups if compatible
+                    # with `self._device_type`. Otherwise, create new pg.
+                    dim_group = (
+                        new_group(
+                            backend=backend,
+                            ranks=sequential_ranks,
+                            group_desc="mesh_default",
+                        )
+                        if torch.cuda.is_available()
+                        and get_backend(default_group) == "gloo"
+                        else default_group
                     )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
-                )
-                return dim_group.group_name  # type: ignore[union-attr]
+                    return dim_group.group_name  # type: ignore[union-attr]
 
             # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
             # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
@@ -619,6 +621,9 @@ else:
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
+                # Preserves topology-aware rank order by skipping sorting if ranks
+                # are custom-ordered.
+                is_sorted = subgroup_ranks == sorted(subgroup_ranks)
                 dim_group = new_group(
                     ranks=subgroup_ranks,
                     timeout=timeout,
@@ -626,6 +631,7 @@ else:
                     pg_options=pg_options,
                     group_desc=group_desc,
                     use_local_synchronization=use_hashed,
+                    sort_ranks=is_sorted,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
