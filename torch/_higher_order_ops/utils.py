@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Generic, overload, TypeVar
+from typing import Any, overload, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -103,7 +103,7 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
-def _move_batch_dims_to_last(unbatched_args, in_dims):
+def _move_batch_dims_to_last_for_scan(unbatched_args, in_dims):
     # Parks the batch dim on the last axis so it never collides with the scan
     # dim (0). The -1 convention here is a scan/associative_scan contract, not a
     # general vmap one: both scan batch rules rely on the scan dim being 0.
@@ -114,22 +114,19 @@ def _move_batch_dims_to_last(unbatched_args, in_dims):
     )
 
 
-def _batch_dims_as_last(in_dims):
-    # Flat markers matching _move_batch_dims_to_last: -1 where batched, else None.
+def _batch_dims_as_last_for_scan(in_dims):
+    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched, else None.
     # Encodes the same scan-specific last-axis convention described there.
     return tuple(
         -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
     )
 
 
-_CombineP = ParamSpec("_CombineP")
-
-
-class _VmapCombineFnWrapper(Generic[_CombineP]):
+class _VmapCombineFnWrapper:
     """Re-vmaps a scan/associative_scan combine_fn for use inside a scan batch rule.
 
     The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
-    last axis (the scan-specific convention, see ``_move_batch_dims_to_last``) so it
+    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
     cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
     and passed as the combine_fn to the underlying HOP.
 
@@ -150,7 +147,7 @@ class _VmapCombineFnWrapper(Generic[_CombineP]):
 
     def __init__(
         self,
-        combine_fn: Callable[_CombineP, Any],
+        combine_fn: Callable[..., Any],
         in_dims: tuple[Any, ...],
         batch_size: int,
         randomness: str,
@@ -170,7 +167,7 @@ class _VmapCombineFnWrapper(Generic[_CombineP]):
             outputs,
             per_slice_out_dims,
         )
-        out_dims = _batch_dims_as_last(per_slice_out_dims)
+        out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
         if self.out_dims is not None and out_dims != self.out_dims:
             raise AssertionError(
                 "combine_fn produced inconsistent output batch dims across scan "
