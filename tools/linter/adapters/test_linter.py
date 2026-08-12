@@ -617,7 +617,17 @@ def main() -> None:
                     print(json.dumps(lint_message._asdict()), flush=True)
             except Exception:
                 logging.critical('Failed at "%s".', futures[future])
-                raise
+                print(
+                    json.dumps(
+                        error_msg(
+                            name="[internal_error]",
+                            path=futures[future],
+                            line=0,
+                            description=f"Linter failed on '{futures[future]}'",
+                        )._asdict()
+                    ),
+                    flush=True,
+                )
 
 
 if __name__ == "__main__":
