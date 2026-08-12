@@ -2224,6 +2224,54 @@ class StringFormatVariable(VariableTracker):
             return repr(self)
         return repr(rendered)
 
+    @staticmethod
+    def _constant_format_arg(arg: VariableTracker) -> object:
+        if isinstance(arg, variables.SymNodeVariable):
+            return arg.evaluate_expr()
+        try:
+            return arg.as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                gb_type="StringFormatVariable with non-constant format argument",
+                context=f"format argument type: {type(arg).__name__}",
+                explanation="Dynamo cannot materialize a formatted string because "
+                "one of its arguments is not a Python constant.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def _constant_string(self) -> str:
+        return self.format_string.format(
+            *[self._constant_format_arg(arg) for arg in self.sym_args],
+            **{
+                key: self._constant_format_arg(value)
+                for key, value in self.sym_kwargs.items()
+            },
+        )
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return hash(self._constant_string()), False
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        if isinstance(other, StringFormatVariable):
+            other = variables.ConstantVariable.create(other._constant_string())
+        else:
+            try:
+                other_constant = other.as_python_constant()
+            except NotImplementedError:
+                return variables.ConstantVariable.create(NotImplemented)
+            if not isinstance(other_constant, str):
+                return variables.ConstantVariable.create(NotImplemented)
+
+        self_constant = variables.ConstantVariable.create(self._constant_string())
+        return python_constant_richcompare_impl(self_constant, tx, other, op)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(

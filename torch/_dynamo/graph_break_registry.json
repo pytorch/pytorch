@@ -6376,6 +6376,16 @@
       ]
     }
   ],
+  "GB8136": [
+    {
+      "Gb_type": "StringFormatVariable with non-constant format argument",
+      "Context": "format argument type: {type(arg).__name__}",
+      "Explanation": "Dynamo cannot materialize a formatted string because one of its arguments is not a Python constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0374": [
     {
       "Gb_type": "Sparse tensor creation not supported",
