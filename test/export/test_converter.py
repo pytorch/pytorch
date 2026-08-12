@@ -25,22 +25,7 @@ requires_prepacked_linear = unittest.skipIf(
 )
 
 
-class TestConverter(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
-
-        self.torch_bind_ops = [
-            torch.ops._TorchScriptTesting.queue_pop,
-            torch.ops._TorchScriptTesting.queue_push,
-            torch.ops._TorchScriptTesting.queue_size,
-        ]
-
-    def tearDown(self):
-        return
-
+class _ConverterCheckMixin(TestCase):
     def _check_equal_ts_ep_converter(
         self,
         M,
@@ -119,6 +104,23 @@ class TestConverter(TestCase):
             else:
                 self.assertEqual(type(x), type(y))
                 self.assertEqual(x, y)
+
+
+class TestConverter(_ConverterCheckMixin):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
+
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+
+    def tearDown(self):
+        return
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -1489,7 +1491,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(m, inp, ["script"])
 
 
-class TestConverterPrimDevice(TestCase):
+class TestConverterPrimDevice(_ConverterCheckMixin):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_prim_device(self, device):
@@ -1499,7 +1501,7 @@ class TestConverterPrimDevice(TestCase):
                 return torch.ones(2, 3, device=device)
 
         inp = (torch.rand((3, 4), device=device),)
-        TestConverter()._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp)
 
 
 instantiate_device_type_tests(TestConverterPrimDevice, globals())
