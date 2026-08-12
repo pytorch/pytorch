@@ -14177,9 +14177,9 @@ op_db: list[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -14212,9 +14212,9 @@ op_db: list[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=("cuda", "xpu")),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -14508,7 +14508,7 @@ op_db: list[OpInfo] = [
                        torch.float32: tol(atol=1e-5, rtol=1e-5),
                        torch.complex64: tol(atol=1e-5, rtol=1e-5),
                    }),
-                   "TestDecomp", "test_comprehensive", device_type="cuda",
+                   "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu"),
                ),
            ],
            skips=(
@@ -14574,7 +14574,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestInductorOpInfo", "test_comprehensive", device_type="cuda"),
            )),
@@ -14590,7 +14590,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestInductorOpInfo", "test_comprehensive", device_type="cuda"),
            )),
@@ -14605,7 +14605,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
            )),
     OpInfo('std_mean',
            variant_test_name='unbiased',
@@ -14625,7 +14625,7 @@ op_db: list[OpInfo] = [
                    }),
                    "TestDecomp",
                    "test_comprehensive",
-                   device_type="cuda"
+                   device_type=("cuda", "xpu")
                ),
                DecorateInfo(
                    toleranceOverride({
@@ -15089,7 +15089,7 @@ op_db: list[OpInfo] = [
                     "for multi-dimensional weight inputs"
                 ),
                 'TestDecomp', 'test_comprehensive',
-                device_type="cuda"),
+                device_type=("cuda", "xpu")),
             # RuntimeError: input->type()->kind() ==
             # TypeKind::OptionalType INTERNAL ASSERT FAILED at
             # "torch/csrc/jit/passes/utils/check_alias_annotation.cpp":267
@@ -15155,7 +15155,7 @@ op_db: list[OpInfo] = [
             # through nll_loss2d for the per-row reduction).
             DecorateInfo(
                 unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                "TestDecomp", "test_comprehensive", device_type="cuda"),
+                "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
             # LinearCrossEntropyOptions is a Python dataclass; JIT scripting
             # cannot infer it. Every chunked sample carries options=..., so
             # all dtypes hit this -- not just float32.
@@ -16253,7 +16253,7 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/131050
                DecorateInfo(unittest.skip("Flaky on Linux/ROCm CUDA"),
                             'TestDecomp', 'test_comprehensive',
-                            device_type='cuda', dtypes=(torch.bfloat16,),
+                            device_type=('cuda', 'xpu'), dtypes=(torch.bfloat16,),
                             active_if=IS_LINUX or TEST_WITH_ROCM),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -18522,7 +18522,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples'),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda",
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu"),
                             active_if=TEST_WITH_ROCM),
            ),
            skips=(
