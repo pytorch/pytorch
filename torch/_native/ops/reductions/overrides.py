@@ -30,7 +30,7 @@ import torch
 from ... import cutedsl_utils as cu
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
-from ..sum.cutedsl_impl import _inner_tree_enabled
+from .cutedsl_impl import _inner_tree_enabled
 
 
 if TYPE_CHECKING:
@@ -289,6 +289,10 @@ def _amin_cond(self, dim=(), keepdim=False):
 
 
 def _prod_cond(self, dim, keepdim=False, *, dtype=None):
+    # Yields to the inner-tree prod override for the same reason _sum_cond does:
+    # cutedsl_impl claims prod.dim_int on CUDA too and carries a bitwise contract.
+    if _inner_tree_enabled():
+        return False
     return _base_cond(self, dim) and _supported_out_dtype(dtype)
 
 
