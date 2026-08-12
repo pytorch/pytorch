@@ -1080,7 +1080,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        from ..device_interface import get_registered_device_interfaces
+        from .torch import device_type_for_autocast_class
 
         if func not in [
             torch.amp.autocast_mode.autocast,
@@ -1113,17 +1113,7 @@ class AutocastModeVariable(ContextWrappingVariable):
                 # pyrefly: ignore [unnecessary-comparison]
                 arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
             elif key == "device_type" and key not in bound_args.arguments:
-                # Out-of-tree device autocast subclass: device_type
-                # is implicit in the subclass constructor.  Resolve
-                # from the DeviceInterface registration by name.
-                arg = None
-                for _, iface in get_registered_device_interfaces():
-                    for ac_cls, dt in getattr(iface, "autocast_classes", {}).items():
-                        if func.__name__ == ac_cls.__name__:
-                            arg = dt
-                            break
-                    if arg is not None:
-                        break
+                arg = device_type_for_autocast_class(func)
                 if arg is None:
                     raise AssertionError(
                         f"Cannot determine device_type for autocast class: {func}"

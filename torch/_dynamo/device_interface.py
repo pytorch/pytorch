@@ -15,6 +15,7 @@ The abstraction layer enables device-agnostic code in TorchDynamo while allowing
 specialized implementations for each hardware backend's unique features.
 """
 
+import functools
 import inspect
 import time
 from collections import namedtuple
@@ -42,6 +43,8 @@ class DeviceInterface:
     This is a simple device runtime interface for Inductor. It enables custom
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
+
+    autocast_classes: frozenset[type] = frozenset()
 
     class device:
         def __new__(cls, device: torch.types.Device) -> Any:
@@ -636,12 +639,23 @@ device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
 
+@functools.cache
+def get_device_autocast_classes() -> dict[type, str]:
+    result: dict[type, str] = {}
+    for device, device_interface in get_registered_device_interfaces():
+        device_type = device.split(":")[0]
+        for autocast_class in device_interface.autocast_classes:
+            result.setdefault(autocast_class, device_type)
+    return result
+
+
 def register_interface_for_device(
     device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    get_device_autocast_classes.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:

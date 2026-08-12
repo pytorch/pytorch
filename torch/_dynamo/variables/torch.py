@@ -197,30 +197,10 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
-def _get_device_autocast_classes() -> dict[type, str]:
-    """Autocast classes registered by out-of-tree DeviceInterfaces.
-
-    Not cached: device interfaces may be registered lazily, so we
-    query each time.
-    """
-    from ..device_interface import get_registered_device_interfaces
-
-    result: dict[type, str] = {}
-    for _, iface in get_registered_device_interfaces():
-        ac = getattr(iface, "autocast_classes", None)
-        if ac:
-            result.update(ac)
-    return result
-
-
 def _matches_device_autocast_class(value) -> bool:
-    """Check if `value` is an autocast class belonging to a registered device.
+    """Check whether value is an autocast class registered by a device."""
+    from ..device_interface import get_device_autocast_classes
 
-    Handles the multi-path import identity mismatch where the same class
-    loaded via ``torch.npu.amp`` and ``torch_npu.npu.amp`` has different
-    Python identities.  Falls back to comparing source files when the
-    exact object reference does not match.
-    """
     if not isinstance(value, type):
         return False
     if not issubclass(value, torch.amp.autocast_mode.autocast):
@@ -228,23 +208,40 @@ def _matches_device_autocast_class(value) -> bool:
     if value is torch.amp.autocast_mode.autocast:
         return False
 
-    registered = _get_device_autocast_classes()
+    registered = get_device_autocast_classes()
     if value in registered:
         return True
-
     if not registered:
         return False
+    return _autocast_class_by_file(value) is not None
 
-    import inspect
 
-    for ac_cls in registered:
+def _autocast_class_by_file(value: type) -> type | None:
+    """Return the registered autocast class defined in value's source file."""
+    from ..device_interface import get_device_autocast_classes
+
+    try:
+        value_file = inspect.getfile(value)
+    except (TypeError, OSError):
+        return None
+    for autocast_class in get_device_autocast_classes():
         try:
-            if inspect.getfile(value) == inspect.getfile(ac_cls):
-                return True
+            if inspect.getfile(autocast_class) == value_file:
+                return autocast_class
         except (TypeError, OSError):
             pass
+    return None
 
-    return False
+
+def device_type_for_autocast_class(value: type) -> str | None:
+    from ..device_interface import get_device_autocast_classes
+
+    registered = get_device_autocast_classes()
+    device_type = registered.get(value)
+    if device_type is not None:
+        return device_type
+    autocast_class = _autocast_class_by_file(value)
+    return None if autocast_class is None else registered[autocast_class]
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
