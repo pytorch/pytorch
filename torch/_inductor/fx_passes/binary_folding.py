@@ -179,7 +179,8 @@ def binary_folding_init():
         if conv_node.args[1].op != "get_attr":
             return False
         # conv.bias
-        if conv_node.args[1] is not None and conv_node.args[1].op != "get_attr":
+        bias_node = conv_node.args[2]
+        if bias_node is not None and bias_node.op != "get_attr":
             return False
         if (
             not isinstance(other, int)

@@ -46,6 +46,9 @@ DTYPE_TO_METAL = {
     torch.int32: "int",
     torch.int64: "long",
     torch.uint8: "uchar",
+    torch.uint16: "ushort",
+    torch.uint32: "uint",
+    torch.uint64: "ulong",
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",
@@ -481,6 +484,7 @@ class MetalOverrides(OpOverrides):
         # Unary special ops
         for name in [
             "erf",
+            "erfc",
             "erfinv",
             "i0",
             "i0e",
@@ -671,7 +675,7 @@ class MetalKernel(SIMDKernel):
             raise AssertionError("expected no load mask during reduction")
 
         def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
-            # Uwraps vec3 dtype into individual components
+            # Unwraps vec3 dtype into individual components
             return OpsWrapper._unwrap(
                 [CSEVariable(f"{res3}.{t}", res3.bounds, res3.dtype) for t in "xyz"]
             )
@@ -755,8 +759,8 @@ class MetalKernel(SIMDKernel):
             if not self.multistage_reduction_entry:
                 val = cast_value  # type: ignore[assignment]
             else:
-                lim_fn = "lowest" if reduction_type.endswith("max") else "max"
-                limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
+                op_struct = "MaxOp" if reduction_type == "max" else "MinOp"
+                limit_val = f"::c10::metal::{op_struct}<{src_metal_type}>::identity()"
                 val = self._new_idxvar(
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
@@ -777,8 +781,8 @@ class MetalKernel(SIMDKernel):
                 val = cast_value  # type: ignore[assignment]
                 idx_val = f"static_cast<{DTYPE_TO_METAL[dtype]}>({reduction_idx})"
             else:
-                lim_fn = "lowest" if reduction_type.endswith("max") else "max"
-                limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
+                op_struct = "MaxOp" if reduction_type == "argmax" else "MinOp"
+                limit_val = f"::c10::metal::{op_struct}<{src_metal_type}>::identity()"
                 val = self._new_idxvar(
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
@@ -786,15 +790,9 @@ class MetalKernel(SIMDKernel):
                 idx_var = next(
                     t for t in self.range_tree_nodes.values() if t.is_reduction
                 )
-                cmp_op = ">" if reduction_type == "argmax" else "<"
-                nan_suffix = (
-                    f" || ::metal::isnan({value}) "
-                    if src_dtype.is_floating_point
-                    else ""
-                )
                 self.compute.splice(f"""
-                if ({value} {cmp_op} {val}{nan_suffix}) {{
-                    {val} = {value};
+                if (::c10::metal::{op_struct}<{src_metal_type}>::replace({cast_value}, {val})) {{
+                    {val} = {cast_value};
                     {idx_val} = {idx_var.name};
                 }}
                 """)
@@ -806,11 +804,13 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar(src_dtype, acc_buf_alloc_size)
-                self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
+                acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+                self.compute.splice(
+                    f"{acc_buf}[{reduction_idx}] = float3({value}, 0.0, 1.0);"
+                )
                 wf_res = self.cse.generate(
                     self.compute,
-                    f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size_str})",
+                    f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
@@ -822,7 +822,7 @@ class MetalKernel(SIMDKernel):
             )
             wf_res = self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
@@ -842,7 +842,7 @@ class MetalKernel(SIMDKernel):
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction_entry else self.compute,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
@@ -1215,7 +1215,6 @@ class MetalKernel(SIMDKernel):
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
-    _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
@@ -1241,8 +1240,7 @@ class MetalScheduling(SIMDScheduling):
 
         # Python path: register kernel with async_compile; wait() will compile all
         # accumulated Metal kernels into a single library and replace each placeholder.
-        fn_name = f"generated_kernel_{self._kernel_fn_counter}"
-        self._kernel_fn_counter += 1
+        fn_name = f"generated_kernel_{wrapper.next_kernel_suffix()}"
         wrapper.src_to_kernel[src_code] = fn_name
 
         # Extract Metal source from compile_mps_shader('''...''') call

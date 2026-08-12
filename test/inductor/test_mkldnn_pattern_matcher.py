@@ -219,6 +219,7 @@ class TestPatternMatcherBase(TestCase):
                 line
                 for line in source_code.splitlines()
                 if not any(assert_key in line for assert_key in assert_keywords)
+                and not line.strip().startswith("assert_tensor_metadata(")
             ]
             source_code = "\n".join(filtered_lines)
 
@@ -1492,6 +1493,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    def test_mkldnn_to_dense_float8_dtype(self):
+        def fn(x):
+            return x.to_dense(torch.float8_e4m3fn)
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertEqual(actual.float(), expected.float())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
     def test_mkldnn_to_dense_input_backward(self):
         def fn(x):
             return (x.to_dense() + 1).sum()
@@ -1573,7 +1588,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     1
                 ),
             )
-            example_inputs[0].get_device()
             m = Mod(
                 lambda x, y: x.add_(y),
             ).eval()

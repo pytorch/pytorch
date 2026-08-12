@@ -68,6 +68,7 @@ class LocalTensorTestBase(TestCase):
 class LocalTensorRankTest(LocalTensorTestBase):
     def setUp(self):
         super().setUp()
+        self._current_rank = 0
 
     def tearDown(self):
         super().tearDown()
@@ -87,6 +88,7 @@ class LocalTensorRankTest(LocalTensorTestBase):
                 torch.distributed.init_process_group(
                     "fake", rank=rank, world_size=self.world_size
                 )
+                self._current_rank = rank
             original_test()
 
         setattr(self, test_name, rank_loop_wrapper)
@@ -96,7 +98,10 @@ class LocalTensorRankTest(LocalTensorTestBase):
     def rank(self):
         if not dist.is_initialized():
             raise AssertionError("Process group is not initialized!")
-        return dist.get_rank()
+        # Can't use dist.get_rank() because it is patched inside LocalTensorMode
+        # to return a multi-rank SymInt, which isn't hashable for dict indexing
+        # (self._local_tensors[self.rank]).
+        return self._current_rank
 
 
 class LocalTensorWorldTest(LocalTensorTestBase):
@@ -434,6 +439,7 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
             self.assertIsInstance(result, LocalTensor)
 
 
+@instantiate_parametrized_tests
 class TestLocalTensorRankWorld3(LocalTensorRankTest):
     world_size = 3
 
@@ -573,6 +579,69 @@ class TestLocalTensorRankWorld3(LocalTensorRankTest):
             expected_output = torch.tensor([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
             self.assertEqual(result._local_tensors[self.rank], expected_output)
 
+    def test_all_to_all_single_uneven_splits(self):
+        """all_to_all_single with unequal per-source sections (gh-177371)."""
+        # Rank src holds world_size sections of output_split_sizes[src] rows and
+        # sends one to each destination, so every section it sends matches the
+        # section every destination declares for src.
+        output_split_sizes = list(range(1, self.world_size + 1))
+        different_tensors = {
+            src: torch.arange(
+                self.world_size * output_split_sizes[src] * 4, dtype=torch.float
+            ).reshape(-1, 4)
+            + src * 100
+            for src in range(self.world_size)
+        }
+
+        with LocalTensorMode(self.world_size):
+            lt_output = torch.empty(sum(output_split_sizes), 4)
+            dist.all_to_all_single(
+                lt_output,
+                LocalTensor(different_tensors),
+                output_split_sizes=output_split_sizes,
+                group=torch.distributed.distributed_c10d._get_default_group(),
+            )
+
+        for dst in range(self.world_size):
+            expected = torch.cat(
+                [
+                    different_tensors[src].chunk(self.world_size)[dst]
+                    for src in range(self.world_size)
+                ]
+            )
+            self.assertEqual(lt_output._local_tensors[dst], expected)
+
+    @parametrize(
+        "input_split_sizes,output_split_sizes",
+        [
+            # Ranks 0, 1 and 2 receive 9, 6 and 3 rows but each declares 6.
+            ([3, 2, 1], [2, 2, 2]),
+            # Rows received and rows declared are both 6, but the per-source
+            # sections disagree: rank 0 sends 2 rows into a 3 row section.
+            ([2, 2, 2], [3, 2, 1]),
+        ],
+    )
+    def test_all_to_all_single_mismatched_splits_error(
+        self, input_split_sizes, output_split_sizes
+    ):
+        """Split sizes that do not describe a valid exchange raise, not reshape."""
+        with LocalTensorMode(self.world_size):
+            lt_input = LocalTensor(
+                {r: torch.zeros(6, 4) for r in range(self.world_size)}
+            )
+            lt_output = torch.zeros(6, 4)
+
+            with self.assertRaisesRegex(
+                ValueError, "input split from rank 0 to rank 0"
+            ):
+                dist.all_to_all_single(
+                    lt_output,
+                    lt_input,
+                    output_split_sizes=output_split_sizes,
+                    input_split_sizes=input_split_sizes,
+                    group=torch.distributed.distributed_c10d._get_default_group(),
+                )
+
 
 class TestLocalTensorWorld3(LocalTensorWorldTest):
     world_size = 3
@@ -646,6 +715,40 @@ class TestLocalTensorWorld3(LocalTensorWorldTest):
 class TestLocalTensorWorld4(LocalTensorWorldTest):
     world_size = 4
 
+    def test_dist_get_rank_default_group(self):
+        with LocalTensorMode(self.world_size):
+            rank = dist.get_rank()
+            self.assertIsInstance(rank, torch.SymInt)
+            self.assertIsInstance(rank.node, LocalIntNode)
+            for r in range(self.world_size):
+                self.assertEqual(rank.node._local_ints[r], r)
+
+    def test_dist_get_rank_sub_group(self):
+        sub_ranks = [0, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks)
+        with LocalTensorMode(self.world_size):
+            rank = dist.get_rank(sub_pg)
+            self.assertIsInstance(rank, torch.SymInt)
+            self.assertIsInstance(rank.node, LocalIntNode)
+            # All ranks should be present — LocalTensorMode sims the entire
+            # mesh, so complement groups [1,3] also need group-local ranks.
+            self.assertEqual(
+                set(rank.node._local_ints.keys()), set(range(self.world_size))
+            )
+            # sub_pg=[0,2]: rank 0 -> local 0, rank 2 -> local 1
+            # complement=[1,3]: rank 1 -> local 0, rank 3 -> local 1
+            self.assertEqual(rank.node._local_ints[0], 0)
+            self.assertEqual(rank.node._local_ints[1], 0)
+            self.assertEqual(rank.node._local_ints[2], 1)
+            self.assertEqual(rank.node._local_ints[3], 1)
+
+    def test_dist_get_rank_unpatched_outside_mode(self):
+        # Verify that dist.get_rank is restored after exiting
+        orig_get_rank = dist.get_rank
+        with LocalTensorMode(self.world_size):
+            pass
+        self.assertIs(dist.get_rank, orig_get_rank)
+
     def test_dtensor_cat(self):
         with LocalTensorMode(self.world_size):
             device_mesh = self.build_device_mesh()
@@ -683,7 +786,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         # LocalTensorMode implementations must accept either a string group
         # name or a ProcessGroup. Covers the four handlers that share the
         # widened group-name signature. See pytorch/pytorch#184746.
-        import torch.distributed.config as dist_config
+        import torch.compiler.config as compiler_config
         from torch.distributed._functional_collectives import (
             all_to_all_single,
             reduce_scatter_tensor,
@@ -745,7 +848,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
 
         with (
             LocalTensorMode(ws),
-            dist_config.patch(compile_on_one_rank=True),
+            compiler_config.patch(compile_on_one_rank=True),
         ):
             lt = LocalTensor(per_rank)
             result = run(lt)
@@ -762,7 +865,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         # both (a) survive the ProcessGroup-as-group_name path through
         # LocalTensorMode's _local_functional_* handlers and (b) return a
         # LocalTensor whose per-rank shards are the correct concatenation.
-        import torch.distributed.config as dist_config
+        import torch.compiler.config as compiler_config
 
         fake_pg = dist.distributed_c10d._get_default_group()
 
@@ -774,7 +877,7 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         per_rank = {r: torch.full((2, 3), float(r)) for r in range(ws)}
         with (
             LocalTensorMode(ws),
-            dist_config.patch(compile_on_one_rank=True),
+            compiler_config.patch(compile_on_one_rank=True),
         ):
             lt = LocalTensor(per_rank)
             result = f(lt)

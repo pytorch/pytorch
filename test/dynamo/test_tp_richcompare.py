@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for richcompare_impl: unified comparison protocol in Dynamo."""
+"""Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
 import unittest
@@ -8,10 +8,10 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._library.opaque_object import register_opaque_type
+from torch._library.opaque_object import register_custom_class
 
 
-class _OpaqueVal(torch._opaque_base.OpaqueBase):
+class _OpaqueVal(torch._custom_class_base.CustomClassBase):
     def __init__(self, val):
         self.val = val
 
@@ -30,7 +30,7 @@ class _OpaqueVal(torch._opaque_base.OpaqueBase):
         return (f"_OpaqueVal({self.val})", {"_OpaqueVal": _OpaqueVal})
 
 
-register_opaque_type(_OpaqueVal, typ="value", hoist=True)
+register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
@@ -63,7 +63,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         if expect_type_error is not None:
             self.assertFalse(
                 expect_type_error,
-                f"Expected {op.__name__}({a!r}, {b!r}) to raise TypeError "
+                lambda msg: f"{msg}\nExpected {op.__name__}({a!r}, {b!r}) to raise TypeError "
                 f"but eager returned {expected!r}",
             )
 
@@ -1428,7 +1428,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, (False, True, True))
 
     # =====================================================================
-    # Opaque object comparison (TorchScriptObjectVariable)
+    # Opaque object comparison (CustomClassObjectVariable)
     # =====================================================================
 
     def test_opaque_object_cmp(self):
@@ -1776,6 +1776,71 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
         self.assertEqual(result, expected)
 
+    def test_set_subclass_inherited_cmp_uses_internal_contents(self):
+        class LyingSet(set):
+            def __iter__(self):
+                return iter([99])
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        class LyingFrozenSet(frozenset):
+            def __iter__(self):
+                return iter([99])
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        def fn(x, a, b):
+            offset = 0
+            comparisons = (
+                a == b,
+                b == a,
+                a != b,
+                b != a,
+                a <= b,
+                b <= a,
+                a < b,
+                b < a,
+                a >= b,
+                b >= a,
+                a > b,
+                b > a,
+            )
+            for i, pred in enumerate(comparisons):
+                if pred:
+                    offset += 1 << i
+            return x + offset
+
+        cases = (
+            ({1, 2, 3}, LyingSet({1, 2, 3})),
+            (LyingSet({1, 2, 3}), {1, 2, 3}),
+            (LyingSet({1, 2}), LyingSet({1, 2, 3})),
+            ({1, 2, 3}, LyingFrozenSet({1, 2, 3})),
+        )
+
+        def base_len(obj):
+            if isinstance(obj, set):
+                return set.__len__(obj)
+            return frozenset.__len__(obj)
+
+        for a, b in cases:
+            with self.subTest(a=type(a), b=type(b), sizes=(base_len(a), base_len(b))):
+                x = torch.ones(())
+                expected = fn(x, a, b)
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+                self.assertEqual(opt_fn(x, a, b), expected)
+                self.assertEqual(opt_fn(x, a, b), expected)
+                self.assertEqual(cnt.frame_count, 1)
+            torch._dynamo.reset()
+
     # =====================================================================
     # Tensor vs non-proxyable types (followups)
     # =====================================================================
@@ -1833,6 +1898,33 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         expected = fn(ks1, ks2)
         result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
         self.assertEqual(result, expected)
+
+    def test_unbound_builtin_cmp_dunder(self):
+        """type.__cmp__(a, b) invokes only the left type's slot (may be
+        NotImplemented) rather than the full comparison protocol."""
+
+        def fn():
+            return (
+                complex.__eq__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, 2 + 2j),
+                complex.__eq__(1 + 1j, 2),
+                complex.__ne__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, None),
+                complex.__lt__(1 + 1j, 2 + 2j),
+                int.__eq__(1, 1),
+                int.__lt__(1, 2),
+                int.__eq__(1, None),
+                float.__eq__(1.0, 2.0),
+                float.__lt__(1.0, 2.0),
+                str.__eq__("a", "a"),
+                bool.__eq__(True, 1),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(len(expected), len(result))
+        for e, r in zip(expected, result):
+            self.assertIs(r, e)
 
 
 if __name__ == "__main__":

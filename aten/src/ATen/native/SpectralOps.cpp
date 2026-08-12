@@ -69,7 +69,11 @@ namespace {
 // Promote inputs to FFT functions
 // * Integers are promoted to the default floating type
 // * If require_complex=True, all types are promoted to complex
-// * Raises an error for half-precision dtypes to allow future support
+// * float16/bfloat16 on XPU: promoted to float32 (no native XPU FFT kernel)
+// * float16 on CUDA: passed through; cuFFT handles natively (SM53+, pow2)
+// * bfloat16 on CUDA: passed through; cuFFT handles natively (SM80+, pow2)
+//   or falls back to float32 promotion for older hardware
+// * Raises an error for half-precision types on CPU
 ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
     return type;
@@ -85,9 +89,21 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
-    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    // XPU has no native float16 or bfloat16 FFT kernel; promote both to float32.
+    // ROCm (hipFFT) has no native bfloat16 FFT kernel; promote to float32.
+    // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
+    // so we leave them unchanged here and let the cuFFT planner decide.
+    if ((type == kHalf || type == kBFloat16) && device.is_xpu()) {
+      type = kFloat;
+    }
+    // ROCm/hipFFT does not support bfloat16; promote to float32
+    if (type == kBFloat16 && device.is_cuda() && at::globalContext().hasROCM()) {
+      type = kFloat;
+    }
+    TORCH_CHECK_NOT_IMPLEMENTED(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
+                "Unsupported dtype ", type);
   } else {
-    TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    TORCH_CHECK_NOT_IMPLEMENTED(type == kFloat || type == kDouble, "Unsupported dtype ", type);
   }
 
   if (!require_complex) {
@@ -99,6 +115,9 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
+  // bfloat16 on CUDA: cuFFT produces CUDA_C_16BF which is upcast to ComplexFloat.
+  // Returning kComplexFloat keeps output-tensor allocation consistent.
+  case kBFloat16: return kComplexFloat;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
   }
 }
@@ -223,7 +242,7 @@ Tensor fft_r2c(std::string_view function_name,
                Tensor out, Tensor input, std::optional<SymInt> n_opt,
                int64_t unwrapped_dim, std::optional<std::string_view> norm_str,
                bool forward, bool onesided) {
-  TORCH_CHECK(!input.is_complex(), function_name,
+  TORCH_CHECK_TYPE(!input.is_complex(), function_name,
               " expects a real input tensor, but got ", input.scalar_type());
   TORCH_CHECK(!out.defined() || out.is_complex(), function_name,
               " expects a complex output tensor, but got ", out.scalar_type());
@@ -476,7 +495,7 @@ static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
                              at::OptionalSymIntArrayRef s,
                              at::OptionalIntArrayRef dim,
                              const std::optional<std::string_view>& norm_str) {
-  TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
+  TORCH_CHECK_TYPE(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(!desc.shape.empty(), "rfftn must transform at least one axis");
   Tensor input = promote_tensor_fft(self, /*require_complex=*/false);
@@ -573,7 +592,7 @@ static Tensor fft_hfftn_impl(
     auto c2c_dims = IntArrayRef(desc.dim).slice(0, desc.dim.size() - 1);
     tmp = at::_fft_c2c(x, c2c_dims, norm, /*forward=*/true);
   } else {
-    tmp = x;
+    tmp = std::move(x);
   }
 
   const auto last_dim = desc.dim.back();
@@ -882,7 +901,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor of floating point or complex values";
-    TORCH_CHECK(false, std::move(ss).str());
+    TORCH_CHECK_NOT_IMPLEMENTED(false, std::move(ss).str());
   }
   if (self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
@@ -1061,7 +1080,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  TORCH_CHECK(self.is_complex(),
+  TORCH_CHECK_TYPE(self.is_complex(),
               "istft requires a complex-valued input tensor matching the "
               "output from stft with return_complex=True.");
   Tensor input = at::view_as_real(self.resolve_conj());
