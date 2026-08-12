@@ -669,3 +669,8 @@ using c10::complex_literals::operator""_id;
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
+
+#define C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
+// utilities for complex types
+#include <torch/headeronly/util/complex_utils.h> // IWYU pragma: keep
+#undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H

@@ -65,15 +65,24 @@ from ..source import (
     WeakRefCallSource,
 )
 from ..utils import (
+    check_positional,
     check_unspec_or_constant_args,
-    cmp_name_to_op_mapping,
     identity,
     istype,
+    no_keywords,
     proxy_args_kwargs,
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    getset_build,
+    getset_read,
+    Member,
+    Method,
+    NO_SUCH_SUBOBJ,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
@@ -191,7 +200,7 @@ class SuperVariable(VariableTracker):
             ],
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Check if getattr is a constant. If not, delay the actual work by
@@ -441,18 +450,14 @@ class FrameSummaryVariable(VariableTracker):
     def python_type(self) -> type:
         return traceback.FrameSummary
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "lineno":
-            return VariableTracker.build(tx, self.frame_summary.lineno)
-        elif name == "filename":
-            return VariableTracker.build(tx, self.frame_summary.filename)
-        elif name == "name":
-            return VariableTracker.build(tx, self.frame_summary.name)
-        elif name == "line":
-            return VariableTracker.build(tx, self.frame_summary.line)
-        return super().getattro_impl(tx, name)
+    # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
+    # each slot is exposed as a read-only member_descriptor.
+    tp_members = {
+        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno)),
+        "filename": Member(getset_build(lambda s: s.frame_summary.filename)),
+        "name": Member(getset_build(lambda s: s.frame_summary.name)),
+        "line": Member(getset_build(lambda s: s.frame_summary.line)),
+    }
 
 
 class TracebackVariable(VariableTracker):
@@ -525,13 +530,13 @@ class TracebackVariable(VariableTracker):
             self.tb_next = val
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "tb_next":
             return self.tb_next
         elif name == "tb_lineno":
-            return self.frame_summary.getattro_impl(tx, "lineno")
+            return self.frame_summary.tp_getattro_impl(tx, "lineno")
         elif name == "frame_summary":
             return self.frame_summary
         elif name == "tb_lasti":
@@ -541,9 +546,9 @@ class TracebackVariable(VariableTracker):
                 explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -630,7 +635,7 @@ class ExceptionVariable(VariableTracker):
     def python_type(self) -> type:
         return self.exc_type
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -733,7 +738,7 @@ class ExceptionVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
@@ -758,7 +763,7 @@ class ExceptionVariable(VariableTracker):
             # to the generic lookup that finds nothing means the attribute is
             # genuinely absent -- match CPython's BaseException tp_getattro
             # (PyObject_GenericGetAttr) and raise AttributeError.
-            return super().getattro_impl(tx, name)
+            return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
             raise_observed_exception(
                 AttributeError,
@@ -766,7 +771,7 @@ class ExceptionVariable(VariableTracker):
                 args=[f"'{self.exc_type.__name__}' object has no attribute '{name}'"],
             )
 
-    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
@@ -794,7 +799,7 @@ class ExceptionVariable(VariableTracker):
         args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
         return f"{self.python_type_name()}({args})"
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
         return VariableTracker.build(tx, self.debug_repr())
 
@@ -811,12 +816,12 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "value":
             return self.value
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -839,12 +844,12 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in self._attrs:
             return self._attrs[name]
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
@@ -859,11 +864,16 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
 class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
+    tp_members = {
+        "name": Member(getset_read(lambda s: s._attrs["name"])),
+        "obj": Member(getset_read(lambda s: s._attrs["obj"])),
+    }
 
 
 class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
+    tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
 
 
 class UnknownVariable(VariableTracker):
@@ -912,7 +922,7 @@ class ComptimeVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from ..comptime import comptime
@@ -1445,7 +1455,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
@@ -1459,7 +1469,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class AutogradEngineVariable(UserDefinedObjectVariable):
@@ -1625,13 +1635,13 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import generic_richcompare
 
         try:
-            resolved = self.obj.getattro_impl(tx, self.name)
+            resolved = self.obj.tp_getattro_impl(tx, self.name)
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
@@ -1641,7 +1651,7 @@ class GetAttrVariable(VariableTracker):
             else:
                 unimplemented(
                     gb_type="Unresolved GetAttrVariable comparison",
-                    context=f"richcompare_impl {self} {op}",
+                    context=f"tp_richcompare_impl {self} {op}",
                     explanation=f"Cannot compare {self} because the attribute "
                     f"could not be resolved to a concrete value.",
                     hints=[*graph_break_hints.SUPPORTABLE],
@@ -1706,7 +1716,7 @@ class CallMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -1756,7 +1766,7 @@ class PythonModuleVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
@@ -1774,7 +1784,7 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -1803,7 +1813,7 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         if op in ("__eq__", "__ne__"):
@@ -1849,15 +1859,10 @@ class TypingVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
-
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.value, name))
-            )
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
@@ -1952,7 +1957,7 @@ class NumpyVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -2223,7 +2228,16 @@ class StringFormatVariable(VariableTracker):
     def _constant_format_arg(arg: VariableTracker) -> object:
         if isinstance(arg, variables.SymNodeVariable):
             return arg.evaluate_expr()
-        return arg.as_python_constant()
+        try:
+            return arg.as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                gb_type="StringFormatVariable with non-constant format argument",
+                context=f"format argument type: {type(arg).__name__}",
+                explanation="Dynamo cannot materialize a formatted string because "
+                "one of its arguments is not a Python constant.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
     def _constant_string(self) -> str:
         return self.format_string.format(
@@ -2237,7 +2251,7 @@ class StringFormatVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self._constant_string()), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -2291,7 +2305,7 @@ class ObjectVariable(VariableTracker):
     def python_type(self) -> type[object]:
         return object
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import object_richcompare
@@ -2512,7 +2526,7 @@ class ConstantLikeVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import python_constant_richcompare_impl
@@ -2558,7 +2572,7 @@ class ConstantLikeVariable(VariableTracker):
             ],
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         result = getattr(self.value, name)
@@ -2694,12 +2708,12 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if name == "name":
             return ConstantVariable.create(self.cv_obj.name)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
 
 class RandomClassVariable(VariableTracker):
@@ -2833,90 +2847,146 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
-    def call_method(
+    def seed(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "seed":
-            tx.output.side_effects.mutation(self)
-            self.random.seed(
-                *[x.as_python_constant() for x in args],
-                **{key: val.as_python_constant() for key, val in kwargs.items()},
-            )
-            return variables.ConstantVariable.create(None)
-        elif name == "getstate":
-            return self.wrap_state(self.random.getstate())
-        elif name == "setstate":
-            tx.output.side_effects.mutation(self)
-            self.random.setstate(self.unwrap_state(args[0]))
-            return variables.ConstantVariable.create(None)
-        elif name == "shuffle":
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            seq = args[0].realize()
-            tx.output.side_effects.mutation(self)
-            # shuffle's permutation depends only on the sequence length and the
-            # RNG state, not on the elements, so shuffle a list of indices to
-            # both advance the symbolic RNG and obtain the permutation to apply.
-            if not hasattr(seq, "items"):
-                raise AssertionError(
-                    "shuffle only supports ListVariable and TupleVariable"
-                )
-            perm = list(range(len(seq.items)))
-            self.random.shuffle(perm)
-            tx.output.side_effects.mutation(seq)
-            seq.items[:] = [seq.items[i] for i in perm]
-            return variables.ConstantVariable.create(None)
-        elif name == "sample":
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            elems = unpack_iterable(tx, args[0])
-            k = args[1].as_python_constant()
-            if not isinstance(k, int) or k < 0 or k > len(elems):
-                raise_value_error(
-                    tx,
-                    "Sample larger than population or is negative",
-                )
-            tx.output.side_effects.mutation(self)
-            # Like shuffle, sample's selected positions depend only on the
-            # population length and RNG state, so sample over an index range to
-            # advance the symbolic RNG and pick the population elements to keep.
-            indices = self.random.sample(range(len(elems)), k)
-            return variables.ListVariable(
-                [elems[i] for i in indices],
-                mutation_type=variables.base.ValueMutationNew(),
-            )
-        elif name in self._supported_fn_names:
-            tx.output.side_effects.mutation(self)
-            state = self.random.getstate()
+        tx.output.side_effects.mutation(self)
+        self.random.seed(
+            *[x.as_python_constant() for x in args],
+            **{key: val.as_python_constant() for key, val in kwargs.items()},
+        )
+        return variables.ConstantVariable.create(None)
 
-            def call_random_meth(*args: Any, **kwargs: Any) -> Any:
-                r = random.Random()
-                r.setstate(state)
-                return getattr(r, name)(*args, **kwargs)
+    def getstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.wrap_state(self.random.getstate())
 
-            # self.random state not actually updated by call_random_meth, so update here
-            # by calling the method
-            getattr(self.random, name)(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        tx.output.side_effects.mutation(self)
+        self.random.setstate(self.unwrap_state(args[0]))
+        return variables.ConstantVariable.create(None)
+
+    def shuffle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        name = "shuffle"
+        check_positional(tx, name, len(args), 1, 1)
+        no_keywords(tx, name, kwargs)
+        seq = args[0].realize()
+        tx.output.side_effects.mutation(self)
+        # shuffle's permutation depends only on the sequence length and the
+        # RNG state, not on the elements, so shuffle a list of indices to
+        # both advance the symbolic RNG and obtain the permutation to apply.
+        if not hasattr(seq, "items"):
+            raise AssertionError("shuffle only supports ListVariable and TupleVariable")
+        perm = list(range(len(seq.items)))
+        self.random.shuffle(perm)
+        tx.output.side_effects.mutation(seq)
+        seq.items[:] = [seq.items[i] for i in perm]
+        return variables.ConstantVariable.create(None)
+
+    def sample(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        name = "sample"
+        check_positional(tx, name, len(args), 2, 2)
+        no_keywords(tx, name, kwargs)
+        elems = unpack_iterable(tx, args[0])
+        k = args[1].as_python_constant()
+        if not isinstance(k, int) or k < 0 or k > len(elems):
+            raise_value_error(
+                tx,
+                "Sample larger than population or is negative",
             )
+        tx.output.side_effects.mutation(self)
+        # Like shuffle, sample's selected positions depend only on the
+        # population length and RNG state, so sample over an index range to
+        # advance the symbolic RNG and pick the population elements to keep.
+        indices = self.random.sample(range(len(elems)), k)
+        return variables.ListVariable(
+            [elems[i] for i in indices],
+            mutation_type=variables.base.ValueMutationNew(),
+        )
 
-            return call_random_fn(tx, call_random_meth, args, kwargs)
-        return super().call_method(tx, name, args, kwargs)
+    def _call_random(self, tx, name, args, kwargs):
+        tx.output.side_effects.mutation(self)
+        state = self.random.getstate()
+
+        def call_random_meth(*args: Any, **kwargs: Any) -> Any:
+            r = random.Random()
+            r.setstate(state)
+            return getattr(r, name)(*args, **kwargs)
+
+        # self.random state not actually updated by call_random_meth, so update here
+        # by calling the method
+        getattr(self.random, name)(
+            *[x.as_python_constant() for x in args],
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+
+        return call_random_fn(tx, call_random_meth, args, kwargs)
+
+    def _random(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "random", args, kwargs)
+
+    def _randint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "randint", args, kwargs)
+
+    def _randrange(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "randrange", args, kwargs)
+
+    def _uniform(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._call_random(tx, "uniform", args, kwargs)
+
+    tp_methods = {
+        "seed": Method(seed),
+        "getstate": Method(getstate),
+        "setstate": Method(setstate),
+        "shuffle": Method(shuffle),
+        "sample": Method(sample),
+        "random": Method(_random),
+        "randint": Method(_randint),
+        "randrange": Method(_randrange),
+        "uniform": Method(_uniform),
+    }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -2988,7 +3058,7 @@ class WeakRefVariable(VariableTracker):
 
         return generic_hash_impl(tx, self.referent_vt)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import generic_richcompare

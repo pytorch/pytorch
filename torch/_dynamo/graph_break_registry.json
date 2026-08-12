@@ -299,6 +299,16 @@
       "Hints": []
     }
   ],
+  "GB1273": [
+    {
+      "Gb_type": "Unsupported attribute assignment on traceback object",
+      "Context": "call_setattr {self} {attr}",
+      "Explanation": "Dynamo does not support setting the attribute '{attr}' on tracked traceback objects. Only `tb_next` is supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0023": [
     {
       "Gb_type": "Builtin `operator.*` comparison with constant `self` failed",
@@ -404,6 +414,16 @@
     }
   ],
   "GB0031": [
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "getattro_impl {self} {name}",
@@ -1488,6 +1508,15 @@
   "GB0102": [
     {
       "Gb_type": "Strict mode banned op",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Getattr invocation '{name}' in strict mode is not supported.",
+      "Hints": [
+        "Remove `{name}` from the list of banned ops by ",
+        "setting `torch._dynamo.config._autograd_backward_strict_mode_banned_ops`."
+      ]
+    },
+    {
+      "Gb_type": "Strict mode banned op",
       "Context": "getattro_impl {self} {name}",
       "Explanation": "Getattr invocation '{name}' in strict mode is not supported.",
       "Hints": [
@@ -1518,6 +1547,12 @@
     }
   ],
   "GB0104": [
+    {
+      "Gb_type": "Tensor with grad_fn()",
+      "Context": "tp_getattro_impl {self} grad_fn",
+      "Explanation": "Dynamo does not support tracing tensors with a grad_fn directly.",
+      "Hints": []
+    },
     {
       "Gb_type": "Tensor with grad_fn()",
       "Context": "getattro_impl {self} grad_fn",
@@ -1573,6 +1608,12 @@
     }
   ],
   "GB0108": [
+    {
+      "Gb_type": "Tensor.retain_grad() with AOTDispatcher",
+      "Context": "tp_getattro_impl {self} retain_grad",
+      "Explanation": "`Tensor.retain_grad()` does not work with AOTDispatcher.",
+      "Hints": []
+    },
     {
       "Gb_type": "Tensor.retain_grad() with AOTDispatcher",
       "Context": "getattro_impl {self} retain_grad",
@@ -1822,6 +1863,12 @@
   "GB5976": [
     {
       "Gb_type": "Data pointer comparison",
+      "Context": "tp_richcompare_impl {self} {op} {other}",
+      "Explanation": "Dynamo can only trace data pointer comparisons when it can prove both operands have the same data pointer.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Data pointer comparison",
       "Context": "richcompare_impl {self} {op} {other}",
       "Explanation": "Dynamo can only trace data pointer comparisons when it can prove both operands have the same data pointer.",
       "Hints": []
@@ -2003,6 +2050,14 @@
   "GB0135": [
     {
       "Gb_type": "Unsupported attribute assignment on Exception object",
+      "Context": "call_setattr {self} {attr}",
+      "Explanation": "Dynamo does not support setting the attribute '{attr}' on tracked exception objects. Only `__context__`, `__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported attribute assignment on Exception object",
       "Context": "call_setattr {self} {name}",
       "Explanation": "Dynamo does not support setting the attribute '{name}' on tracked exception objects. Only `__context__`, `__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
       "Hints": [
@@ -2021,6 +2076,14 @@
     }
   ],
   "GB0137": [
+    {
+      "Gb_type": "Unsupported attribute for slice() object",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "Unsupported attribute for slice() object",
       "Context": "getattro_impl {self} {name}",
@@ -2293,6 +2356,14 @@
   "GB4411": [
     {
       "Gb_type": "missing sq_contains",
+      "Context": "sq_contains_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "missing sq_contains",
       "Context": "sq_contains not implemented for {self.python_type_name()}",
       "Explanation": "Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
       "Hints": [
@@ -2338,6 +2409,16 @@
       ]
     }
   ],
+  "GB2412": [
+    {
+      "Gb_type": "Unsupported attribute",
+      "Context": "attr_unsupported {vt} {name}",
+      "Explanation": "{type(vt).__name__} does not support attribute '{name}'",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0156": [
     {
       "Gb_type": "Unsupported method call",
@@ -2347,6 +2428,12 @@
     }
   ],
   "GB0157": [
+    {
+      "Gb_type": "Unsupported ndarray attribute access",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Dynamo currently does not support tracing `ndarray.{name}`.",
+      "Hints": []
+    },
     {
       "Gb_type": "Unsupported ndarray attribute access",
       "Context": "getattro_impl {self} {name}",
@@ -2369,6 +2456,12 @@
     }
   ],
   "GB0159": [
+    {
+      "Gb_type": "Unsupported ndarray.__version__ access",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Dynamo currently does not support tracing `ndarray.{name}`.",
+      "Hints": []
+    },
     {
       "Gb_type": "Unsupported ndarray.__version__ access",
       "Context": "getattro_impl {self} {name}",
@@ -2832,6 +2925,14 @@
   ],
   "GB9648": [
     {
+      "Gb_type": "Missing tp_richcompare_impl override",
+      "Context": "tp_richcompare_impl {self} {op}",
+      "Explanation": "{type(self).__name__} does not implement tp_richcompare_impl. Add a tp_richcompare_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
       "Gb_type": "Missing richcompare_impl override",
       "Context": "richcompare_impl {self} {op}",
       "Explanation": "{type(self).__name__} does not implement richcompare_impl. Add a richcompare_impl override to {type(self).__name__}.",
@@ -2859,6 +2960,14 @@
     }
   ],
   "GB2483": [
+    {
+      "Gb_type": "tp_str_impl not implemented",
+      "Context": "{type(self).__name__} has no tp_str_impl override for {self.python_type_name()}",
+      "Explanation": "Dynamo does not implement __str__ for {self.python_type_name()} in {type(self).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "str_impl not implemented",
       "Context": "{type(self).__name__} has no str_impl override for {self.python_type_name()}",
@@ -2900,6 +3009,14 @@
     }
   ],
   "GB0188": [
+    {
+      "Gb_type": "getattr with no source",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Dynamo does not know how to access an attribute on an `nn.Module` instance that lacks a source. This is usually an internal error in Dynamo.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
     {
       "Gb_type": "getattr with no source",
       "Context": "getattro_impl {self} {name}",
@@ -3072,6 +3189,14 @@
     }
   ],
   "GB6215": [
+    {
+      "Gb_type": "Unresolved GetAttrVariable comparison",
+      "Context": "tp_richcompare_impl {self} {op}",
+      "Explanation": "Cannot compare {self} because the attribute could not be resolved to a concrete value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unresolved GetAttrVariable comparison",
       "Context": "richcompare_impl {self} {op}",
@@ -3267,6 +3392,17 @@
     }
   ],
   "GB0211": [
+    {
+      "Gb_type": "torch.nn.Module with a non-function custom __getattr__",
+      "Context": "tp_getattro_impl {self} {name}",
+      "Explanation": "Dynamo detected a nn.Module object with a custom `__getattr__` method, but this method is not a standard Python function (e.g., it might be implemented in C/C++). Dynamo cannot currently trace into such non-standard `__getattr__` methods.",
+      "Hints": [
+        "Avoid using objects with non-standard __getattr__ methods ",
+        "within the compiled region. If possible, implement ",
+        "__getattr__ as a standard Python function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "torch.nn.Module with a non-function custom __getattr__",
       "Context": "getattro_impl {self} {name}",
@@ -4954,6 +5090,17 @@
   "GB1220": [
     {
       "Gb_type": "Untraceable C tp_richcompare",
+      "Context": "tp_richcompare_impl {self} {op}",
+      "Explanation": "{cls.__name__} defines a C comparison method that Dynamo cannot trace into.",
+      "Hints": [
+        "Use torch._dynamo.allow_c_slot({cls.__name__}) to ",
+        "register it as safe if its comparison methods are pure ",
+        "and deterministic.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Untraceable C tp_richcompare",
       "Context": "richcompare_impl {self} {op}",
       "Explanation": "{cls.__name__} defines a C comparison method that Dynamo cannot trace into.",
       "Hints": [
@@ -5864,6 +6011,14 @@
   ],
   "GB6053": [
     {
+      "Gb_type": "tp_repr_impl not implemented",
+      "Context": "{type(self).__name__} has tp_repr slot but no tp_repr_impl override",
+      "Explanation": "The type {self.python_type_name()} has a tp_repr C slot but the corresponding VariableTracker doesn't implement tp_repr_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
       "Gb_type": "repr_impl not implemented",
       "Context": "{type(self).__name__} has tp_repr slot but no repr_impl override",
       "Explanation": "The type {self.python_type_name()} has a tp_repr C slot but the corresponding VariableTracker doesn't implement repr_impl.",
@@ -6218,6 +6373,16 @@
       "Hints": [
         "Disable compiled autograd by removing the compiled_autograd context manager.",
         "Or move the autograd.grad() call outside the torch.compile region."
+      ]
+    }
+  ],
+  "GB8136": [
+    {
+      "Gb_type": "StringFormatVariable with non-constant format argument",
+      "Context": "format argument type: {type(arg).__name__}",
+      "Explanation": "Dynamo cannot materialize a formatted string because one of its arguments is not a Python constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
