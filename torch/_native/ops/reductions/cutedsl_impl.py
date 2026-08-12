@@ -1,4 +1,4 @@
-"""CuTeDSL overrides for inner-tree ``sum``, ``prod``, ``nansum``, and ``mean``.
+"""CuTeDSL overrides for inner-tree reductions.
 
 CuTeDSL port of the Triton-style inner-tree reduction kernel that
 otherwise lives in ``aten/src/ATen/native/cuda/ReduceSumProdKernel.cu``
@@ -8,12 +8,13 @@ is the feature-rollout gate for these operators -- it is *not* gated by the
 global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
 ``cutedsl_utils`` at registration time).
 
-We register eight ATen dispatcher entries on ``CUDA``:
+We register ten ATen dispatcher entries on ``CUDA``:
 
 * ``sum.dim_IntList`` / ``sum.IntList_out`` -- ``x.sum(dim=...)`` + ``.out``.
 * ``prod.dim_int`` / ``prod.int_out`` -- ``x.prod(dim=...)`` + ``.out``.
 * ``nansum`` / ``nansum.out`` -- ``x.nansum(dim=...)`` + ``.out``.
 * ``mean.dim`` / ``mean.out`` -- ``x.mean(dim=...)`` + ``.out``.
+* ``linalg_vector_norm`` / ``linalg_vector_norm.out`` -- p=1 and p=2 norms.
 
 ``nanmean`` is covered compositionally and intentionally has no dispatcher
 entry here. ATen's CompositeImplicitAutograd implementation computes an
@@ -109,6 +110,16 @@ def _single_dim(dim, ndim: int) -> int | None:
     if len(dims) != 1:
         return None
     return _normalize_dim(dims[0], ndim)
+
+
+def _vector_norm_order(ord) -> int | None:
+    if isinstance(ord, bool) or not isinstance(ord, (int, float)):
+        return None
+    if ord == 1:
+        return 1
+    if ord == 2:
+        return 2
+    return None
 
 
 def _keepdim_out_shape(self: torch.Tensor, d: int) -> list[int]:
@@ -227,6 +238,24 @@ def _out_cond(self, dim=None, keepdim=False, *, dtype=None, out) -> bool:
     return _eligibility(self, d, out_kd) is not None
 
 
+def _vector_norm_cond(self, ord=2, dim=None, keepdim=False, *, dtype=None) -> bool:
+    if _vector_norm_order(ord) is None or not _cond(self, dim, keepdim, dtype=dtype):
+        return False
+    d = _single_dim(dim, self.ndim)
+    return d is not None and self.shape[d] != 1
+
+
+def _vector_norm_out_cond(
+    self, ord=2, dim=None, keepdim=False, *, dtype=None, out
+) -> bool:
+    if _vector_norm_order(ord) is None or not _out_cond(
+        self, dim, keepdim, dtype=dtype, out=out
+    ):
+        return False
+    d = _single_dim(dim, self.ndim)
+    return d is not None and self.shape[d] != 1
+
+
 def _sum_into():
     from .inner_tree_kernel import inner_tree_sum_into
 
@@ -251,7 +280,13 @@ def _mean_into():
     return inner_tree_mean_into
 
 
-def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
+def _vector_norm_into():
+    from .inner_tree_kernel import inner_tree_vector_norm_into
+
+    return inner_tree_vector_norm_into
+
+
+def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into, *args) -> None:
     """Run ``reduce_into`` writing the reduction of ``self`` along ``d`` into
     the keepdim-shaped ``out_kd``. Caller has validated eligibility."""
     it = _eligibility(self, d, out_kd)
@@ -262,7 +297,7 @@ def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
         return
     in_2d = self.as_strided((m, n), (in_rs, 1))
     out_1d = out_kd.as_strided((m,), (out_rs,))
-    reduce_into()(out_1d, in_2d)
+    reduce_into()(out_1d, in_2d, *args)
 
 
 def _make_impl(reduce_into):
@@ -295,9 +330,37 @@ def _make_out_impl(reduce_into):
     return _out_impl
 
 
+def _vector_norm_impl(self, ord=2, dim=None, keepdim=False, *, dtype=None):
+    p = _vector_norm_order(ord)
+    if p is None:
+        raise AssertionError("_vector_norm_cond guaranteed p=1 or p=2")
+    if dim is None:
+        raise AssertionError("_vector_norm_cond guaranteed a non-None dim")
+    d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
+    out_kd = torch.empty(
+        _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
+    )
+    _run(self, d, out_kd, _vector_norm_into, p)
+    return out_kd if keepdim else out_kd.squeeze(d)
+
+
+def _vector_norm_out_impl(self, ord=2, dim=None, keepdim=False, *, dtype=None, out):
+    p = _vector_norm_order(ord)
+    if p is None:
+        raise AssertionError("_vector_norm_out_cond guaranteed p=1 or p=2")
+    if dim is None:
+        raise AssertionError("_vector_norm_out_cond guaranteed a non-None dim")
+    d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
+    out_kd = _out_keepdim_view(self, d, keepdim, out)
+    if out_kd is None:
+        raise AssertionError("_vector_norm_out_cond guaranteed a reduced-shape out")
+    _run(self, d, out_kd, _vector_norm_into, p)
+    return out
+
+
 def register_to_dispatch() -> None:
-    # Eligibility (_cond/_out_cond) is reduction-agnostic; only the kernel
-    # entry differs among sum, prod, nansum, and mean.
+    # Eligibility (_cond/_out_cond) is reduction-agnostic; vector norm adds
+    # its order check before using the same geometry predicate.
     cu.register_op_override(
         "aten", "sum.dim_IntList", "CUDA", cond=_cond, impl=_make_impl(_sum_into)
     )
@@ -333,4 +396,18 @@ def register_to_dispatch() -> None:
         "CUDA",
         cond=_out_cond,
         impl=_make_out_impl(_mean_into),
+    )
+    cu.register_op_override(
+        "aten",
+        "linalg_vector_norm",
+        "CUDA",
+        cond=_vector_norm_cond,
+        impl=_vector_norm_impl,
+    )
+    cu.register_op_override(
+        "aten",
+        "linalg_vector_norm.out",
+        "CUDA",
+        cond=_vector_norm_out_cond,
+        impl=_vector_norm_out_impl,
     )
