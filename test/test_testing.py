@@ -2652,13 +2652,14 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
-                           "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
+                           "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
-                           "torch._native.ops.sum.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
                            "torch.distributed.examples",  # requires CUDA and torchvision

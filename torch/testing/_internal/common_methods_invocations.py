@@ -4775,28 +4775,11 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
 
 
 def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs):
-    # The FlyDSL override only fires on ROCm for large N with enough rows to
-    # amortize the launch: N in [4096, 8192) needs >= 8192 rows, [8192, 16384)
-    # needs >= 4096, and N >= 16384 needs >= 2048.
-    #
-    # Exactly one dispatching shape is listed. Each band's minimum works out to
-    # the same 2^25 elements -- 128 MiB per fp32 tensor, 64 MiB at fp16/bf16 --
-    # and every TestCommon test pays for it: test_noncontiguous_samples copies
-    # it, test_compare_cpu runs the reference on CPU, test_multiple_devices
-    # repeats it per device. The other two bands, and the kernel's internal
-    # paths, are covered far more cheaply by
-    # test/python_native/test_flydsl_rmsnorm_fwd.py. No memory guard: this
-    # variant is already gated to gfx950, which has hundreds of GB of HBM, and
-    # largeTensorTest's own gc.collect() + empty_cache() per test costs an
-    # order of magnitude more here than the samples it would protect.
+    # Keep one large dispatching shape here; dedicated tests cover the other bands.
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     cases = (
-        # eps omitted, which is what nn.RMSNorm passes, so this covers both the
-        # kernel and the accumulator-epsilon substitution the override does in
-        # aten's place.
         ((8192, 4096), (4096,), {}),
-        # Below the row threshold and below the N threshold: both fall through
-        # to aten, which the override must leave numerically untouched.
+        # Exercise row- and N-threshold fallbacks.
         ((64, 4096), (4096,), {'eps': 1e-5}),
         ((8, 128), (128,), {'eps': 1e-5}),
         ((8, 128), (128,), {}),
@@ -14171,6 +14154,7 @@ op_db: list[OpInfo] = [
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -14201,14 +14185,11 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
-               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -14239,10 +14220,6 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
-               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -19600,23 +19577,13 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,  # vmap complains of the sizes
-           sample_inputs_func=sample_inputs_put,
-           skips=(
-               # NotImplementedError: The operator 'aten::put_' is not currently
-               # implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
-           )),
-
+           sample_inputs_func=sample_inputs_put),
     OpInfo('take',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_grad=False,  # vmap complains of the sizes
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_take,
-           skips=(
-               # The operator 'aten::take' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
-           ),
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -23088,37 +23055,18 @@ if "flydsl" in dsl_ops_by_dsl:
             dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
             dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
             supports_out=False,
-            # Matches the base nn.functional.rms_norm entry: the override only
-            # replaces the forward, and returns the FP32 rstd that aten's
-            # backward consumes, so autograd is unaffected. Note the gradient
-            # suites filter to float64/complex128, which this variant does not
-            # list -- test_flydsl_rmsnorm_fwd.py covers gradients instead.
-            supports_forward_ad=True,
-            supports_fwgrad_bwgrad=True,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
             sample_inputs_func=sample_inputs_rms_norm_flydsl,
             decorators=[
                 onlyCUDA,
-                # The override declines every input on other archs, so without
-                # this the variant would silently compare aten against itself.
                 skipCUDAIf(
                     not isRocmArchAnyOf(MI350_ARCH),
                     "flydsl rms_norm override requires gfx950",
                 ),
-                # The predicate declines non-contiguous inputs, so this test
-                # compares the FlyDSL kernel against aten rather than one
-                # kernel against itself. Their reduction orders differ, which
-                # at N=4096 exceeds the default fp32 tolerance.
-                DecorateInfo(
-                    toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
-                    "TestCommon", "test_noncontiguous_samples",
-                ),
             ],
             skips=(
-                # test_dtypes probes every dtype and expects the listed set
-                # to exactly match what the op accepts. The override falls
-                # through to aten for fp64/complex, so those "work" from the
-                # probe's perspective -- but this variant is specifically for
-                # the override's supported dtypes only.
+                # Unsupported FlyDSL dtypes fall through to aten and appear supported.
                 DecorateInfo(
                     unittest.expectedFailure,
                     "TestCommon", "test_dtypes",
