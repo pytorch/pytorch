@@ -365,11 +365,13 @@ function install_flash_attn_cute() {
 }
 
 function install_cutlass_dsl() {
-  # cutlass-dsl requires Python >= 3.12
+  # 3.12 was only ever required by cutlass-dsl 4.0/4.1; 4.2 dropped it to 3.10
+  # and 4.4.2+ ship a pure-python py3 wheel. Skipping on py3.10 left every
+  # py3.10 CUDA build without the runtime the native-AOT stage-2 build needs.
   local py_version
   py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
+  if [[ "$(echo -e "3.10\n$py_version" | sort -V | head -n1)" != "3.10" ]]; then
+    echo "Skipping CUTLASS DSL install: requires Python >= 3.10, have $py_version"
     return 0
   fi
 
