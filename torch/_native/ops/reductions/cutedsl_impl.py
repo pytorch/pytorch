@@ -1,4 +1,4 @@
-"""CuTeDSL overrides for ``aten::sum`` / ``aten::prod`` / ``aten::nansum``.
+"""CuTeDSL overrides for inner-tree ``sum``, ``prod``, ``nansum``, and ``mean``.
 
 CuTeDSL port of the Triton-style inner-tree reduction kernel that
 otherwise lives in ``aten/src/ATen/native/cuda/ReduceSumProdKernel.cu``
@@ -8,14 +8,15 @@ is the feature-rollout gate for these operators -- it is *not* gated by the
 global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
 ``cutedsl_utils`` at registration time).
 
-We register six ATen dispatcher entries on ``CUDA``:
+We register eight ATen dispatcher entries on ``CUDA``:
 
 * ``sum.dim_IntList`` / ``sum.IntList_out`` -- ``x.sum(dim=...)`` + ``.out``.
 * ``prod.dim_int`` / ``prod.int_out`` -- ``x.prod(dim=...)`` + ``.out``.
 * ``nansum`` / ``nansum.out`` -- ``x.nansum(dim=...)`` + ``.out``.
+* ``mean.dim`` / ``mean.out`` -- ``x.mean(dim=...)`` + ``.out``.
 
-sum/prod/nansum share the identical inner-tree geometry and eligibility. Their
-combiner, identity, and optional per-element map are threaded through the kernel
+The reductions share identical inner-tree geometry and eligibility. Their
+combiner, identity, and optional pre/post maps are threaded through the kernel
 in ``inner_tree_kernel.py``.
 
 ``sum.dim_IntList`` is ``structured_delegate: sum.IntList_out``, so its
@@ -236,6 +237,12 @@ def _nansum_into():
     return inner_tree_nansum_into
 
 
+def _mean_into():
+    from .inner_tree_kernel import inner_tree_mean_into
+
+    return inner_tree_mean_into
+
+
 def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
     """Run ``reduce_into`` writing the reduction of ``self`` along ``d`` into
     the keepdim-shaped ``out_kd``. Caller has validated eligibility."""
@@ -282,7 +289,7 @@ def _make_out_impl(reduce_into):
 
 def register_to_dispatch() -> None:
     # Eligibility (_cond/_out_cond) is reduction-agnostic; only the kernel
-    # entry differs among sum, prod, and nansum.
+    # entry differs among sum, prod, nansum, and mean.
     cu.register_op_override(
         "aten", "sum.dim_IntList", "CUDA", cond=_cond, impl=_make_impl(_sum_into)
     )
@@ -308,4 +315,14 @@ def register_to_dispatch() -> None:
         "CUDA",
         cond=_out_cond,
         impl=_make_out_impl(_nansum_into),
+    )
+    cu.register_op_override(
+        "aten", "mean.dim", "CUDA", cond=_cond, impl=_make_impl(_mean_into)
+    )
+    cu.register_op_override(
+        "aten",
+        "mean.out",
+        "CUDA",
+        cond=_out_cond,
+        impl=_make_out_impl(_mean_into),
     )
