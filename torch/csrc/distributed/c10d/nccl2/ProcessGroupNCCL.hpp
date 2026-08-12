@@ -122,10 +122,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   using Options = ::c10d::ProcessGroupNCCL::Options;
 
-  // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
-  // the first collective (or via eagerConnectSingleDevice / bound_device_id),
-  // matching c10d's device-binding model -- unlike torchcomms which took an
-  // eager init(device).
+  // c10d-style constructor. Communicator initialization happens when c10d
+  // binds the backend to a device via setBoundDeviceId().
   ProcessGroupNCCL(
       c10::intrusive_ptr<::c10d::Store> store,
       int rank,
@@ -272,6 +270,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
   void setTimeout(std::chrono::milliseconds timeout) override;
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -476,8 +475,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     std::shared_ptr<NcclApi> nccl_api_;
   };
 
-  // Lazy, one-time bootstrap of the NCCL communicator on `device`. Subsequent
-  // calls validate the same device. Replaces torchcomms' eager init(device).
+  // One-time bootstrap of the NCCL communicator on `device`. Subsequent calls
+  // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
   void finalize();

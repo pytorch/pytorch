@@ -8208,7 +8208,7 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA, XPU: put_
+    CPU, CUDA, MPS, XPU: put_
   autogen: put.out
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
@@ -9260,12 +9260,12 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: take_out
+    CPU, CUDA, MPS, XPU: take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA, XPU: take
+    CPU, CUDA, MPS, XPU: take
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -9518,12 +9518,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU, CUDA, MPS: geqrf_out
+    CPU, CUDA, MPS, XPU: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: geqrf
+    CPU, CUDA, MPS, XPU: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -14486,12 +14486,12 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA, MPS: linalg_householder_product
+    CPU, CUDA, MPS, XPU: linalg_householder_product
 
 - func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CPU, CUDA, MPS: linalg_householder_product_out
+    CPU, CUDA, MPS, XPU: linalg_householder_product_out
 
 - func: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg
@@ -14719,7 +14719,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA, MPS: linalg_qr_out
+    CPU, CUDA, MPS, XPU: linalg_qr_out
 
 - func: linalg_polar(Tensor A) -> (Tensor U, Tensor H)
   python_module: linalg
