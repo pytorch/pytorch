@@ -763,16 +763,15 @@ class TestDraftExport(TestCase):
             )
 
 
-
 class TestDraftExportCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties(0).total_memory < 2**28,
+        torch.cuda.is_available()
+        and torch.cuda.get_device_properties(0).total_memory < 2**28,
         "Requires 16 MB GPU memory to pass the test; setting it higher to catch violations",
     )
-    def test_cuda_memory_usage(self):
+    def test_cuda_memory_usage(self, device):
         # This used to OOM
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -781,12 +780,11 @@ class TestDraftExportCuda(TestCase):
                 return x
 
         # measure base usage
-        device = torch.device("cuda:0")
         torch.cuda.reset_peak_memory_stats()
         base_usage = torch.cuda.memory_allocated(device)
 
         # usage with input tensor allocated
-        x = torch.randn(2**10, 2**10).to(device)
+        x = torch.randn(2**10, 2**10, device=device)
         x_usage = torch.cuda.memory_allocated(device)
 
         # draft export peak memory usage
@@ -796,6 +794,7 @@ class TestDraftExportCuda(TestCase):
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
+
 
 class TestDraftExportDeviceGuard(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -829,6 +828,7 @@ class TestDraftExportDeviceGuard(TestCase):
                 m(*bad_device_inps)
 
 
+instantiate_device_type_tests(TestDraftExportCuda, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDraftExportDeviceGuard, globals(), except_for="cpu")
 
 
