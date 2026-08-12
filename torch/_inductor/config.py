@@ -2612,6 +2612,9 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
+# cutlass fields not overridden below are aliased to `cutlass.*`: reads resolve
+# to the cutlass entry and writes mutate it, so `cuda`, `xpu` and `cutlass` share
+# those values (they are not isolated). Fields defined here stay independent.
 @alias_fields_from(cutlass)
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -2639,6 +2642,8 @@ class cuda:
     enable_ptxas_info = False
 
 
+# See the note on `cuda` above: unoverridden cutlass fields are aliased to
+# `cutlass.*` and thus shared, not copied.
 @alias_fields_from(cutlass)
 class xpu:
     # Xe arch to use for SYCL kernel compilation.

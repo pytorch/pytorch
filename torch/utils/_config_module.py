@@ -6,6 +6,7 @@ import inspect
 import io
 import os
 import pickle
+import sys
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -331,6 +332,9 @@ class _ConfigEntry:
     # upstream bug - python/cpython#126886
     hide: bool = False
     alias: str | None = None
+    # Memoized (container, attr_name) resolution of ``alias``. ``None`` means
+    # not resolved yet; resolution is stable for the process lifetime.
+    _resolved_alias: "tuple[ModuleType | SubConfigProxy, str] | None" = None
     # Deprecation support
     deprecated: bool = False
     deprecation_message: str | None = None
@@ -343,6 +347,7 @@ class _ConfigEntry:
         )
         self.justknob = config.justknob
         self.alias = config.alias
+        self._resolved_alias = None
         # Deprecation fields
         self.deprecated = config.deprecated
         self.deprecation_message = config.deprecation_message
@@ -427,6 +432,10 @@ class ConfigModule(ModuleType):
 
             if config.alias is not None:
                 self._set_alias_val(config, value)
+                # Clear ``hide`` so an aliased field stays readable after a
+                # mock.patch teardown (delattr sets hide=True, then setattr
+                # must clear it; see _ConfigEntry.hide).
+                config.hide = False
             else:
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
@@ -477,37 +486,71 @@ class ConfigModule(ModuleType):
         self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override.set(_UNSET_SENTINEL)
-        self._config[name].hide = True
+        config = self._config[name]
+        if config.alias is not None:
+            # Reset the aliased-to target rather than the alias entry, whose
+            # own user_override is never read.
+            target = self._get_alias_target_entry(config)
+            if target is not None:
+                target.user_override.set(_UNSET_SENTINEL)
+        else:
+            config.user_override.set(_UNSET_SENTINEL)
+        config.hide = True
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
-    ) -> tuple[object, str] | None:
+    ) -> "tuple[ModuleType | SubConfigProxy, str] | None":
         alias = entry.alias
         if alias is None:
             return None
+        if entry._resolved_alias is not None:
+            return entry._resolved_alias
         # The leading components of the alias form an importable module and the
         # trailing components are attributes on it (e.g. a `cutlass.foo`
         # sub-config field of torch._inductor.config). Import the longest
         # importable module prefix, then walk the remaining attributes.
         parts = alias.split(".")
         for i in range(len(parts) - 1, 0, -1):
-            try:
-                container: Any = importlib.import_module(".".join(parts[:i]))
-            except ImportError:
-                continue
+            module_name = ".".join(parts[:i])
+            module = sys.modules.get(module_name)
+            if module is None:
+                try:
+                    module = importlib.import_module(module_name)
+                except ModuleNotFoundError:
+                    # This prefix is not a module; try a shorter one. Genuine
+                    # import failures of an existing module propagate.
+                    continue
+            container: ModuleType | SubConfigProxy = module
             for attr in parts[i:-1]:
                 container = getattr(container, attr)
-            return container, parts[-1]
+            resolved = (container, parts[-1])
+            entry._resolved_alias = resolved
+            return resolved
         raise AttributeError(f"config alias {alias} does not exist")
+
+    def _get_alias_target_entry(self, entry: _ConfigEntry) -> "_ConfigEntry | None":
+        """Resolve the ``_ConfigEntry`` an alias points at, if the target is
+        itself a config entry (rather than a plain module constant)."""
+        data = self._get_alias_module_and_name(entry)
+        if data is None:
+            return None
+        container, name = data
+        if isinstance(container, SubConfigProxy):
+            target_module = container._config
+            key = container._prefix + name
+        elif isinstance(container, ModuleType) and hasattr(container, "_config"):
+            target_module = container
+            key = name
+        else:
+            return None
+        return target_module._config.get(key)  # type: ignore[attr-defined]
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:
         data = self._get_alias_module_and_name(entry)
         if data is None:
             return _UNSET_SENTINEL
-        module, constant_name = data
-        constant_value = getattr(module, constant_name)
-        return constant_value
+        container, constant_name = data
+        return getattr(container, constant_name)
 
     def _set_alias_val(self, entry: _ConfigEntry, val: Any) -> None:
         data = self._get_alias_module_and_name(entry)
@@ -515,8 +558,8 @@ class ConfigModule(ModuleType):
             raise AssertionError(
                 "alias data should not be None when setting alias value"
             )
-        module, constant_name = data
-        setattr(module, constant_name, val)
+        container, constant_name = data
+        setattr(container, constant_name, val)
 
     _GET_DICT_DIRTY_KEYS_CAP = 16
 
@@ -1007,18 +1050,32 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     return default
 
 
-def alias_fields_from(parent_cls):
+def alias_fields_from(parent_cls: type) -> Callable[[type], type]:
     """Class decorator adding an alias for every public field of ``parent_cls``
     that the decorated class does not override.
 
     Unlike copying, aliases resolve dynamically: reading or writing an aliased
     field on the child reads/writes the parent's field, so later changes to the
     parent (e.g. user overrides) are reflected on the child.
+
+    Because reads and writes both resolve to the shared parent entry, sibling
+    children that alias the same parent are *not* isolated: writing an aliased
+    field through one child (or through the parent) is observed through the
+    other. For mutable defaults (lists, dicts) the child and parent share the
+    same object, so in-place mutation is visible through either name.
     """
     prefix = f"{parent_cls.__module__}.{parent_cls.__qualname__}"
+    # Subconfig classes are required to be defined in the config module, so
+    # ``__qualname__`` is a bare name and the derived alias resolves. Guard the
+    # assumption here so a nested/relocated parent fails at decoration time
+    # rather than at first field access.
+    if "." in parent_cls.__qualname__:
+        raise AssertionError(
+            f"alias_fields_from expects a top-level config class, got {parent_cls.__qualname__}"
+        )
     annotations = inspect.get_annotations(parent_cls)
 
-    def wrapper(child_cls):
+    def wrapper(child_cls: type) -> type:
         for k, v in parent_cls.__dict__.items():
             if k.startswith("_") or k in child_cls.__dict__:
                 continue
