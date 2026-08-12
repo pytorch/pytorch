@@ -68,14 +68,25 @@ def define_targets(rules):
         # The Bazel cc_library maps genrule outputs by target name rather
         # than output path, breaking the torch/headeronly/core/enum_tag.h
         # include path.
+        # The cuda/ headers are CUDA-only source; on AMD they must be replaced
+        # (not supplemented) by their hipified copies, or both spellings would
+        # be exported under the same include path.
+        cuda_headers = native.glob(["cuda/**/*.h"])
         native.cxx_library(
             name = "torch_headeronly",
             header_namespace = "torch/headeronly",
-            exported_headers = {
-                h: h for h in native.glob(["**/*.h"], exclude = ["version.h"])
+            exported_headers = ({
+                h: h
+                for h in native.glob(["**/*.h"], exclude = ["version.h"] + cuda_headers)
             } | {
                 "core/enum_tag.h": ":enum_tag_h",
-            },
+            }) + select({
+                "DEFAULT": {h: h for h in cuda_headers},
+                "ovr_config//gpu:amd": {
+                    h: ":fb_headeronly_hipify_gen[{}]".format(h)
+                    for h in cuda_headers
+                },
+            }),
             visibility = ["PUBLIC"],
             exported_deps = [
                 "//caffe2/torch/headeronly/macros:macros",
