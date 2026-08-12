@@ -634,9 +634,10 @@ def _misaligned_view(rows, cols, dtype):
     # Sanity check: if the allocator ever hands us a base such that the
     # +1-element slice is still 16B-aligned, the test silently passes
     # without exercising the misalignment path.
-    assert t.data_ptr() % 16 != 0, (  # noqa: S101
-        f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
-    )
+    if t.data_ptr() % 16 == 0:
+        raise AssertionError(
+            f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
+        )
     return t
 
 
