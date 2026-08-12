@@ -45,8 +45,9 @@ BUILD_DIR = os.path.join(REPO, "build")
 # artifacts the embedded glob picks up.
 NATIVE_AOT_ARTIFACTS_DIR = os.path.join(BUILD_DIR, "native_aot")
 # See export.py: as a script sys.path[0] is this directory, so the repo root
-# has to go on the path for `tools.native_aot` to import from any cwd.
-sys.path.insert(0, REPO)
+# has to go on the path for `tools.native_aot` to import from any cwd. Appended,
+# not inserted, so the source torch/ tree never shadows the installed wheel.
+sys.path.append(REPO)
 
 
 def _report(msg: str) -> None:
