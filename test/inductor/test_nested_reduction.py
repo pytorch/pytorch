@@ -1092,6 +1092,54 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_non_leaf_epilogue_fallback()
 
+    def test_standalone_sub_parent_leaves_incompatible_reader_unfused(self):
+        B, D = 4, 512
+
+        def f(x):
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / scale.unsqueeze(-1)
+            odd = pairs[..., 1].float() / scale.unsqueeze(-1)
+            side = torch.sin(even[:, ::2])
+            return even, odd, side, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_standalone_sub_parent_multidimensional_reduction(self):
+        B, C, D = 4, 4, 16
+
+        def f(x):
+            scale = (x.float().abs().amax(dim=(-2, -1)) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = x.view(B, C, D // 2, 2)
+            scale_f = scale[:, None, None]
+            even = pairs[..., 0].float() / scale_f
+            odd = pairs[..., 1].float() / scale_f
+            return even, odd, scale
+
+        x = torch.randn(B, C, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
+    def test_standalone_sub_parent_rejects_mismatched_parent_coordinates(self):
+        def f(x):
+            parent = torch.as_strided(x, (2, 6, 8), (100, 10, 1))
+            scale = (parent.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            even = torch.as_strided(x, (3, 4, 4), (100, 10, 2))
+            odd = torch.as_strided(x, (3, 4, 4), (100, 10, 2), storage_offset=1)
+            scale_f = scale.reshape(3, 4, 1)
+            return even.float() / scale_f, odd.float() / scale_f, scale
+
+        x = torch.randn(256, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+
     def test_standalone_sub_parent_rejects_same_buffer_scalar(self):
         B, D, G = 32, 1024, 16
 
