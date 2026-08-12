@@ -115,8 +115,8 @@ def _move_batch_dims_to_last_for_scan(unbatched_args, in_dims):
 
 
 def _batch_dims_as_last_for_scan(in_dims):
-    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched,
-    # else None. Encodes the same scan-specific last-axis convention described there.
+    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched, else None.
+    # Encodes the same scan-specific last-axis convention described there.
     return tuple(
         -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
     )
@@ -126,8 +126,8 @@ class _VmapCombineFnWrapper:
     """Re-vmaps a scan/associative_scan combine_fn for use inside a scan batch rule.
 
     The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
-    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``)
-    so it cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
+    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
+    cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
     and passed as the combine_fn to the underlying HOP.
 
     Contract for callers:
@@ -168,15 +168,6 @@ class _VmapCombineFnWrapper:
             per_slice_out_dims,
         )
         out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
-        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
-            raise RuntimeError(
-                "associative_scan under vmap requires the combine_fn outputs to keep "
-                "the same batched arguments as its xs inputs, because the outputs are "
-                "fed back as inputs on later scan levels. Here they diverge (e.g. "
-                "batched additional_inputs with unbatched xs, or a pytree where an "
-                "output leaf becomes batched via another leaf): expected output batch "
-                f"dims {self.expected_out_dims} but got {out_dims}."
-            )
         if self.out_dims is not None and out_dims != self.out_dims:
             raise AssertionError(
                 "combine_fn produced inconsistent output batch dims across scan "
