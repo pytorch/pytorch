@@ -310,7 +310,7 @@ class TestCapabilityGating(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        expected_runs = 1
+        expected_runs = 3
         if cls.executed_count != expected_runs:
             raise AssertionError(
                 f"Capability gating failed! "
@@ -329,21 +329,38 @@ class TestCapabilityGating(TestCase):
         type(self).executed_count += 1
         self.fail("Expected skip: dtype.bf16 is unsupported on this device")
 
-    @requires_capabilities(Capability.attention.flash_attention)
     def test_capability_missing(self, device):
-        type(self).executed_count += 1
-        self.fail("Expected skip: attention.flash_attention is not declared")
+        """@requires_capabilities raises AssertionError for undeclared capabilities."""
 
-    @requires_capabilities(
-        Capability.lib.triton,
-        Capability.dtype.bf16,
-        Capability.attention.flash_attention,
-    )
-    def test_capability_combined(self, device):
+        @requires_capabilities(Capability.attention.flash_attention)
+        def dummy(self):
+            self.fail("should not execute")
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared capabilities: attention\.flash_attention",
+        ):
+            dummy(self)
         type(self).executed_count += 1
-        self.fail(
-            "Expected skip: attention.flash_attention is not declared and dtype.bf16 is not supported"
+
+    def test_capability_combined(self, device):
+        """@requires_capabilities raises AssertionError when a combined set
+        includes an undeclared capability."""
+
+        @requires_capabilities(
+            Capability.lib.triton,
+            Capability.dtype.bf16,
+            Capability.attention.flash_attention,
         )
+        def dummy(self):
+            self.fail("should not execute")
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared capabilities: attention\.flash_attention",
+        ):
+            dummy(self)
+        type(self).executed_count += 1
 
 
 PrivateUse1TestBase._capabilities = classmethod(
