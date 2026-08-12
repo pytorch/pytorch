@@ -22,6 +22,7 @@ trait/kernel support for those shapes lands.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -29,6 +30,7 @@ import torch
 from ... import cutedsl_utils as cu
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
+from ..sum.cutedsl_impl import _inner_tree_enabled
 
 
 if TYPE_CHECKING:
@@ -45,7 +47,7 @@ else:
     kg = LazyModule("torch._native.ops.reductions.kernel_general")
 
 
-_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
 
 def _acc_policy():
@@ -60,6 +62,7 @@ def _acc_policy():
         torch.float16: (cutlass.Float32, torch.float32),
         torch.bfloat16: (cutlass.Float32, torch.float32),
         torch.float32: (cutlass.Float32, torch.float32),
+        torch.float64: (cutlass.Float64, torch.float64),
     }
 
 
@@ -131,14 +134,18 @@ def _geometry_supported(x: torch.Tensor, dim, nouts=1, has_index=False) -> bool:
 
 def _keepdim_reshape(out: torch.Tensor, x_shape, red: set | None, keepdim: bool):
     # Our kernels return the NON-keepdim result. Restore size-1 reduced dims when
-    # keepdim=True so the output matches aten's shape exactly.
+    # keepdim=True so the output matches aten's shape exactly. resize_ (not reshape)
+    # because an aten reduction NEVER aliases its output, and view-ness is observable
+    # -- see kernel_general._as_shape for the OpInfo failure this caused.
     if not keepdim:
         return out
     if red is None:
         target = [1] * len(x_shape)
     else:
         target = [1 if i in red else s for i, s in enumerate(x_shape)]
-    return out.reshape(target)
+    if out._base is not None:
+        return out.reshape(target).clone()
+    return out.resize_(target)
 
 
 # ----------------------------------------------------------- shared cond helpers
@@ -213,6 +220,14 @@ def _run1(make_trait, key, self, red, keepdim, out_torch_dtype):
 
 
 def _sum_cond(self, dim=None, keepdim=False, *, dtype=None):
+    # Yield to the inner-tree sum override (ops/sum/) whenever its feature flag is on.
+    # Both register on sum.dim_IntList/CUDA and the router is first-match-wins, so
+    # without this we would silently shadow it -- and it carries a BITWISE-equivalence
+    # contract (its own kernel's exact bit pattern is asserted), which our accumulation
+    # order does not reproduce. Its flag is off by default, so this normally costs one
+    # env lookup and changes nothing.
+    if _inner_tree_enabled():
+        return False
     return _base_cond(self, dim) and _supported_out_dtype(dtype)
 
 
@@ -220,6 +235,19 @@ def _sum_impl(self, dim=None, keepdim=False, *, dtype=None):
     red = _normalize_dims(dim, self.dim())
     odt = _out_dtype(self, dtype)
     return _run1(lambda acc: T.SumOps(acc=acc), "sum", self, red, keepdim, odt)
+
+
+def _nansum_cond(self, dim=None, keepdim=False, *, dtype=None):
+    # Same signature and gates as sum. Float-only via _base_cond, which is also the
+    # correct scope: aten short-circuits an INTEGER nansum to plain sum (there are no
+    # integer NaNs), so declining ints here loses nothing.
+    return _base_cond(self, dim) and _supported_out_dtype(dtype)
+
+
+def _nansum_impl(self, dim=None, keepdim=False, *, dtype=None):
+    red = _normalize_dims(dim, self.dim())
+    odt = _out_dtype(self, dtype)
+    return _run1(lambda acc: T.NanSumOps(acc=acc), "nansum", self, red, keepdim, odt)
 
 
 def _mean_cond(self, dim=None, keepdim=False, *, dtype=None):
@@ -417,6 +445,12 @@ def _norm_trait(ord_val):
         return lambda acc: T.AbsMaxOps(acc=acc)
     if ord_val == float("-inf"):
         return lambda acc: T.AbsMinOps(acc=acc)
+    if ord_val == 0:
+        # ord=0 is defined as the NONZERO COUNT, not a |x|**p sum (p=0 would make every
+        # nonzero term 1**0 and 0**0 == 1 too). CountNonzeroOps already implements exactly
+        # that and is validated against vector_norm(ord=0); it accumulates in the float acc
+        # so the result casts to the float out dtype like any other norm.
+        return lambda acc: T.CountNonzeroOps(acc=acc)
     return lambda acc: T.NormOps(float(ord_val), acc=acc)
 
 
@@ -443,17 +477,29 @@ def _count_nonzero_impl(self, dim):
     )
 
 
+def _dof_ok(self, dim, correction) -> bool:
+    # aten emits a "degrees of freedom is <= 0" UserWarning when the correction meets
+    # or exceeds the reduced extent, then returns inf. We produce the right value
+    # (see traits._welford_denom) but not the warning, and the warning is part of
+    # aten's observable contract (test_warn_invalid_degrees_of_freedom asserts it).
+    # Decline the degenerate case so aten emits it -- a capability gate, and the
+    # correction >= n case is not a performance-relevant shape.
+    red = _normalize_dims(dim, self.dim())
+    n = self.numel() if red is None else math.prod(self.shape[d] for d in red)
+    return _correction(correction) < n
+
+
 def _var_cond(self, dim=None, *, correction=None, keepdim=False):
-    return _base_cond(self, dim)
+    return _base_cond(self, dim) and _dof_ok(self, dim, correction)
 
 
 def _std_cond(self, dim=None, *, correction=None, keepdim=False):
-    return _base_cond(self, dim)
+    return _base_cond(self, dim) and _dof_ok(self, dim, correction)
 
 
 def _vector_norm_cond(self, ord=2, dim=None, keepdim=False, *, dtype=None):
-    # ord=0 is a nonzero-count, not a |x|**p norm -> let aten handle it.
-    return _base_cond(self, dim) and ord != 0 and _supported_out_dtype(dtype)
+    # ord=0 (the nonzero count) is served via CountNonzeroOps -- see _norm_trait.
+    return _base_cond(self, dim) and _supported_out_dtype(dtype)
 
 
 def _all_cond(self, dim, keepdim=False):
@@ -516,11 +562,11 @@ def _aminmax_impl(self, *, dim=None, keepdim=False):
 
 
 def _var_mean_cond(self, dim=None, *, correction=None, keepdim=False):
-    return _base_cond(self, dim, nouts=2)
+    return _base_cond(self, dim, nouts=2) and _dof_ok(self, dim, correction)
 
 
 def _std_mean_cond(self, dim=None, *, correction=None, keepdim=False):
-    return _base_cond(self, dim, nouts=2)
+    return _base_cond(self, dim, nouts=2) and _dof_ok(self, dim, correction)
 
 
 def _aminmax_cond(self, *, dim=None, keepdim=False):
@@ -537,6 +583,11 @@ def register_reduction_overrides() -> None:
     )
     cu.register_op_override(
         "aten", "mean.dim", "CUDA", cond=_mean_cond, impl=_mean_impl
+    )
+    # nansum shares sum's signature and gates; nanmean needs nothing of its own -- aten
+    # decomposes it into nansum / isnan.logical_not.sum, both of which we now serve.
+    cu.register_op_override(
+        "aten", "nansum", "CUDA", cond=_nansum_cond, impl=_nansum_impl
     )
     # Group A: amax / amin / prod (single-output value reductions).
     cu.register_op_override("aten", "amax", "CUDA", cond=_amax_cond, impl=_amax_impl)

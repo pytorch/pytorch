@@ -73,6 +73,13 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertEqual(self._fired_count(lambda: torch.var_mean(x, dim=-1)), 1)
         self.assertEqual(self._fired_count(lambda: torch.aminmax(x, dim=-1)), 1)
 
+    def test_fp64_fires(self):
+        # fp64 is a supported accumulator (not a fp32 cast), so a fp64 call must
+        # route through our kernel rather than fall back to aten.
+        x = torch.randn(128, 512, device="cuda", dtype=torch.float64)
+        self.assertEqual(self._fired_count(lambda: torch.sum(x, dim=-1)), 1)
+        self.assertEqual(self._fired_count(lambda: torch.amax(x, dim=-1)), 1)
+
     def test_unsupported_dtype_falls_back(self):
         # Integer input is outside the supported set -> must NOT hit our kernel.
         xi = torch.randint(0, 9, (64, 64), device="cuda")
