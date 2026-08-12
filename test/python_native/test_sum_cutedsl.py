@@ -752,6 +752,142 @@ class TestSumCuteDSLOverride(TestCase):
             torch.mean(integer, dim=1)
         self.assertEqual(mean_into.call_count, 0)
 
+    # --- nanmean (ATen composite over nansum + count/div) ---
+
+    def _make_nanmean_input(self, m, n, dtype):
+        x = self._make_order_sensitive_input(m, n, dtype)
+        cols = torch.arange(n, device="cuda").reshape(1, n)
+        rows = torch.arange(m, device="cuda").reshape(m, 1)
+        return x.masked_fill((cols + 3 * rows) % 13 == 0, float("nan"))
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nanmean_matches_nansum_over_count(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nanmean_input(m, n, dtype)
+                with self._inner_tree_flag():
+                    got = torch.nanmean(x, 1)
+                    count = (~torch.isnan(x)).sum(1)
+                    expected = torch.nansum(x, 1) / count
+                self.assertEqual(count.dtype, torch.int64)
+                self.assertEqual(
+                    got.view(view_dtype), expected.view(view_dtype), rtol=0, atol=0
+                )
+
+    def test_nanmean_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nanmean_input(128, 8195, torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_nansum_into",
+                wraps=inner_tree_kernel.inner_tree_nansum_into,
+            ) as nansum_into,
+            self._inner_tree_flag(),
+        ):
+            torch.nanmean(x, dim=1)
+        self.assertEqual(nansum_into.call_count, 1)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nanmean_matches_aten(self, dtype):
+        rtol, atol = (1e-5, 1e-6) if dtype == torch.float32 else (1e-12, 1e-12)
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nanmean_input(m, n, dtype)
+                x[0].fill_(float("nan"))
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nanmean(x, dim=1)
+                with self._inner_tree_flag():
+                    got = torch.nanmean(x, dim=1)
+                self.assertTrue(torch.isnan(got[0]).item())
+                self.assertEqual(got[1:], ref[1:], rtol=rtol, atol=atol)
+
+    def test_nanmean_out_variant(self):
+        x = self._make_nanmean_input(128, 8195, torch.float32)
+        with self._inner_tree_flag():
+            functional = torch.nanmean(x, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with self._inner_tree_flag():
+            returned = torch.nanmean(x, dim=1, out=out)
+        self.assertIs(returned, out)
+        self.assertEqual(
+            out.view(torch.int32), functional.view(torch.int32), rtol=0, atol=0
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_nanmean_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nanmean_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nanmean(x, dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nanmean(x, dim=1)
+                self.assertEqual(nansum_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_nanmean_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nanmean_input(4, 32, torch.float32)
+        cases = [
+            ("dim_none", x, {"dim": None}),
+            ("explicit_dtype", x, {"dim": 1, "dtype": torch.float64}),
+            ("multi_dim", x.reshape(2, 2, 32), {"dim": (1, 2)}),
+            ("noncontiguous", x[:, ::2], {"dim": 1}),
+            ("complex", x.to(torch.complex64), {"dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nanmean(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nanmean(input_, **kwargs)
+                self.assertEqual(nansum_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+        for dtype in (torch.int64, torch.bool):
+            with self.subTest(dtype=dtype):
+                integer = torch.ones(4, 32, device="cuda", dtype=dtype)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "expected input to have floating point or complex dtype",
+                    ),
+                ):
+                    torch.nanmean(integer, dim=1)
+                self.assertEqual(nansum_into.call_count, 0)
+
+    def test_nanmean_requires_grad_is_warning_free(self):
+        x = self._make_nanmean_input(4, 32, torch.float32).requires_grad_()
+        with self._inner_tree_flag():
+            self.assertNotWarn(lambda: torch.nanmean(x, dim=1).sum().backward())
+        self.assertIsNotNone(x.grad)
+
 
 instantiate_parametrized_tests(TestSumCuteDSLOverride)
 
