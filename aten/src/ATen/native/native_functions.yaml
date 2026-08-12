@@ -3689,6 +3689,7 @@
   dispatch:
     CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
+    MPS: logspace_out_mps
     XPU: logspace_xpu_out
 
 - func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
@@ -6609,27 +6610,32 @@
 - func: _philox_key_split(Tensor key, int num_splits) -> Tensor
   variants: function
   dispatch:
+    CPU: _philox_key_split_cpu
     CUDA: _philox_key_split_cuda
 
 - func: _philox_key_fold_in(Tensor key, int data) -> Tensor
   variants: function
   dispatch:
+    CPU: _philox_key_fold_in_cpu
     CUDA: _philox_key_fold_in_cuda
 
 - func: _philox_key_fold_in.Tensor(Tensor key, Tensor data) -> Tensor
   variants: function
   dispatch:
+    CPU: _philox_key_fold_in_tensor_cpu
     CUDA: _philox_key_fold_in_tensor_cuda
 
 - func: _philox_normal_(Tensor(a!) self, Tensor key, float mean=0, float std=1) -> Tensor(a!)
   variants: function, method
   dispatch:
+    CPU: _philox_normal_cpu_
     CUDA: _philox_normal_cuda_
   autogen: _philox_normal, _philox_normal.out
 
 - func: _philox_uniform_(Tensor(a!) self, Tensor key, float low=0, float high=1) -> Tensor(a!)
   variants: function, method
   dispatch:
+    CPU: _philox_uniform_cpu_
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
@@ -7144,9 +7150,15 @@
   tags: needs_exact_strides
 
 - func: _scaled_grouped_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
+  structured_delegate: _scaled_grouped_mm_v2.out
+  variants: function
+  tags: needs_exact_strides
+
+- func: _scaled_grouped_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
   dispatch:
-    CUDA: _scaled_grouped_mm_cuda_v2
+    CUDA: _scaled_grouped_mm_cuda_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -8196,7 +8208,7 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA, XPU: put_
+    CPU, CUDA, MPS, XPU: put_
   autogen: put.out
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
@@ -9248,12 +9260,12 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: take_out
+    CPU, CUDA, MPS, XPU: take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA, XPU: take
+    CPU, CUDA, MPS, XPU: take
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -9506,12 +9518,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU, CUDA, MPS: geqrf_out
+    CPU, CUDA, MPS, XPU: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: geqrf
+    CPU, CUDA, MPS, XPU: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -14474,12 +14486,12 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA, MPS: linalg_householder_product
+    CPU, CUDA, MPS, XPU: linalg_householder_product
 
 - func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CPU, CUDA, MPS: linalg_householder_product_out
+    CPU, CUDA, MPS, XPU: linalg_householder_product_out
 
 - func: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg
@@ -14539,6 +14551,8 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_vector_norm.out
+  dispatch:
+    SparseCPU, SparseCUDA, SparseMPS: linalg_vector_norm_sparse
   tags: reduction
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
@@ -14705,7 +14719,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA, MPS: linalg_qr_out
+    CPU, CUDA, MPS, XPU: linalg_qr_out
 
 - func: linalg_polar(Tensor A) -> (Tensor U, Tensor H)
   python_module: linalg
@@ -15333,7 +15347,7 @@
   dispatch:
     CUDA: _efficient_attention_backward
 
-- func: _cudnn_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _cudnn_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, Tensor? seqused_k=None, Tensor? block_table=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CUDA: _cudnn_attention_forward
   tags: nondeterministic_seeded

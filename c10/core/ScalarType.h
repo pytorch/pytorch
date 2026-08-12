@@ -118,7 +118,7 @@ inline bool isBitsType(ScalarType t) {
       t == ScalarType::Bits16;
 }
 
-inline bool isBarebonesUnsignedType(ScalarType t) {
+constexpr bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
       t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
