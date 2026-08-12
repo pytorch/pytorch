@@ -6641,6 +6641,40 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         return self.outputs
 
 
+# TODO: Factor out a common DSL template buffer base shared with
+# CuteDSLTemplateBuffer.
+class FlyDSLTemplateBuffer(TemplateBuffer):
+    """
+    Buffer for FlyDSL template kernels.
+    Similar to CuteDSLTemplateBuffer but routed through FlyDSL scheduling.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        make_kernel_render: Callable[_P, _T],
+        template: Any,
+        mutated_inputs: Iterable[IRNode] | None = None,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.mutated_inputs = mutated_inputs
+        self.outputs: list[Buffer] = [self]
+
+        if mutated_inputs is not None:
+            if not isinstance(self.inputs[0], IRNode):
+                raise AssertionError(type(self.inputs[0]))
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+
 class NVUniversalGemmBuffer(TemplateBuffer):
     """
     Buffer for NVIDIA Universal GEMM kernels.
@@ -12106,11 +12140,10 @@ class _WaitKernel(_CollectiveKernel):
         return read_writes
 
 
-# NB: recursive structure here reflects val_to_arg_str, avoid
-# calling free_unbacked_symbols on "exotic" types that don't get pexpr
-# treatment
+# NB: relationals reach constant_args via ShapeAsConstantBuffer and need symbol
+# scanning even though codegen_switch, rather than val_to_arg_str, emits them.
 def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+    if isinstance(s, (SymTypes, sympy.Basic)):
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
@@ -12126,7 +12159,7 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
 
 
 def maybe_free_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+    if isinstance(s, (SymTypes, sympy.Basic)):
         # This branch should be impossible in return position
         return free_symbols(s)
     elif isinstance(s, (tuple, list)):
