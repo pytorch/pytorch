@@ -132,10 +132,10 @@ class TestNVUniversalGemm(TestCase):
 
         source = "def epilogue(accum, D):\n    return D"
 
-        def signature(tensor, alignment_bytes=16):
+        def signature(tensor, alignment_bytes=16, *, preserve_layout=False):
             args = CuTeDSLEpilogueArguments(source, D=tensor)
             args.to_tensor_wrappers()
-            if alignment_bytes != 16:
+            if preserve_layout or alignment_bytes != 16:
                 args.tensors["D"] = TensorWrapper(tensor, alignment_bytes)
             return _epilogue_args_signature(args)
 
@@ -148,11 +148,11 @@ class TestNVUniversalGemm(TestCase):
 
         signatures = {
             signature(contiguous, alignment_bytes=4),
+            signature(transposed, preserve_layout=True),
             *(
                 signature(tensor)
                 for tensor in (
                     contiguous,
-                    transposed,
                     different_shape,
                     different_dtype,
                     scalar,
