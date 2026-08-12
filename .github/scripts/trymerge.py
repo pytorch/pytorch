@@ -443,6 +443,16 @@ INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
+# Meta CodeSync creates this check-run in the queued state on every new head commit
+# of a PR it tracks internally, and only ever completes it once someone imports that
+# exact revision, so on a PR that has been rebased -- or was never imported -- it just
+# stays queued ("PR has not been imported") until somebody imports again.  Because the
+# merge loop waits on every check on the PR, not just the ones a merge rule requires,
+# waiting on it stalls the merge until the job times out: on #189303 it sat queued for
+# 29 hours, timing out one merge job and holding up the next.  So a pending one is not
+# treated as blocking -- but only where CodeSync has cleared the commit through
+# INTERNAL_CHANGES_CHECKRUN_NAME, which does conclude (see categorize_checks).
+IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # This could be set to -1 to ignore all flaky and broken trunk failures. On the
 # other hand, using a large value like 10 here might be useful in sev situation
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
@@ -2558,6 +2568,21 @@ def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 
+def codesync_reports_no_connected_diff(check_runs: JobNameToStateDict) -> bool:
+    """Whether Meta CodeSync has affirmatively cleared this commit for merging,
+    i.e. it sees no internal Diff connected to the PR.  Deliberately demands an
+    outright success: a missing, still-running, skipped or neutral check is not a
+    clearance.  Stricter on purpose than GitHubPR.has_no_connected_diff, which looks
+    at the title alone -- do not unify them, this one guards a merge.
+    """
+    check = check_runs.get(INTERNAL_CHANGES_CHECKRUN_NAME)
+    return (
+        check is not None
+        and check.status == "SUCCESS"
+        and check.title == HAS_NO_CONNECTED_DIFF_TITLE
+    )
+
+
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: list[str],
@@ -2594,6 +2619,18 @@ def categorize_checks(
         url = check_runs[checkname].url
         classification = check_runs[checkname].classification
         job_id = check_runs[checkname].job_id
+
+        if (
+            status is None
+            and checkname == IMPORT_STATUS_CHECKRUN_NAME
+            and codesync_reports_no_connected_diff(check_runs)
+        ):
+            # NB: Waiting on this one has no end unless somebody imports the commit by
+            # hand -- see the comment on IMPORT_STATUS_CHECKRUN_NAME. Scoped to the case
+            # where CodeSync itself says there is no internal Diff connected: a PR whose
+            # Diff has yet to land internally keeps waiting, as before. A conclusive
+            # failure is not ignored either, it falls through to the handling below.
+            continue
 
         if status is None and classification != "UNSTABLE":
             # NB: No need to wait if the job classification is unstable as it would be
