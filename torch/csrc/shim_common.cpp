@@ -741,6 +741,10 @@ AOTI_TORCH_EXPORT AOTITorchError
 torch_dtype_to_pyobject(int32_t dtype, void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        dtype >= 0 && dtype < static_cast<int32_t>(c10::ScalarType::NumOptions),
+        "torch_dtype_to_pyobject: invalid dtype code ",
+        dtype);
     *ret = torch::detail::getPyObjectConversionImpl().dtype_to_pyobject(
         static_cast<c10::ScalarType>(dtype));
   });
@@ -770,6 +774,16 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
     void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        device_type >= 0 && device_type < c10::COMPILE_TIME_MAX_DEVICE_TYPES,
+        "torch_device_to_pyobject: invalid device type ",
+        device_type);
+    TORCH_CHECK(
+        device_index >= -1 &&
+            device_index <= std::numeric_limits<c10::DeviceIndex>::max(),
+        "torch_device_to_pyobject: device index ",
+        device_index,
+        " is out of range");
     *ret = torch::detail::getPyObjectConversionImpl().device_to_pyobject(
         at::Device(
             static_cast<c10::DeviceType>(device_type),

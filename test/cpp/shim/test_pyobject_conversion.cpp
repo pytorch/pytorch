@@ -8,6 +8,8 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/stable/c/shim.h>
 
+#include <cstring>
+
 TEST(TorchPyObjectConversion, NoopErrorsWithoutLibtorchPython) {
   // from_pyobject: the no-op errors before touching py_obj, so a dummy non-null
   // pointer is enough to reach it.
@@ -66,4 +68,39 @@ TEST(TorchPyObjectConversion, DeviceNoopErrorsWithoutLibtorchPython) {
           aoti_torch_device_type_cpu(), /*device_index=*/-1, &py_out),
       AOTI_TORCH_FAILURE);
   EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, DtypeCodeValidatedBeforeNarrowing) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_dtype_to_pyobject(256, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  EXPECT_NE(
+      std::strstr(
+          torch_exception_get_what_without_backtrace(),
+          "invalid dtype code 256"),
+      nullptr);
+}
+
+TEST(TorchPyObjectConversion, DeviceValuesValidatedBeforeNarrowing) {
+  void* py_out = nullptr;
+  EXPECT_EQ(
+      torch_device_to_pyobject(256, /*device_index=*/-1, &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  EXPECT_NE(
+      std::strstr(
+          torch_exception_get_what_without_backtrace(),
+          "invalid device type 256"),
+      nullptr);
+
+  EXPECT_EQ(
+      torch_device_to_pyobject(
+          aoti_torch_device_type_cuda(), /*device_index=*/256, &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  EXPECT_NE(
+      std::strstr(
+          torch_exception_get_what_without_backtrace(),
+          "device index 256 is out of range"),
+      nullptr);
 }
