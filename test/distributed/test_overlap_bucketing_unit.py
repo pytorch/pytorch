@@ -1076,6 +1076,37 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         # Should not error in deterministic mode (would have errored before fix)
         schedule_overlap_bucketing(gm)
 
+    @torch._inductor.config.patch(deterministic=True)
+    def test_no_memory_tracking_preserves_in_flight_limit(self):
+        """Both memory-increase caps may be disabled without breaking scheduling."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            mm_result = torch.mm(a, b)
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+            return (mm_result + ag_out).sum()
+
+        with FakeTensorMode():
+            a = torch.randn(16, 16, device=self.device)
+            b = torch.randn(16, 16, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        schedule_overlap_bucketing(
+            gm,
+            max_memory_increase_gb=None,
+            max_memory_increase_ratio=None,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
     def test_assume_bucketed_latency_exceeds_exposed_time(self):
         """
         When assume_bucketing_reduces_latency is True and two same-type
