@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from torch._native.ops.sum.inner_tree_plan import (
+from torch._native.ops.reductions.inner_tree_plan import (
     compute_inner_tree_params,
     InnerTreeParams,
     vec_size,

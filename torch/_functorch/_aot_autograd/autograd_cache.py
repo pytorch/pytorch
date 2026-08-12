@@ -172,6 +172,13 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # An autocast context manager *inside* a compiled region is traced into
+        # these calls. What they do is fully determined by their arguments
+        # (device type, dtype, enabled, cache_enabled), which are constants in
+        # the graph and therefore part of the cache key, so a graph compiled
+        # under one autocast setting can never be reused for another.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
