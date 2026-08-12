@@ -63,9 +63,15 @@ REPO = os.path.normpath(
 )
 # Run as a script (`python tools/native_aot/export.py`), sys.path[0] is this
 # directory, so `tools.native_aot` is importable only when the cwd happens to
-# be the repo root. Insert the root explicitly instead of loading siblings by
-# file path, which also keeps the imports legible to type checkers.
-sys.path.insert(0, REPO)
+# be the repo root. Put the root on the path explicitly instead of loading
+# siblings by file path, which also keeps the imports legible to type checkers.
+#
+# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the
+# repo root contains a torch/ source tree with no compiled extension. Ahead of
+# site-packages it shadows the real torch, so every worker's `import torch`
+# dies with "loaded the torch/_C folder of the PyTorch repository". Invisible
+# in a `pip install -e .` checkout, where that tree IS the installed torch.
+sys.path.append(REPO)
 
 # torchgen is pure Python and imports with no built torch, which this
 # module scope requires: stage-1 codegen and the linter image that runs
