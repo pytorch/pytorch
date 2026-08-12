@@ -118,13 +118,28 @@ def _mul(a, b):
 
 
 class _Reduction(NamedTuple):
-    name: str  # aten op name ("sum" / "prod"); disambiguates the compile cache
+    name: str  # aten op name; disambiguates the compile cache
     op: Callable  # trace-time combiner: _add / _mul
     identity: float  # reduction identity: 0.0 for sum, 1.0 for prod
+    # Trace-time per-element map applied to each loaded value before the combiner.
+    pre: Callable | None = None
+    # Trace-time map applied once to the final reduced scalar before its store.
+    post: Callable | None = None
+
+
+def _nan_to_zero(v):
+    dtype = v.dtype
+    return dtype(cutlass.select_(v != v, dtype(0.0), v))
+
+
+def _divide_by_n(v, N):
+    return v / v.dtype(N)
 
 
 _SUM = _Reduction("sum", _add, 0.0)
 _PROD = _Reduction("prod", _mul, 1.0)
+_NANSUM = _Reduction("nansum", _add, 0.0, pre=_nan_to_zero)
+_MEAN = _Reduction("mean", _add, 0.0, post=_divide_by_n)
 
 
 # ---------------------------------------------------------------------------
@@ -185,12 +200,17 @@ def _warp_butterfly(val, op):
     return val
 
 
-def _load_vec_static(mIn, row, base: int, N: int, vec_size: int, acc, zero, op):
+def _load_vec_static(mIn, row, base: int, N: int, vec_size: int, acc, zero, op, pre):
     """Load + reduce one vector group with compile-time ``base`` (multirow)."""
     vals = []
     for i in range(vec_size):
         off = base + i
-        vals.append(acc(mIn[row, off]) if off < N else zero)
+        v = zero
+        if off < N:
+            v = acc(mIn[row, off])
+            if const_expr(pre is not None):
+                v = pre(v)
+        vals.append(v)
     return _reduce_vec(vals, vec_size, op)
 
 
@@ -204,6 +224,7 @@ def _load_vec_dyn(
     acc: cutlass.Constexpr,
     zero,
     op: cutlass.Constexpr,
+    pre: cutlass.Constexpr,
 ):
     """Load + reduce one vector group with a runtime ``base`` (warp paths).
 
@@ -219,6 +240,8 @@ def _load_vec_dyn(
         v = zero
         if off < Int32(N):
             v = acc(mIn[row, off])
+            if const_expr(pre is not None):
+                v = pre(v)
         vals.append(v)
     return _reduce_vec(vals, vec_size, op)
 
@@ -242,10 +265,22 @@ def _make_multirow(in_dt, acc, out_dt, N: int, vec_size: int, red: _Reduction):
             tree = []
             for load in cutlass.range_constexpr(num_loads):
                 val = _load_vec_static(
-                    mIn, row, load * vec_size, N, vec_size, acc, zero, red.op
+                    mIn,
+                    row,
+                    load * vec_size,
+                    N,
+                    vec_size,
+                    acc,
+                    zero,
+                    red.op,
+                    red.pre,
                 )
                 _streaming_push(tree, val, load, _MULTIROW_MAX_DEPTH, red.op)
-            mOut[row] = out_dt(tree[0])
+            result = tree[0]
+            if const_expr(red.post is not None):
+                assert red.post is not None  # noqa: S101
+                result = red.post(result, N)
+            mOut[row] = out_dt(result)
 
     @cute.jit
     def _launch(
@@ -321,7 +356,9 @@ def _make_looped(
                 v = zero
                 if Int32(load) < this_batch_loads:
                     v = _warp_butterfly(
-                        _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero, red.op),
+                        _load_vec_dyn(
+                            mIn, row, base, N, vec_size, acc, zero, red.op, red.pre
+                        ),
                         red.op,
                     )
                 _streaming_push(tree, v, load, p.depth, red.op)
@@ -344,6 +381,9 @@ def _make_looped(
         if row_active:
             if lane == Int32(0):
                 if warp_id == Int32(0):
+                    if const_expr(red.post is not None):
+                        assert red.post is not None  # noqa: S101
+                        final_sum = red.post(final_sum, N)
                     mOut[row] = out_dt(final_sum)
 
     @cute.jit
@@ -422,7 +462,9 @@ def _make_two_partial(
             v = zero
             if Int32(load) < this_batch_loads:
                 v = _warp_butterfly(
-                    _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero, red.op),
+                    _load_vec_dyn(
+                        mIn, row, base, N, vec_size, acc, zero, red.op, red.pre
+                    ),
                     red.op,
                 )
             _streaming_push(tree, v, load, p.depth, red.op)
@@ -460,7 +502,7 @@ def _make_two_partial(
     return _launch
 
 
-def _make_two_accum(acc, out_dt, num_batches: int, red: _Reduction):
+def _make_two_accum(acc, out_dt, N: int, num_batches: int, red: _Reduction):
     @cute.kernel
     def _kernel(mPartials: cute.Tensor, mOut: cute.Tensor, num_outputs: Int32):
         tx, _, _ = cute.arch.thread_idx()
@@ -477,6 +519,9 @@ def _make_two_accum(acc, out_dt, num_batches: int, red: _Reduction):
             # kernel regardless of unroll.
             for b in cutlass.range(1, num_batches):
                 s = red.op(s, mPartials[base + b])
+            if const_expr(red.post is not None):
+                assert red.post is not None  # noqa: S101
+                s = red.post(s, N)
             mOut[row] = out_dt(s)
 
     @cute.jit
@@ -619,14 +664,16 @@ def _compile_two_partial(
 
 @instrumented_cutedsl_cache(
     lambda red, *a, **k: f"aten::{red.name}",
-    key_fn=lambda red, torch_dtype, num_batches: (
-        f"{red.name} two_accum {torch_dtype} batches={num_batches}"
+    key_fn=lambda red, torch_dtype, N, num_batches: (
+        f"{red.name} two_accum {torch_dtype} N={N} batches={num_batches}"
     ),
 )
-def _compile_two_accum(red: _Reduction, torch_dtype: torch.dtype, num_batches: int):
+def _compile_two_accum(
+    red: _Reduction, torch_dtype: torch.dtype, N: int, num_batches: int
+):
     out_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(out_dt)
-    launcher = _make_two_accum(acc, out_dt, num_batches, red)
+    launcher = _make_two_accum(acc, out_dt, N, num_batches, red)
     return cute.compile(
         launcher,
         _fake_1d_contig(acc),
@@ -642,7 +689,8 @@ def _inner_tree_reduce_into(
     out: torch.Tensor, src: torch.Tensor, red: _Reduction
 ) -> None:
     """Compute ``out[r] = reduce(src[r, :])`` for every row ``r`` in the
-    inner-tree order, where ``reduce`` is ``red`` (``sum`` or ``prod``).
+    inner-tree order, where ``reduce`` is ``red`` (``sum``, ``prod``,
+    ``nansum``, or ``mean``).
 
     ``src`` is a 2D ``(M, N)`` view with inner-dim stride 1 (outer row stride
     may differ from N); ``out`` is a 1D ``(M,)`` view (its stride may differ
@@ -690,7 +738,7 @@ def _inner_tree_reduce_into(
         p.effective_loads,
     )
     c1(src, partials, m * p.num_batches)
-    c2 = _compile_two_accum(red, dtype, p.num_batches)
+    c2 = _compile_two_accum(red, dtype, n, p.num_batches)
     c2(partials, out, m, _ceil_div(m, _ACCUM_THREADS))
 
 
@@ -702,3 +750,13 @@ def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
 def inner_tree_prod_into(out: torch.Tensor, src: torch.Tensor) -> None:
     """Row-wise inner-tree ``prod`` (see ``_inner_tree_reduce_into``)."""
     _inner_tree_reduce_into(out, src, _PROD)
+
+
+def inner_tree_nansum_into(out: torch.Tensor, src: torch.Tensor) -> None:
+    """Row-wise inner-tree ``nansum`` (see ``_inner_tree_reduce_into``)."""
+    _inner_tree_reduce_into(out, src, _NANSUM)
+
+
+def inner_tree_mean_into(out: torch.Tensor, src: torch.Tensor) -> None:
+    """Row-wise inner-tree ``mean`` (see ``_inner_tree_reduce_into``)."""
+    _inner_tree_reduce_into(out, src, _MEAN)
