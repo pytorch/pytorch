@@ -622,6 +622,136 @@ class TestSumCuteDSLOverride(TestCase):
                 self.assertEqual(nansum_into.call_count, 0)
                 self.assertEqual(got, ref, rtol=0, atol=0)
 
+    # --- mean (sum DAG followed by one final division) ---
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_mean_matches_sum_over_n(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                with self._inner_tree_flag():
+                    got = torch.mean(x, dim=1)
+                    # IEEE true division (tensor/tensor, div.rn) to match the
+                    # kernel's divide-by-N. NOTE: `tensor / python_int` lowers to
+                    # reciprocal-multiply (sum * (1/n)) which differs by ~1 ULP.
+                    expected = torch.sum(x, dim=1) / torch.tensor(
+                        n, device=x.device, dtype=dtype
+                    )
+                self.assertTrue(
+                    torch.equal(got.view(view_dtype), expected.view(view_dtype))
+                )
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_mean_matches_aten(self, dtype):
+        rtol, atol = (1e-5, 1e-6) if dtype == torch.float32 else (1e-12, 1e-12)
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.mean(x, dim=1)
+                with self._inner_tree_flag():
+                    got = torch.mean(x, dim=1)
+                self.assertEqual(got, ref, rtol=rtol, atol=atol)
+
+    def test_mean_override_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_mean_into",
+                wraps=inner_tree_kernel.inner_tree_mean_into,
+            ) as mean_into,
+            self._inner_tree_flag(),
+        ):
+            torch.mean(x, dim=1)
+        self.assertEqual(mean_into.call_count, 1)
+
+    def test_mean_override_out_variant(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        with self._inner_tree_flag():
+            functional = torch.mean(x, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_mean_into",
+                wraps=inner_tree_kernel.inner_tree_mean_into,
+            ) as mean_into,
+            self._inner_tree_flag(),
+        ):
+            returned = torch.mean(x, dim=1, out=out)
+        self.assertEqual(mean_into.call_count, 1)
+        self.assertIs(returned, out)
+        self.assertTrue(
+            torch.equal(out.view(torch.int32), functional.view(torch.int32))
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_mean_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.mean(x, dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_mean_into",
+                        wraps=inner_tree_kernel.inner_tree_mean_into,
+                    ) as mean_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.mean(x, dim=1)
+                self.assertEqual(mean_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_mean_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(4, 32, torch.float32)
+        cases = [
+            ("bare", x, {}),
+            ("explicit_dtype", x, {"dim": 1, "dtype": torch.float64}),
+            ("multi_dim", x.reshape(2, 2, 32), {"dim": (1, 2)}),
+            ("noncontiguous", x[:, ::2], {"dim": 1}),
+            ("complex", x.to(torch.complex64), {"dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.mean(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_mean_into",
+                        wraps=inner_tree_kernel.inner_tree_mean_into,
+                    ) as mean_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.mean(input_, **kwargs)
+                self.assertEqual(mean_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+        integer = torch.ones(4, 32, device="cuda", dtype=torch.int64)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_mean_into",
+                wraps=inner_tree_kernel.inner_tree_mean_into,
+            ) as mean_into,
+            self._inner_tree_flag(),
+            self.assertRaisesRegex(RuntimeError, "could not infer output dtype"),
+        ):
+            torch.mean(integer, dim=1)
+        self.assertEqual(mean_into.call_count, 0)
+
 
 instantiate_parametrized_tests(TestSumCuteDSLOverride)
 
