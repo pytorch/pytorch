@@ -54,36 +54,17 @@ REGISTER_ALL_CLAMP_OPS(float);
 REGISTER_ALL_CLAMP_OPS(half);
 REGISTER_ALL_CLAMP_OPS(bfloat);
 
-// Bool-output infinity checks, keyed on whether the dtype can represent
-// infinity (types that cannot are never infinite); comparisons happen in the
-// native type, so half/bfloat need no widening cast.
 struct isposinf_functor {
-  template <
-      typename T,
-      enable_if_t<::metal::numeric_limits<T>::has_infinity, bool> = true>
+  template <typename T>
   inline bool operator()(const T x) {
     return x == ::metal::numeric_limits<T>::infinity();
-  }
-  template <
-      typename T,
-      enable_if_t<!::metal::numeric_limits<T>::has_infinity, bool> = true>
-  inline bool operator()(const T) {
-    return false;
   }
 };
 
 struct isneginf_functor {
-  template <
-      typename T,
-      enable_if_t<::metal::numeric_limits<T>::has_infinity, bool> = true>
+  template <typename T>
   inline bool operator()(const T x) {
     return x == -::metal::numeric_limits<T>::infinity();
-  }
-  template <
-      typename T,
-      enable_if_t<!::metal::numeric_limits<T>::has_infinity, bool> = true>
-  inline bool operator()(const T) {
-    return false;
   }
 };
 
@@ -94,9 +75,3 @@ struct isneginf_functor {
 REGISTER_ISINF_OPS(float);
 REGISTER_ISINF_OPS(half);
 REGISTER_ISINF_OPS(bfloat);
-REGISTER_ISINF_OPS(long);
-REGISTER_ISINF_OPS(int);
-REGISTER_ISINF_OPS(short);
-REGISTER_ISINF_OPS(char);
-REGISTER_ISINF_OPS(uchar);
-REGISTER_ISINF_OPS(bool);
