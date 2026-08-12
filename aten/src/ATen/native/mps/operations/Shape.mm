@@ -137,11 +137,11 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
                                                                         get_type_str<idx_type_t>(),
                                                                         scalarToMetalTypeString(input),
                                                                         scalarToMetalTypeString(output)));
-          getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input});
+          getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input}, stream);
           [computeEncoder setComputePipelineState:pipeline_state];
           mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
           mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-          getMPSProfiler().endProfileKernel(pipeline_state);
+          getMPSProfiler().endProfileKernel(pipeline_state, stream);
         }
       });
     }
