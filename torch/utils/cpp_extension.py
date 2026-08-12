@@ -2371,7 +2371,8 @@ def _jit_compile(name,
                 clean_ctx_mgr = contextlib.nullcontext()
             with clean_ctx_mgr as clean_ctx:
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                    assert hipify_python is not None  # noqa: S101
+                    if hipify_python is None:
+                        raise AssertionError("expected hipify_python to be not None")
                     hipify_result = hipify_python.hipify(
                         project_directory=build_directory,
                         output_directory=build_directory,
