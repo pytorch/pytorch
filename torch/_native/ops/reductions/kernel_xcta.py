@@ -29,7 +29,7 @@ import cuda.bindings.driver as cuda
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Int32, Int64
+from cutlass import const_expr, Float32, Float64, Int32, Int64
 
 import torch
 
@@ -41,7 +41,12 @@ from . import (  # safe: kernel_general imports us only lazily
 )
 
 
-_PART_TORCH = {Float32: torch.float32, Int32: torch.int32, Int64: torch.int64}
+_PART_TORCH = {
+    Float32: torch.float32,
+    Float64: torch.float64,
+    Int32: torch.int32,
+    Int64: torch.int64,
+}
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
@@ -263,7 +268,11 @@ def reduce_row_xcta(
         pn,
         _L.stream(),
     )
-    return out.view(()) if flatten and out.numel() == 1 and M == 1 else out
+    # resize_ (not view) so the 0-d result is not a VIEW of `out`: aten reductions
+    # never alias, and view-ness is observable (see kernel_general._as_shape).
+    if flatten and out.numel() == 1 and M == 1:
+        return out.resize_(())
+    return out
 
 
 def _build_geom(trait, trait_key, x, out_dtype, M, N, block, subrow_target):
@@ -370,7 +379,7 @@ def _build_geom(trait, trait_key, x, out_dtype, M, N, block, subrow_target):
             _L.stream(),
         )
 
-    fn = cached_plan(_PLAN, pkey, _build)
+    fn = cached_plan(_PLAN, pkey, _build, op=f"aten::{trait_key}")
     return (C, s, wrap_in, fn, *_s2_args(C, M, N))
 
 
