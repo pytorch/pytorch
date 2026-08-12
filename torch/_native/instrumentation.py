@@ -186,7 +186,7 @@ def _format_key(args: tuple, kwargs: dict, key_fn: Callable | None) -> str:
 
 def _make_wrapper(
     fn: Callable[..., R],
-    op: str,
+    op: str | Callable[..., str],
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
@@ -228,9 +228,19 @@ def _make_wrapper(
                 outcome = "error"
             else:
                 outcome = "compiled" if compiled else "cache_hit"
+            if callable(op):
+                # A label callback must never change the wrapped fn's outcome:
+                # this runs in the finally block, so a raised exception would
+                # mask the real result/error. Fall back to a safe label.
+                try:
+                    op_label = op(*args, **kwargs)
+                except Exception:
+                    op_label = "<op-label-error>"
+            else:
+                op_label = op
             _emit(
                 CompileEvent(
-                    op=op,
+                    op=op_label,
                     dsl=dsl,
                     outcome=outcome,
                     compiled=compiled,
@@ -267,14 +277,18 @@ def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
 
 
 def instrument_cutedsl_compile(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
 
     Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``.
+        op: Operator symbol being compiled for, e.g. ``"aten::topk"``. May
+            instead be a callable receiving the wrapped function's arguments
+            and returning the label per call; if that callable raises, the
+            label falls back to ``"<op-label-error>"`` without changing the
+            wrapped function's result or exception.
         key_fn: Optional callable with the wrapped function's signature
             returning a short string describing the compile key for logs.
             Defaults to a repr of the args/kwargs.
@@ -469,7 +483,7 @@ def instrument_helion_kernel(
 
 
 def instrumented_cutedsl_cache(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
