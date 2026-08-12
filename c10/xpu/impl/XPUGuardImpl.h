@@ -107,7 +107,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     *xpu_event = new sycl::event(syclex::make_event(
         c10::xpu::get_device_context(),
         syclex::properties{
-            syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
+            syclex::enable_profiling{flag & EventFlag::TIMING}}));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
