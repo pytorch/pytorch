@@ -9,7 +9,6 @@ from itertools import product
 from typing import Any
 
 import torch
-import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
@@ -24,6 +23,11 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.optim.swa_utils import AveragedModel
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
@@ -37,10 +41,11 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    subtest,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -89,16 +94,19 @@ mp_only_param_and_buf = MixedPrecision(
 # Nothing is cast (thus param, comm, grad, and buffer should be in the full precision)
 mp_no_mixed_precision = MixedPrecision()
 
-nccl_supports_bf16 = dist.is_nccl_available() and nccl.version() >= (2, 10)
+mp_diff_buffer_and_reduce = MixedPrecision(
+    param_dtype=torch.float16,
+    buffer_dtype=torch.bfloat16,
+    reduce_dtype=torch.float32,
+)
 
-mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
-if nccl_supports_bf16:
-    mp_diff_buffer_and_reduce = MixedPrecision(
-        param_dtype=torch.float16,
-        buffer_dtype=torch.bfloat16,
-        reduce_dtype=torch.float32,
-    )
-    mp_configs.extend([mp_diff_buffer_and_reduce])
+mp_configs = [
+    default_mp,
+    mp_only_reduce,
+    mp_only_param_and_buf,
+    mp_no_mixed_precision,
+    mp_diff_buffer_and_reduce,
+]
 
 # Buffer original dtype, which can differ from model params.
 _BUFFER_ORIG_DTYPE = torch.float64
@@ -108,14 +116,20 @@ cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params
 full_precision_param_dtype_config = [torch.float32, torch.float64]
 enable_sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
 
-configs = list(
-    product(
+configs = [
+    subtest(
+        config,
+        decorators=[requires_capabilities(Capability.dtype.bf16)],
+    )
+    if config[0] is mp_diff_buffer_and_reduce
+    else config
+    for config in product(
         mp_configs,
         cpu_offload_config,
         full_precision_param_dtype_config,
         enable_sharded_grad_scaler,
     )
-)
+]
 
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
@@ -124,17 +138,11 @@ test_name_mapping = {
     str(mp_only_reduce): "mp_only_reduce",
     str(mp_only_param_and_buf): "mp_only_param_and_buf",
     str(mp_no_mixed_precision): "mp_no_mp",
+    str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
     "enable_sharded_grad_scaler": "enable_sharded_grad_scaler",
 }
-
-if nccl_supports_bf16:
-    test_name_mapping.update(
-        {
-            str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
-        }
-    )
 
 subtest_name = partial(subtest_name, test_name_mapping)
 
@@ -240,9 +248,19 @@ class LinearMixedPrecision(nn.Module):
 
 
 class TestFSDPMixedPrecision(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         raise ValueError("To be implemented by child classes")
+
+    def _supported_mixed_precision_config(self):
+        capabilities = type(self).get_capabilities()
+        return (
+            mp_diff_buffer_and_reduce
+            if capabilities.get(Capability.dtype.bf16, False)
+            else default_mp
+        )
 
     def _get_simple_nested_model(
         self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
@@ -520,6 +538,8 @@ class TestFSDPMixedPrecision(FSDPTest):
 
 
 class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -536,11 +556,12 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             ],
         }
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
-        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
+        mp = self._supported_mixed_precision_config()
         self._run_test_mixed_precision_e2e(
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
@@ -551,6 +572,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             enable_sharded_grad_scaler=False,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_mixed_precision_e2e_full_shard(
@@ -602,12 +624,14 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 fsdp_model.module.run_backward(loss)
                 optim.step()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_mp_embedding_reduce(self):
         self._test_mixed_precision_embedding_table(
             mp_config=MixedPrecision(reduce_dtype=torch.float16)
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_mp_embedding_only_params_and_bufs(self):
         self._test_mixed_precision_embedding_table(
@@ -617,6 +641,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             )
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_mp_embedding_default(self):
         default_mp_config = MixedPrecision(
@@ -626,6 +651,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         self._test_mixed_precision_embedding_table(mp_config=default_mp_config)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_mp_embedding_params_and_reduce_diff(self):
         params_and_reduce_different = MixedPrecision(
@@ -637,6 +663,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             mp_config=params_and_reduce_different
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @skipIfNoTorchVision
     def test_mixed_precision_resnet(self):
@@ -676,6 +703,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         loss = fsdp(inp).sum()
         loss.backward()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_grads_reduced_precision(self):
         self.run_subtests(
@@ -686,6 +714,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             self._test_grads_reduced_precision,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("convert_sync_bn", [True, False])
     def test_mp_batchnorm(self, convert_sync_bn):
@@ -749,6 +778,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # for syncBN
         model(inp).sum().backward()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_eval_root_cast_inputs(self):
         """
@@ -793,6 +823,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             inp = torch.randn(5, 5)
             model(inp, use_full_prec_in_eval).sum().backward()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval(self):
         """
@@ -836,6 +867,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             expected_dtype = torch.float32 if use_full_prec_in_eval else torch.float16
             self.assertEqual(expected_dtype, loss.dtype)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval_buffers(self):
         """
@@ -908,6 +940,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             for buf in fsdp_model.buffers():
                 self.assertEqual(torch.float16, buf.dtype)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval_comm(self):
         for (
@@ -947,6 +980,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 loss = model.get_loss(inp, output).to(device_type)
                 model.run_backward(loss)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_input_grads_with_param_mixed_precision(self):
         """
@@ -998,6 +1032,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # propagated via `ToCopyBackward0`
         self.assertEqual(x_float.grad.dtype, torch.float32)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_buffer_dtype_no_root_handle(self):
         class NonLearnableConv(nn.Module):
@@ -1046,6 +1081,8 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     """
     Smaller test suite for unshared param (i.e. world_size == 1) case.
     """
@@ -1054,6 +1091,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     def world_size(self):
         return 1
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     def test_grads_reduced_precision(self):
         self.run_subtests(
@@ -1061,11 +1099,12 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             self._test_grads_reduced_precision,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
-        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
+        mp = self._supported_mixed_precision_config()
         self._run_test_mixed_precision_e2e(
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
@@ -1076,9 +1115,10 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             enable_sharded_grad_scaler=False,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_e2e_full_shard(self):
-        mp = default_mp if not nccl_supports_bf16 else mp_diff_buffer_and_reduce
+        mp = self._supported_mixed_precision_config()
         self._run_test_mixed_precision_e2e(
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
@@ -1088,9 +1128,6 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             sharding_strategy=ShardingStrategy.FULL_SHARD,
             enable_sharded_grad_scaler=False,
         )
-
-
-instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
 
 
 class IgnoredModule(nn.Module):
@@ -1114,10 +1151,13 @@ class ModelWithIgnoredModule(nn.Module):
 
 
 class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_with_ignored_module(self):
         model = ModelWithIgnoredModule().to(device_type)
@@ -1135,10 +1175,13 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
 
 
 class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule(self):
         forward_inputs: dict[str, nn.Module] = {}
@@ -1161,6 +1204,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs[c1].dtype, torch.float32)
         self.assertEqual(forward_inputs[c2].dtype, torch.float16)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule_skip_inputs(self):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
@@ -1182,6 +1226,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs[c1].dtype, torch.float32)
         self.assertEqual(forward_inputs[c2].dtype, torch.float32)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule_skip_inputs_error(self):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
@@ -1201,6 +1246,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         ):
             fsdp(x).sum().backward()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_submodules_with_different_precisions_error(self):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
@@ -1225,6 +1271,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         ):
             fsdp(x).sum().backward()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_submodules_with_different_precisions(self):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
@@ -1246,6 +1293,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs[c1].dtype, torch.float32)
         self.assertEqual(forward_inputs[c2].dtype, torch.float16)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_submodules_with_external_inputs(self):
         class ToyModule(nn.Module):
@@ -1290,10 +1338,13 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
 
 
 class TestFSDPTrainEval(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_train_ema_eval_flow(self):
         """
@@ -1371,6 +1422,29 @@ class TestFSDPTrainEval(FSDPTest):
             self.assertNotEqual(eval_out_sums[i], eval_out_sums[i + 1])
         self.assertNotEqual(eval_out_sums[0], eval_out_sums[-1])
 
+
+devices = ("cuda", "hpu", "xpu", "privateuse1")
+instantiate_device_type_tests(
+    TestFSDPMixedPrecisionSharded, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPMixedPrecisionUnsharded, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPMixedPrecisionIgnoredModules,
+    globals(),
+    only_for=devices,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFSDPDifferentSubmodulePrecision,
+    globals(),
+    only_for=devices,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFSDPTrainEval, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
