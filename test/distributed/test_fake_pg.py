@@ -76,6 +76,14 @@ class TestFakePG(TestCase):
         # default init path leaves the backend options null).
         dist.set_timeout(timedelta(seconds=30))
 
+    def test_add_ephemeral_timeout_is_noop(self):
+        backend = FakeProcessGroup._create_internal(0, world_size=2)
+        backend._add_ephemeral_timeout(timedelta(seconds=42))
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=42))
+
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
 
@@ -774,6 +782,50 @@ class TestFakePG(TestCase):
         tensor = torch.ones(3, 3)
         dist.all_reduce(tensor, group=new_pg)
         self.assertEqual(tuple(tensor.shape), (3, 3))
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_split_group_backend_filter(self):
+        # A fake world's backend string is the bare name "fake", which
+        # BackendConfig expands to every device fake supports. split_group's
+        # filter validation used to re-expand it through
+        # Backend.default_device_backend_map -- where fake is only the default
+        # for hpu -- so every device-qualified filter was rejected as "not
+        # present in the parent" and the bare "fake" filter selected hpu alone.
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=2,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+        parent_pg = dist.distributed_c10d._get_default_group()
+        parent_devices = {d.type for d in parent_pg._device_types}
+        self.assertIn(device_type, parent_devices)
+
+        # A bare filter naming the parent's backend keeps every parent device.
+        full = dist.split_group(split_ranks=[[0, 1]], backend="fake")
+        self.assertEqual({d.type for d in full._device_types}, parent_devices)
+
+        # A device-qualified filter keeps exactly the named devices. The C++
+        # split additionally requires the filter to keep the parent's default
+        # backend device, which for an all-fake parent is cpu.
+        cpu_only = dist.split_group(split_ranks=[[0, 1]], backend="cpu:fake")
+        self.assertEqual({d.type for d in cpu_only._device_types}, {"cpu"})
+
+        pair = dist.split_group(
+            split_ranks=[[0, 1]], backend=f"cpu:fake,{device_type}:fake"
+        )
+        self.assertEqual({d.type for d in pair._device_types}, {"cpu", device_type})
+
+        # Filters that genuinely do not match the parent are still rejected.
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(split_ranks=[[0, 1]], backend="mps:fake")
+        with self.assertRaisesRegex(ValueError, "Backend mismatch"):
+            dist.split_group(split_ranks=[[0, 1]], backend="cpu:gloo")
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(split_ranks=[[0, 1]], backend="gloo")
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
