@@ -530,7 +530,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             if node.target is inductor_prims.prepare_softmax_online
         )
         self.assertIn(prepare_softmax, analysis.matches)
-        self.assertIsNone(analysis.matches[prepare_softmax].reduction_type)
+        self.assertEqual(analysis.matches[prepare_softmax].reduction_type, "generated")
 
     def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
