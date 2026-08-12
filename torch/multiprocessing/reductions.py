@@ -96,9 +96,7 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
-def rebuild_event(device, handle, event_cls=None):
-    if event_cls is None:
-        event_cls = torch.cuda.Event
+def rebuild_event(device, handle, event_cls=torch.cuda.Event):
     return event_cls.from_ipc_handle(device, handle)
 
 
