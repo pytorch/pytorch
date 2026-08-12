@@ -15,6 +15,8 @@ source "$SCRIPT_PARENT_DIR/common.sh"
 # shellcheck source=./common-build.sh
 source "$SCRIPT_PARENT_DIR/common-build.sh"
 
+export FLASH_ATTENTION_MAX_JOBS="${FLASH_ATTENTION_MAX_JOBS:-2}"
+
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export TMP_DIR_WIN
