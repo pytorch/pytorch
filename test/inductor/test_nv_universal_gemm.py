@@ -431,6 +431,9 @@ class TestNVUniversalGemm(TestCase):
         torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
 
     def test_direct_dense_epilogue_support_check(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            CuTeDSLEpilogueArguments,
+        )
         from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
         from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
             VendoredDenseGemmEFCOperator,
@@ -438,8 +441,9 @@ class TestNVUniversalGemm(TestCase):
 
         operator = object.__new__(VendoredDenseGemmEFCOperator)
         args = MagicMock()
-        args.epilogue._is_direct_cutedsl = True
-        args.epilogue.traced_epilogue = None
+        args.epilogue = CuTeDSLEpilogueArguments(
+            "def epilogue(accum, D):\n    return D", D=torch.empty(1)
+        )
         args.local_reduce = GemmReductionArguments()
         self.assertTrue(operator._supports(args))
 
@@ -1837,7 +1841,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertIs(config.args, args)
         common = (4, 1, "sum", "identity", True)
         primary = ("reduce", "init", "combine", "source", "finalize", "consumer")
-        self.assertEqual(config.primary_constexprs(), (*common, *primary))
         self.assertEqual(
             config.constexprs(),
             (*common, "direct_bool_gt_zero", *primary, "secondary_consumer"),
@@ -3237,7 +3240,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(epilogue_fused)
         self.assertNotIn("out_ptr1", code)
 
-    def test_scaled_mm_multi_store_epilogue_falls_back(self):
+    def test_scaled_mm_multi_store_epilogue_fusion(self):
         m, n, k = self.M, self.N, self.K
         packed_k = k // 2
         a = _create_tensor_with_layout(
@@ -3267,13 +3270,15 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return result, torch.relu(result_fp32), result_fp32 * 0.5
 
         result, code, epilogue_fused = self._compile_and_check(
-            fn, a, b, scale_a, scale_b, expected_kernels=2
+            fn, a, b, scale_a, scale_b
         )
         expected = fn(a, b, scale_a, scale_b)
-        self.assertEqual(result, expected, equal_nan=True)
-        self.assertFalse(epilogue_fused)
+        self.assertEqual(result, expected)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
+        self.assertIn("out_ptr2", code)
 
-    def test_scaled_mm_large_epilogue_falls_back(self):
+    def test_scaled_mm_large_epilogue_fusion(self):
         m, n, k = self.M, self.N, self.K
         packed_k = k // 2
         a = _create_tensor_with_layout(
@@ -3306,10 +3311,12 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return result, *values
 
         result, code, epilogue_fused = self._compile_and_check(
-            fn, a, b, scale_a, scale_b, *biases, expected_kernels=2
+            fn, a, b, scale_a, scale_b, *biases
         )
         self.assertEqual(result, fn(a, b, scale_a, scale_b, *biases))
-        self.assertFalse(epilogue_fused)
+        self.assertTrue(epilogue_fused)
+        for index in range(1, 6):
+            self.assertIn(f"out_ptr{index}", code)
 
     def test_scaled_mm_dynamic_epilogue_fusion(self):
         m, n, k = 128, 128, 512
@@ -3601,6 +3608,41 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
             self.assertNotIn("'local_reduce_out'", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
+
+    def test_scaled_mm_grouped_reduce_with_multi_store_epilogue(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            return result, torch.relu(result.float()), grouped.sum(-1)
+
+        args = (a, b, scale_a, scale_b)
+        result, code, _ = self._compile_and_check(fn, *args)
+        self.assertEqual(result, fn(*args))
+        self.assertIn("output=", code)
+        self.assertIn("out_ptr1", code)
 
     @parametrize(
         "case",

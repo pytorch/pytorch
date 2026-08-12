@@ -12,10 +12,41 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLOpOverrides,
     tensorssa_reduction,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmReductionArguments,
+)
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.virtualized import V
 from torch.utils._sympy.value_ranges import ValueRanges
+
+
+@dataclasses.dataclass(frozen=True)
+class CuTeDSLEpilogueSchema:
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+    scalar_broadcast_names: frozenset[str]
+
+    @property
+    def parameter_names(self) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name in dict.fromkeys((*self.inputs, *self.outputs))
+            if name != GEMM_ACCUMULATOR_ARG_NAME
+        )
+
+
+class CuTeDSLEpilogueSource(str):  # noqa: SLOT000
+    schema: CuTeDSLEpilogueSchema
+
+    def __new__(cls, source: str, schema: CuTeDSLEpilogueSchema):
+        value = super().__new__(cls, source)
+        value.schema = schema
+        return value
+
+
+def get_cutedsl_epilogue_schema(source: Any) -> CuTeDSLEpilogueSchema | None:
+    return source.schema if isinstance(source, CuTeDSLEpilogueSource) else None
 
 
 def gemm_epilogue_op_scope(
@@ -111,8 +142,6 @@ def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
         "direct_bool_gt_zero",
     ) or reduction_type.startswith(("mean", "normalize_sum", "variance")):
         return "sum"
-    if reduction_type == "normalize_absmax":
-        return "max"
     return cast(ReductionType, reduction_type)
 
 
@@ -214,9 +243,6 @@ class GemmReductionCompileConfig:
             reduction.finalize,
             self.consumer,
         )
-
-    def primary_constexprs(self) -> tuple[Any, ...]:
-        return self._common_constexprs() + self._primary_callbacks()
 
     def blockscaled_primary_constexprs(self) -> tuple[Any, ...]:
         args = self.args

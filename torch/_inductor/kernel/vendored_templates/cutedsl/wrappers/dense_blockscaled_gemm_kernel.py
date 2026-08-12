@@ -48,7 +48,7 @@ class _EpilogueABI:
     """Runtime tensors and metadata derived from a traced epilogue signature."""
 
     input_pack: EpilogueInputPack
-    outputs: tuple
+    outputs: EpilogueOutputPack
     output_count: int
     primary_output: int
 
@@ -122,20 +122,22 @@ def _epilogue_abi_tensor(tensor):
     return TensorWrapper(padded)
 
 
-def _epilogue_outputs(args, attr: str) -> tuple[tuple, int, int]:
+def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int, int]:
     epilogue = getattr(args, "epilogue", None)
     if epilogue is None:
-        return (), 1, 0
+        return EpilogueOutputPack(()), 1, 0
     output_names = _epilogue_signature(epilogue.epilogue_fn)[1]
     if not output_names:
         raise NotImplementedError("NVGEMM scaled epilogues require an output")
     if len(output_names) > 1 and "D" not in output_names:
         raise NotImplementedError("NVGEMM scaled multi-store requires a D output")
     primary_index = output_names.index("D") if "D" in output_names else 0
-    tensors = tuple(
-        getattr(epilogue.tensors[name], attr)
-        for index, name in enumerate(output_names)
-        if index != primary_index
+    tensors = EpilogueOutputPack(
+        tuple(
+            getattr(epilogue.tensors[name], attr)
+            for index, name in enumerate(output_names)
+            if index != primary_index
+        )
     )
     return tensors, len(output_names), primary_index
 
@@ -190,6 +192,7 @@ try:
     from ..dense_blockscaled_gemm_persistent import (  # pyrefly: ignore[missing-import]
         EpilogueInput,
         EpilogueInputPack,
+        EpilogueOutputPack,
         Sm100BlockScaledPersistentDenseGemmKernel as BlockScaledGemmKernelImpl,
     )
 except ImportError:
@@ -354,8 +357,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             alpha = _ones_alpha()
         with torch.cuda.stream(stream):
             epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
-            epilogue_inputs = epilogue.input_pack
-            epilogue_inputs = tvm_ffi.convert(dataclasses.astuple(epilogue_inputs))
+            input_values = tuple(
+                (value.tensor, value.kind) for value in epilogue.input_pack.values
+            )
+            epilogue_inputs = tvm_ffi.convert((input_values,))
+            epilogue_outputs = tvm_ffi.convert((epilogue.outputs.values,))
 
         reduction = args.local_reduce
         reduction_tensors = reduction.map_tensors(lambda value: value.runtime_tensor)
@@ -373,6 +379,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 stream,
                 alpha,
                 epilogue_inputs,
+                epilogue_outputs,
                 local_reduce_out.runtime_tensor
                 if local_reduce_out is not None
                 else None,
@@ -404,6 +411,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             stream,
             alpha,
             epilogue_inputs,
+            epilogue_outputs,
             None,
             None,
         )
