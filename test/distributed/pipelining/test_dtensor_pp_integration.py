@@ -164,13 +164,13 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return dist.get_default_backend_for_device(cls._resolved_device_type())
 
-    @property
-    def device(self) -> torch.device:
-        return torch.device(self._resolved_device_type(), self.rank)
+    def _rank_device(self, device: str) -> torch.device:
+        device_type = torch.device(device).type
+        return torch.device(device_type, self.rank)
 
-    def init_pg(self) -> None:
+    def init_pg(self, rank_device: torch.device) -> None:
         if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(self.device)
+            torch.accelerator.set_device_index(rank_device)
 
     def _make_mesh(self) -> DeviceMesh:
         return init_device_mesh(
@@ -182,9 +182,11 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         n_layers: int,
         tp_mesh: DeviceMesh,
         apply_tp: Callable,
+        *,
+        rank_device: torch.device,
     ) -> tuple[NormMLPStack, NormMLPStack]:
         torch.manual_seed(MODEL_SEED)
-        with torch.device(self.device):
+        with torch.device(rank_device):
             ref_model = NormMLPStack(d_hid, n_layers)
 
         pp_model = copy.deepcopy(ref_model)
@@ -196,11 +198,13 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
 
         return ref_model, pp_model
 
-    def _make_full_batch_tensors(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def _make_full_batch_tensors(
+        self, *, rank_device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         torch.manual_seed(INPUT_SEED)
-        input_full = torch.randn(batch_size, d_hid, device=self.device)
+        input_full = torch.randn(batch_size, d_hid, device=rank_device)
         torch.manual_seed(TARGET_SEED)
-        target_full = torch.randn(batch_size, d_hid, device=self.device)
+        target_full = torch.randn(batch_size, d_hid, device=rank_device)
         return input_full, target_full
 
     def _run_reference_microbatched(
@@ -209,6 +213,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         input_dt: DTensor,
         target_dt: DTensor,
         *,
+        rank_device: torch.device,
         null_boundary_grads: bool = True,
     ) -> tuple[
         dict[str, torch.Tensor | None],
@@ -267,20 +272,28 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
                     input_args = self._empty_dt_from(
                         stage_input,
                         stage_input.requires_grad,
+                        rank_device=rank_device,
                     )
                     output_args = self._empty_dt_from(
                         stage_output,
                         stage_output.requires_grad,
+                        rank_device=rank_device,
                     )
                     input_grad_dt = captured_grads[stage_idx]["input"]
                     output_grad_dt = captured_grads[stage_idx]["output"]
                     input_grads = (
-                        self._empty_dt_from(cast(DTensor, input_grad_dt), False)
+                        self._empty_dt_from(
+                            cast(DTensor, input_grad_dt), False, rank_device=rank_device
+                        )
                         if input_grad_dt is not None
                         else None
                     )
                     output_grads = (
-                        self._empty_dt_from(cast(DTensor, output_grad_dt), False)
+                        self._empty_dt_from(
+                            cast(DTensor, output_grad_dt),
+                            False,
+                            rank_device=rank_device,
+                        )
                         if output_grad_dt is not None
                         else None
                     )
@@ -336,9 +349,11 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             )
         return grad.clone()
 
-    def _empty_dt_from(self, dt: DTensor, requires_grad: bool) -> DTensor:
+    def _empty_dt_from(
+        self, dt: DTensor, requires_grad: bool, *, rank_device: torch.device
+    ) -> DTensor:
         meta = _DTensorMeta.from_dtensor(dt)
-        empty_local = torch.empty(meta.shape, dtype=meta.dtype, device=self.device)
+        empty_local = torch.empty(meta.shape, dtype=meta.dtype, device=rank_device)
         result = DTensor.from_local(
             empty_local,
             dt.device_mesh,
@@ -359,6 +374,8 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         pp_group: dist.ProcessGroup,
         tp_mesh: DeviceMesh,
         static_stage_meta: StageStaticMetaMap | None,
+        *,
+        rank_device: torch.device,
     ) -> PipelineStage:
         stage_module = pp_model.get_submodule(f"layers.{stage_index}")
         if static_stage_meta is None:
@@ -366,7 +383,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
                 submodule=stage_module,
                 stage_index=stage_index,
                 num_stages=num_stages,
-                device=self.device,
+                device=rank_device,
                 group=pp_group,
                 get_mesh=lambda _dim_names, _layout: tp_mesh,
             )
@@ -379,7 +396,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             submodule=stage_module,
             stage_index=stage_index,
             num_stages=num_stages,
-            device=self.device,
+            device=rank_device,
             group=pp_group,
             input_args=(input_args,),
             output_args=(output_args,),
@@ -470,6 +487,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
 
     def _run_training_correctness(
         self,
+        device: str,
         schedule_class: type,
         apply_tp: Callable,
         placements: list,
@@ -477,7 +495,8 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         use_static_metadata: bool = True,
         null_boundary_grads: bool = False,
     ) -> None:
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
 
         mesh = self._make_mesh()
         tp_mesh = mesh["tp"]
@@ -492,9 +511,10 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             n_layers=n_layers,
             tp_mesh=tp_mesh,
             apply_tp=apply_tp,
+            rank_device=rank_device,
         )
 
-        input_full, target_full = self._make_full_batch_tensors()
+        input_full, target_full = self._make_full_batch_tensors(rank_device=rank_device)
 
         ref_input = distribute_tensor(
             input_full.clone(),
@@ -513,6 +533,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             ref_input,
             ref_target,
             null_boundary_grads=null_boundary_grads,
+            rank_device=rank_device,
         )
 
         pp_static_stage_meta = static_stage_meta if use_static_metadata else None
@@ -545,6 +566,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
                 pp_group=pp_group,
                 tp_mesh=tp_mesh,
                 static_stage_meta=pp_static_stage_meta,
+                rank_device=rank_device,
             )
             for stage_index in stage_indices
         ]
@@ -576,12 +598,14 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
 
     def _run_inference_only_equivalence(
         self,
+        device: str,
         apply_tp: Callable,
         placements: list,
         *,
         use_static_metadata: bool = False,
     ) -> None:
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
 
         mesh = self._make_mesh()
         tp_mesh = mesh["tp"]
@@ -593,9 +617,10 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             n_layers=2,
             tp_mesh=tp_mesh,
             apply_tp=apply_tp,
+            rank_device=rank_device,
         )
 
-        input_full, target_full = self._make_full_batch_tensors()
+        input_full, target_full = self._make_full_batch_tensors(rank_device=rank_device)
 
         ref_input = distribute_tensor(
             input_full.clone(),
@@ -621,12 +646,13 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
                 ref_model,
                 ref_input_for_meta,
                 ref_target_for_meta,
+                rank_device=rank_device,
             )
 
             static_stage_meta = {
                 stage_idx: (
-                    self._empty_dt_from(stage_meta[0], False),
-                    self._empty_dt_from(stage_meta[1], False),
+                    self._empty_dt_from(stage_meta[0], False, rank_device=rank_device),
+                    self._empty_dt_from(stage_meta[1], False, rank_device=rank_device),
                     None,
                     None,
                 )
@@ -653,6 +679,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             pp_group=pp_group,
             tp_mesh=tp_mesh,
             static_stage_meta=static_stage_meta,
+            rank_device=rank_device,
         )
         schedule = Schedule1F1B(
             stage,
@@ -678,16 +705,18 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @_requires_multi_gpu
-    def test_static_mode_replicate(self):
+    def test_static_mode_replicate(self, device):
         self._run_training_correctness(
+            device,
             Schedule1F1B,
             apply_tp_replicate,
             [Replicate()],
         )
 
     @_requires_multi_gpu
-    def test_static_mode_none_grad_slots_replicate(self):
+    def test_static_mode_none_grad_slots_replicate(self, device):
         self._run_training_correctness(
+            device,
             Schedule1F1B,
             apply_tp_replicate,
             [Replicate()],
@@ -695,8 +724,9 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
         )
 
     @_requires_multi_gpu
-    def test_static_mode_none_grad_slots_shard(self):
+    def test_static_mode_none_grad_slots_shard(self, device):
         self._run_training_correctness(
+            device,
             Schedule1F1B,
             apply_tp_shard,
             [Shard(1)],
@@ -704,46 +734,52 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
         )
 
     @_requires_multi_gpu
-    def test_static_mode_shard(self):
+    def test_static_mode_shard(self, device):
         self._run_training_correctness(
+            device,
             Schedule1F1B,
             apply_tp_shard,
             [Shard(1)],
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_inference_only_replicate(self):
+    def test_dynamic_mode_inference_only_replicate(self, device):
         self._run_inference_only_equivalence(
+            device,
             apply_tp_replicate,
             [Replicate()],
         )
 
     @_requires_multi_gpu
-    def test_static_mode_inference_only_replicate(self):
+    def test_static_mode_inference_only_replicate(self, device):
         self._run_inference_only_equivalence(
+            device,
             apply_tp_replicate,
             [Replicate()],
             use_static_metadata=True,
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_inference_only_shard(self):
+    def test_dynamic_mode_inference_only_shard(self, device):
         self._run_inference_only_equivalence(
+            device,
             apply_tp_shard,
             [Shard(1)],
         )
 
     @_requires_multi_gpu
-    def test_static_mode_inference_only_shard(self):
+    def test_static_mode_inference_only_shard(self, device):
         self._run_inference_only_equivalence(
+            device,
             apply_tp_shard,
             [Shard(1)],
             use_static_metadata=True,
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_replicate(self):
+    def test_dynamic_mode_replicate(self, device):
         self._run_training_correctness(
+            device,
             Schedule1F1B,
             apply_tp_replicate,
             [Replicate()],
@@ -751,8 +787,9 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_shard(self):
+    def test_dynamic_mode_shard(self, device):
         self._run_training_correctness(
+            device,
             Schedule1F1B,
             apply_tp_shard,
             [Shard(1)],
@@ -760,32 +797,36 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
         )
 
     @_requires_multi_gpu
-    def test_static_mode_interleaved1f1b_replicate(self):
+    def test_static_mode_interleaved1f1b_replicate(self, device):
         self._run_training_correctness(
+            device,
             ScheduleInterleaved1F1B,
             apply_tp_replicate,
             [Replicate()],
         )
 
     @_requires_multi_gpu
-    def test_static_mode_zbv_zero_bubble_replicate(self):
+    def test_static_mode_zbv_zero_bubble_replicate(self, device):
         self._run_training_correctness(
+            device,
             ScheduleZBVZeroBubble,
             apply_tp_replicate,
             [Replicate()],
         )
 
     @_requires_multi_gpu
-    def test_static_mode_dualpipev_replicate(self):
+    def test_static_mode_dualpipev_replicate(self, device):
         self._run_training_correctness(
+            device,
             ScheduleDualPipeV,
             apply_tp_replicate,
             [Replicate()],
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_interleaved1f1b_shard(self):
+    def test_dynamic_mode_interleaved1f1b_shard(self, device):
         self._run_training_correctness(
+            device,
             ScheduleInterleaved1F1B,
             apply_tp_shard,
             [Shard(1)],
@@ -793,8 +834,9 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_zbv_zero_bubble_shard(self):
+    def test_dynamic_mode_zbv_zero_bubble_shard(self, device):
         self._run_training_correctness(
+            device,
             ScheduleZBVZeroBubble,
             apply_tp_shard,
             [Shard(1)],
@@ -802,8 +844,9 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
         )
 
     @_requires_multi_gpu
-    def test_dynamic_mode_dualpipev_shard(self):
+    def test_dynamic_mode_dualpipev_shard(self, device):
         self._run_training_correctness(
+            device,
             ScheduleDualPipeV,
             apply_tp_shard,
             [Shard(1)],
