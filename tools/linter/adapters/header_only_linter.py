@@ -37,7 +37,6 @@ class LintMessage(NamedTuple):
 
 CPP_TEST_GLOBS = [
     "test/cpp/aoti_abi_check/*.cpp",
-    "test/cpp/aoti_abi_check/cuda/*.cu",
 ]
 
 REPO_ROOT = Path(__file__).parents[3]
