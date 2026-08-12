@@ -427,17 +427,20 @@ struct TORCH_API TupleElements {
     }
   }
 
-  // Note: this implementation is not exception safe
+  // This implementation only provides basic exception safety
   TupleElements& operator=(const TupleElements& rhs) {
     if (this == &rhs) { return *this; }
     if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
       elementsVector_ = rhs.elementsVector_;
     } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
+      IValue tmp[3];
+      std::copy_n(rhs.elementsInline_, rhs.inlineSize_, tmp);
       std::destroy_at(&elementsVector_);
-      std::uninitialized_copy_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
+      std::uninitialized_move_n(tmp, rhs.inlineSize_, elementsInline_);
     } else if (inlineSize_ > 0 && rhs.inlineSize_ == 0) {
+      std::vector<IValue> tmp(rhs.elementsVector_);
       std::destroy_n(elementsInline_, inlineSize_);
-      std::construct_at(&elementsVector_, rhs.elementsVector_);
+      std::construct_at(&elementsVector_, std::move(tmp));
     } else {
       auto copySize = std::min(inlineSize_, rhs.inlineSize_);
       auto it = std::copy(
