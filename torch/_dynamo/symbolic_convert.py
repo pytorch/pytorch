@@ -1076,6 +1076,24 @@ def _make_warnings_warn_wrapper(filename: str, lineno: int) -> Callable[..., Any
     return wrapper
 
 
+# Reenter Dynamo around fn so forward and recompute run the same compiled code.
+def _checkpoint_with_dynamo_reenabled(
+    function: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    import torch.utils.checkpoint
+
+    callback = torch._C._dynamo.eval_frame.get_eval_frame_callback()
+
+    def function_with_dynamo(*fn_args: Any, **fn_kwargs: Any) -> Any:
+        prior = torch._C._dynamo.eval_frame.set_eval_frame(callback)
+        try:
+            return function(*fn_args, **fn_kwargs)
+        finally:
+            torch._C._dynamo.eval_frame.set_eval_frame(prior)
+
+    return torch.utils.checkpoint.checkpoint(function_with_dynamo, *args, **kwargs)
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -1172,6 +1190,7 @@ def break_graph_if_unsupported(
             # naturally reconstructs the wrapper via LOAD_GLOBAL.
             if self.parent is not None:
                 self._maybe_replace_warnings_warn_on_stack(inst)
+            self._maybe_replace_checkpoint_on_stack(inst)
 
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
@@ -3670,6 +3689,30 @@ class InstructionTranslatorBase(
         wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
         self.stack[callable_idx] = SkipFunctionVariable(
             wrapper, source=GlobalSource(wrapper_name)
+        )
+
+    def _maybe_replace_checkpoint_on_stack(self, inst: Instruction) -> None:
+        from .variables.higher_order_ops import CheckpointHigherOrderVariable
+
+        try:
+            # 3.14 CALL_FUNCTION_EX has no oparg; depth does not use it there
+            depth = get_call_callable_depth(inst.opname, inst.arg or 0)
+        except ValueError:
+            return
+
+        callable_idx = len(self.stack) - depth
+        callable_var = self.stack[callable_idx]
+        if not (
+            isinstance(callable_var, CheckpointHigherOrderVariable)
+            and callable_var.from_utils_checkpoint
+        ):
+            return
+
+        wrapper_name = self.output.install_global_by_id(
+            "__checkpoint_with_dynamo_reenabled", _checkpoint_with_dynamo_reenabled
+        )
+        self.stack[callable_idx] = SkipFunctionVariable(
+            _checkpoint_with_dynamo_reenabled, source=GlobalSource(wrapper_name)
         )
 
     def create_call_resume_at(

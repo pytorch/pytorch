@@ -26,6 +26,7 @@ from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounterWithBackend,
+    EagerAndRecordGraphs,
     normalize_gm,
 )
 from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
@@ -39,6 +40,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     skipIfHpu,
@@ -906,10 +908,10 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         self.assertEqual(result, expected)
 
-        # One graph for torch.sin on the input, and other for torch.cos.
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
-        self.assertEqual(len(cnt.graphs), 2)
+        # sin and cos graphs in fn, plus gn compiled across its graph breaks
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, 5)
+        self.assertEqual(len(cnt.graphs), 4)
 
     @requires_gpu_and_triton
     def test_kwargs(self, device):
@@ -3811,6 +3813,140 @@ def forward(self, x_1):
     alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
     return (alias_4, mul_1)""",
         )
+
+
+class ActivationCheckpointingGraphBreakFallbackTests(torch._dynamo.test_case.TestCase):
+    class _Attention(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.q_proj = nn.Linear(16, 16)
+            self.o_proj = nn.Linear(16, 16)
+
+        def forward(self, x, use_reentrant=False):
+            def attn_forward(x):
+                q = self.q_proj(x)
+                torch._dynamo.graph_break()
+                return self.o_proj(q.sin())
+
+            return checkpoint(attn_forward, x, use_reentrant=use_reentrant)
+
+    def _check_fn(self, fn, fn_ref, backend, *args, **kwargs):
+        args_ref = tuple(a.detach().clone().requires_grad_(True) for a in args)
+        expected = fn_ref(*args_ref, **kwargs)
+        expected.sum().backward()
+
+        cnt = CompileCounterWithBackend(backend)
+        result = torch.compile(fn, backend=cnt)(*args, **kwargs)
+        result.sum().backward()
+
+        self.assertEqual(result, expected)
+        for a, a_ref in zip(args, args_ref):
+            self.assertEqual(a.grad, a_ref.grad)
+        return cnt
+
+    def _check_model(self, model, x, backend, **model_kwargs):
+        model_ref = copy.deepcopy(model)
+        cnt = self._check_fn(model, model_ref, backend, x, **model_kwargs)
+        for p, p_ref in zip(model.parameters(), model_ref.parameters()):
+            self.assertEqual(p.grad, p_ref.grad)
+        return cnt
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_graph_break_in_checkpointed_fn(self, backend):
+        model = self._Attention()
+        x = torch.randn(2, 16, requires_grad=True)
+        cnt = self._check_model(model, x, backend)
+        # attn_forward is compiled as two graphs around its graph break
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)
+
+    def test_graph_break_in_checkpointed_fn_reentrant(self):
+        model = self._Attention()
+        x = torch.randn(2, 16, requires_grad=True)
+        cnt = self._check_model(model, x, "eager", use_reentrant=True)
+        # two forward graphs under no_grad, two more for grad-enabled recompute
+        self.assertEqual(cnt.frame_count, 4)
+
+    def test_graph_break_nested_checkpoint(self):
+        def inner(x):
+            q = torch.sin(x)
+            torch._dynamo.graph_break()
+            return torch.cos(q)
+
+        def outer(x):
+            return checkpoint(inner, x, use_reentrant=False) * 2
+
+        def fn(x):
+            return checkpoint(outer, x, use_reentrant=False) + 1
+
+        x = torch.randn(4, 4, requires_grad=True)
+        cnt = self._check_fn(fn, fn, "aot_eager", x)
+        self.assertEqual(cnt.frame_count, 4)
+
+    def test_graph_break_call_function_ex(self):
+        def gn(x):
+            a = torch.sin(x)
+            torch._dynamo.graph_break()
+            return torch.cos(a)
+
+        def fn(x):
+            args = (gn, x)
+            kwargs = {"use_reentrant": False}
+            return checkpoint(*args, **kwargs)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        cnt = self._check_fn(fn, fn, "eager", x)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_graph_break_selective_checkpoint(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def context_fn():
+            return create_selective_checkpoint_contexts(policy_fn)
+
+        def gn(x, y):
+            a = torch.sigmoid(torch.matmul(x, y))
+            torch._dynamo.graph_break()
+            return torch.cos(a)
+
+        def fn(x, y):
+            return checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False, context_fn=context_fn
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        self._check_fn(fn, fn, "aot_eager", x, y)
+
+    def test_graph_break_fullgraph_still_errors(self):
+        model = self._Attention()
+        x = torch.randn(2, 16, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(model, backend="eager", fullgraph=True)(x)
+
+    def test_no_graph_break_still_captures_hop(self):
+        def gn(x):
+            return torch.sigmoid(torch.matmul(x, x))
+
+        def fn(x):
+            return torch.cos(checkpoint(gn, torch.sin(x), use_reentrant=False))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertTrue(
+            any(
+                node.target is tag_activation_checkpoint
+                for node in backend.graphs[0].graph.nodes
+            )
+        )
+
+
+instantiate_parametrized_tests(ActivationCheckpointingGraphBreakFallbackTests)
 
 
 if __name__ == "__main__":
