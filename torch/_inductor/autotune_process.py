@@ -1736,6 +1736,11 @@ class AsyncAutotuner:
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
             future = AsyncAutotuner.choice_hash_to_future.get(choice_hash)
-            if future is not None:
-                timings[choice] = future.result()
+            if future is None:
+                autotuning_log.debug(
+                    "Skipping choice without a scheduled autotuning Future: %s",
+                    choice_hash,
+                )
+                continue
+            timings[choice] = future.result()
         return timings
