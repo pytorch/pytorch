@@ -55,6 +55,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
@@ -94,6 +95,8 @@ device_module = torch.get_device_module(device_type)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -828,6 +831,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -1228,6 +1233,8 @@ class AsyncTPTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -1351,6 +1358,8 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 # MultiProcessTestCase instead of MultiProcContinuousTest.
 @requires_cuda_p2p_access()
 class SymmMemNegativeTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -1524,6 +1533,8 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -1813,6 +1824,8 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -1882,6 +1895,8 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
@@ -2399,6 +2414,8 @@ class LoweringTest(MultiProcContinuousTest):
 
 
 class SymmMemSingleProcTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_cuda
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -2478,6 +2495,8 @@ class SymmMemSingleProcTest(TestCase):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemPoolTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -2661,6 +2680,8 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
     CUDA backend (cuMemMap/IPC).
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
@@ -2718,6 +2739,8 @@ class ExternalNcclCommRegistrationTest(TestCase):
     These run the real C++ registry path: register the real pointer into the
     per-device ``NCCLDevCommManager`` and unregister via the handle.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     def _make_real_comm(self, device_index: int = 0) -> int:
         """Create a real 1-rank ncclComm on ``device_index`` and return its
