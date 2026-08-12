@@ -100,9 +100,19 @@ def measure(
         ).items():
             if "error" in payload:
                 errors.setdefault(rel, str(payload["error"]))
-            else:
-                ran.setdefault(rel, {})[job] = set(payload["ran"])
-                observable |= {p for p, v in payload["probes"].items() if v}
+                continue
+            seen = len(payload["ran"]) + len(payload["skipped"])
+            if seen < payload["loadable"]:
+                # The suite was abandoned partway, so the tests after the abort are
+                # in neither bucket and would silently read as needing nothing.
+                errors.setdefault(
+                    rel,
+                    f"{job}: suite stopped after {seen} of {payload['loadable']} "
+                    f"tests, so the rest could not be measured",
+                )
+                continue
+            ran.setdefault(rel, {})[job] = set(payload["ran"])
+            observable |= {p for p, v in payload["probes"].items() if v}
 
     needs = {}
     for rel, by_job in ran.items():
