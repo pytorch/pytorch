@@ -55,6 +55,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, variables
 from ..exc import (
+    FakeTensorObservedException,
     ObservedException,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -2238,6 +2239,8 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
                 e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
             raise
         except (Unsupported, ObservedException) as e:
+            if isinstance(e, FakeTensorObservedException):
+                raise
             # Only tag if not already tagged (reports deepest HOP only)
             if hasattr(e, "_hop_name"):
                 raise
@@ -2303,7 +2306,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -2472,12 +2475,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # "merge" is too strong a word: we mostly assert that
         # the resulting graphstates have to be the same.
         #
-        # Branch-local guards and range refinements must not become parent
-        # graph guards. The predicate determines which branch runs at runtime,
-        # so constraints learned while tracing one branch are isolated from the
-        # outer ShapeEnv. Side effects are still NOT permitted inside
-        # true/false branches; this would be difficult to implement, because of
-        # the path explosion problem.
+        # During export, branch-local guards and range refinements must not
+        # become top-level input constraints. The predicate determines which
+        # branch runs at runtime, so export isolates those constraints and puts
+        # them in the branch graph as runtime assertions instead. Regular
+        # torch.compile must retain branch guards on the parent ShapeEnv so a
+        # failed specialization triggers recompilation. Side effects are still
+        # NOT permitted inside true/false branches; this would be difficult to
+        # implement because of the path explosion problem.
 
         def speculate_branch(
             branch: bool,
@@ -2488,12 +2493,20 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 raise AssertionError("_HOP_NAME must be set")
             # TODO: Support kwargs
             shape_env = tx.output.shape_env
-            guard_start = len(shape_env.guards)
-            deferred_runtime_asserts_start = (
-                shape_env._snapshot_deferred_runtime_asserts()
-            )
-            var_to_range_start = dict(shape_env.var_to_range)
-            with tx.output.shape_env.isolate_branch_shape_env():
+            guard_start = None
+            deferred_runtime_asserts_start = None
+            var_to_range_start = None
+            branch_shape_env_context = contextlib.nullcontext()
+            is_export = tx.output.export or torch.compiler.is_exporting()
+            if is_export:
+                guard_start = len(shape_env.guards)
+                deferred_runtime_asserts_start = (
+                    shape_env._snapshot_deferred_runtime_asserts()
+                )
+                var_to_range_start = dict(shape_env.var_to_range)
+                branch_shape_env_context = shape_env.isolate_branch_shape_env()
+
+            with branch_shape_env_context:
                 (
                     (ret_val, ret_spec),
                     ret_graph,
@@ -2511,14 +2524,23 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     supports_input_mutation=self.supports_input_mutation,
                     supports_aliasing=self.supports_aliasing,
                 )
-                shape_env._insert_branch_runtime_asserts(
-                    torch.fx.GraphModule(dict(tx.output.nn_modules), ret_graph),
-                    f"{self._HOP_NAME}_branch",
-                    guard_start,
-                    deferred_runtime_asserts_start,
-                    var_to_range_start,
-                    export=tx.output.export,
-                )
+                if is_export:
+                    if (
+                        guard_start is None
+                        or deferred_runtime_asserts_start is None
+                        or var_to_range_start is None
+                    ):
+                        raise AssertionError(
+                            "branch ShapeEnv snapshot was not captured"
+                        )
+                    shape_env._insert_branch_runtime_asserts(
+                        torch.fx.GraphModule(dict(tx.output.nn_modules), ret_graph),
+                        f"{self._HOP_NAME}_branch",
+                        guard_start,
+                        deferred_runtime_asserts_start,
+                        var_to_range_start,
+                        export=tx.output.export,
+                    )
 
             # need to ensure we increase epoch so we don't memoize unbacked bindings
             # across different subgraphs which can interfere with runtime assertion
@@ -2626,6 +2648,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.switch import _get_branch
 
         from . import ListVariable
+
+        self.supports_input_mutation = not torch.is_grad_enabled()
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -3027,17 +3051,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
         _check_all_tensorvariable(additional_inputs_vars)
 
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.associative_scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
-
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
@@ -3303,18 +3316,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 explanation=f"Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
                 hints=[
                     *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
-        # scan_length check
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         _check_all_tensorvariable(init_vars)
@@ -5154,7 +5155,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare

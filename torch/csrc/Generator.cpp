@@ -225,6 +225,37 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPGenerator_philoxState(
+    PyObject* _self,
+    PyObject* increment) {
+  HANDLE_TH_ERRORS
+  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  TORCH_CHECK(
+      THPUtils_checkLong(increment),
+      "philox_state expected an int, but got ",
+      THPUtils_typename(increment));
+  // Deliberately not unpack_uint64: a negative increment is never
+  // meaningful, so let the OverflowError propagate.
+  const uint64_t inc = THPUtils_unpackUInt64(increment);
+
+  std::tuple<at::Tensor, at::Tensor, at::Tensor> state;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    state = gen.philox_state(inc);
+  }
+  auto& [seed_t, offset_t, intragraph_t] = state;
+
+  auto ret = THPObjectPtr{PyTuple_New(3)};
+  if (!ret)
+    throw python_error(); // @allow-raw-throw
+  PyTuple_SET_ITEM(ret.get(), 0, THPVariable_Wrap(std::move(seed_t)));
+  PyTuple_SET_ITEM(ret.get(), 1, THPVariable_Wrap(std::move(offset_t)));
+  PyTuple_SET_ITEM(ret.get(), 2, THPVariable_Wrap(std::move(intragraph_t)));
+  return ret.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
@@ -307,6 +338,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
+    {"philox_state", THPGenerator_philoxState, METH_O, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

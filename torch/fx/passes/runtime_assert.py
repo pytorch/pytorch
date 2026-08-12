@@ -1,7 +1,6 @@
 import dis
 import functools
 import logging
-import operator
 import sys
 from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING
@@ -205,14 +204,6 @@ def insert_deferred_runtime_asserts(
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
-    def is_self_equality(node: fx.Node) -> bool:
-        return (
-            node.op == "call_function"
-            and node.target is operator.eq
-            and len(node.args) == 2
-            and node.args[0] is node.args[1]
-        )
-
     def _sympy_interp(
         expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
     ) -> fx.Proxy:
@@ -403,11 +394,6 @@ def insert_deferred_runtime_asserts(
                 ):
                     res = _sympy_interp(expr_to_proxy, ra.expr).node
 
-                    if is_self_equality(res):
-                        graph.erase_node(res)
-                        added_asserts.add(ra.expr)
-                        continue
-
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
                         # TODO: use ra.msg here, but it's pretty
@@ -490,10 +476,7 @@ def insert_deferred_runtime_asserts(
             if node.target in assert_targets:
                 cond = _assertion_condition(node)
                 assert_expr = _get_sym_val(cond) if isinstance(cond, fx.Node) else None
-                if (
-                    cond == True  # noqa: E712
-                    or (isinstance(cond, fx.Node) and is_self_equality(cond))
-                ):
+                if cond == True:  # noqa: E712
                     arg = cond
                     gm.graph.erase_node(node)
                     if isinstance(arg, fx.Node) and not arg.users:
@@ -662,7 +645,7 @@ def insert_deferred_runtime_asserts(
                 # https://github.com/pytorch/pytorch/pull/119043
                 # which didn't work.
                 #
-                # Another ideas for how to do this:
+                # Another idea for how to do this:
                 # - Have bound_sympy be the source of truth of the ranges of any expression
                 # - Cache intermediate results for every subexpression of bound_sympy
                 # - This cache should be possible to edit to refine ranges

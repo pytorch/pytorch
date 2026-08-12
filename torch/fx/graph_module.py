@@ -305,7 +305,8 @@ def _copy_attr(
     # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
     # So, we register it as a named buffer in the target module.
     if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
-        to_module.register_buffer(field, orig)
+        persistent = field not in from_module._non_persistent_buffers_set
+        to_module.register_buffer(field, orig, persistent=persistent)
     else:
         setattr(to_module, field, orig)
 
@@ -876,7 +877,7 @@ class {module_name}(torch.nn.Module):
                 # ["foo", "bar", "baz"]
                 fullpath = node.target.split(".")
 
-                # If we're looking at multiple parts of a path, join
+                # If we're looking at multiple parts of a path,
                 # join them with a dot. Otherwise, return that single
                 # element without doing anything to it.
                 def join_fn(x: str, y: str) -> str:

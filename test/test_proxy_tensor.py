@@ -12,7 +12,6 @@ import torch._dynamo
 import unittest
 import warnings
 import operator
-import sys
 from collections.abc import Iterable
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
@@ -1153,78 +1152,6 @@ def forward(self, x_1, y_1):
     empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
     return ((sym_size_int, sym_size_int_1), empty)""")
 
-    def test_deduped_symints_preserves_runtime_assert_condition_slice(self):
-        import sympy
-
-        from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        graph = torch.fx.Graph()
-        a = graph.placeholder("a")
-        b = graph.placeholder("b")
-        add = graph.call_function(operator.add, (a, 1))
-        add_1 = graph.call_function(operator.add, (b, 2))
-        eq = graph.call_function(operator.eq, (add, 4))
-        graph.call_function(torch.ops.aten._assert_scalar.default, (eq, "first"))
-        eq_1 = graph.call_function(operator.eq, (add_1, 4))
-        graph.call_function(torch.ops.aten._assert_scalar.default, (eq_1, "second"))
-        add_2 = graph.call_function(operator.add, (add, add_1))
-        graph.output(add_2)
-        gm = torch.fx.GraphModule({}, graph)
-
-        shape_env = ShapeEnv()
-        a.meta["val"] = shape_env.create_symintnode(
-            sympy.Symbol("s0", integer=True), hint=3
-        )
-        b.meta["val"] = shape_env.create_symintnode(
-            sympy.Symbol("s1", integer=True), hint=2
-        )
-        same_example_expr = sympy.Symbol("s2", integer=True)
-        add.meta["val"] = shape_env.create_symintnode(same_example_expr, hint=4)
-        add_1.meta["val"] = shape_env.create_symintnode(same_example_expr, hint=4)
-        eq.meta["val"] = shape_env.create_symboolnode(sympy.true)
-        eq_1.meta["val"] = shape_env.create_symboolnode(sympy.true)
-
-        dedupe_symints(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-
-        self.assertIs(eq_1.args[0], add_1)
-        self.assertEqual(gm(3, 2), 8)
-        with self.assertRaisesRegex(RuntimeError, "second"):
-            gm(3, 1)
-
-    def test_deduped_symints_preserves_deep_runtime_assert_condition_slice(self):
-        import sympy
-
-        from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        graph = torch.fx.Graph()
-        a = graph.placeholder("a")
-        current = a
-        chain_length = sys.getrecursionlimit() + 100
-        for _ in range(chain_length):
-            current = graph.call_function(operator.add, (current, 1))
-        eq = graph.call_function(operator.eq, (current, chain_length))
-        graph.call_function(torch.ops.aten._assert_scalar.default, (eq, "deep"))
-        graph.output(current)
-        gm = torch.fx.GraphModule({}, graph)
-
-        shape_env = ShapeEnv()
-        a.meta["val"] = shape_env.create_symintnode(
-            sympy.Symbol("s0", integer=True), hint=0
-        )
-        for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target is operator.add:
-                node.meta["val"] = shape_env.create_symintnode(
-                    sympy.Symbol(node.name, integer=True), hint=0
-                )
-        eq.meta["val"] = shape_env.create_symboolnode(sympy.true)
-
-        dedupe_symints(gm.graph)
-        gm.graph.lint()
-
     def test_unary(self):
         def f(x):
             if x.shape[0] >= 20:
@@ -2323,8 +2250,6 @@ out_symbolic_tensor_failures = {
     xfail('argmax', ''),
     xfail('argmin', ''),
     xfail('gather', ''),
-    xfail('linalg.pinv', ''),
-    xfail('linalg.pinv', 'hermitian'),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),

@@ -109,15 +109,15 @@ def dedupe_symints(graph: torch.fx.Graph):
         if node.op == "placeholder":
             resolvable_from_input_symints.add(node)
             sym_dict[val] = node
-        elif node in runtime_assert_condition_nodes:
-            # Assertion conditions carry provenance: two condition slices may
-            # evaluate to the same expression for example inputs but guard
-            # different symbolic quantities at runtime. Let assertion-specific
-            # deduplication decide which checks are redundant.
-            continue
         elif existing_node := sym_dict.get(val):
-            node.replace_all_uses_with(existing_node)
-            graph.erase_node(node)
+            if node in runtime_assert_condition_nodes:
+                # Preserve the runtime provenance used by the assertion. The
+                # existing canonical node proves this symbolic value is
+                # resolvable, so descendants can still participate in CSE.
+                resolvable_from_input_symints.add(node)
+            else:
+                node.replace_all_uses_with(existing_node)
+                graph.erase_node(node)
         elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
             sym_dict[val] = node
             resolvable_from_input_symints.add(node)

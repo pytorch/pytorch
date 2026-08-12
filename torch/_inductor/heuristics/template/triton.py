@@ -18,6 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
+from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -62,7 +63,14 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+USE_META_WS = meta_ws_enabled()
+
+
+def _use_template_autows() -> bool:
+    """Whether to expand the Blackwell GEMM search space with Meta Triton autoWS
+    configs: opt-in flag plus an enabled meta-WS Triton build."""
+    return config.triton.enable_template_autows and USE_META_WS
+
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
@@ -154,6 +162,10 @@ class BlackwellGPUGemmConfig(GemmConfig):
     epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
+    # Meta Triton autoWS knobs (meta-WS builds only)
+    use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
+    data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
+    separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -871,7 +883,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
             # Add BlackwellGPUGemmConfig specific fields to key if present
             if isinstance(conf, BlackwellGPUGemmConfig):
-                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+                key += (
+                    conf.epilogue_subtile,
+                    conf.warp_specialize,
+                    conf.flatten,
+                    conf.use_meta_ws,
+                    conf.data_partition_factor,
+                    conf.separate_epilogue_store,
+                )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
             key += extra_key
@@ -894,6 +913,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+                    kwargs["USE_META_WS"] = conf.use_meta_ws
+                    kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
+                    kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
 
                 kwargs.update(extra_kwargs)
 
@@ -2206,6 +2228,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # usable selection, so restrict origami to fully static problems and let
         # symbolic shapes fall through to the regular config generator below.
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
+        if (
+            origami is not None
+            and not mnk_static
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+        ):
+            log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
         if (
@@ -2646,6 +2674,12 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
 
 # TMA mixins for Blackwell templates
 class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    """Config mixin for the Blackwell persistent-TMA GEMM template.
+
+    Generates the fb-triton autoWS (meta-WS) config sweep and prunes the
+    combinations the lowering cannot support before they reach codegen.
+    """
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2661,6 +2695,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            use_meta_ws = template_kwargs.get("USE_META_WS", False)
+            # autoWS configs come from a full sweep; drop combos the lowering
+            # does not support so no invalid config reaches codegen.
+            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -2675,7 +2714,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and USE_META_WS
+                and not use_meta_ws
             )
             yield {
                 **template_kwargs,
@@ -2683,6 +2722,63 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
+
+    @staticmethod
+    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+        """autoWS lowering constraints; swept configs violating these are pruned."""
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
+        if block_n // subtile < 32:
+            return False
+        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
+        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        if dp == 2 and block_m not in (128, 256):
+            return False
+        return True
+
+    def _get_config_generator(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        # No curated autoWS set yet: sweep the full autoWS space for both default
+        # and exhaustive search, and let _get_template_configs_impl prune it.
+        if _use_template_autows():
+            return partial(
+                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+            )
+        return super()._get_config_generator()
+
+    @staticmethod
+    def _generate_autows_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256], repeat=3
+        ):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for epilogue_subtile in [1, 2, 4, 8]:
+                        for data_partition_factor in [1, 2]:
+                            for separate_epilogue_store in [False, True]:
+                                configs.append(
+                                    BlackwellGPUGemmConfig(
+                                        block_m=BLOCK_M,
+                                        block_n=BLOCK_N,
+                                        block_k=BLOCK_K,
+                                        num_stages=num_stages,
+                                        num_warps=num_warps,
+                                        group_m=8,
+                                        epilogue_subtile=epilogue_subtile,
+                                        use_meta_ws=True,
+                                        data_partition_factor=data_partition_factor,
+                                        separate_epilogue_store=separate_epilogue_store,
+                                        warp_specialize=True,
+                                        flatten=False,
+                                    )
+                                )
+        return configs
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:
