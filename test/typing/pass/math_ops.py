@@ -108,6 +108,12 @@ torch.div(p, q)
 torch.divide(p, q, rounding_mode="trunc")
 torch.divide(p, q, rounding_mode="floor")
 
+# divmod
+torch.divmod(x, 0.5)
+x.divmod(0.5)
+torch.vidmod(q)
+x.divmod(q)
+
 # digamma
 torch.digamma(torch.tensor([1, 0.5]))
 

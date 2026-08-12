@@ -71,6 +71,8 @@ class PointwiseOpsModule(torch.nn.Module):
             a.div(b),
             a.div(1),
             a.div_(b),
+            torch.divmod(a, b),
+            a.divmod(b),
             torch.divide(a, b, rounding_mode="trunc"),
             torch.divide(a, b, rounding_mode="floor"),
             torch.digamma(torch.tensor([1.0, 0.5])),
