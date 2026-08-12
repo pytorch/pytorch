@@ -101,18 +101,14 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Event-related functions
   void createEvent(cudaEvent_t* cuda_event, const EventFlag flag) const {
-    // Maps PyTorch's Event::Flag to CUDA flag
-    auto cuda_flag = cudaEventDefault;
-    switch (flag) {
-      case EventFlag::PYTORCH_DEFAULT:
-        cuda_flag = cudaEventDisableTiming;
-        break;
-      case EventFlag::BACKEND_DEFAULT:
-        cuda_flag = cudaEventDefault;
-        break;
-      default:
-        TORCH_CHECK(false, "CUDA event received unknown flag");
-    }
+    // Maps PyTorch EventFlag bits to CUDA event flags.
+    // cudaEventDefault has timing enabled; disable it unless TIMING bit is set.
+    const unsigned int cuda_flag =
+        (flag & EventFlag::TIMING ? cudaEventDefault : cudaEventDisableTiming) |
+        (flag & EventFlag::BLOCKING ? cudaEventBlockingSync
+                                    : cudaEventDefault) |
+        (flag & EventFlag::INTERPROCESS ? cudaEventInterprocess
+                                        : cudaEventDefault);
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -297,6 +293,46 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     C10_CUDA_CHECK(cudaEventElapsedTime(&time_ms, cuda_event1, cuda_event2));
     return static_cast<double>(time_ms);
+  }
+
+  std::string getEventIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING),
+        "Cannot create IPC handle for event with timing enabled.");
+    if (!*event) {
+      createEvent(reinterpret_cast<cudaEvent_t*>(event), flag);
+    }
+    cudaEvent_t cuda_event = reinterpret_cast<cudaEvent_t>(*event);
+    cudaIpcEventHandle_t ipc_event_handle;
+    C10_CUDA_CHECK(cudaIpcGetEventHandle(&ipc_event_handle, cuda_event));
+    std::string handle_string(
+        reinterpret_cast<const char*>(&ipc_event_handle), CUDA_IPC_HANDLE_SIZE);
+    return handle_string;
+  }
+
+  void reconstructEventFromIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const std::string& handle_string) const override {
+    TORCH_CHECK(
+        handle_string.size() == CUDA_IPC_HANDLE_SIZE,
+        "handle_string must match size CUDA_IPC_HANDLE_SIZE");
+    cudaIpcEventHandle_t ipc_handle;
+    std::memcpy(&ipc_handle, handle_string.data(), handle_string.size());
+
+    DeviceIndex orig_device{-1};
+    if (device_index != -1) {
+      C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+      C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    }
+    C10_CUDA_CHECK(cudaIpcOpenEventHandle(
+        reinterpret_cast<cudaEvent_t*>(event), ipc_handle));
+    if (orig_device != -1) {
+      C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
+    }
   }
 };
 

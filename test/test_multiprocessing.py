@@ -281,6 +281,29 @@ def _event_handle_exporter_consumer(handle, p2c, c2p):
         p2c.get()
 
 
+def _generic_event_handle_importer_consumer(handle, p2c, c2p):
+    e1 = torch.Event.from_ipc_handle(0, handle)
+    c2p.put(0)  # notify parent child is ready
+    p2c.get()  # wait for record in parent
+    e1.synchronize()
+    c2p.put(1)  # notify synchronization is done in child
+    p2c.get()  # wait for parent to finish before destructing child event
+
+
+def _generic_event_handle_exporter_consumer(handle, p2c, c2p):
+    stream = torch.Stream()
+    with stream:
+        e1 = torch.Event.from_ipc_handle(
+            torch.accelerator.current_device_index(), handle
+        )
+        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        e1.record()
+        c2p.put(0)
+        # wait for parent process finished synchronization before
+        # destructing e1
+        p2c.get()
+
+
 @contextlib.contextmanager
 def fs_sharing():
     prev_strategy = mp.get_sharing_strategy()
@@ -1008,6 +1031,52 @@ if __name__ == "__main__":
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_exporter_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+        # wait for event in child process is recorded
+        c2p.get()
+
+        self.assertFalse(e0.query())
+        e0.synchronize()
+        self.assertTrue(e0.query())
+        p2c.put(0)
+        p.join()
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_generic_event_handle_importer(self):
+        e0 = torch.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(e0.query())
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=_generic_event_handle_importer_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for child to become ready
+        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        e0.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(e0.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(e0.query())
+        p2c.put(1)  # notify child that parent is done
+        p.join()
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_generic_event_handle_exporter(self):
+        e0 = torch.Event(enable_timing=False, interprocess=True)
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=_generic_event_handle_exporter_consumer,
             args=(e0.ipc_handle(), p2c, c2p),
         )
         p.start()

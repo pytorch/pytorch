@@ -114,8 +114,7 @@ struct InlineEvent final {
         DeviceTypeName(other.device_type()),
         ".");
     TORCH_CHECK_VALUE(
-        (flag_ == EventFlag::BACKEND_DEFAULT) &&
-            (other.flag_ == EventFlag::BACKEND_DEFAULT),
+        (flag_ & EventFlag::TIMING) && (other.flag_ & EventFlag::TIMING),
         "Both events must be created with argument 'enable_timing=True'.");
     TORCH_CHECK_VALUE(
         was_marked_for_recording() && other.was_marked_for_recording(),
@@ -133,6 +132,25 @@ struct InlineEvent final {
     if (!was_marked_for_recording_)
       return;
     backend_.synchronizeEvent(event_);
+  }
+
+  std::string ipcHandle() {
+    TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Event is not an IPC event.");
+    return backend_.getEventIPCHandle(&event_, device_index_, flag_);
+  }
+
+  void reconstructFromIPCHandle(
+      const DeviceIndex device_index,
+      const std::string& handle_string) {
+    backend_.reconstructEventFromIPCHandle(
+        &event_, device_index, handle_string);
+    device_index_ = device_index;
+    // Backend events are lazily created on first record, so a valid IPC handle
+    // implies the event was already recorded in the sender process.
+    was_marked_for_recording_ = true;
+    TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Invalid IPC handle.");
+    // Reconstructed events cannot be re-exported via ipcHandle.
+    flag_ = EventFlag::PYTORCH_DEFAULT;
   }
 
  private:

@@ -107,7 +107,10 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     *xpu_event = new sycl::event(syclex::make_event(
         c10::xpu::get_device_context(),
         syclex::properties{
-            syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
+            syclex::enable_ipc{flag & EventFlag::INTERPROCESS},
+            syclex::enable_profiling {
+              flag & EventFlag::TIMING
+            }}));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
@@ -160,6 +163,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
 #endif
     } else {
+      TORCH_CHECK(
+          !flag & EventFlag::INTERPROCESS,
+          "Event must be reusable to support IPC")
       // Delete the event previously recorded.
       if (xpu_event)
         delete xpu_event;
@@ -242,6 +248,66 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
 
+  void synchronizeEvent(void* event) const override {
+    if (!event)
+      return;
+    auto* xpu_event = reinterpret_cast<sycl::event*>(event);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_synchronization(
+          c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
+    }
+    xpu_event->wait_and_throw();
+  }
+
+  std::string getEventIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING),
+        "Cannot create IPC handle for event with timing enabled.");
+#if SYCL_COMPILER_VERSION >= 20260200
+    bool reusable = c10::xpu::get_raw_device(device_index)
+                        .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
+    sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
+    if (!xpu_event) {
+      createEvent(&xpu_event, flag);
+    }
+    auto handle_data =
+        sycl::ext::oneapi::experimental::ipc::event::get(*xpu_event).data();
+    std::string handle_string(
+        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+    return handle_string;
+#else
+    TORCH_CHECK(false, "Event IPC requires SYCL compiler 2026.2 or later.");
+#endif
+  }
+
+  void reconstructEventFromIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const std::string& handle_string) const override {
+#if SYCL_COMPILER_VERSION >= 20260200
+    DeviceIndex current_device =
+        device_index == -1 ? c10::xpu::current_device() : device_index;
+    bool reusable = c10::xpu::get_raw_device(current_device)
+                        .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
+    sycl::ext::oneapi::experimental::ipc::handle_data_t handle_data(
+        handle_string.data(), handle_string.data() + handle_string.size());
+
+    sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
+    xpu_event =
+        new sycl::event(sycl::ext::oneapi::experimental::ipc::event::open(
+            handle_data, c10::xpu::get_device_context()));
+#else
+    TORCH_CHECK(false, "Event IPC requires SYCL compiler 2026.2 or later.");
+#endif
+    }
+  }
+
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
@@ -256,18 +322,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   bool isStreamCapturing(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
     return xpu_stream.is_capturing();
-  }
-
-  void synchronizeEvent(void* event) const override {
-    if (!event)
-      return;
-    auto* xpu_event = reinterpret_cast<sycl::event*>(event);
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_event_synchronization(
-          c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
-    }
-    xpu_event->wait_and_throw();
   }
 
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
