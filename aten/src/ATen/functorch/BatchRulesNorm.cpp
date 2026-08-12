@@ -350,7 +350,6 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & mean, std::optional<int64_t> mean_bdim,
     const at::Tensor & rstd, std::optional<int64_t> rstd_bdim,
     int64_t N, int64_t C, int64_t HxW, int64_t group) {
-
   auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto mean_ = moveBatchDimToFront(mean, mean_bdim);
