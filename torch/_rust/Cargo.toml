@@ -1,0 +1,32 @@
+[package]
+name = "torch_rust"
+version = "0.1.0"
+# OSS-only edition pin. The Buck build ignores this file and uses the fbsource
+# default edition (2024) with the patched vendored pyo3; Buck also forbids setting
+# `edition` on first-party targets. OSS stays on 2021 because pristine crates.io
+# pyo3 0.26 fails to compile under edition 2024 (E0034 in its IntoPyObject
+# codegen). Unifying on 2024 would require a newer pyo3.
+edition = "2021"
+publish = false
+
+[lib]
+name = "_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+cxx = "1.0"
+pyo3 = { version = "0.26", features = ["extension-module"] }
+
+[build-dependencies]
+cxx-build = "1.0"
+pyo3-build-config = "0.26"
+
+[lints.rust]
+warnings = "deny"
+
+# module_inception is inherent to the cxx::bridge pattern (a `mod ffi` inside
+# bindings/ffi.rs); cxx rejects an attribute-level allow on the bridge, so
+# suppress it here. `all` is lowered in priority so this specific override wins.
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+module_inception = "allow"
