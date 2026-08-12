@@ -3,6 +3,17 @@
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
+#include <c10/util/StringUtil.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cslt_compress_native.h>
+#include <ATen/ops/_cslt_sparse_mm_native.h>
+#include <ATen/ops/_cslt_sparse_mm_search_native.h>
+#endif
+
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {
@@ -45,6 +56,17 @@ cusparseLtHandle_t& get_cusparselt_handle_for_current_device() {
 c10::once_flag g_hipSparseLtSupportInitFlag;
 static bool g_hipSparseLtSupported = false;
 
+static const std::vector<std::string>& hipSparseLtSupportedArchs() {
+#if ROCM_VERSION >= 71400
+  static const std::vector<std::string> archs = {"gfx950", "gfx942", "gfx1250"};
+#elif ROCM_VERSION >= 71200
+  static const std::vector<std::string> archs = {"gfx950", "gfx942"};
+#else
+  static const std::vector<std::string> archs = {};
+#endif
+  return archs;
+}
+
 // Initialize the hipSparseLt support status once for the platform
 static void initHipSparseLtSupport() {
   // Default to not supported
@@ -53,8 +75,8 @@ static void initHipSparseLtSupport() {
   // Check only the first available device
   try {
     if (at::cuda::device_count() > 0) {
-      g_hipSparseLtSupported =
-          at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx942"}, 0);
+      g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
+          hipSparseLtSupportedArchs(), 0);
     }
   } catch (const std::exception&) {
     // If an exception occurs during device property check, we assume
@@ -74,9 +96,9 @@ static bool isHipSparseLtSupported() {
   if (!g_hipSparseLtSupported) {
     TORCH_CHECK(
         false,
-        "hipSparseLt not supported on this device, supported architectures: "
-        "gfx950, gfx942. "
-        "required ROCM version: 6.4.0 or later.");
+        "hipSparseLt not supported on this device. Supported architectures: ",
+        c10::Join(", ", hipSparseLtSupportedArchs()),
+        ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
   }
   return g_hipSparseLtSupported;
 }
@@ -583,7 +605,7 @@ at::Tensor _cslt_sparse_mm(
       (int)split_k,
       (int)split_k_mode,
       false);
-  return std::get<0>(result);
+  return std::get<0>(std::move(result));
 }
 
 int64_t _cslt_sparse_mm_search(

@@ -1613,7 +1613,7 @@ class ACTCompileTest(TestCase):
                         self.assertNotIsInstance(
                             a,
                             AsyncCollectiveTensor,
-                            f"arg {i} is still an ACT — trigger_wait() "
+                            lambda msg: f"{msg}\narg {i} is still an ACT — trigger_wait() "
                             "was not called before the compiled function",
                         )
                     return gm(*args)

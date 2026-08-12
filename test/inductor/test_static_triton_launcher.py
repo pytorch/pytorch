@@ -61,6 +61,9 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher = object.__new__(StaticallyLaunchedXpuKernel)
         launcher.function = None
         launcher.module = None
+        launcher.device_agnostic = False
+        launcher.functions = {}
+        launcher.modules = {}
         launcher.cubin_path = "/tmp/kernel.zebin"
         launcher.cubin_raw = b"zebin"
         launcher.name = "kernel"
@@ -133,6 +136,20 @@ class TestStaticTritonLauncherUnit(TestCase):
         del fast_launcher
         gc.collect()
         self.assertIsNone(owner_ref())
+
+    def test_resolve_load_device_cpu_stays_none(self):
+        # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
+        # concrete index makes the guard call exchange_device, which CPU does not
+        # implement, breaking the triton CPU backend's _make_launchers.
+        from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
+
+        self.assertIsNone(_resolve_load_device(None, "cpu"))
+        self.assertEqual(_resolve_load_device(3, "cpu"), 3)
+        # The resolved CPU value must be usable in a DeviceGuard without raising.
+        iface = get_interface_for_device("cpu")
+        with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
+            pass
 
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):
@@ -560,6 +577,8 @@ def kernel_many_args(out_tensor, {decl}):
                 self.name = "fake_kernel"
                 self.module = 0xC0FFEE
                 self.function = 0xF00D
+                self.functions = {}
+                self.modules = {}
                 self.C_impl = FakeImpl
 
             def close(self):
@@ -651,6 +670,35 @@ class TestStaticTritonCompileResult(TestCase):
         x = torch.randn(1, device=GPU_TYPE)
         x2 = x.clone().detach_()
         self.assertEqual(foo(x), x2 + 5)
+
+    @skipIfXpu(msg="Tests CUDA static launcher dtype validation")
+    @torch._inductor.config.patch({"compile_threads": 1, "fx_graph_cache": False})
+    def test_custom_op_bad_fake_dtype_fails_fast(self):
+        namespace = f"test_static_launcher_dtype_validation_{random.randint(0, 2**32)}"
+
+        @torch.library.custom_op(f"{namespace}::bad_meta_mul", mutates_args=())
+        def bad_meta_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a * b
+
+        @bad_meta_mul.register_fake
+        def _(a, b):
+            return torch.empty_like(a, dtype=torch.bfloat16)
+
+        op = getattr(torch.ops, namespace).bad_meta_mul
+
+        @torch.compile(fullgraph=True)
+        def f(a, b):
+            x = op(a, b)
+            return x + 1
+
+        a = torch.randn(1 << 20, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(1 << 20, device=GPU_TYPE, dtype=torch.float32)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)expected dtype torch\.bfloat16 but got torch\.float32.*incorrect fake",
+            lambda: f(a, b),
+        )
 
     def test_empty_tensor(self):
         @torch.compile()

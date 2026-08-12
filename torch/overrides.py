@@ -340,6 +340,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.as_subclass,
         Tensor.eig,
         Tensor.lstsq,
+        Tensor.qr,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -1051,7 +1052,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.q_per_channel_zero_points: lambda input: -1,
         torch.q_scale: lambda input: -1,
         torch.q_zero_point: lambda input: -1,
-        torch.qr: lambda input, some=True, out=None: -1,
         torch.linalg.qr: lambda input, mode="reduced", out=None: -1,
         torch.linalg.polar: lambda A, out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
@@ -1341,7 +1341,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.__mod__: lambda self, other: -1,
         Tensor.__rmod__: lambda self, other: -1,
         Tensor.__imod__: lambda self, other: -1,
-        Tensor.__array_wrap__: lambda self, array, context=None, return_scalar=False: -1,
+        Tensor.__array_wrap__: lambda self, array: -1,
         Tensor.__getitem__: lambda self, idx: -1,
         Tensor.__deepcopy__: lambda self, memo: -1,
         Tensor.__int__: lambda self: -1,
@@ -1818,7 +1818,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or arguments to check for __torch_function__ methods.
+        Iterable of arguments to check for __torch_function__ methods.
     Returns
     -------
     bool

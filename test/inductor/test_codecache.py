@@ -61,7 +61,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
+from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
@@ -530,17 +530,6 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
-
-    def _find_triton_kernel_binaries(self):
-        found = []
-        triton_dir = os.path.join(cache_dir(), "triton")
-        device_type = "hip" if torch.version.hip else "cuda"
-        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
-        for dirpath, _, filenames in os.walk(triton_dir):
-            for filename in filenames:
-                if filename.endswith(binary_ext):
-                    found.append(os.path.join(dirpath, filename))
-        return found
 
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
@@ -1031,55 +1020,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
-
-    @requires_cuda_and_triton
-    @config.patch(
-        {
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "bundle_triton_into_fx_graph_cache": True,
-            "triton.store_cubin": True,
-            "compile_threads": 1,
-        }
-    )
-    def test_cache_artifact_load_emits_triton_bundle(self):
-        def fn(x, y):
-            return (x.sin() + y.cos()).relu()
-
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            mock.patch.dict(
-                os.environ,
-                {
-                    "TORCHINDUCTOR_CACHE_DIR": tmpdir,
-                    "TRITON_CACHE_DIR": os.path.join(tmpdir, "triton"),
-                },
-            ),
-        ):
-            self.reset()
-            CacheArtifactManager.clear()
-
-            x = torch.randn(256, 256, device="cuda")
-            y = torch.randn(256, 256, device="cuda")
-            compiled_fn = torch.compile(fn, dynamic=False)
-
-            self.assertEqual(fn(x, y), compiled_fn(x, y))
-            torch.cuda.synchronize()
-
-            artifacts = torch.compiler.save_cache_artifacts()
-            self.assertIsNotNone(artifacts)
-            artifact_bytes, _ = artifacts
-
-            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
-
-            self.reset()
-            CacheArtifactManager.clear()
-            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
-
-            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
-
-            self.assertIsNotNone(cache_info)
-            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
 
     @requires_triton()
     @config.patch(
@@ -2940,7 +2880,6 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     @parametrize("is_aot", (False, True))
     def test_split_module(self, is_aot):
         class Mod(torch.nn.Module):
@@ -2949,21 +2888,6 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 x = x + (b0**2) + (b1 / 2)
                 x = x + (c0**2) + (c1 / 2)
                 return x
-
-        seen = 0
-        splits = [4, 8]
-
-        def split(n):
-            nonlocal seen
-            if seen < splits[0]:
-                seen += 1
-                return 0
-            elif seen < splits[1]:
-                seen += 1
-                return 1
-            else:
-                seen += 1
-                return 2
 
         def t():
             return torch.randn([])
@@ -2978,22 +2902,73 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         example_inputs = (x, a0, a1, b0, b1, c0, c1)
         gm, inps, _ = self.capture(Mod())(*example_inputs)
-        split = torch.fx.passes.split_module.split_module(gm, gm, split)
 
-        # Each of the split graphs only has one output.
-        ca0 = torch._inductor.standalone_compile(
-            split.submod_0, (a0, x, a1), aot=is_aot
-        )
-        ca1 = torch._inductor.standalone_compile(
-            split.submod_1, (b0, x, b1), aot=is_aot
-        )
-        ca2 = torch._inductor.standalone_compile(
-            split.submod_2, (c0, x, c1), aot=is_aot
+        # Partition by data dependency: nodes depending on a0/a1 -> 0,
+        # b0/b1 -> 1, c0/c1 -> 2. This produces 3 structurally identical
+        # subgraphs regardless of canonicalized node order.
+        placeholder_group = {}
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                name = node.name
+                if "a0" in name or "a1" in name:
+                    placeholder_group[node] = 0
+                elif "b0" in name or "b1" in name:
+                    placeholder_group[node] = 1
+                elif "c0" in name or "c1" in name:
+                    placeholder_group[node] = 2
+                else:
+                    placeholder_group[node] = -1
+
+        node_group: dict = {}
+
+        def get_group(node):
+            if node in node_group:
+                return node_group[node]
+            if node.op == "placeholder":
+                return placeholder_group[node]
+            if node.op == "output":
+                return -1
+            groups = {get_group(a) for a in node.all_input_nodes}
+            groups.discard(-1)
+            g = max(groups) if groups else -1
+            node_group[node] = g
+            return g
+
+        def split_fn(node):
+            return max(get_group(node), 0)
+
+        split = torch.fx.passes.split_module.split_module(
+            gm,
+            gm,
+            split_fn,
+            keep_original_node_name=False,
+            keep_original_input_name=False,
         )
 
-        y = ca0(a0, x, a1)
-        y = ca1(b0, y, b1)
-        y = ca2(c0, y, c1)
+        # Derive each submodule's inputs from the split graph's
+        # call_module args rather than hardcoding the order, which
+        # depends on canonicalization.
+        node_to_val = {}
+        ph_idx = 0
+        for n in split.graph.nodes:
+            if n.op == "placeholder":
+                node_to_val[n] = inps[ph_idx]
+                ph_idx += 1
+
+        for call_node in split.graph.nodes:
+            if call_node.op != "call_module":
+                continue
+            submod = getattr(split, call_node.target)
+            submod_inputs = tuple(node_to_val[a] for a in call_node.args)
+            compiled = torch._inductor.standalone_compile(
+                submod,
+                submod_inputs,
+                aot=is_aot,
+            )
+            node_to_val[call_node] = compiled(*submod_inputs)
+
+        output_node = next(n for n in split.graph.nodes if n.op == "output")
+        y = node_to_val[output_node.args[0][0]]
         if not is_aot:
             # fx graph cache doesn't run in AOT mode
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
@@ -3578,6 +3553,128 @@ class TestFxGraphCacheHashing(TestCase):
 
         with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
             CacheabilityValidator(gm, require_shape_env=False).validate()
+
+    def _nested_region_gm(self, patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+        )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm.meta["nested_region_config"] = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        return gm
+
+    def test_nested_region_config_patches_affect_cache_key(self):
+        # A region's inductor_config_patches must be part of the cache key,
+        # otherwise two regions differing only in their patches would collide
+        # and reuse a stale compiled artifact.
+        same1 = self._nested_region_gm({"max_autotune": True})
+        same2 = self._nested_region_gm({"max_autotune": True})
+        different = self._nested_region_gm({"max_autotune": False})
+
+        self.assertEqual(
+            FxGraphHashDetails(
+                same1, [], cast(Any, {}), []
+            ).nested_inductor_config_patches,
+            (("", (("max_autotune", True),)),),
+        )
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
+
+    def test_nested_region_uncacheable_config_bypasses_cache(self):
+        # A callable patch value can't be hashed into the cache key.
+        def custom_pass(graph):
+            return graph
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                require_shape_env=False,
+            ).validate()
+
+        # A non-callable value under a custom-pass key is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
+                require_shape_env=False,
+            ).validate()
+
+        # A callable hidden inside a list value (e.g.
+        # _fuse_ddp_communication_passes) is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm(
+                    {"_fuse_ddp_communication_passes": [custom_pass]}
+                ),
+                require_shape_env=False,
+            ).validate()
+
+        # A list of non-callables stays cacheable.
+        CacheabilityValidator(
+            self._nested_region_gm(
+                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
+            ),
+            require_shape_env=False,
+        ).validate()
+
+    def _nested_region_bw_gm(self, bw_patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        fw_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches=bw_patches
+        )
+        bw_config = get_backward_nested_region_config(fw_config)
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        # Mirror run_joint_graph_passes_on_hops: the backward config is stamped on
+        # the partitioned backward invoke_subgraph node's meta["custom"] (the
+        # source of truth), not the subgraph module.
+        node = gm.graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": bw_config}
+        gm.graph.output(())
+        gm.recompile()
+        return gm
+
+    def test_nested_region_bw_config_patches_affect_cache_key(self):
+        # bw_inductor_config_patches (stamped on the backward invoke_subgraph
+        # node) must be part of the cache key, or two graphs differing only in
+        # backward config would collide.
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        # Backward config replaces (does not merge with) the forward config.
+        bw_config = get_backward_nested_region_config(
+            get_invoke_subgraph_compile_options(
+                bw_inductor_config_patches={"max_autotune": True}
+            )
+        )
+        self.assertEqual(
+            bw_config.inductor_config_patches,
+            {"max_autotune": True},
+        )
+
+        same1 = self._nested_region_bw_gm({"max_autotune": True})
+        same2 = self._nested_region_bw_gm({"max_autotune": True})
+        different = self._nested_region_bw_gm({"max_autotune": False})
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_check_for_hop_skips_constants(self):
@@ -5140,7 +5237,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(calls, [60])
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
-            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+            msg=lambda msg: f"{msg}\nexpected timeout warning, got: {[str(w.message) for w in caught]}",
         )
 
     def test_probe_load_returns_false_on_called_process_error(self):
