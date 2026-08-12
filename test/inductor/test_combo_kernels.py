@@ -3038,6 +3038,7 @@ class _PeakMemFakeNode:
         self._outputs: list = []
         self.mpi_node = SimpleNamespace(pred_buffers=set())
         self.snodes: list | None = None
+        self.unmet_dependencies = []
 
     def get_name(self) -> str:
         return self.name
@@ -3052,6 +3053,9 @@ class _PeakMemFakeNode:
                 out.extend(s.get_outputs())
             return out
         return self._outputs
+
+    def get_buffer_names(self):
+        return OrderedSet(buf.get_name() for buf in self.get_outputs())
 
 
 class _PeakMemFakeBuffer:
@@ -3291,7 +3295,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         nodes = [producer, child, independent]
         scheduler = self._make_schedule_first_scheduler(nodes)
 
-        members, consumed_end = Scheduler._collect_combo_members_from_schedule(
+        members = Scheduler._collect_combo_members_from_schedule(
             scheduler,
             tuple(nodes),
             OrderedSet([child, independent]),
@@ -3301,7 +3305,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
         self.assertEqual(members, [child, independent])
-        self.assertEqual(consumed_end, 3)
 
     def test_schedule_first_rejects_ancestor(self):
         from torch._inductor.scheduler import Scheduler
@@ -3311,7 +3314,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         nodes = [producer, consumer]
         scheduler = self._make_schedule_first_scheduler(nodes)
 
-        members, consumed_end = Scheduler._collect_combo_members_from_schedule(
+        members = Scheduler._collect_combo_members_from_schedule(
             scheduler,
             tuple(nodes),
             OrderedSet(nodes),
@@ -3321,7 +3324,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
         self.assertEqual(members, [producer])
-        self.assertEqual(consumed_end, 2)
 
     def test_schedule_first_rejects_cycle_from_stale_ancestors(self):
         from torch._inductor.scheduler import FusedSchedulerNode, Scheduler
@@ -3343,7 +3345,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         }
 
         self.assertTrue(Scheduler.will_fusion_create_cycle(scheduler, p, q))
-        members, consumed_end = Scheduler._collect_combo_members_from_schedule(
+        members = Scheduler._collect_combo_members_from_schedule(
             scheduler,
             tuple(nodes),
             OrderedSet([p, q]),
@@ -3353,7 +3355,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
         self.assertEqual(members, [p])
-        self.assertEqual(consumed_end, 3)
 
     @parametrize("mismatch", ["device", "stream", "mempool"])
     def test_schedule_first_rejects_incompatible_context(self, mismatch):
@@ -3378,7 +3379,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             nodes, streams=streams, mempools=mempools
         )
 
-        members, consumed_end = Scheduler._collect_combo_members_from_schedule(
+        members = Scheduler._collect_combo_members_from_schedule(
             scheduler,
             tuple(nodes),
             OrderedSet(nodes),
@@ -3388,7 +3389,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
         self.assertEqual(members, [first])
-        self.assertEqual(consumed_end, 2)
 
     def test_schedule_first_stops_at_max_distance_and_member_limit(self):
         from torch._inductor.scheduler import Scheduler
@@ -3398,17 +3398,15 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         eligible = OrderedSet(nodes)
 
         # A max_distance of 2 produces the half-open region [0, 3).
-        bounded, bounded_end = Scheduler._collect_combo_members_from_schedule(
+        bounded = Scheduler._collect_combo_members_from_schedule(
             scheduler, tuple(nodes), eligible, 0, 3, 8
         )
-        capped, capped_end = Scheduler._collect_combo_members_from_schedule(
+        capped = Scheduler._collect_combo_members_from_schedule(
             scheduler, tuple(nodes), eligible, 0, 4, 2
         )
 
         self.assertEqual(bounded, nodes[:3])
-        self.assertEqual(bounded_end, 3)
         self.assertEqual(capped, nodes[:2])
-        self.assertEqual(capped_end, 2)
 
     def test_schedule_first_topologically_sorts_only_region(self):
         from torch._inductor.scheduler import Scheduler
@@ -3434,15 +3432,232 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         ):
             result, local_nodes = Scheduler._build_combo_kernel_region(
                 scheduler,
-                [first, second],
+                [[first, second]],
                 baseline_nodes,
                 region_start=0,
                 region_end=3,
                 enable_autotune=False,
             )
 
-        self.assertIs(result, combo)
+        self.assertEqual(result, [combo])
         self.assertEqual(local_nodes, [dependency, combo])
+
+    def test_schedule_first_rejects_cycle_between_region_combos(self):
+        from torch._inductor.scheduler import Scheduler
+
+        first_a = _ScheduleFirstFakeNode("first_a", buffers=("first_a_buf",))
+        first_b = _ScheduleFirstFakeNode("first_b", buffers=("first_b_buf",))
+        second_b = _ScheduleFirstFakeNode(
+            "second_b",
+            buffers=("second_b_buf",),
+            unmet_dependencies=("first_a_buf",),
+        )
+        second_a = _ScheduleFirstFakeNode(
+            "second_a",
+            buffers=("second_a_buf",),
+            unmet_dependencies=("first_b_buf",),
+        )
+        baseline_nodes = (first_a, first_b, second_b, second_a)
+        combo_a = _ScheduleFirstFakeCombo(
+            [first_a, second_a],
+            buffers=("first_a_buf", "second_a_buf"),
+            unmet_dependencies=("first_b_buf",),
+        )
+        combo_b = _ScheduleFirstFakeCombo(
+            [first_b, second_b],
+            buffers=("first_b_buf", "second_b_buf"),
+            unmet_dependencies=("first_a_buf",),
+        )
+        scheduler = self._make_schedule_first_scheduler(list(baseline_nodes))
+
+        with patch(
+            "torch._inductor.scheduler.ForeachKernelSchedulerNode",
+            side_effect=[combo_a, combo_b],
+        ):
+            result = Scheduler._build_combo_kernel_region(
+                scheduler,
+                [[first_a, second_a], [first_b, second_b]],
+                baseline_nodes,
+                region_start=0,
+                region_end=4,
+                enable_autotune=False,
+            )
+
+        self.assertIsNone(result)
+
+    def test_schedule_first_accepts_multiple_combos_per_region(self):
+        from torch._inductor.scheduler import Scheduler
+
+        nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(4)]
+        scheduler = self._make_schedule_first_scheduler(nodes)
+        scheduler.speedup_by_combo_kernel = lambda candidate: True
+        eligible = OrderedSet(nodes)
+        combos = [
+            _ScheduleFirstFakeCombo(nodes[:2]),
+            _ScheduleFirstFakeCombo(nodes[2:]),
+        ]
+        attempts = []
+        accepted = []
+
+        def memory_check(
+            scheduler_arg,
+            combo_groups,
+            mem_ctx,
+            *,
+            region_start,
+            region_end,
+            enable_autotune,
+        ):
+            attempts.append(
+                (region_start, region_end, [list(group) for group in combo_groups])
+            )
+            return combos, combos
+
+        baseline_nodes = tuple(nodes)
+        mem_ctx = SimpleNamespace(baseline_nodes=baseline_nodes)
+        with (
+            patch.object(Scheduler, "_try_combo_with_memory_check", memory_check),
+            torch._inductor.config.patch(combo_kernel_max_num_nodes=2),
+        ):
+            finalized, finalized_end = Scheduler._try_combo_with_halving(
+                scheduler,
+                0,
+                4,
+                eligible,
+                0,
+                baseline_nodes,
+                mem_ctx,
+                enable_autotune=False,
+                on_accept=lambda combo, members, num: accepted.append(
+                    (combo, list(members), num)
+                ),
+            )
+
+        self.assertEqual(
+            attempts,
+            [(0, 4, [nodes[:2], nodes[2:]])],
+        )
+        self.assertEqual(
+            accepted,
+            [(combos[0], nodes[:2], 0), (combos[1], nodes[2:], 0)],
+        )
+        self.assertEqual(finalized, combos)
+        self.assertEqual(finalized_end, 4)
+
+    def test_schedule_first_speedup_failure_does_not_consume_region(self):
+        from torch._inductor.scheduler import Scheduler
+
+        nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(4)]
+        streams = {nodes[0]: 0, nodes[1]: 0, nodes[2]: 1, nodes[3]: 1}
+        scheduler = self._make_schedule_first_scheduler(nodes, streams=streams)
+        scheduler.speedup_by_combo_kernel = lambda candidate: candidate[0] is nodes[2]
+        eligible = OrderedSet(nodes)
+        combo = _ScheduleFirstFakeCombo(nodes[2:])
+        attempts = []
+        accepted = []
+
+        def memory_check(
+            scheduler_arg,
+            combo_groups,
+            mem_ctx,
+            *,
+            region_start,
+            region_end,
+            enable_autotune,
+        ):
+            attempts.append(
+                (region_start, region_end, [list(group) for group in combo_groups])
+            )
+            return [combo], [nodes[0], nodes[1], combo]
+
+        baseline_nodes = tuple(nodes)
+        mem_ctx = SimpleNamespace(baseline_nodes=baseline_nodes)
+        with (
+            patch.object(Scheduler, "_try_combo_with_memory_check", memory_check),
+            torch._inductor.config.patch(combo_kernel_max_num_nodes=8),
+        ):
+            finalized, finalized_end = Scheduler._try_combo_with_halving(
+                scheduler,
+                0,
+                4,
+                eligible,
+                0,
+                baseline_nodes,
+                mem_ctx,
+                enable_autotune=False,
+                on_accept=lambda accepted_combo, members, num: accepted.append(
+                    (accepted_combo, list(members), num)
+                ),
+            )
+
+        self.assertEqual(attempts, [(0, 4, [nodes[2:]])])
+        self.assertEqual(accepted, [(combo, nodes[2:], 0)])
+        self.assertEqual(finalized, [nodes[0], nodes[1], combo])
+        self.assertEqual(finalized_end, 4)
+
+    def test_schedule_first_memory_checks_all_region_combos_once(self):
+        from torch._inductor.scheduler import ComboKernelMemoryContext, Scheduler
+
+        nodes = [_PeakMemFakeNode(f"node{i}") for i in range(5)]
+        scheduler = _PeakMemFakeScheduler(nodes)
+        sort_calls = []
+
+        def topological_sort(local_nodes):
+            sort_calls.append(list(local_nodes))
+            return list(local_nodes)
+
+        scheduler.topological_sort_schedule = topological_sort
+        mem_ctx = ComboKernelMemoryContext(
+            graph_outputs=set(),
+            baseline_nodes=tuple(nodes),
+            node_to_idx={node: idx for idx, node in enumerate(nodes)},
+            baseline_peak=0,
+            running_peak=0,
+            baseline_live_before=[0] * len(nodes),
+        )
+        combos = []
+
+        def fake_combo(scheduler_arg, snodes, **kwargs):
+            combo = _PeakMemFakeNode(f"combo{len(combos)}")
+            combo.snodes = list(snodes)
+            combos.append(combo)
+            return combo
+
+        with (
+            patch(
+                "torch._inductor.scheduler.ForeachKernelSchedulerNode",
+                side_effect=fake_combo,
+            ),
+            patch(
+                "torch._inductor.memory.estimate_region_peak_memory",
+                return_value=0,
+            ) as estimate,
+            torch._inductor.config.patch(
+                combo_kernel_peak_memory_increase_gb=0.0,
+                combo_kernel_peak_memory_pct_threshold=None,
+            ),
+        ):
+            result = Scheduler._try_combo_with_memory_check(
+                scheduler,
+                [nodes[:2], nodes[3:]],
+                mem_ctx,
+                region_start=0,
+                region_end=5,
+                enable_autotune=False,
+            )
+
+        self.assertIsNotNone(result)
+        combo_nodes, local_nodes = result
+        expected_region = [combos[0], nodes[2], combos[1]]
+        self.assertEqual(combo_nodes, combos)
+        self.assertEqual(local_nodes, expected_region)
+        self.assertEqual(sort_calls, [expected_region])
+        estimate.assert_called_once()
+        self.assertEqual(estimate.call_args.args[0], expected_region)
+        self.assertEqual(estimate.call_args.kwargs["region_start"], 0)
+        self.assertEqual(estimate.call_args.kwargs["region_end"], 4)
+        step_of = estimate.call_args.kwargs["step_of"]
+        self.assertEqual([step_of(node) for node in nodes], [0, 0, 1, 2, 2])
 
     def test_schedule_first_halving_recollects_disjoint_regions(self):
         from torch._inductor.scheduler import Scheduler
@@ -3457,17 +3672,21 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         def memory_check(
             scheduler_arg,
-            group_nodes,
+            combo_groups,
             mem_ctx,
             *,
             region_start,
             region_end,
             enable_autotune,
         ):
-            attempts.append((region_start, region_end, list(group_nodes)))
+            attempts.append(
+                (region_start, region_end, [list(group) for group in combo_groups])
+            )
             if (region_start, region_end) == (0, 8):
                 return None
 
+            self.assertEqual(len(combo_groups), 1)
+            group_nodes = combo_groups[0]
             combo = _ScheduleFirstFakeCombo(group_nodes)
             combos[(region_start, region_end)] = combo
             group_set = OrderedSet(group_nodes)
@@ -3477,7 +3696,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                     local_nodes.append(combo)
                 elif node not in group_set:
                     local_nodes.append(node)
-            return combo, local_nodes
+            return [combo], local_nodes
 
         def on_accept(combo, members, num):
             accepted.append((combo, list(members), num))
@@ -3506,9 +3725,9 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(
             attempts,
             [
-                (0, 8, [nodes[0], nodes[2], nodes[5], nodes[6]]),
-                (0, 4, [nodes[0], nodes[2]]),
-                (5, 8, [nodes[5], nodes[6]]),
+                (0, 8, [[nodes[0], nodes[2], nodes[5], nodes[6]]]),
+                (0, 4, [[nodes[0], nodes[2]]]),
+                (4, 8, [[nodes[5], nodes[6]]]),
             ],
         )
         self.assertEqual(
@@ -3522,7 +3741,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 nodes[1],
                 nodes[3],
                 nodes[4],
-                combos[(5, 8)],
+                combos[(4, 8)],
                 nodes[7],
             ],
         )
@@ -3679,14 +3898,18 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             torch._inductor.config.patch(**thresholds),
         ):
             indices = [node_to_idx[node] for node in group_nodes]
-            return Scheduler._try_combo_with_memory_check(
+            result = Scheduler._try_combo_with_memory_check(
                 scheduler,
-                group_nodes,
+                [group_nodes],
                 mem_ctx,
                 region_start=min(indices),
                 region_end=max(indices) + 1,
                 enable_autotune=False,
             )
+            if result is None:
+                return None
+            combo_nodes, local_nodes = result
+            return combo_nodes[0], local_nodes
 
     def test_threshold_gating(self):
         """abs_thr/pct_thr set to 0 or a too-small bound reject."""
@@ -3759,6 +3982,40 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             graph_outputs={"buf_c", "buf_d"},
         )
         self.assertIsNotNone(result)
+
+    def test_region_carry_in_changes_gate_decision(self):
+        prefix = _PeakMemFakeNode("prefix")
+        a = _PeakMemFakeNode("a")
+        consume_a = _PeakMemFakeNode("consume_a")
+        b = _PeakMemFakeNode("b")
+        consume_b = _PeakMemFakeNode("consume_b")
+        nodes = [prefix, a, consume_a, b, consume_b]
+
+        buf_a = _PeakMemFakeBuffer("buf_a", {consume_a}, 100, 100)
+        buf_b = _PeakMemFakeBuffer("buf_b", {consume_b}, 100, 100)
+        a._outputs = [buf_a]
+        b._outputs = [buf_b]
+        consume_a.mpi_node.pred_buffers = {buf_a}
+        consume_b.mpi_node.pred_buffers = {buf_b}
+
+        def run(carry_in):
+            return self._try_combo_with_fake_scheduler(
+                nodes,
+                [a, b],
+                baseline_peak=250,
+                baseline_live_before=[
+                    0,
+                    carry_in,
+                    carry_in + 100,
+                    carry_in,
+                    carry_in + 100,
+                    carry_in,
+                ],
+                thresholds=self._thresholds(abs_thr_gb=0.0, pct_thr=None),
+            )
+
+        self.assertIsNotNone(run(0))
+        self.assertIsNone(run(100))
 
     @skipIfRocm  # https://github.com/pytorch/pytorch/issues/182444
     @requires_cuda_and_triton

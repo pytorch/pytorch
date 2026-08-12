@@ -6508,22 +6508,18 @@ class Scheduler:
         region_start: int,
         region_end: int,
         max_members: int,
-    ) -> tuple[list[BaseSchedulerNode], int]:
-        """Collect independent, compatible members from a schedule region.
-
-        Returns the members and the exclusive scan boundary. Reaching the member
-        limit stops the scan early; otherwise the whole region is consumed.
-        """
+    ) -> list[BaseSchedulerNode]:
+        """Collect independent, compatible members from a schedule region."""
         if not (0 <= region_start < region_end <= len(baseline_nodes)):
             raise AssertionError("invalid combo-kernel search region")
 
         seed = baseline_nodes[region_start]
         if seed not in eligible_nodes or max_members < 2:
-            return [], region_start + 1
+            return []
 
         seed_context = self._combo_kernel_context_key(seed)
         if seed_context[0] is None:
-            return [], region_start + 1
+            return []
 
         members: list[BaseSchedulerNode] = []
         member_names = OrderedSet[str]()
@@ -6546,9 +6542,45 @@ class Scheduler:
             member_names.update(node_names)
             member_ancestors.update(node.ancestors)
             if len(members) == max_members:
-                return members, idx + 1
+                return members
 
-        return members, region_end
+        return members
+
+    def _collect_combo_candidates_from_schedule(
+        self,
+        baseline_nodes: tuple[BaseSchedulerNode, ...],
+        eligible_nodes: OrderedSet[BaseSchedulerNode],
+        region_start: int,
+        region_end: int,
+        max_members: int,
+    ) -> list[list[BaseSchedulerNode]]:
+        """Collect profitable, node-disjoint candidates from one region."""
+        remaining = OrderedSet(
+            node
+            for node in baseline_nodes[region_start:region_end]
+            if node in eligible_nodes
+        )
+        candidates: list[list[BaseSchedulerNode]] = []
+        for idx in range(region_start, region_end):
+            seed = baseline_nodes[idx]
+            if seed not in remaining:
+                continue
+
+            members = self._collect_combo_members_from_schedule(
+                baseline_nodes,
+                remaining,
+                idx,
+                region_end,
+                max_members,
+            )
+            remaining.discard(seed)
+            if len(members) < 2 or not self.speedup_by_combo_kernel(members):
+                continue
+
+            candidates.append(members)
+            remaining.difference_update(members)
+
+        return candidates
 
     def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
         """Create combo kernels using the configured memory-gating policy.
@@ -6740,59 +6772,82 @@ class Scheduler:
 
     def _build_combo_kernel_region(
         self,
-        group_nodes: list[BaseSchedulerNode],
+        combo_groups: list[list[BaseSchedulerNode]],
         baseline_nodes: tuple[BaseSchedulerNode, ...],
         *,
         region_start: int,
         region_end: int,
         enable_autotune: bool,
-    ) -> tuple[ForeachKernelSchedulerNode, list[BaseSchedulerNode]]:
-        """Build a combo and topologically repair only its schedule region."""
+    ) -> tuple[list[ForeachKernelSchedulerNode], list[BaseSchedulerNode]] | None:
+        """Build all combos and topologically repair their schedule region."""
         if not (0 <= region_start < region_end <= len(baseline_nodes)):
             raise AssertionError("invalid combo-kernel schedule region")
 
-        group_set = OrderedSet(group_nodes)
         region_set = OrderedSet(baseline_nodes[region_start:region_end])
-        if not all(node in region_set for node in group_nodes):
-            raise AssertionError("combo member is outside its schedule region")
+        member_to_combo: dict[BaseSchedulerNode, ForeachKernelSchedulerNode] = {}
+        combo_nodes: list[ForeachKernelSchedulerNode] = []
+        for group_nodes in combo_groups:
+            if len(group_nodes) < 2:
+                raise AssertionError("combo kernel must contain at least two nodes")
+            if not all(node in region_set for node in group_nodes):
+                raise AssertionError("combo member is outside its schedule region")
+            if any(node in member_to_combo for node in group_nodes):
+                raise AssertionError("combo-kernel candidates overlap")
 
-        combo_node = ForeachKernelSchedulerNode(
-            group_nodes[0].scheduler,
-            group_nodes,
-            use_custom_partition_algo=True,
-            enable_autotune=enable_autotune,
-            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
-        )
+            combo_node = ForeachKernelSchedulerNode(
+                group_nodes[0].scheduler,
+                group_nodes,
+                use_custom_partition_algo=True,
+                enable_autotune=enable_autotune,
+                per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+            )
+            combo_nodes.append(combo_node)
+            member_to_combo.update(dict.fromkeys(group_nodes, combo_node))
+
         local_nodes: list[BaseSchedulerNode] = []
-        inserted_combo = False
+        inserted_combos = OrderedSet[ForeachKernelSchedulerNode]()
         for node in baseline_nodes[region_start:region_end]:
-            if node in group_set:
-                if not inserted_combo:
+            if combo_node := member_to_combo.get(node):
+                if combo_node not in inserted_combos:
                     local_nodes.append(combo_node)
-                    inserted_combo = True
+                    inserted_combos.add(combo_node)
             else:
                 local_nodes.append(node)
 
-        return combo_node, self.topological_sort_schedule(local_nodes)
+        local_nodes = self.topological_sort_schedule(local_nodes)
+        buffer_order = {
+            name: idx
+            for idx, node in enumerate(local_nodes)
+            for name in node.get_buffer_names()
+        }
+        if any(
+            buffer_order[dep.name] > idx
+            for idx, node in enumerate(local_nodes)
+            for dep in node.unmet_dependencies
+            if dep.name in buffer_order
+        ):
+            log.debug("ComboKernels: joint region rewrite creates a cycle")
+            return None
+
+        return combo_nodes, local_nodes
 
     def _try_combo_with_memory_check(
         self,
-        group_nodes: list[BaseSchedulerNode],
+        combo_groups: list[list[BaseSchedulerNode]],
         mem_ctx: ComboKernelMemoryContext,
         *,
         region_start: int,
         region_end: int,
         enable_autotune: bool,
-    ) -> tuple[ForeachKernelSchedulerNode, list[BaseSchedulerNode]] | None:
-        """The gate: does fusing `group_nodes` into one combo keep peak
-        memory under the threshold?
+    ) -> tuple[list[ForeachKernelSchedulerNode], list[BaseSchedulerNode]] | None:
+        """Does fusing all candidates keep peak memory under the threshold?
 
-        Returns the combo and exact rewritten region if accepted, or `None`
+        Returns the combos and exact rewritten region if accepted, or `None`
         if rejected. The running peak lives on `mem_ctx.running_peak`.
 
         The pretend rewrite only changes node order inside the half-open
         window `[region_start, region_end)`. Inside that window:
-          - the members collapse into one combo node, all at `combo_step`,
+          - each candidate collapses into one combo node,
           - everything else is evaluated from the baseline schedule.
         Outside the window, nothing moves. Earlier accepts are accounted
         for only by `mem_ctx.running_peak`. The threshold is checked
@@ -6801,28 +6856,31 @@ class Scheduler:
         """
         from .memory import estimate_region_peak_memory
 
-        combo_node, local_nodes = self._build_combo_kernel_region(
-            group_nodes,
+        build_result = self._build_combo_kernel_region(
+            combo_groups,
             mem_ctx.baseline_nodes,
             region_start=region_start,
             region_end=region_end,
             enable_autotune=enable_autotune,
         )
-        # Wire the combo's pred_buffers from its members so the gate
-        # simulator can read `node.mpi_node.pred_buffers` uniformly.
-        combo_pred_buffers = OrderedSet()
-        for m in group_nodes:
-            combo_pred_buffers.update(m.mpi_node.pred_buffers)
-        combo_node.mpi_node = MemoryPlanningInfoForNode(
-            pred_buffers=combo_pred_buffers,
-        )
+        if build_result is None:
+            return None
+        combo_nodes, local_nodes = build_result
+        for combo_node, group_nodes in zip(combo_nodes, combo_groups):
+            combo_pred_buffers = OrderedSet()
+            for member in group_nodes:
+                combo_pred_buffers.update(member.mpi_node.pred_buffers)
+            combo_node.mpi_node = MemoryPlanningInfoForNode(
+                pred_buffers=combo_pred_buffers,
+            )
 
         node_to_idx = mem_ctx.node_to_idx
 
         new_step = {n: region_start + i for i, n in enumerate(local_nodes)}
-        combo_step = new_step[combo_node]
-        for n in group_nodes:
-            new_step[n] = combo_step
+        for combo_node, group_nodes in zip(combo_nodes, combo_groups):
+            combo_step = new_step[combo_node]
+            for node in group_nodes:
+                new_step[node] = combo_step
 
         def step_of(node: BaseSchedulerNode) -> int:
             if node in new_step:
@@ -6859,23 +6917,25 @@ class Scheduler:
         pct = (100.0 * delta / original_peak) if original_peak > 0 else 0.0
         if not accept:
             log.debug(
-                "ComboKernels memory-aware: rejected %d nodes "
+                "ComboKernels memory-aware: rejected %d combos / %d nodes "
                 "(peak delta %+d bytes = %.3f%%)",
-                len(group_nodes),
+                len(combo_groups),
+                sum(map(len, combo_groups)),
                 delta,
                 pct,
             )
             return None
 
         log.info(
-            "ComboKernels memory-aware: accepted %d nodes "
+            "ComboKernels memory-aware: accepted %d combos / %d nodes "
             "(peak delta %+d bytes = %.3f%%)",
-            len(group_nodes),
+            len(combo_groups),
+            sum(map(len, combo_groups)),
             delta,
             pct,
         )
         mem_ctx.running_peak = new_peak
-        return combo_node, local_nodes
+        return combo_nodes, local_nodes
 
     def _try_combo_with_halving(
         self,
@@ -6894,68 +6954,42 @@ class Scheduler:
         """Finalize a region, halving and recollecting after memory rejection."""
         if mem_ctx.baseline_nodes is not baseline_nodes:
             raise AssertionError("memory context does not match baseline schedule")
-        candidate, finalized_end = self._collect_combo_members_from_schedule(
-            baseline_nodes,
-            eligible_nodes,
-            region_start,
-            region_end,
-            config.combo_kernel_max_num_nodes,
-        )
         finalized_nodes: list[BaseSchedulerNode] = []
-        stack: list[tuple[int, int, list[BaseSchedulerNode] | None]] = [
-            (region_start, finalized_end, candidate)
-        ]
+        stack = [(region_start, region_end)]
         while stack:
-            start, end, candidate = stack.pop()
-            if candidate is None:
-                candidate, consumed_end = self._collect_combo_members_from_schedule(
-                    baseline_nodes,
-                    eligible_nodes,
-                    start,
-                    end,
-                    config.combo_kernel_max_num_nodes,
-                )
-            else:
-                consumed_end = end
-
-            if len(candidate) < 2:
-                finalized_nodes.append(baseline_nodes[start])
-                if start + 1 < end:
-                    stack.append((start + 1, end, None))
-                continue
-
-            if consumed_end < end:
-                stack.append((consumed_end, end, None))
-                stack.append((start, consumed_end, candidate))
-                continue
-
-            if not self.speedup_by_combo_kernel(candidate):
+            start, end = stack.pop()
+            candidates = self._collect_combo_candidates_from_schedule(
+                baseline_nodes,
+                eligible_nodes,
+                start,
+                end,
+                config.combo_kernel_max_num_nodes,
+            )
+            if not candidates:
                 finalized_nodes.extend(baseline_nodes[start:end])
                 continue
 
             result = Scheduler._try_combo_with_memory_check(
                 self,
-                candidate,
+                candidates,
                 mem_ctx,
                 region_start=start,
                 region_end=end,
                 enable_autotune=enable_autotune,
             )
             if result is not None:
-                combo_node, local_nodes = result
-                on_accept(combo_node, candidate, num)
+                combo_nodes, local_nodes = result
+                for combo_node, candidate in zip(combo_nodes, candidates):
+                    on_accept(combo_node, candidate, num)
                 finalized_nodes.extend(local_nodes)
                 continue
 
             region_size = end - start
-            if region_size <= 1:
-                finalized_nodes.append(baseline_nodes[start])
-                continue
             midpoint = start + region_size // 2
-            stack.append((midpoint, end, None))
-            stack.append((start, midpoint, None))
+            stack.append((midpoint, end))
+            stack.append((start, midpoint))
 
-        return finalized_nodes, finalized_end
+        return finalized_nodes, region_end
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:

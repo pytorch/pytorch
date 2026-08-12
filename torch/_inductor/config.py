@@ -1128,7 +1128,8 @@ combo_kernel_peak_memory_increase_gb: float | None = None  # Absolute cap in GB
 combo_kernel_peak_memory_pct_threshold: float | None = 0.05
 # Maximum baseline-schedule distance scanned for a memory-gated combo candidate.
 # This is ignored when memory gating is disabled. Set to -1 (or any negative
-# value) to scan the remaining schedule.
+# value) to scan the remaining schedule. Unbounded scans can take quadratic
+# time on large schedules and are intended only for small graphs or debugging.
 combo_kernel_max_distance: int = 64
 
 # constant folding on the joint graph
