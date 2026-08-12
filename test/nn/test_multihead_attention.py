@@ -10,11 +10,12 @@ from torch.nn import MultiheadAttention
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyOn,
+    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
@@ -38,6 +39,7 @@ class TestMultiheadAttentionNN(NNTestCase):
     if TEST_CUDA:
         _do_cuda_memory_leak_check = True
         _do_cuda_non_default_stream = True
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     @parametrize_test("average_attn_weights", [True, False])
@@ -755,6 +757,8 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
@@ -835,6 +839,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
 
     @torch.no_grad()
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4448")
+    @onlyAccelerator
     @unittest.skipIf(
         TEST_WITH_CROSSREF,
         "CrossRef turns on TorchFunctionMode, and so disables fastpath.",
@@ -845,13 +850,6 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         and key padding mask (mask type 1) are provided at the same time on CPU and CUDA and PrivateUse1
         """
         device = device.rstrip(":0123456789")
-        if device not in [
-            "cpu",
-            "cuda",
-            "xpu",
-            torch._C._get_privateuse1_backend_name(),
-        ]:
-            self.skipTest("Fastpath only runs on CPU and CUDA and XPU and PrivateUse1.")
 
         with torch.autocast(device_type=device, enabled=False):
             embed_dim = 16
@@ -885,7 +883,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
                 # If mock was called, fastpath was taken
                 self.assertTrue(fastpath_mock.called)
 
-    @onlyOn(["cuda", "xpu", torch._C._get_privateuse1_backend_name()])
+    @onlyAccelerator
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype(self, device, dtype):
         embed_dim = 128
@@ -900,7 +898,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @onlyOn(["cuda", "xpu", torch._C._get_privateuse1_backend_name()])
+    @onlyAccelerator
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype_batch_first(self, device, dtype):
         embed_dim = 128
