@@ -1485,7 +1485,7 @@ NUM_SIZE0_TENSORS = 1000
 class TestMultiTensorApply(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_multi_tensor_apply_size0_tensors_cpu(self):
+    def test_multi_tensor_apply_size0_tensors_cpu(self, device):
         size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
@@ -1493,7 +1493,7 @@ class TestMultiTensorApply(TestCase):
     @unittest.skipIf(
         torch.accelerator.current_accelerator() is None, "no accelerator available"
     )
-    def test_multi_tensor_apply_size0_tensors_cuda(self):
+    def test_multi_tensor_apply_size0_tensors_cuda(self, device):
         size0_tensors = [
             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)
         ]
@@ -1518,6 +1518,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestFSDPUseOrigParamsFQNs, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFSDPUseOrigParamsInit, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMultiTensorApply, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
