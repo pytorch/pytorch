@@ -212,10 +212,6 @@ class GemmEpilogueIRAnalysis:
                 buffer.get_store_function()(*buffer.data.inner_fn_args())
         return cls(handler.stores, buffers)
 
-    @classmethod
-    def store_from_buffer(cls, buffer: ComputedBuffer) -> GemmEpilogueIRStore | None:
-        return cls.from_buffers((buffer,)).store(buffer.get_name())
-
     def store(self, name: str) -> GemmEpilogueIRStore | None:
         return self.stores.get(name)
 
@@ -1000,55 +996,6 @@ def variance_parameters_ir(
 
     affine = _affine_around(store.value, is_variance)
     return affine if affine is not None and affine[0] != 0.0 else None
-
-
-def centered_mean_consumer_type_unrolled_ir(
-    store: GemmEpilogueIRStore, source_name: str, group: int
-) -> str | None:
-    """Classify an affine source/mean expression after a small reduction unroll."""
-
-    def coefficients(expr: Any) -> tuple[float, float, float] | None:
-        expr = _strip_conversions(expr)
-        if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "truediv":
-            if _constant_value(expr.args[1]) == group and _sum_terms(
-                expr.args[0], source_name, group
-            ):
-                return 0.0, 1.0, 0.0
-        if _is_source(expr, source_name):
-            return 1.0, 0.0, 0.0
-        constant = _constant_value(expr)
-        if isinstance(constant, (int, float, sympy.Number)) and not isinstance(
-            constant, bool
-        ):
-            return 0.0, 0.0, float(constant)
-        if not isinstance(expr, GemmEpilogueIRExpression):
-            return None
-        if expr.op in ("add", "sub"):
-            lhs, rhs = coefficients(expr.args[0]), coefficients(expr.args[1])
-            if lhs is None or rhs is None:
-                return None
-            return _affine_add(
-                lhs, _affine_scale(rhs, 1.0 if expr.op == "add" else -1.0)
-            )
-        if expr.op == "mul":
-            lhs, rhs = coefficients(expr.args[0]), coefficients(expr.args[1])
-            if lhs is None or rhs is None:
-                return None
-            if lhs[:2] == (0.0, 0.0):
-                return _affine_scale(rhs, lhs[2])
-            if rhs[:2] == (0.0, 0.0):
-                return _affine_scale(lhs, rhs[2])
-        return None
-
-    values = coefficients(store.value)
-    if (
-        values is None
-        or values[0] == 0.0
-        or values[1] == 0.0
-        or not all(math.isfinite(value) for value in values)
-    ):
-        return None
-    return GemmReductionDescriptor("mean_linear", values).serialize()
 
 
 def is_logsumexp_ir(store: GemmEpilogueIRStore, source_name: str, group: int) -> bool:

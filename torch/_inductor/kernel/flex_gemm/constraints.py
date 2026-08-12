@@ -5,6 +5,10 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    FlexGemmOutputStorageLayout,
+    output_layout_supports_config,
+)
 from torch._inductor.kernel.gemm_epilogue import (
     GEMM_REDUCTION_FRAGMENT_WIDTH,
     GemmReductionGeometry,
@@ -69,7 +73,7 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
     "FlexGEMM local reductions cannot be combined with C/alpha/beta yet"
 )
 LOCAL_REDUCE_SWAP_AB_ERROR = (
-    "FlexGEMM local reductions do not support swap_ab configs yet"
+    "FlexGEMM swap_ab local reductions require physical callbacks"
 )
 LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
     "FlexGEMM local-reduce aux output must be produced by a grouped TensorSSA reduction"
@@ -117,6 +121,9 @@ LOCAL_REDUCE_MIXED_MATCH_ERROR = (
 LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
     "FlexGEMM local-reduce broadcast values must share one grouped layout"
 )
+FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR = (
+    "FlexGEMM output layout transforms must be returned directly as a validated output"
+)
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
@@ -126,12 +133,15 @@ LOCAL_REDUCE_RUNTIME_DENSE_MM_ERROR = (
     "FlexGEMM local reductions currently support only 2-D aten.mm"
 )
 LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {actual}"
+LOCAL_REDUCE_BLOCKED_AXIS_ERROR = (
+    "FlexGEMM blocked local-reduce outputs currently support only axis 1"
+)
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
-    "FlexGEMM output contractions do not compose with aux outputs, local "
-    "reductions, C, alpha/beta, or batched GEMMs yet"
+    "FlexGEMM output contractions do not compose with full-shape aux outputs, "
+    "C, alpha/beta, or batched GEMMs yet"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR = (
     "FlexGEMM output contractions currently support only numeric [1, 1] and "
@@ -306,13 +316,23 @@ def validate_local_reduce_no_c_alpha_beta(
         raise NotImplementedError(LOCAL_REDUCE_C_ALPHA_BETA_ERROR)
 
 
-def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
+def validate_flex_gemm_local_reduce_config(
+    config: Any, group: int, axis: int, *, allow_swap_ab: bool = False
+) -> bool:
     """Return whether a QuACK config has a validated grouped-reduction layout.
+
+    Swap-ab transposes the physical accumulator, so the logical reduction axis
+    is reversed before checking tile ownership. The generated epilogue emits
+    physical callbacks for the transposed reduction geometry, including groups
+    that fit within one fragment before reorientation.
 
     This matches ``GemmConfig`` fields against layout families covered by forced
     kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
     one 32-value epilogue fragment need no cross-fragment combine. Some SM100
     two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
+
+    Non-SM100 devices retain the conservative single-CTA families because the
+    expanded fragment and clustered layouts have only been validated on SM100.
 
     Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
     callback path, which combines epilogue fragments inside one CTA and directly
@@ -326,14 +346,19 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     temporal fragment combine supports a full-tile group without cross-CTA state.
     Axis-0 full groups still exceed the per-CTA M tile and remain unsupported.
     """
-    match axis:
-        case 0:
-            tile = config.tile_m
-        case 1:
-            tile = config.tile_n
-        case _:
+    if axis not in (0, 1) or group <= 0:
+        return False
+    swapped = config.swap_ab
+    if swapped:
+        if (
+            not allow_swap_ab
+            or not GemmReductionGeometry(group, 1 - axis).needs_physical_callbacks
+        ):
             return False
-    if group <= 0 or config.swap_ab:
+        axis = 1 - axis
+    tile = config.tile_m if axis == 0 else config.tile_n
+    is_sm100 = config.device_capacity == 10
+    if not is_sm100 and (swapped or config.tile_n < 128 or config.tile_n % 64 != 0):
         return False
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
@@ -354,6 +379,8 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
         return False
 
     is_single_cta_layout = config.tile_m == 128 and config.cluster_m == 1
+    if not is_sm100:
+        return is_single_cta_layout
     is_wide_m_two_cta_layout = config.tile_m == 256 and config.cluster_m == 2
     is_split_n_warp_two_cta_layout = (
         axis == 1
@@ -487,6 +514,32 @@ def output_contraction_config_supported(config: Any, n: Any) -> bool:
 
 
 FlexGemmLocalReduceGeometry = GemmReductionGeometry
+
+
+def flex_gemm_output_config_supported(
+    config: Any,
+    n: Any,
+    local_reduce_geometries: Sequence[FlexGemmLocalReduceGeometry],
+    output_contraction: FlexGemmOutputContraction | None,
+    output_layout: FlexGemmOutputStorageLayout | None,
+    output_layout_geometry: FlexGemmLocalReduceGeometry | None,
+    *,
+    allow_local_reduce_swap_ab: bool = False,
+) -> bool:
+    """Return whether one config satisfies the complete output-plan contract."""
+    return (
+        (output_contraction is None or output_contraction_config_supported(config, n))
+        and all(
+            validate_flex_gemm_local_reduce_config(
+                config,
+                geometry.group,
+                geometry.axis,
+                allow_swap_ab=allow_local_reduce_swap_ab,
+            )
+            for geometry in local_reduce_geometries
+        )
+        and output_layout_supports_config(output_layout, config, output_layout_geometry)
+    )
 
 
 @dataclasses.dataclass(frozen=True)
