@@ -13,9 +13,10 @@
 
 # CODEOWNERS review-surface taxonomy
 #
-# Every tracked path resolves to one review surface. The fast lintrunner set
-# enforces full coverage, declared sections, valid owners, source order, and no
-# duplicate, stale, or ineffective patterns.
+# Every tracked path resolves to one review surface. Every listed pattern must
+# match at least one committed path. The fast lintrunner set enforces these
+# rules, declared sections, valid owners, source order, and no duplicate or
+# ineffective patterns.
 #
 # Review-surface hierarchy:
 # - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
@@ -32,6 +33,7 @@
 # - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
 # - Legacy: caffe2
 # - Repository-wide material: ai_agent_tooling, docs_general
+# - Protected ownership: protected_codeownership
 #
 # Grouped review-surface definitions:
 #
@@ -626,8 +628,6 @@
 /aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
 /aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
@@ -744,7 +744,6 @@
 /torch/utils/hipify/ @jeffdaily @jithunnair-amd
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
-/torch/utils/pytree/ @XuehaiPan
 /torch/_vendor/quack/ @slayton58 @drisspg
 #
 # [python_nn_api]
@@ -859,16 +858,16 @@
 /test/quantization/ @jerryzh168
 /test/test_quantization.py @jerryzh168
 # /torch/ao/
+/torch/ao/quantization/ @jerryzh168
+/torch/ao/nn/intrinsic/ @jerryzh168
+/torch/ao/nn/quantized/ @jerryzh168
+/torch/ao/nn/quantizable/ @jerryzh168
+/torch/ao/nn/qat/ @jerryzh168
 /torch/quantization/ @jerryzh168
 /aten/src/ATen/native/quantized/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cpu/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cuda/ @jerryzh168
 /aten/src/ATen/native/quantized/cudnn/ @jerryzh168
-/ao/quantization/ @jerryzh168
-/nn/intrinsic/ @jerryzh168
-/nn/quantized/ @jerryzh168
-/nn/quantizable/ @jerryzh168
-/nn/qat/ @jerryzh168
 #
 # [profiler]
 # /test/cpp/profiler/test_profiler_collection.cpp
@@ -935,7 +934,6 @@
 # /.spin/
 # /BUCK.oss
 # /CMakeLists.txt
-# /CODEOWNERS
 # /Dockerfile
 # /Makefile
 # /buckbuild.bzl
@@ -1095,10 +1093,6 @@
 #
 # [caffe2]
 # /caffe2/
-/caffe2/core/hip/ @jeffdaily @jithunnair-amd
-/caffe2/operators/hip/ @jeffdaily @jithunnair-amd
-/caffe2/operators/rnn/hip/ @jeffdaily @jithunnair-amd
-/caffe2/utils/hip/ @jeffdaily @jithunnair-amd
 #
 # [serialization_package]
 # /benchmarks/serialization/
@@ -1199,5 +1193,11 @@
 # /docs/
 /docs/source/conf.py @albanD
 /docs/source/higher_order_ops/ @bohnstingl
-/docs/source/notes/get_start_xpu.rst @EikanWang @gujinghui
+/docs/source/notes/get_start_xpu.md @EikanWang @gujinghui
+#
+# [protected_codeownership]
+# DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet.
+# Keep these rules last so they override broader patterns.
+/CODEOWNERS @albanD @malfet
+/.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
 #

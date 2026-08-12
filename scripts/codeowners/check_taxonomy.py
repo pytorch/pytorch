@@ -27,8 +27,8 @@ FAILURE_GUIDANCE = {
         "`# [surface]` section."
     ),
     "Stale patterns": (
-        "At the reported CODEOWNERS line, correct the commented path or remove it; "
-        "it matches no committed file."
+        "At the reported CODEOWNERS line, correct or remove the pattern; it matches "
+        "no committed path."
     ),
     "Ineffective patterns": (
         "At the reported CODEOWNERS line, move the commented pattern to the winning "
@@ -60,7 +60,6 @@ class TaxonomyPattern:
     group: str
     path: str
     line_number: int
-    active: bool = False
 
 
 @dataclass
@@ -161,7 +160,7 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
                     )
             if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
-            patterns.append(TaxonomyPattern(group, pattern[1:], line_number, active))
+            patterns.append(TaxonomyPattern(group, pattern[1:], line_number))
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
@@ -266,17 +265,11 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
         uncovered=uncovered,
         overridden=overridden,
         duplicates=duplicates,
-        stale=[
-            pattern
-            for pattern in patterns
-            if pattern not in matched_patterns and not pattern.active
-        ],
+        stale=[pattern for pattern in patterns if pattern not in matched_patterns],
         ineffective=[
             pattern
             for pattern in patterns
-            if pattern in matched_patterns
-            and pattern not in effective_patterns
-            and not pattern.active
+            if pattern in matched_patterns and pattern not in effective_patterns
         ],
         source_order_mismatches=source_order_mismatches,
     )
