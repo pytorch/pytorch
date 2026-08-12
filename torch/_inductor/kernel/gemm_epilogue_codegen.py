@@ -3,16 +3,17 @@
 
 import ast
 import dataclasses
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
-    canonical_tensorssa_reduction_type,
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
-    materialize_tensorssa_reduction,
+    tensorssa_reduction,
 )
 from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+from torch._inductor.ops_handler import ReductionType
 from torch._inductor.virtualized import V
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -62,6 +63,90 @@ def materialize_epilogue_function(
     return scope[function_names[0]]
 
 
+@dataclasses.dataclass(frozen=True)
+class MaterializedTensorSSAReduction:
+    """CuTeDSL compile-time operands for a TensorSSA reduction."""
+
+    reduce_op: object
+    init_val: object
+    combine: Callable
+    source: Callable
+    finalize: Callable
+
+
+def _identity_source(value):
+    return value
+
+
+def _square_source(value):
+    return value * value
+
+
+def _abs_source(value):
+    import cutlass.cute as cute
+
+    return cute.math.abs(value)
+
+
+def _abs_scale_source(value):
+    import cutlass.cute as cute
+
+    return cute.math.max(cute.math.abs(value), cute.full_like(value, 1e-12)) / 448.0
+
+
+def _identity_finalize(value, group):
+    return value
+
+
+def _mean_finalize(value, group):
+    return value / group
+
+
+def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
+    """Return the associative primitive used by a composed reduction plan."""
+    if reduction_type == "logsumexp":
+        return "max"
+    if reduction_type in (
+        "online_softmax",
+        "direct_bool_gt_zero",
+    ) or reduction_type.startswith(("mean", "normalize_sum", "variance")):
+        return "sum"
+    if reduction_type == "normalize_absmax":
+        return "max"
+    return cast(ReductionType, reduction_type)
+
+
+def materialize_tensorssa_reduction(
+    reduction_type: ReductionType,
+    cute: Any,
+    source_type: str = "identity",
+    plan_type: str | None = None,
+) -> MaterializedTensorSSAReduction:
+    """Materialize the shared TensorSSA descriptor as CuTeDSL operands."""
+    reduction = tensorssa_reduction(reduction_type)
+    reduce_op = getattr(cute.ReductionOp, reduction.cute_op.rpartition(".")[2])
+    combine = materialize_epilogue_function(
+        f"def combine(lhs, rhs):\n    return {reduction.combine_expr}", cute
+    )
+    init_val = materialize_epilogue_function(
+        f"def init():\n    return {reduction.init_val}", cute
+    )()
+    source = {
+        "identity": _identity_source,
+        "square": _square_source,
+        "abs": _abs_source,
+        "abs_scale": _abs_scale_source,
+    }[source_type]
+    finalize = (
+        _mean_finalize
+        if plan_type is not None and plan_type.startswith("mean")
+        else _identity_finalize
+    )
+    return MaterializedTensorSSAReduction(
+        reduce_op, init_val, combine, source, finalize
+    )
+
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionCompileConfig:
     args: GemmReductionArguments
@@ -80,6 +165,7 @@ class GemmReductionCompileConfig:
 
         reduction = materialize_tensorssa_reduction(
             canonical_tensorssa_reduction_type(args.reduction_type),
+            cute,
             args.source_type,
             args.reduction_type,
         )
