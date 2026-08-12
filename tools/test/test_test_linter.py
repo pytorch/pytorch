@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 
+from tools.linter.adapters import test_linter
 from tools.linter.adapters.test_linter import (
     check_file,
     DEVICE_SPECIFIC_CLASSIFICATIONS,
     error_msg,
     HardwareClassification,
     LintMessage,
+    REPO_ROOT,
 )
 
 
@@ -30,6 +33,42 @@ class TestHwClassificationLinter(unittest.TestCase):
             test_file = root / "test_sample.py"
             _write(test_file, textwrap.dedent(content))
             return check_file(str(test_file))
+
+    # --- file parse errors ---
+
+    def test_syntax_error_in_file(self) -> None:
+        """A file with invalid syntax should produce a parse error, not crash."""
+        src = "this is not valid python @@@"
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].name, "[parse_error]")
+        self.assertIsNotNone(msgs[0].description)
+        self.assertIn("Failed to parse", msgs[0].description)
+
+    # --- allowlist / non-test files ---
+
+    def test_non_test_file_skipped(self) -> None:
+        """Non-test files (not test_*.py or *_test.py) return no messages."""
+        msgs = check_file("some_util.py")
+        self.assertEqual(msgs, [])
+
+    def test_allowlisted_file_skipped(self) -> None:
+        """Files in the allowlist are skipped silently."""
+        src = """\
+            from torch.testing._internal.common_utils import TestCase
+            class TestFoo(TestCase):
+                def test_x(self): pass
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            test_file = root / "test_sample.py"
+            _write(test_file, textwrap.dedent(src))
+            rel_path = os.path.relpath(test_file, REPO_ROOT).replace("\\", "/")
+            test_linter._allowlist.add(rel_path)
+            try:
+                self.assertEqual(check_file(str(test_file)), [])
+            finally:
+                test_linter._allowlist.discard(rel_path)
 
     # --- missing / invalid hw_classification ---
 
@@ -98,6 +137,17 @@ class TestHwClassificationLinter(unittest.TestCase):
             ),
         )
 
+    # --- non-test classes ---
+
+    def test_no_test_methods_class_not_flagged(self) -> None:
+        """A class with no test_* methods is not a test class and should be ignored."""
+        src = """\
+            from torch.testing._internal.common_utils import TestCase
+            class TestMixin(TestCase):
+                def helper(self): pass
+        """
+        self.assertEqual(self._run(src), [])
+
     # ==================================================================
     # GENERIC
     # ==================================================================
@@ -107,6 +157,16 @@ class TestHwClassificationLinter(unittest.TestCase):
             from torch.testing._internal.common_utils import HardwareClassification, TestCase
             class TestFoo(TestCase):
                 hw_classification = HardwareClassification.GENERIC
+                def test_x(self): pass
+        """
+        self.assertEqual(self._run(src), [])
+
+    def test_valid_annotated_hw_classification(self) -> None:
+        """The annotated form hw_classification: HardwareClassification = ... is valid."""
+        src = """\
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            class TestFoo(TestCase):
+                hw_classification: HardwareClassification = HardwareClassification.GENERIC
                 def test_x(self): pass
         """
         self.assertEqual(self._run(src), [])
@@ -325,6 +385,47 @@ class TestHwClassificationLinter(unittest.TestCase):
                 ),
             )
 
+    def test_device_specific_non_literal_only_for(self) -> None:
+        """only_for with a non-literal value triggers _KWARG_UNKNOWN / missing-only_for error."""
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
+            src = f"""\
+                from torch.testing._internal.common_device_type import instantiate_device_type_tests
+                from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                MY_CONST = '{cls.value.lower()}'
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.{cls.name}
+                    def test_x(self, device): pass
+                instantiate_device_type_tests(TestFoo, globals(), only_for=MY_CONST)
+            """
+            msgs = self._run(src)
+            self.assertEqual(len(msgs), 1, f"failed for {cls}")
+            self.assertEqual(msgs[0].name, "[only_for]")
+
+    def test_device_specific_only_for_none(self) -> None:
+        """only_for=None is treated as absent and triggers missing-only_for error."""
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
+            src = f"""\
+                from torch.testing._internal.common_device_type import instantiate_device_type_tests
+                from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.{cls.name}
+                    def test_x(self, device): pass
+                instantiate_device_type_tests(TestFoo, globals(), only_for=None)
+            """
+            msgs = self._run(src)
+            self.assertEqual(len(msgs), 1, f"failed for {cls}")
+            self.assertEqual(
+                msgs[0],
+                error_msg(
+                    name="[only_for]",
+                    path=msgs[0].path,
+                    line=6,
+                    description=f"{cls.value} class 'TestFoo' "
+                    f"must use only_for='{cls.value.lower()}' "
+                    f"in instantiate_device_type_tests.",
+                ),
+            )
+
     def test_device_specific_uses_except_for(self) -> None:
         for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
@@ -348,6 +449,20 @@ class TestHwClassificationLinter(unittest.TestCase):
                     f"must not use except_for in instantiate_device_type_tests.",
                 ),
             )
+
+    def test_device_specific_except_for_none_treated_as_absent(self) -> None:
+        """except_for=None must not trigger the except_for rule."""
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
+            src = f"""\
+                from torch.testing._internal.common_device_type import instantiate_device_type_tests
+                from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.{cls.name}
+                    def test_x(self, device): pass
+                instantiate_device_type_tests(TestFoo, globals(),
+                    only_for='{cls.value.lower()}', except_for=None)
+            """
+            self.assertEqual(self._run(src), [], f"failed for {cls}")
 
     # ==================================================================
     # ACCELERATOR
@@ -385,6 +500,18 @@ class TestHwClassificationLinter(unittest.TestCase):
                 hw_classification = HardwareClassification.ACCELERATOR
                 def test_x(self, device): pass
             instantiate_device_type_tests(TestFoo, globals(), except_for='hpu')
+        """
+        self.assertEqual(self._run(src), [])
+
+    def test_accelerator_except_for_none_treated_as_absent(self) -> None:
+        """except_for=None is semantically identical to omitting the kwarg."""
+        src = """\
+            from torch.testing._internal.common_device_type import instantiate_device_type_tests
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            class TestFoo(TestCase):
+                hw_classification = HardwareClassification.ACCELERATOR
+                def test_x(self, device): pass
+            instantiate_device_type_tests(TestFoo, globals(), except_for=None)
         """
         self.assertEqual(self._run(src), [])
 
@@ -481,6 +608,38 @@ class TestHwClassificationLinter(unittest.TestCase):
                     line=6,
                     description=f"{HC.ACCELERATOR.value} test method 'TestFoo.test_x' "
                     f"must not use '@{bad_dec}' decorators except onlyAccelerator",
+                ),
+            )
+
+    def test_accelerator_forbidden_call_decorator(self) -> None:
+        """Call-form only* decorators (ast.Call nodes) must be detected."""
+        for dec_name, dec_args in [
+            ("onlyCPU", ""),
+            ("onlyCUDA", ""),
+            ("onlyMPS", ""),
+            ("onlyXPU", ""),
+            ("onlyOn", '["cuda", "xpu"]'),
+            ("onlyNativeDeviceTypesAnd", '["hpu"]'),
+        ]:
+            src = f"""\
+                from torch.testing._internal.common_device_type import instantiate_device_type_tests, {dec_name}
+                from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.ACCELERATOR
+                    @{dec_name}({dec_args})
+                    def test_x(self, device): pass
+                instantiate_device_type_tests(TestFoo, globals())
+            """
+            msgs = self._run(src)
+            self.assertEqual(len(msgs), 1, f"failed for {dec_name}")
+            self.assertEqual(
+                msgs[0],
+                error_msg(
+                    name="[decorator]",
+                    path=msgs[0].path,
+                    line=6,
+                    description=f"{HC.ACCELERATOR.value} test method 'TestFoo.test_x' "
+                    f"must not use '@{dec_name}' decorators except onlyAccelerator",
                 ),
             )
 
