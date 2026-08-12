@@ -72,7 +72,8 @@ def _common_supported(
 
 def _fused_rms_norm_fwd_perf_wins(input: torch.Tensor, n: int) -> bool:
     rows_m = input.numel() // n
-    # Tuned on gfx950 (MI355)
+    # Tuned on gfx950 (MI355) at rows_m=2048. 114688 is the last N where all
+    # three dtypes still beat aten (1.15x-1.19x)
     return (
         (4096 <= n < 8192 and rows_m >= 8192)
         or (8192 <= n < 16384 and rows_m >= 4096)

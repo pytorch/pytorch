@@ -22,6 +22,9 @@ DISPATCH_N = 4096
 DISPATCH_DTYPE = torch.float16
 BACKWARD_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 KERNEL_PATH_NS = (4096, 12288, 24576, 114688, 4097, 4103, 8193, 16385, 32769, 98305)
+# (N, minimum rows M) for each band _fused_rms_norm_fwd_perf_wins admits.
+BAND_MINIMUMS = ((4096, 8192), (8192, 4096), (16384, 2048))
+UPPER_BOUND_N = 114688
 
 
 def _unsupported_environment_reason() -> str | None:
@@ -299,6 +302,30 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(got, ref)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
+    @parametrize("n,min_rows", BAND_MINIMUMS)
+    def test_band_minimum_dispatches(self, n, min_rows):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        x, weight = self._make_inputs(min_rows, n, DISPATCH_DTYPE)
+        torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+    @parametrize("n,min_rows", BAND_MINIMUMS)
+    def test_one_row_below_band_minimum_falls_back(self, n, min_rows):
+        # Pins the >= in each band. Without this, widening or narrowing a row
+        # threshold by one changes which shapes dispatch and nothing goes red.
+        x, weight = self._make_inputs(min_rows - 1, n, DISPATCH_DTYPE)
+        torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self._assert_no_flydsl_compiles()
+
+    @parametrize("n,dispatches", ((UPPER_BOUND_N, True), (UPPER_BOUND_N + 1, False)))
+    def test_upper_bound_is_inclusive(self, n, dispatches):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        x, weight = self._make_inputs(2048, n, DISPATCH_DTYPE)
+        torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1 if dispatches else 0)
+
     def test_nn_rmsnorm_default_eps_dispatches(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
 
@@ -330,6 +357,12 @@ class TestFlyDSLRMSNorm(TestCase):
         x, weight = self._make_inputs(8, 128, torch.float64)
         with self.assertRaisesRegex(TypeError, "unsupported RMSNorm dtype"):
             rmsnorm_fwd(x, [128], weight, EPS)
+
+    def test_dtype_tables_agree(self):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import FLYDSL_DTYPE_CONFIGS
+        from torch._native.ops.norm.flydsl_rmsnorm_utils import SUPPORTED_DTYPES
+
+        self.assertEqual(set(SUPPORTED_DTYPES.values()), set(FLYDSL_DTYPE_CONFIGS))
 
     def test_unresolvable_arch_raises(self):
         # The arch selects the wave size baked into the reduction, so a missing
