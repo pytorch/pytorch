@@ -434,6 +434,15 @@ check whether the process group has already been initialized use {func}`torch.di
 .. autofunction:: set_timeout
 ```
 
+### Experimental collective time estimation
+
+The context manager and the backend's `_supports_time_estimate` capability probe are
+experimental and may change without notice.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._time_estimator
+```
+
 ### Fault-tolerant reconfiguration
 
 ```{eval-rst}
@@ -1297,6 +1306,39 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.breakpoint
+```
+
+## Watchdog (Experimental)
+
+The ``torch.distributed._watchdog`` module provides a pure-Python watchdog for
+detecting hung operations in Python-based distributed backends and related
+distributed primitives. It monitors both CPU-side hangs (e.g., a stuck
+rendezvous) and GPU-side hangs (e.g., a kernel that never completes) by running
+an asyncio event loop on a background daemon thread. By default, timeouts dump
+all thread stack traces and abort the process.
+
+:::{warning}
+This module is experimental and subject to change.
+:::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._watchdog
+```
+
+```{eval-rst}
+.. autofunction:: shutdown
+```
+
+```{eval-rst}
+.. autofunction:: stream_timeout
+```
+
+```{eval-rst}
+.. autofunction:: cpu_timeout
+```
+
+```{eval-rst}
+.. autofunction:: op_timeout
 ```
 
 % Distributed modules that are missing specific entries.
