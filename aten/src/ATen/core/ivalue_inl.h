@@ -639,7 +639,7 @@ struct TORCH_API TupleElements {
   }
 
   operator std::vector<IValue>() && {
-    return vec();
+    return std::move(*this).vec();
   }
 };
 
