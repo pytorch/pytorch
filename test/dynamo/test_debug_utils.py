@@ -18,6 +18,7 @@ from torch._dynamo.debug_utils import (
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
@@ -27,6 +28,8 @@ i32 = torch.int32
 
 
 class TestDebugUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_serialize_symbolic_storage_nbytes(self):
         from sympy import floor
 
@@ -197,6 +200,8 @@ def forward(self, x_1):
 
 
 class TestDebugUtilsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_aot_graph_parser(self, device):
         def forward(
             self,
@@ -307,6 +312,8 @@ class TestDebugUtilsDevice(TestCase):
 
 
 class TestNNModuleToStringBufferDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_nn_module_to_string_buffer_device(self, device):
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
         gm.register_buffer("test_buf", torch.empty(5, device=device))
@@ -340,14 +347,14 @@ instantiate_device_type_tests(
     TestNNModuleToStringBufferDevice, globals(), allow_xpu=True
 )
 
-instantiate_device_type_tests(TestDebugUtils, globals())
-
 instantiate_device_type_tests(
     TestDebugUtilsDevice, globals(), except_for="mps", allow_xpu=True
 )
 
 
 class TestBackendOverrideIntegration(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -513,6 +520,8 @@ instantiate_device_type_tests(
 
 
 class TestInductorConfigOverrideIntegration(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -916,12 +925,13 @@ class TestInductorConfigOverrideIntegration(TestCase):
 instantiate_device_type_tests(
     TestInductorConfigOverrideIntegration,
     globals(),
-    only_for=["cpu", "cuda", "xpu"],
     allow_xpu=True,
 )
 
 
 class TestConfigOverrideValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         from torch._dynamo.graph_id_filter import (
@@ -971,6 +981,8 @@ class TestConfigOverrideValidation(TestCase):
 
 
 class TestDynamoConfigOverrideIntegration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
