@@ -8,9 +8,16 @@
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
 
+#include <string>
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
+
+struct TORCH_API IpcMemHandle {
+  std::string handle;
+  uint64_t offset;
+};
 
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
 #define FAIL_PRIVATEUSE1HOOKS_FUNC(func)                        \
@@ -66,6 +73,46 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
       const c10::Storage& storage,
       size_t newsize) const {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  virtual bool supportsIpc() const {
+    return false;
+  }
+
+  virtual size_t ipcEventHandleSize() const {
+    return 0;
+  }
+
+  virtual IpcMemHandle getIpcMemHandle(
+      [[maybe_unused]] void* ptr) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "getIpcMemHandle is not implemented for this PrivateUse1 device; "
+        "implement it in PrivateUse1HooksInterface to enable IPC.");
+  }
+
+  virtual std::string getIpcEventHandle() const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "getIpcEventHandle is not implemented for this PrivateUse1 device; "
+        "implement it in PrivateUse1HooksInterface to enable IPC.");
+  }
+
+  virtual c10::DataPtr openIpcMemHandle(
+      [[maybe_unused]] const std::string& handle) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "openIpcMemHandle is not implemented for this PrivateUse1 device; "
+        "implement it in PrivateUse1HooksInterface to enable IPC.");
+  }
+
+  virtual void waitIpcEvent(
+      [[maybe_unused]] const std::string& event_bytes,
+      [[maybe_unused]] const c10::Stream& stream) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "waitIpcEvent is not implemented for this PrivateUse1 device; "
+        "implement it in PrivateUse1HooksInterface to enable IPC.");
   }
 
 #undef FAIL_PRIVATEUSE1HOOKS_FUNC
