@@ -2530,6 +2530,24 @@ class DictTests(torch._dynamo.test_case.TestCase):
         unbacked_method.meta["unbacked_bindings"] = {"u0": ()}
         self.assertFalse(_is_safe_to_reorder(unbacked_method))
 
+        # increment_version bumps a version counter in place; matched by
+        # identity, so the torch._C alias (different __name__) is covered too.
+        self.assertFalse(
+            _is_safe_to_reorder(
+                graph.call_function(torch.autograd.graph.increment_version, (x,))
+            )
+        )
+        self.assertFalse(
+            _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
+        )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_canonical_graph_collectives_are_barriers(self):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+
         # Functional collectives are barriers (comm/compute overlap + Inductor's
         # in-place collective reuse). Dynamo graphs hold OpOverloadPackets,
         # aten graphs hold OpOverloads, so both dispatch forms must be covered.
@@ -2543,17 +2561,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(collective_packet))
         self.assertTrue(
             _is_safe_to_reorder(graph.call_function(torch.ops.aten.add.Tensor, (x, x)))
-        )
-
-        # increment_version bumps a version counter in place; matched by
-        # identity, so the torch._C alias (different __name__) is covered too.
-        self.assertFalse(
-            _is_safe_to_reorder(
-                graph.call_function(torch.autograd.graph.increment_version, (x,))
-            )
-        )
-        self.assertFalse(
-            _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
         )
 
 
