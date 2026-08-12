@@ -234,11 +234,12 @@ struct XPUEvent {
     TORCH_CHECK(
         !enable_ipc_ || !enable_timing_,
         "XPUEvent cannot have both IPC and timing enabled.");
-#if SYCL_COMPILER_VERSION >= 20260200
-    namespace syclex = sycl::ext::oneapi::experimental;
 #ifdef _WIN32
     TORCH_CHECK(!enable_ipc_, "XPU IPC events are not supported on Windows.");
 #endif
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+
     auto& device = c10::xpu::get_raw_device(device_index_);
     if (enable_ipc_) {
       TORCH_CHECK(
