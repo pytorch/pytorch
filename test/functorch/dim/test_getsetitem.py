@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 class TestGetSetItem(TestCase):
     hw_classification = HardwareClassification.GENERIC
     """Comprehensive tests for first-class dimension indexing operations."""
