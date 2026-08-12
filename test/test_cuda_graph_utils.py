@@ -15,7 +15,7 @@ from torch.cuda._graph_annotations import (
     resolve_and_remap,
     resolve_pending_annotations,
 )
-from torch.cuda._utils import _check_cuda_bindings
+from torch.cuda._utils import _check_cuda_bindings, _check_cuda_bindings_driver
 from torch.cuda.graph_annotations import (
     clear_kernel_annotations,
     get_kernel_annotations,
@@ -1271,6 +1271,40 @@ class TestMarkKernels(TestCase):
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
 )
 class TestGetGraphData(TestCase):
+    def test_batch_mem_op_node(self):
+        from cuda.bindings import driver
+
+        device = _check_cuda_bindings_driver(
+            driver.cuDeviceGet(torch.cuda.current_device())
+        )
+        can_use_stream_mem_ops = _check_cuda_bindings_driver(
+            driver.cuDeviceGetAttribute(
+                driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_CAN_USE_STREAM_MEM_OPS_V1,
+                device,
+            )
+        )
+        if not can_use_stream_mem_ops:
+            self.skipTest("device does not support stream memory operations")
+
+        value = torch.zeros(1, dtype=torch.int32, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _check_cuda_bindings_driver(
+                driver.cuStreamWriteValue32(
+                    torch.cuda.current_stream().cuda_stream,
+                    value.data_ptr(),
+                    1,
+                    driver.CUstreamWriteValue_flags.CU_STREAM_WRITE_VALUE_DEFAULT,
+                )
+            )
+
+        g.instantiate()
+        data = g.get_graph_data()
+        batch_mem_op_nodes = [
+            node for node in data["nodes"] if node["node_type"] == "batch_mem_op"
+        ]
+        self.assertEqual(len(batch_mem_op_nodes), 1)
+
     def test_basic_structure(self):
         g = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.zeros([2000], device="cuda")
