@@ -769,7 +769,10 @@ def _update_reuse_args_tensors(
         args.out.tensor._runtime_tensor = out
     epilogue = getattr(args, "epilogue", None)
     if epilogue is not None:
-        input_names = epilogue.epilogue_fn.schema.inputs
+        source = epilogue.epilogue_fn
+        input_names = (
+            source.schema.inputs if isinstance(source, CuTeDSLEpilogueSource) else ()
+        )
         for name, wrapper in epilogue.tensors.items():
             val = epilogue_args.tensors[name]
             runtime_tensor = getattr(val, "runtime_tensor", val)
