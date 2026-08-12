@@ -3708,6 +3708,24 @@ def choose_saved_values_set(
     )[0]
 
 
+def _stable_target_str(target: Any) -> str:
+    """Stringify a node target stably across processes.
+
+    ``str()`` on a plain Python-function target (e.g. ``torch.sym_not``) renders
+    its ``repr`` including the object's memory address (``<function sym_not at
+    0x...>``), which differs per process. That poisons cross-rank graph hashing.
+    Use FX's qualified name for callables so equal graphs hash equally.
+    """
+    from torch.fx.node import _get_qualified_name
+
+    if callable(target):
+        try:
+            return _get_qualified_name(target)
+        except Exception:
+            return str(target)
+    return str(target)
+
+
 def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
     """Compute a forward-looking structural hash for each node.
 
@@ -3737,7 +3755,7 @@ def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
         elif node.op == "output":
             self_key = ("output",)
         else:
-            self_key = (node.op, str(node.target))
+            self_key = (node.op, _stable_target_str(node.target))
 
         user_hashes = tuple(sorted(hashes[u] for u in node.users))
         hashes[node] = hashlib.sha256(
@@ -3787,7 +3805,7 @@ def _canonical_node_names(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
             return (3,)
         else:
             input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, str(node.target), input_indices)
+            return (2, _stable_target_str(node.target), input_indices)
 
     # Seed the heap with nodes that have no dependencies.
     # The counter ensures deterministic ordering when keys are equal.
@@ -3849,7 +3867,7 @@ def _sync_decision_cross_ranks(
             # ranks. Use only the canonical name and op for these.
             if n.op == "placeholder":
                 return f"{canonical[n]}:{n.op}"
-            return f"{canonical[n]}:{n.op}:{n.target}"
+            return f"{canonical[n]}:{n.op}:{_stable_target_str(n.target)}"
 
         node_str = "/".join(
             _node_hash_str(n)

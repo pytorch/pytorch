@@ -268,7 +268,11 @@ def reduce_row_xcta(
         pn,
         _L.stream(),
     )
-    return out.view(()) if flatten and out.numel() == 1 and M == 1 else out
+    # resize_ (not view) so the 0-d result is not a VIEW of `out`: aten reductions
+    # never alias, and view-ness is observable (see kernel_general._as_shape).
+    if flatten and out.numel() == 1 and M == 1:
+        return out.resize_(())
+    return out
 
 
 def _build_geom(trait, trait_key, x, out_dtype, M, N, block, subrow_target):

@@ -21,6 +21,7 @@ from torch._native.instrumentation import (
     instrument_triton_kernel,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.logging_utils import log_settings, preserve_log_state
 
 
 # No shared tlparse harness exists in torch (see test/dynamo/test_structured_trace.py,
@@ -154,23 +155,28 @@ class _CapturingHandler(logging.Handler):
         self.records.append(record)
 
 
+# Both sinks are gated on this off-by-default artifact, so tests asserting on
+# emitted output have to turn it on first.
+_ARTIFACT = "native_dsl_compile"
+_ARTIFACT_LOG_QNAME = f"torch._native.instrumentation.__{_ARTIFACT}"
+
+
 class _LoggerCaptureTest(TestCase):
-    """Captures the native_dsl logger so tests can assert on emitted lines."""
+    """Captures the artifact logger so tests can assert on emitted lines."""
 
     def setUp(self):
         super().setUp()
-        self.log = logging.getLogger("torch._native.instrumentation")
-        self._orig_level = self.log.level
+        self._log_settings = log_settings(f"+{_ARTIFACT}")
+        self.log = logging.getLogger(_ARTIFACT_LOG_QNAME)
         self._orig_propagate = self.log.propagate
-        self.log.setLevel(logging.INFO)
-        self.log.propagate = False
+        self.log.propagate = False  # keep the lines off stderr
         self.handler = _CapturingHandler()
         self.log.addHandler(self.handler)
 
     def tearDown(self):
         self.log.removeHandler(self.handler)
-        self.log.setLevel(self._orig_level)
         self.log.propagate = self._orig_propagate
+        self._log_settings.close()
         super().tearDown()
 
     @property
@@ -259,10 +265,10 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(calls, [(256, 64)])
         self.assertEqual(len(self.messages), 1)
 
-    def test_no_work_when_not_listening(self):
-        # With no listener (logger above INFO, no trace handlers), the wrapper
-        # must run the wrapped fn but skip all instrumentation: no log line,
-        # and crucially no key_fn call (user code we shouldn't run for nothing).
+    def test_no_work_when_artifact_disabled(self):
+        # With the artifact off, the wrapper must run the wrapped fn but skip
+        # all instrumentation: no log line, and crucially no key_fn call (user
+        # code we shouldn't run for nothing).
         key_calls = []
 
         def key_fn(N, K):
@@ -272,15 +278,8 @@ class TestInstrumentation(_LoggerCaptureTest):
         fake = _FakeJitCache()
         compile_fn = instrument_cutedsl_compile("aten::topk", key_fn=key_fn)(fake)
 
-        self.log.setLevel(logging.WARNING)
-        saved = list(trace_log.handlers)
-        for h in saved:
-            trace_log.removeHandler(h)
-        try:
+        with preserve_log_state():
             compile_fn(256, 64)
-        finally:
-            for h in saved:
-                trace_log.addHandler(h)
 
         self.assertEqual(fake.misses, 1)  # wrapped fn still ran
         self.assertEqual(key_calls, [])  # ... but no instrumentation work
@@ -442,8 +441,18 @@ class TestTlparseOutput(TestCase):
 
     def setUp(self):
         super().setUp()
+        self._log_settings = log_settings(f"+{_ARTIFACT}")
         self.old_level = trace_log.level
         trace_log.setLevel(logging.DEBUG)
+
+        # Own trace_log's handler list outright. _init_logs() (run by
+        # log_settings) installs LazyTraceHandler, which unregisters itself on
+        # its first emit -- and mutating the list mid-dispatch makes
+        # Logger.callHandlers skip the handler right after it, silently
+        # dropping the first record from ours.
+        self._saved_handlers = list(trace_log.handlers)
+        for h in self._saved_handlers:
+            trace_log.removeHandler(h)
 
         # Raw trace file in the on-disk format tlparse consumes, written via
         # the same TorchLogsFormatter(trace=True) that TORCH_TRACE installs.
@@ -472,6 +481,9 @@ class TestTlparseOutput(TestCase):
         self.raw_file.close()
         os.unlink(self.raw_file.name)
         trace_log.setLevel(self.old_level)
+        for h in self._saved_handlers:
+            trace_log.addHandler(h)
+        self._log_settings.close()
         super().tearDown()
 
     def _emit_one(self):
@@ -489,6 +501,16 @@ class TestTlparseOutput(TestCase):
             if getattr(r, "metadata", {}).get("artifact", {}).get("name")
             == "native_dsl_compile"
         ]
+
+    def test_no_artifact_when_disabled(self):
+        # Regression test: a job collecting a structured trace (trace_log has
+        # handlers, as it does here) must not get a record per op call without
+        # an explicit TORCH_LOGS opt-in.
+        with preserve_log_state():
+            for _ in range(10):
+                self._emit_one()
+
+        self.assertEqual(self._artifact_records(), [])
 
     def test_emits_artifact_record(self):
         self._emit_one()
