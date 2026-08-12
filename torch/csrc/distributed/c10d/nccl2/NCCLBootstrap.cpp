@@ -7,10 +7,12 @@
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
+#include <cstring>
 #include <exception>
 #include <set>
 
@@ -43,36 +45,50 @@ NCCLBootstrap::NCCLBootstrap(
 }
 
 ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
-  ncclUniqueId uniqueId;
+  return exchangeUniqueIds(name, 1).front();
+}
+
+std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
+    std::string_view name,
+    int numIds) {
+  TORCH_INTERNAL_ASSERT(numIds > 0 && numIds <= comm_size_);
 
   auto store =
       c10::make_intrusive<::c10d::PrefixStore>(std::string(name), store_);
-  auto key = fmt::format("nccl_storekey_{}", generation_);
-  if (rank_ == 0) {
-    // Generate unique ID on rank 0
-    ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
+  auto keyPrefix = fmt::format("nccl_storekey_{}", generation_);
+  std::vector<std::string> keys;
+  keys.reserve(numIds);
+  for (int index = 0; index < numIds; ++index) {
+    keys.push_back(
+        numIds == 1 ? keyPrefix : fmt::format("{}_{}", keyPrefix, index));
+  }
+
+  const int rootIndex = detail::getRootIndex(rank_, comm_size_, numIds);
+  if (rootIndex >= 0) {
+    ncclUniqueId uniqueId;
+    const ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
     if (ncclErr != ncclSuccess) {
       throw std::runtime_error(
           "Failed to get NCCL unique ID: " +
           std::string(nccl_api_->getErrorString(ncclErr)));
     }
 
-    // Set the unique ID in the store
     std::vector<uint8_t> vec(
         reinterpret_cast<uint8_t*>(&uniqueId),
         reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
-    store->set(key, vec);
-  } else {
-    // Other ranks read the broadcast ID
-    store->wait({key}, timeout_);
-    auto vec = store->get(key);
-    if (vec.size() != sizeof(ncclUniqueId)) {
-      throw std::runtime_error("Invalid NCCL unique ID size");
-    }
-    uniqueId = *(reinterpret_cast<const ncclUniqueId*>(vec.data()));
+    store->set(keys[static_cast<size_t>(rootIndex)], vec);
   }
 
-  return uniqueId;
+  store->wait(keys, timeout_);
+  auto values = store->multiGet(keys);
+  std::vector<ncclUniqueId> uniqueIds(numIds);
+  for (int index = 0; index < numIds; ++index) {
+    if (values[index].size() != sizeof(ncclUniqueId)) {
+      throw std::runtime_error("Invalid NCCL unique ID size");
+    }
+    std::memcpy(&uniqueIds[index], values[index].data(), sizeof(ncclUniqueId));
+  }
+  return uniqueIds;
 }
 
 // TorchComm-layer hint keys that are not part of ncclConfig.
@@ -145,7 +161,8 @@ void populateNcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.nvlsCTAs=" << config.nvlsCTAs;
     }
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
     else if (key == "nChannelsPerNetPeer" || key == "n_channels_per_net_peer") {
       config.nChannelsPerNetPeer = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
@@ -170,21 +187,39 @@ ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
     const ncclConfig_t& base_config) {
   c10::cuda::CUDAGuard gpuGuard(device_);
-  ncclUniqueId uniqueId;
   ncclComm_t nccl_comm = nullptr;
 
-  uniqueId = exchangeUniqueId(name);
-
   // TODO: add logging on failures and successes
-  // TODO: use scalable init
   // TODO: get the local rank
   ncclConfig_t config = base_config;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name.c_str();
 #endif
 
-  ncclResult_t ncclErr = nccl_api_->commInitRankConfig(
-      &nccl_comm, comm_size_, uniqueId, rank_, &config);
+  constexpr int kDefaultRanksPerRoot = 128;
+  const int ranksPerRoot =
+      getCvarInt({"TORCH_NCCL_RANKS_PER_ROOT"}, kDefaultRanksPerRoot);
+  TORCH_CHECK_VALUE(
+      ranksPerRoot > 0, "TORCH_NCCL_RANKS_PER_ROOT must be greater than zero");
+
+  ncclResult_t ncclErr = ncclInvalidUsage;
+  if (comm_size_ > ranksPerRoot) {
+    const int numRoots = (comm_size_ + ranksPerRoot - 1) / ranksPerRoot;
+    auto uniqueIds = exchangeUniqueIds(name, numRoots);
+    TC_LOG(INFO) << "[comm=" << name << "] Using scalable NCCL init with "
+                 << numRoots << " roots";
+    ncclErr = nccl_api_->commInitRankScalable(
+        &nccl_comm,
+        comm_size_,
+        rank_,
+        static_cast<int>(uniqueIds.size()),
+        uniqueIds.data(),
+        &config);
+  } else {
+    const auto uniqueId = exchangeUniqueId(name);
+    ncclErr = nccl_api_->commInitRankConfig(
+        &nccl_comm, comm_size_, uniqueId, rank_, &config);
+  }
   if (nccl_comm == nullptr) {
     throw std::runtime_error(
         "Failed to initialize NCCL communicator: " +
