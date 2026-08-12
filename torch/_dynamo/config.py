@@ -500,6 +500,11 @@ use_recursive_dict_tags_for_guards = False
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
 
+# Hoist Tensor.requires_grad_(True) on an unused graph input in front of the
+# graph instead of graph breaking. See method_requires_grad_ in
+# variables/tensor.py.
+hoist_requires_grad_on_inputs = os.environ.get("TORCH_HOIST_REQUIRES_GRAD", "0") == "1"
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
