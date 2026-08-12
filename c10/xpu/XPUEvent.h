@@ -245,7 +245,7 @@ struct XPUEvent {
     }
 #else
     TORCH_CHECK(
-        !enable_ipc_, "XPUEvent IPC requires SYCL compiler 2026.2 or later.");
+        !enable_ipc_, "XPU IPC events require SYCL compiler 2026.2 or later.");
 #endif
   }
 
