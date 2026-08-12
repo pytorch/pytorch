@@ -62,6 +62,30 @@ def _resolve_pristine(
         raise RuntimeError(diff_sync.pristine_download_hint(tag, upstream)) from e
 
 
+def _filter_pairs(
+    pairs: list[tuple[Path, Path]], only: str, cpython_dir: Path
+) -> list[tuple[Path, Path]]:
+    """Exact relative path, basename, or unique stem (no substring surprises)."""
+    exact = [
+        (py, diff)
+        for py, diff in pairs
+        if only == py.relative_to(cpython_dir).as_posix() or only == py.name
+    ]
+    if exact:
+        return exact
+    # --only test_bool (no .py): must be unique (test_int != test_int_literal).
+    stem = [(py, diff) for py, diff in pairs if only == py.stem]
+    if len(stem) == 1:
+        return stem
+    if len(stem) > 1:
+        names = ", ".join(py.name for py, _ in stem)
+        raise ValueError(
+            f"--only {only!r} matches multiple files ({names}); "
+            f"pass an exact basename like {stem[0][0].name!r}"
+        )
+    return []
+
+
 def regenerate(
     only: str | None,
     *,
@@ -75,14 +99,16 @@ def regenerate(
         (p.with_suffix(".py"), p) for p in diff_paths if p.with_suffix(".py").is_file()
     ]
     if only:
-        pairs = [
-            (py, diff)
-            for py, diff in pairs
-            if only in py.relative_to(CPYTHON_DIR).as_posix() or only in py.name
-        ]
+        try:
+            pairs = _filter_pairs(pairs, only, CPYTHON_DIR)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
         if not pairs:
             print(f"no pairs matched --only {only!r}", file=sys.stderr)
             return 1
+        matched = ", ".join(py.relative_to(CPYTHON_DIR).as_posix() for py, _ in pairs)
+        print(f"--only {only!r} matched: {matched}")
 
     if pristine_path is not None and len(pairs) != 1:
         print(
@@ -156,7 +182,11 @@ def regenerate(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default=None, help="Substring filter on relative path")
+    ap.add_argument(
+        "--only",
+        default=None,
+        help="Exact basename, relative path, or unique stem (e.g. test_bool.py)",
+    )
     ap.add_argument(
         "--force",
         action="store_true",
@@ -179,8 +209,8 @@ def main() -> int:
         errors = diff_sync.verify_all()
         if errors:
             print("cpython diff sync check FAILED:")
-            for err in errors:
-                print(f"  - {err}")
+            for rel, err in errors:
+                print(f"  - {rel}: {err}")
             return 1
         n = len(list(diff_sync.iter_diff_paths()))
         print(f"OK: {n} cpython .py/.diff pairs in sync")
