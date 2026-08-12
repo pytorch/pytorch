@@ -4581,6 +4581,71 @@ Tensor linalg_matrix_sqrth_differential(
   return 0.5 * (out + out.mH());
 }
 
+// Solves H X + X H = R for Hermitian positive-definite H = Q diag(s) Q^H.
+// Eigendecomposing H directly (rather than A^H A, whose eigenvalues are the
+// squared singular values) keeps small singular values at full precision.
+static Tensor polar_sylvester_solve(
+    const Tensor& Q,
+    const Tensor& s,
+    const Tensor& R) {
+  auto denom = s.unsqueeze(-1) + s.unsqueeze(-2);
+  auto inner = at::matmul(at::matmul(Q.mH(), R), Q).div(denom);
+  return at::matmul(at::matmul(Q, inner), Q.mH());
+}
+
+// X H^{-1} reusing the eigendecomposition of H.
+static Tensor polar_apply_hinv(
+    const Tensor& Q,
+    const Tensor& s,
+    const Tensor& X) {
+  return at::matmul(at::matmul(X, Q).div(s.unsqueeze(-2)), Q.mH());
+}
+
+Tensor linalg_polar_backward(
+    const Tensor& grad_U,
+    const Tensor& grad_H,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H) {
+  if (!grad_U.defined() && !grad_H.defined()) {
+    return {};
+  }
+  at::NoTF32Guard disable_tf32;
+  auto [s, Q] = at::linalg_eigh(H);
+  s = s.clamp_min(0);
+  Tensor grad_A;
+  if (grad_U.defined()) {
+    auto C = at::matmul(U.mH(), grad_U);
+    // Project out the component parallel to U before applying H^{-1}; the
+    // tangential component goes through the Sylvester solve.
+    auto normal = polar_apply_hinv(Q, s, grad_U - at::matmul(U, C));
+    auto X = polar_sylvester_solve(Q, s, C - C.mH());
+    grad_A = normal + at::matmul(U, X);
+  }
+  if (grad_H.defined()) {
+    auto Z = polar_sylvester_solve(Q, s, grad_H + grad_H.mH());
+    auto from_H = at::matmul(A, Z);
+    grad_A = grad_A.defined() ? grad_A + from_H : std::move(from_H);
+  }
+  return grad_A;
+}
+
+std::tuple<Tensor, Tensor> linalg_polar_jvp(
+    const Tensor& dA,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H) {
+  at::NoTF32Guard disable_tf32;
+  // d(H^2) = d(A^H A) gives H dH + dH H = dA^H A + A^H dA, and
+  // U = A H^{-1} gives dU = (dA - U dH) H^{-1}.
+  auto [s, Q] = at::linalg_eigh(H);
+  s = s.clamp_min(0);
+  auto dM = at::matmul(dA.mH(), A) + at::matmul(A.mH(), dA);
+  auto dH = polar_sylvester_solve(Q, s, dM);
+  auto dU = polar_apply_hinv(Q, s, dA - at::matmul(U, dH));
+  return std::make_tuple(std::move(dU), std::move(dH));
+}
+
 template <typename F1, typename F2, typename... Ts>
 static Tensor masked_fmap(
     const Tensor& mask,
