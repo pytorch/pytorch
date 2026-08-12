@@ -112,6 +112,7 @@ class TestExportJobs(unittest.TestCase):
         import sys
         import types
         import unittest.mock as mock
+        from typing import Any, cast
 
         seen = {}
 
@@ -120,9 +121,11 @@ class TestExportJobs(unittest.TestCase):
             return types.SimpleNamespace(export_to_c=lambda **kw: None)
 
         fake_cute = types.ModuleType("cutlass.cute")
-        fake_cute.compile = fake_compile
+        # cast: a ModuleType instance has no declared attributes, so plain
+        # assignment fails type checking (idiom from test/test_utils.py).
+        cast(Any, fake_cute).compile = fake_compile
         fake_cutlass = types.ModuleType("cutlass")
-        fake_cutlass.cute = fake_cute
+        cast(Any, fake_cutlass).cute = fake_cute
         tc = toolchains.CuteDslToolchain()
         with (
             mock.patch.dict(
