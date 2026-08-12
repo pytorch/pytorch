@@ -411,6 +411,13 @@ class TestInlineAsmElementwiseInputValidation(TestCase):
                 dtype=torch.float32,
             )
 
+
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+class TestInlineAsmElementwiseCUDAContract(TestCase):
+    """Tests for CUDA-specific API contracts."""
+
+    hw_classification = HardwareClassification.CUDA
+
     def test_error_cpu_tensor(self):
         x = torch.randn(100, dtype=torch.float32)
         with self.assertRaises(RuntimeError):

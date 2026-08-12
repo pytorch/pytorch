@@ -39,7 +39,6 @@ from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -343,18 +342,17 @@ class TestUtils(TestCase):
 
 
 class TestDeviceTflops(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, device, dtype):
-        with torch.device(device):
+        with torch.cuda.device(device):
             ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestDeviceTflops, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestDeviceTflops, globals(), only_for=("cuda",))
 
 
 class TestLoadTemplate(TestCase):
@@ -423,11 +421,12 @@ class TestRuntimeEstimation(TestCase):
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
-        importlib.util.find_spec("cutlass_api") is None,
-        "requires cutlass_api",
+        not torch.cuda.is_available()
+        or importlib.util.find_spec("cutlass_api") is None,
+        "requires CUDA and cutlass_api",
     )
     def test_ensure_fp4_dtype_registered(self):
         """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
