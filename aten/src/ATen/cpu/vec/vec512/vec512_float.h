@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <limits>
 #if defined(CPU_CAPABILITY_AVX512)
@@ -792,7 +793,7 @@ inline void transpose_block(
     at::vec::VectorizedN<float, 16>& input,
     int M = 16,
     int N = 16) {
-  TORCH_CHECK(M <= 16 && N <= 16, "transpose_block expects M, N <= 16.");
+  STD_TORCH_CHECK(M <= 16 && N <= 16, "transpose_block expects M, N <= 16.");
   // unpacking and interleaving 32-bit elements
   __m512 temp[16];
   int i;
@@ -857,7 +858,8 @@ inline void transpose_mxn_16x16(
     int64_t ld_dst,
     int M,
     int N) {
-  TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
+  STD_TORCH_CHECK(
+      M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
   // load from src to registers
   at::vec::VectorizedN<float, 16> input;
   int i;
