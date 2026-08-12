@@ -972,7 +972,7 @@ def forward(self, primals_1):
         self.assertEqual(f(inp), f_compiled(inp))
 
     def test_sparse_csr_creation_requires_grad_errors(self):
-        # backward through sparse creation is unsupported; used to abort in C++
+        # AOTAutograd without dynamo gives bogus 0-sized grad; eager, #192093 fine
         def f(v):
             crow = torch.tensor([0, 2, 4])
             col = torch.tensor([0, 1, 0, 1])
@@ -980,7 +980,10 @@ def forward(self, primals_1):
             return a.to_dense().sum()
 
         f_compiled = aot_function(f, nop)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "SparseCompressedTensorBackward0 returned an invalid gradient",
+        ):
             f_compiled(torch.randn(4, requires_grad=True))
 
     # https://github.com/pytorch/pytorch/issues/93363
