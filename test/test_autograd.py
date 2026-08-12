@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
+    xfailIf,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -977,6 +978,33 @@ class TestAutograd(TestCase):
 
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+
+    @skipIfTorchDynamo("dynamo inlines setup_context, so the value stays live")
+    def test_custom_function_setup_context_releases_return_value(self):
+        class Sentinel:
+            pass
+
+        sentinel_ref = None
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                nonlocal sentinel_ref
+                sentinel = Sentinel()
+                sentinel_ref = weakref.ref(sentinel)
+                return sentinel
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO
+
+        MyFunc.apply(torch.randn(3, requires_grad=True))
+
+        self.assertIsNone(sentinel_ref())
 
     def test_multiple_insert_removal_caching(self):
         torch._C._set_cached_tensors_enabled(True)
@@ -4179,6 +4207,300 @@ class TestAutograd(TestCase):
         z2.sum().backward()
         self.assertEqual(l.grad.dtype, torch.float32)
 
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    @parametrize(
+        "declared,expected",
+        [
+            # unset -> slot defaults to storage dtype; explicit up/down casts the
+            # incoming fp64 grad; None passes it through uncast; the output's own
+            # dtype requests the default explicitly.
+            ("unset", torch.bfloat16),
+            (torch.float32, torch.float32),
+            (torch.float16, torch.float16),
+            (None, torch.float64),
+            (torch.bfloat16, torch.bfloat16),
+        ],
+    )
+    def test_ctx_output_grad_dtype(self, declared, expected):
+        # ctx.set_output_grad_dtype controls the dtype of the gradient the
+        # engine hands to backward, independent of the output's storage dtype.
+        # The output is bf16; a downstream node returns an fp64 gradient for it.
+        class Downstream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return torch.ones_like(g, dtype=torch.float64)
+
+        class DeclareOutput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, declared):
+                out = x.to(torch.bfloat16)
+                if declared != "unset":
+                    ctx.set_output_grad_dtype(declared)
+                return out
+
+            @staticmethod
+            def backward(ctx, g):
+                DeclareOutput.seen = g.dtype
+                return g.to(torch.float32), None
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = DeclareOutput.apply(x, declared)
+        self.assertEqual(out.dtype, torch.bfloat16)
+        Downstream.apply(out).sum().backward()
+        self.assertEqual(DeclareOutput.seen, expected)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_multiple_outputs(self):
+        # Positional declarations line up with returned values: a concrete
+        # dtype, the default (via the output's own dtype), and None for a
+        # non-tensor output.
+        class MultiOutput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                t1 = x.sin()
+                t2 = x.cos()
+                ctx.set_output_grad_dtype(torch.float64, t2.dtype, None)
+                return t1, t2, "not a tensor"
+
+            @staticmethod
+            def backward(ctx, g1, g2, g3):
+                MultiOutput.seen = (g1.dtype, g2.dtype, g3)
+                return g1.to(torch.float32) + g2.to(torch.float32)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        t1, t2, s = MultiOutput.apply(x)
+        self.assertEqual(s, "not a tensor")
+        (t1.sum() + t2.sum()).backward()
+        self.assertEqual(MultiOutput.seen[0], torch.float64)
+        self.assertEqual(MultiOutput.seen[1], torch.float32)
+        self.assertIsNone(MultiOutput.seen[2])
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_aliased_outputs(self):
+        # setup_context can declare distinct grad dtypes for output slots whose
+        # tensors alias the same storage.
+        class SetupContext(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                base = x.to(torch.bfloat16)
+                return base.view_as(base), base.view_as(base)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.set_output_grad_dtype(torch.float32, torch.float64)
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                SetupContext.output_grad_dtypes = (g0.dtype, g1.dtype)
+                return g0.to(torch.float32) + g1.to(torch.float32)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out0, out1 = SetupContext.apply(x)
+        (out0.sum() + out1.sum()).backward()
+        self.assertEqual(
+            SetupContext.output_grad_dtypes, (torch.float32, torch.float64)
+        )
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_accumulation(self):
+        # A declared grad dtype also governs the dtype the engine accumulates
+        # in when the output fans out to multiple consumers: the two fp64
+        # incoming gradients are accumulated as fp32 (the declared dtype), so
+        # backward sees fp32.
+        class Consumer(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return torch.ones_like(g, dtype=torch.float64)
+
+        class Fanout(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.to(torch.bfloat16)
+                ctx.set_output_grad_dtype(torch.float32)
+                return out
+
+            @staticmethod
+            def backward(ctx, g):
+                Fanout.seen = g.dtype
+                return g.to(torch.float32)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = Fanout.apply(x)
+        (Consumer.apply(out).sum() + Consumer.apply(out).sum()).backward()
+        self.assertEqual(Fanout.seen, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_setup_context(self):
+        # The API is equally usable from setup_context.
+        class UseSetup(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.to(torch.bfloat16)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.set_output_grad_dtype(torch.float32)
+
+            @staticmethod
+            def backward(ctx, g):
+                UseSetup.seen = g.dtype
+                return g.to(torch.float32)
+
+        class Downstream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return torch.ones_like(g, dtype=torch.float64)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = UseSetup.apply(x)
+        Downstream.apply(out).sum().backward()
+        self.assertEqual(UseSetup.seen, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_validation(self):
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+
+        class CountMismatch(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32, torch.float32)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "number of declarations to match"):
+            CountMismatch.apply(x)
+
+        class TooFewDeclarations(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32)
+                return x.clone(), x.clone()
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                return g0 + g1
+
+        with self.assertRaisesRegex(RuntimeError, "number of declarations to match"):
+            TooFewDeclarations.apply(x)
+
+        class BadDeclarationType(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype("float32")
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "torch.dtype or None"):
+            BadDeclarationType.apply(x)
+
+        class DtypeForNonTensor(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(None, torch.float32)
+                return x.clone(), "not a tensor"
+
+            @staticmethod
+            def backward(ctx, g, gs):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "not a differentiable tensor"):
+            DtypeForNonTensor.apply(x)
+
+        class DtypeForNonDifferentiable(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.clone()
+                ctx.mark_non_differentiable(out)
+                ctx.set_output_grad_dtype(torch.float32)
+                return out
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "not a differentiable tensor"):
+            DtypeForNonDifferentiable.apply(x)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_called_twice(self):
+        # set_output_grad_dtype may be called at most once per invocation.
+        class CalledTwice(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32)
+                ctx.set_output_grad_dtype(torch.float64)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "can only be called once"):
+            CalledTwice.apply(x)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_return_as_is_non_differentiable(self):
+        # mark_non_differentiable records the raw output's TensorImpl, so
+        # differentiability must be checked on the raw output, not its wrapper.
+        class ReturnAsIs(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                out = x.to(torch.bfloat16)
+                ctx.mark_non_differentiable(y)
+                ctx.set_output_grad_dtype(torch.float32, None)
+                return out, y
+
+            @staticmethod
+            def backward(ctx, g_out, g_y):
+                ReturnAsIs.seen_grad_dtype = g_out.dtype
+                return g_out.to(torch.float32), None
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        y = torch.tensor([3.0, 4.0])
+        out, out_y = ReturnAsIs.apply(x, y)
+        self.assertFalse(out_y.requires_grad)
+        out.sum().backward()
+        self.assertEqual(ReturnAsIs.seen_grad_dtype, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_no_leak_from_returned_input(self):
+        # The output defaults to its dtype while leaf accumulation uses x.grad_dtype.
+        class ReturnInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                ReturnInput.seen_grad_dtype = g.dtype
+                return g
+
+        x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True)
+        x.grad_dtype = torch.float64
+        out = ReturnInput.apply(x)
+        out.sum().backward()
+        self.assertEqual(ReturnInput.seen_grad_dtype, torch.float32)
+        self.assertEqual(x.grad.dtype, torch.float64)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -4279,6 +4601,7 @@ class TestAutograd(TestCase):
         # graph was freed, causing a RuntimeError here.
         self.assertEqual(saved_ctx[0].saved_tensors, (p,))
 
+    @xfailIf(TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 13))
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
         # and different test case worth enshrining.  mult1 is not testing
@@ -16981,6 +17304,99 @@ class TestSelectiveActivationCheckpoint(TestCase):
         out.sum().backward()
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_saved_tensors_hooks_fire_for_saved_tensors(self):
+        # Tensors SAC decides to save skip SavedVariable, so SAC must simulate
+        # pack/unpack with the surrounding user saved-tensors hooks. This is
+        # opt-in for now (BC); the default legacy behavior is covered by
+        # TestSACAmbientSavedTensorsHooks.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        packed, unpacked = [], []
+
+        def pack(x):
+            packed.append(x)
+            return x * 2  # transform so we can tell unpack really ran
+
+        def unpack(x):
+            unpacked.append(x)
+            return x / 2
+
+        def fn(x):
+            return torch.mm(x, x).relu().sum()
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def run_checkpoint():
+            return checkpoint(
+                fn,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+                respect_saved_tensors_hooks=True,
+            )
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            out = run_checkpoint()
+        out.backward()
+        # Exactly two packs, both during forward: the checkpoint input x
+        # (save_inputs) and the mm output (MUST_SAVE, via SAC storage).
+        # Recompute saves are shadowed by _recomputation_hook and don't fire.
+        self.assertEqual(len(packed), 2)
+        self.assertEqual(len(packed), len(unpacked))
+
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref).backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
+        # Hooks around backward only must not affect tensors SAC saved
+        # without hooks in scope
+        packed.clear()
+        unpacked.clear()
+        x.grad = None
+        out = run_checkpoint()
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            out.backward()
+        self.assertEqual(len(packed), 0)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @skipIfTorchDynamo("gc is unreliable under dynamo-wrapped frames")
+    def test_saved_tensors_hooks_no_refcycle_with_stateful_owner(self):
+        # The graph retains checkpoint's internal pack_hook via SavedVariable
+        # in a way gc cannot traverse, so if pack_hook kept a permanent ref to
+        # the user hooks, a hook owner reaching back to the output would leak
+        # uncollectably. _user_hooks must not outlive the hooks TLS scope.
+        class Hooks:
+            def pack(self, t):
+                return t.detach()
+
+            def unpack(self, t):
+                return t
+
+        def scenario():
+            x = torch.randn(4, 4, requires_grad=True)
+            hooks = Hooks()
+
+            # No tensor args: keeps save_inputs from packing x through the
+            # user hooks, which would reach hooks via a pre-existing path.
+            def fn():
+                return torch.mm(x, x).relu().sum()
+
+            with torch.autograd.graph.saved_tensors_hooks(hooks.pack, hooks.unpack):
+                out = checkpoint(fn, use_reentrant=False)
+            hooks.output = out  # owner -> graph back-reference
+            return weakref.ref(hooks), weakref.ref(out)
+
+        hooks_ref, out_ref = scenario()
+        gc.collect()
+        self.assertIsNone(hooks_ref())
+        self.assertIsNone(out_ref())
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_function_with_more_than_one_output(self):
         # maybe there is a more systematic way:
         counter = [0]
@@ -17182,6 +17598,248 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 },
             )
             self.assertEqual(my_count[0], 9)
+
+
+@skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
+class TestSACAmbientSavedTensorsHooks(TestCase):
+    # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
+    # a selective activation checkpoint (SAC) region interacts with the tensors
+    # SAC decides to save. Historically SAC held those tensors outside the
+    # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
+    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
+    # through the hook; the default (legacy) leaves them untouched and warns.
+    # These tests pin both behaviors so the eventual default flip is explicit.
+    class RecordingHooks:
+        # Records the shapes pack sees without transforming the tensor, so it is
+        # numerically transparent (models a CPU-offload hook on CPU).
+        def __init__(self):
+            self.packed = []
+
+        def __enter__(self):
+            def pack(t):
+                self.packed.append(tuple(t.shape))
+                return t
+
+            def unpack(t):
+                return t
+
+            self._ctx = torch.autograd.graph.saved_tensors_hooks(pack, unpack)
+            self._ctx.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._ctx.__exit__(*args)
+
+    # Distinct shapes so a recorded shape unambiguously identifies which op's
+    # output the ambient hook saw: only the MUST_SAVE mm output is MM_SHAPE.
+    INPUT_SHAPE = (4, 6)
+    MM_SHAPE = (6, 6)
+
+    @staticmethod
+    def _fn(x):
+        # mm(x.t(), x) turns an INPUT_SHAPE tensor into an MM_SHAPE one.
+        return torch.mm(x.t(), x).relu().sum()
+
+    @staticmethod
+    def _mm_save_context_fn():
+        # MUST_SAVE the mm output; recompute everything else.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        return functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(0)
+
+    def _run(self, respects, capture_warning=False):
+        # Wrap an ambient RecordingHooks OUTER around a SAC region whose only
+        # saved tensor is the MM_SHAPE mm output. Returns the recorded shapes.
+        fn = self._fn
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        context_fn = self._mm_save_context_fn()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with self.RecordingHooks() as hooks:
+                out = checkpoint(
+                    fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    respect_saved_tensors_hooks=respects,
+                )
+            out.backward()
+
+        # Numeric parity vs the plain (no-hook, no-checkpoint) reference must
+        # hold regardless of the flag: recording/offloading is transparent.
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref).backward()
+        torch.testing.assert_close(x.grad, x_ref.grad)
+
+        if capture_warning:
+            fw = [w for w in caught if issubclass(w.category, FutureWarning)]
+            return hooks.packed, fw
+        return hooks.packed
+
+    def test_hook_outer_sac_inner_default_bypasses(self):
+        # Legacy default: the ambient hook is blind to the MUST_SAVE mm output.
+        # A FutureWarning fires because a user hook is in scope.
+        packed, fw = self._run(respects=None, capture_warning=True)
+        self.assertNotIn(self.MM_SHAPE, packed)
+        self.assertTrue(
+            any("selective activation checkpoint" in str(w.message) for w in fw)
+        )
+
+    def test_hook_outer_sac_inner_opt_in_routes(self):
+        # Opt-in: the MUST_SAVE mm output now flows through the ambient hook.
+        packed = self._run(respects=True)
+        self.assertIn(self.MM_SHAPE, packed)
+
+    def test_hook_outer_sac_inner_opt_out_bypasses_silently(self):
+        # Explicit legacy opt-out: hook blind to the mm output, and no warning.
+        packed, fw = self._run(respects=False, capture_warning=True)
+        self.assertNotIn(self.MM_SHAPE, packed)
+        self.assertEqual(fw, [])
+
+    def test_save_on_cpu_opt_in_offloads_saved_tensor(self):
+        # save_on_cpu is the canonical ambient hook. On CPU we can only observe
+        # numeric parity; device movement is asserted on CUDA below.
+        fn = self._fn
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        context_fn = self._mm_save_context_fn()
+        with torch.autograd.graph.save_on_cpu():
+            out = checkpoint(
+                fn,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+                respect_saved_tensors_hooks=True,
+            )
+        out.backward()
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref).backward()
+        torch.testing.assert_close(x.grad, x_ref.grad)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "needs CUDA to observe offload")
+    def test_save_on_cpu_device_movement(self):
+        # save_on_cpu moves saved tensors to CPU. Under the default the SAC-kept
+        # mm output never reaches the hook, so it stays on GPU; under the opt-in
+        # the hook sees it and offloads it to CPU.
+        def offloaded_device(respects):
+            device_by_shape = {}
+
+            def pack(t):
+                device_by_shape[tuple(t.shape)] = t.device.type
+                return t.cpu()
+
+            def unpack(t):
+                return t.cuda()
+
+            x = torch.randn(*self.INPUT_SHAPE, device="cuda", requires_grad=True)
+            context_fn = self._mm_save_context_fn()
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = checkpoint(
+                    self._fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=context_fn,
+                    respect_saved_tensors_hooks=respects,
+                )
+            out.backward()
+            return device_by_shape
+
+        self.assertNotIn(self.MM_SHAPE, offloaded_device(False))
+        self.assertEqual(offloaded_device(True).get(self.MM_SHAPE), "cuda")
+
+    def test_nested_checkpoint_ignores_internal_hooks(self):
+        # An inner selective checkpoint nested inside an outer recompute-all
+        # checkpoint, both under a user hook. Torch installs its own internal
+        # saved_tensors_hooks per region; the user hook must be resolved through
+        # them, never mistaken for one. The single MUST_SAVE mm output must
+        # reach the user hook exactly once under the opt-in (not doubled by
+        # torch's internal hooks), and never under the default. Parity holds
+        # either way.
+        def inner(x, respects):
+            return checkpoint(
+                lambda x: torch.mm(x.t(), x).relu(),
+                x,
+                use_reentrant=False,
+                context_fn=self._mm_save_context_fn(),
+                respect_saved_tensors_hooks=respects,
+            )
+
+        def outer(x, respects):
+            recompute_all = functools.partial(
+                create_selective_checkpoint_contexts, lambda *a, **k: False
+            )
+            return checkpoint(
+                inner,
+                x,
+                respects,
+                use_reentrant=False,
+                context_fn=recompute_all,
+                respect_saved_tensors_hooks=respects,
+            ).sum()
+
+        def observe(respects):
+            packed = []
+
+            def pack(t):
+                packed.append(tuple(t.shape))
+                return t
+
+            def unpack(t):
+                return t
+
+            x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = outer(x, respects)
+            out.backward()
+            return packed
+
+        self.assertNotIn(self.MM_SHAPE, observe(False))
+        self.assertEqual(observe(True).count(self.MM_SHAPE), 1)
+
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        outer(x, True).backward()
+        x_ref = x.detach().clone().requires_grad_()
+        outer(x_ref, True).backward()
+        torch.testing.assert_close(x.grad, x_ref.grad)
+
+    def test_plain_checkpoint_no_warning(self):
+        # Plain (non-selective) checkpoint caches nothing via SAC, so an ambient
+        # hook is unaffected and no FutureWarning about SAC should fire.
+        packed = []
+
+        def pack(t):
+            packed.append(tuple(t.shape))
+            return t
+
+        def unpack(t):
+            return t
+
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                out = checkpoint(self._fn, x, use_reentrant=False)
+            out.backward()
+
+        self.assertEqual(
+            [w for w in caught if issubclass(w.category, FutureWarning)], []
+        )
+        self.assertIn(self.INPUT_SHAPE, packed)
+
+    def test_reentrant_rejects_flag(self):
+        # respect_saved_tensors_hooks is a non-reentrant-only feature, like
+        # context_fn and debug.
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        with self.assertRaisesRegex(ValueError, "use_reentrant=False"):
+            checkpoint(
+                self._fn, x, use_reentrant=True, respect_saved_tensors_hooks=True
+            )
 
 
 class TestAutogradMultipleDispatch(TestCase):
@@ -17539,6 +18197,81 @@ class TestAutogradMultipleDispatch(TestCase):
                 for i in range(min(shape)):
                     expected[i, i] = 1.0
                 self.assertEqual(x.grad, expected)
+
+
+@skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
+class TestFunctionAssertMessages(TestCase):
+    # THPFunction_assert forwards to a printf-style formatter. Regression tests
+    # that the dynamic content (offending type name / index) is not silently
+    # dropped from the error message.
+    def _apply(self, forward_fn):
+        class F(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return forward_fn(ctx, x)
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        return F.apply(torch.randn(2, requires_grad=True))
+
+    def test_dirty_tensors_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.dirty_tensors = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_mark_dirty_element_reports_index_and_type(self):
+        def fwd(ctx, x):
+            ctx.dirty_tensors = ("notatensor",)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"argument 0 is of type .*str"):
+            self._apply(fwd)
+
+    def test_to_save_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.to_save = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_non_differentiable_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.non_differentiable = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_mark_non_differentiable_element_reports_type(self):
+        def fwd(ctx, x):
+            ctx.non_differentiable = ("notatensor",)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but got .*str"):
+            self._apply(fwd)
+
+    def test_saved_for_forward_not_tuple_reports_type(self):
+        class F(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.saved_for_forward = "notatuple"
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            F.apply(torch.randn(2, requires_grad=True))
 
 
 # Import test cases from below autograd/ here. These are found
