@@ -574,6 +574,25 @@ at::BlasBackend Context::blasPreferredBackend() {
   return blas_preferred_backend;
 }
 
+bool Context::tf32Supported() {
+#ifdef USE_ROCM
+  static const std::vector<std::string> supported_archs = {
+      "gfx942", "gfx950",
+  };
+  static const bool supported = []() {
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
+        return false;
+      }
+    }
+    return true;
+  }();
+  return supported;
+#else
+  return true;
+#endif
+}
+
 bool Context::ckSDPASupported() {
 #ifdef USE_ROCM
   // CK SDPA is only built for a subset of architectures to limit compile time.
