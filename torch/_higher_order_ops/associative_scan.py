@@ -911,6 +911,7 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     xs_in_dims, additional_in_dims = in_dims
     xs_move_dims = _batch_dims_as_last_for_scan(xs_in_dims)
     additional_move_dims = _batch_dims_as_last_for_scan(additional_in_dims)
+    batch_size = interpreter.batch_size()
     # combine_fn is called with (lhs xs leaves, rhs xs leaves, additional_inputs),
     # so the xs batch-dim markers must be duplicated. See generic_associative_scan.
     after_move_dims = (*xs_move_dims, *xs_move_dims, *additional_move_dims)
