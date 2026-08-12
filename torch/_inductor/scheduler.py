@@ -8143,11 +8143,6 @@ class Scheduler:
             node1, node2
         ):
             return True
-        if any(node.is_reduction() for node in node1.get_nodes()) and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_chain(node1, node2):
-            return True
-
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -10608,11 +10603,6 @@ class BaseScheduling:  # noqa: docstring_linter
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return True
-
-    def can_fuse_reduction_chain(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        return False
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
