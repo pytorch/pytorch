@@ -1,0 +1,43 @@
+name: Refresh release runner groups
+
+# Release binaries build from tags, and the self-hosted runner groups they need
+# are allow-listed per exact ref. That allow-list is reconciled by
+# pytorch/test-infra, which cannot see a tag push in this repo -- so tell it.
+#
+# Without this, a freshly cut RC is not authorized for the release runner groups
+# and every one of its build jobs queues indefinitely with no error, until
+# somebody notices and dispatches the reconcile by hand. That happened on
+# v2.14.0-rc2: https://github.com/pytorch/pytorch/actions/runs/31597398139
+#
+# This must exist on the branch the tag is cut from, since a tag build runs the
+# workflow as of the tagged commit. Cherry-pick it to release branches.
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    # Never gate this on the very runner groups it exists to unblock.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch test-infra reconcile
+        env:
+          GH_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Dispatched on main, not at this tag: the reconcile discovers the new
+          # tag itself, and it only exists in test-infra's default branch.
+          gh workflow run release-manage-runner-groups.yml \
+            --repo pytorch/test-infra \
+            --ref main \
+            --field apply=true
+          echo "Dispatched runner-group reconcile for ${GITHUB_REF}." \
+            >> "${GITHUB_STEP_SUMMARY}"
+          echo "Runs: https://github.com/pytorch/test-infra/actions/workflows/release-manage-runner-groups.yml" \
+            >> "${GITHUB_STEP_SUMMARY}"
