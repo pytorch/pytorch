@@ -42,6 +42,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -53,11 +54,13 @@ from typing import NamedTuple
 LINTER_CODE = "TEST_LINTER"
 HW_CLASSIFICATION_ATTR = "hw_classification"
 INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _KWARG_UNKNOWN = object()  # sentinel: kwarg present but not a literal
 
 
-# Values mirror `torch.testing._internal.common_device_type.HardwareClassification`.
+# Mirrors the member names of `torch.testing._internal.common_utils.HardwareClassification`.
+# Values differ from upstream; only member names are used for matching.
 # Defined locally to avoid importing test infrastructure into the linter.
 class HardwareClassification(Enum):
     GENERIC = "GENERIC"
@@ -167,13 +170,15 @@ def _get_hw_classification(
         elif isinstance(stmt, ast.AnnAssign):
             target = stmt.target
             if not (
-                isinstance(target, ast.Name)
-                and target.id == HW_CLASSIFICATION_ATTR
-                and isinstance(stmt.annotation, ast.Name)
+                isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR
+            ):
+                continue
+            if not (
+                isinstance(stmt.annotation, ast.Name)
                 and stmt.annotation.id == HardwareClassification.__name__
                 and stmt.value is not None
             ):
-                continue
+                return None
             value = stmt.value
         else:
             continue
@@ -227,6 +232,9 @@ def _get_call_kwarg_value(
 
         node = kw_item.value
 
+        if isinstance(node, ast.Constant) and node.value is None:
+            return None
+
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return [node.value]
 
@@ -261,8 +269,6 @@ class RuleContext:
     """Context passed to each rule function during test class linter checks."""
 
     filename: str
-    rel_path: str
-    tree: ast.Module
     class_node: ast.ClassDef
     classification: HardwareClassification
     test_methods: list[ast.FunctionDef] = field(default_factory=list)
@@ -272,7 +278,6 @@ class RuleContext:
     def from_node(
         cls,
         filename: str,
-        rel_path: str,
         class_node: ast.ClassDef,
         tree: ast.Module,
         classification: HardwareClassification,
@@ -293,8 +298,6 @@ class RuleContext:
             )
         return cls(
             filename=filename,
-            rel_path=rel_path,
-            tree=tree,
             class_node=class_node,
             classification=classification,
             test_methods=test_methods,
@@ -412,6 +415,11 @@ def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
                 name = dec.id
             elif isinstance(dec, ast.Attribute):
                 name = dec.attr
+            elif isinstance(dec, ast.Call):
+                if isinstance(dec.func, ast.Name):
+                    name = dec.func.id
+                elif isinstance(dec.func, ast.Attribute):
+                    name = dec.func.attr
             if (
                 name is not None
                 and name.startswith("only")
@@ -520,7 +528,7 @@ def check_file(filename: str) -> list[LintMessage]:
     if not _is_test_file(filename):
         return []
 
-    rel_path = os.path.relpath(filename)
+    rel_path = os.path.relpath(filename, REPO_ROOT).replace("\\", "/")
 
     # Skip checks for files in the allowlist
     if rel_path in _allowlist:
@@ -531,7 +539,14 @@ def check_file(filename: str) -> list[LintMessage]:
             source = f.read()
         tree = ast.parse(source, filename=filename)
     except (OSError, SyntaxError) as e:
-        raise RuntimeError(f"Failed to load Python source '{filename}'") from e
+        return [
+            error_msg(
+                name="[parse_error]",
+                path=filename,
+                line=0,
+                description=f"Failed to parse '{filename}': {e}",
+            )
+        ]
 
     messages: list[LintMessage] = []
     for node in tree.body:
@@ -556,7 +571,6 @@ def check_file(filename: str) -> list[LintMessage]:
         # Dispatch to registered rule functions for this classification
         ctx = RuleContext.from_node(
             filename=filename,
-            rel_path=rel_path,
             class_node=node,
             tree=tree,
             classification=classification,
@@ -567,16 +581,34 @@ def check_file(filename: str) -> list[LintMessage]:
     return messages
 
 
+def _default_num_workers() -> int | None:
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Ensure test classes declare hw_classification.",
         fromfile_prefix_chars="@",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="verbose logging",
+    )
     parser.add_argument("filenames", nargs="+", help="paths to lint")
     args = parser.parse_args()
 
+    logging.basicConfig(
+        format="<%(threadName)s:%(levelname)s> %(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        stream=sys.stderr,
+    )
+
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=_default_num_workers(),
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         for future in concurrent.futures.as_completed(futures):
