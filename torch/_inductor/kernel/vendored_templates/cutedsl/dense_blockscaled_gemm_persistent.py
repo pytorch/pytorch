@@ -455,8 +455,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_output_count: cutlass.Constexpr = 1,
         primary_epilogue_output: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
-        local_reduce_feed_tensor: cute.Tensor = None,
-        local_reduce_config: cutlass.Constexpr = None,
+        local_reduce_group: cutlass.Constexpr = 0,
+        local_reduce_axis: cutlass.Constexpr = 1,
+        local_reduce_type: cutlass.Constexpr = "sum",
+        local_reduce_source: cutlass.Constexpr = "identity",
+        local_reduce_feeds_main: cutlass.Constexpr = False,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -484,28 +487,40 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         :raises TypeError: If input data types are incompatible with the MMA instruction.
         """
 
-        if cutlass.const_expr(local_reduce_config is None):
-            local_reduce_group = 0
-            local_reduce_axis = 1
-            local_reduce_feeds_main = False
+        if cutlass.const_expr(local_reduce_type in ("sum", "mean")):
             local_reduce_op = cute.ReductionOp.ADD
             local_reduce_init = 0.0
             local_reduce_combine = lambda lhs, rhs: lhs + rhs
-            local_reduce_source_op = lambda value: value
-            local_reduce_finalize = lambda value, group: value
-            local_reduce_consumer = None
+        elif cutlass.const_expr(local_reduce_type == "prod"):
+            local_reduce_op = cute.ReductionOp.MUL
+            local_reduce_init = 1.0
+            local_reduce_combine = lambda lhs, rhs: lhs * rhs
+        elif cutlass.const_expr(local_reduce_type == "max"):
+            local_reduce_op = cute.ReductionOp.MAX
+            local_reduce_init = -cutlass.Float32.inf
+            local_reduce_combine = lambda lhs, rhs: cute.math.max(lhs, rhs)
         else:
-            (
-                local_reduce_group,
-                local_reduce_axis,
-                local_reduce_feeds_main,
-                local_reduce_op,
-                local_reduce_init,
-                local_reduce_combine,
-                local_reduce_source_op,
-                local_reduce_finalize,
-                local_reduce_consumer,
-            ) = local_reduce_config
+            assert local_reduce_type == "min"
+            local_reduce_op = cute.ReductionOp.MIN
+            local_reduce_init = cutlass.Float32.inf
+            local_reduce_combine = lambda lhs, rhs: cute.math.min(lhs, rhs)
+        if cutlass.const_expr(local_reduce_source == "square"):
+            local_reduce_source_op = lambda value: value * value
+        else:
+            assert local_reduce_source == "identity"
+            local_reduce_source_op = lambda value: value
+        if cutlass.const_expr(local_reduce_type == "mean"):
+            local_reduce_finalize = lambda value, group: value / group
+        else:
+            local_reduce_finalize = lambda value, group: value
+        if cutlass.const_expr(local_reduce_feeds_main):
+            local_reduce_consumer = (
+                lambda accumulator, reduction, secondary: accumulator
+                - local_reduce_finalize(reduction, local_reduce_group)
+            )
+        else:
+            local_reduce_consumer = None
+        local_reduce_feed_tensor = None
 
         # Convert from torch convention to CuTe convention.
         # CUTLASS API passes tensors as A:(L,M,K) B:(L,K,N) C:(L,M,N)
