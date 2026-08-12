@@ -3235,20 +3235,20 @@ class TestSparse(TestSparseBase):
         values = make_tensor([1, 1], dtype=torch.cdouble, device=device)
         test_tensor(indices, values, False, False)
 
-    @onlyCPU  # just run once, we test both cpu and cuda
+    @onlyAccelerator
     def test_legacy_new_device(self, device):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
         size = torch.Size([2, 3])
 
         x = torch.sparse_coo_tensor(i, v, size, device='cpu')
-        self.assertRaises(RuntimeError, lambda: x.new(device='cuda'))
-        self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cuda'))
-        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cuda'))
-        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
+        self.assertRaises(RuntimeError, lambda: x.new(device=device))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, device=device))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device=device))
+        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device=device))
 
         if torch.cuda.is_available():
-            x = torch.sparse_coo_tensor(i, v, size, device='cuda')
+            x = torch.sparse_coo_tensor(i, v, size, device=device)
             self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
@@ -3266,12 +3266,11 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.sparse_coo, s.new(torch.Size([2, 3])).layout)
         self.assertRaises(TypeError, lambda: s.new([6]))
 
-    @onlyCPU  # not really, but we only really want to run this once
+    @onlyAccelerator
     def test_dtypes(self, device):
         all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
-        if torch.cuda.is_available():
-            do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
+        do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device(device))
 
     def _test_empty_full(self, device, dtype, requires_grad):
         shape = (2, 3)
@@ -3302,17 +3301,16 @@ class TestSparse(TestSparseBase):
         check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                     dtype=int64_dtype, requires_grad=False)
 
-    @onlyCPU  # not really, but we only really want to run this once
+    @onlyAccelerator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @parametrize('requires_grad', (True, False))
     def test_empty_full(self, device, dtype, requires_grad):
         if requires_grad and not (dtype.is_floating_point or dtype.is_complex):
             self.skipTest(f'requires_grad==True requires float or complex dtype, got {dtype}')
 
-        self._test_empty_full(device, dtype, requires_grad)
-        if torch.cuda.is_available():
-            self._test_empty_full(None, dtype, requires_grad)
-            self._test_empty_full(torch.device('cuda:0'), dtype, requires_grad)
+        self._test_empty_full("cpu", dtype, requires_grad)
+        self._test_empty_full(None, dtype, requires_grad)
+        self._test_empty_full(torch.device(device), dtype, requires_grad)
 
     def test_is_sparse(self, device):
         x = torch.randn(3, 3)
