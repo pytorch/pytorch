@@ -29,6 +29,11 @@ MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-}
 ACL_VERSION=${ACL_VERSION:-}
+MKL=${MKL:-}
+CONDA=${CONDA:-}
+OPENBLAS=${OPENBLAS:-}
+ACL=${ACL:-}
+NVPL=${NVPL:-}
 
 case ${image} in
     manylinux2_28-builder:cpu)
@@ -36,12 +41,24 @@ case ${image} in
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
+        MKL=yes
+        CONDA=yes
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
-        TARGET=final
+        TARGET=cpu_final
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
-        MANY_LINUX_VERSION="2_28_aarch64"
+        MANY_LINUX_VERSION="2_28"
+        OPENBLAS=yes
+        ACL=yes
+        ;;
+    manylinux2_39_riscv64-builder:cpu-riscv64)
+        TARGET=final
+        GPU_IMAGE=riscv64/almalinux:10-kitten
+        # Use a custom PyPI index to get pre-built wheels for RISC-V
+        # See https://riseproject-dev.github.io/python-wheels/
+        DOCKER_GPU_BUILD_ARG=" --platform linux/riscv64 --build-arg DEVTOOLSET_VERSION=14 --build-arg PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple --build-arg PIP_PREFER_BINARY=1"
+        MANY_LINUX_VERSION="2_39_riscv64"
         ;;
     manylinuxs390x-builder:cpu-s390x)
         TARGET=final
@@ -54,25 +71,33 @@ case ${image} in
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="2_28"
+        MKL=yes
+        CONDA=yes
         ;;
     manylinux2_28-builder:cuda12*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
+        MKL=yes
+        CONDA=yes
         ;;
     manylinux2_28-builder:cuda13*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
+        MKL=yes
+        CONDA=yes
         ;;
     manylinuxaarch64-builder:cuda*)
         TARGET=cuda_final
-        GPU_IMAGE=amd64/almalinux:8
+        GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
-        MANY_LINUX_VERSION="aarch64"
-        DOCKERFILE_SUFFIX="_cuda_aarch64"
+        MANY_LINUX_VERSION="2_28"
+        OPENBLAS=yes
+        ACL=yes
+        NVPL=yes
         ;;
     manylinux2_28-builder:rocm*)
         MANY_LINUX_VERSION="2_28"
@@ -110,12 +135,16 @@ case ${image} in
             PYTORCH_ROCM_ARCH="gfx900;gfx906;${PYTORCH_ROCM_ARCH}"
             DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
         fi
+        MKL=yes
+        CONDA=yes
         ;;
     manylinux2_28-builder:xpu)
         TARGET=xpu_final
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
+        MKL=yes
+        CONDA=yes
         ;;
     *)
         echo "ERROR: Unrecognized image name: ${image}"
@@ -139,6 +168,11 @@ fi
 docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
+    --build-arg "MKL=${MKL:-}" \
+    --build-arg "CONDA=${CONDA:-}" \
+    --build-arg "OPENBLAS=${OPENBLAS:-}" \
+    --build-arg "ACL=${ACL:-}" \
+    --build-arg "NVPL=${NVPL:-}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
     --target "${TARGET}" \
