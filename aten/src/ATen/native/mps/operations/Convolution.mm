@@ -147,11 +147,49 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source});
+      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, source, output, dimensions);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
+    }
+  });
+  return output;
+}
+
+// DHWIO weight copy; ATen's strided permute copy runs well below memory
+// bandwidth for this permutation, 2-4x slower than the flat kernel.
+static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
+  using namespace mps;
+  const auto output_channels = weight.size(0);
+  const auto input_channels_per_group = weight.size(1);
+  const auto kernel_depth = weight.size(2);
+  const auto kernel_height = weight.size(3);
+  const auto kernel_width = weight.size(4);
+  auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
+                          weight.options());
+  const ConvWeightPermuteParams params{
+      .output_channels = static_cast<uint32_t>(output_channels),
+      .input_channels_per_group = static_cast<uint32_t>(input_channels_per_group),
+      .kernel_height = static_cast<uint32_t>(kernel_height),
+      .kernel_width = static_cast<uint32_t>(kernel_width),
+      .output_channel_stride = static_cast<uint32_t>(weight.stride(0)),
+      .input_channel_stride = static_cast<uint32_t>(weight.stride(1)),
+      .depth_stride = static_cast<uint32_t>(weight.stride(2)),
+      .height_stride = static_cast<uint32_t>(weight.stride(3)),
+      .width_stride = static_cast<uint32_t>(weight.stride(4)),
+  };
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(weight)));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_dhwio", {weight}, stream);
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, weight, output, params);
+      [encoder dispatchThreads:MTLSizeMake(output_channels, input_channels_per_group, kernel_depth * kernel_height)
+          threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(output_channels, 256), 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
   return output;
@@ -333,11 +371,11 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights});
+      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output, params, bias ? *bias : activation);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads_per_threadgroup];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
 }

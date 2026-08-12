@@ -359,27 +359,26 @@ kernel void conv1d_dw_vec(
   }
 }
 
-// DHWIO copy of an OIDHW weight view; ATen's generic permute copy is
-// launch-bound at typical weight sizes. Each thread streams one kW row so
-// large weights stay bandwidth-bound instead of thread-launch-bound.
+// DHWIO copy of an OIDHW weight view; ATen's generic permute copy runs well
+// below memory bandwidth for this permutation. Each thread streams one kW row.
 template <typename T>
 kernel void conv_weight_to_dhwio(
     device const T* source [[buffer(0)]],
     device T* destination [[buffer(1)]],
     constant ConvWeightPermuteParams& params [[buffer(2)]],
     uint3 position [[thread_position_in_grid]]) {
-  const int output_channel = int(position.x);
-  const int input_channel = int(position.y);
-  const int kernel_plane_index = int(position.z);
+  const int output_channel = position.x;
+  const int input_channel = position.y;
+  const int kernel_plane_index = position.z;
   const int kernel_height_index = kernel_plane_index % params.kernel_height;
   const int kernel_depth_index = kernel_plane_index / params.kernel_height;
   device const T* source_row = source +
-      (int64_t)output_channel * params.output_channel_stride +
-      (int64_t)input_channel * params.input_channel_stride +
-      (int64_t)kernel_depth_index * params.depth_stride +
-      (int64_t)kernel_height_index * params.height_stride;
+      output_channel * params.output_channel_stride +
+      input_channel * params.input_channel_stride +
+      kernel_depth_index * params.depth_stride +
+      kernel_height_index * params.height_stride;
   device T* destination_row = destination +
-      ((int64_t)kernel_plane_index * params.kernel_width *
+      (kernel_plane_index * params.kernel_width *
            params.input_channels_per_group +
        input_channel) *
           params.output_channels +
@@ -387,11 +386,20 @@ kernel void conv_weight_to_dhwio(
   for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
        ++kernel_width_index) {
     destination_row
-        [(int64_t)kernel_width_index * params.input_channels_per_group *
+        [kernel_width_index * params.input_channels_per_group *
          params.output_channels] =
-            source_row[(int64_t)kernel_width_index * params.width_stride];
+            source_row[kernel_width_index * params.width_stride];
   }
 }
+
+#define INSTANTIATE_CONV_WEIGHT_TO_DHWIO(DT)                      \
+  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void \
+  conv_weight_to_dhwio<DT>(                                       \
+      device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);
+
+INSTANTIATE_CONV_WEIGHT_TO_DHWIO(float)
+INSTANTIATE_CONV_WEIGHT_TO_DHWIO(half)
+INSTANTIATE_CONV_WEIGHT_TO_DHWIO(bfloat)
 
 // (kW, O, I) copy of an OIkW weight view: per-tap slabs with input channels
 // contiguous, the A-operand form of conv1d_sgemm.
@@ -447,9 +455,6 @@ static_assert(
       constant Conv1dDwParams&,                                                \
       device const DT*,                                                        \
       uint3);                                                                  \
-  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void              \
-  conv_weight_to_dhwio<DT>(                                                    \
-      device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3); \
   template [[host_name("conv_weight_to_koc_" #DT)]] kernel void                \
   conv_weight_to_koc<DT>(                                                      \
       device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);

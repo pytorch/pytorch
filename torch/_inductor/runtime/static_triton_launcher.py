@@ -129,6 +129,17 @@ class StaticallyLaunchedTritonKernel:
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         self.module: int | None = None  # Owns the HIP/CUDA module loaded for function
+        # compile-on-one-rank: a device-agnostic kernel (no baked device index) can be
+        # launched on more than one device within a single process. A loaded module/
+        # function is bound to a single device, so when device_agnostic is set we keep
+        # them per device and resolve the current device at launch time. The cubin
+        # (device-agnostic) is retained so it can be loaded onto additional devices.
+        # These per-device dicts assume one thread per device for a given launcher (the
+        # single-process multi-device path is sequential in practice); concurrent
+        # first-launch on two new devices would need external locking.
+        self.device_agnostic: bool = False
+        self.functions: dict[int, int] = {}
+        self.modules: dict[int, int] = {}
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -154,7 +165,32 @@ class StaticallyLaunchedTritonKernel:
                 self.cubin_path = filepath  # pyre-ignore
         return self.cubin_path
 
+    def _agnostic_cubin_path(self) -> str:
+        # The cubin bytes are device-agnostic, so the same file loads onto any device.
+        # Keep it available (the single-device path frees it after one load) and rewrite
+        # from the retained raw bytes if the file was removed under us.
+        if self.cubin_path is not None and os.path.exists(self.cubin_path):
+            return self.cubin_path
+        if self.cubin_raw is None or self.cubin_path is None:
+            raise AssertionError(
+                "device-agnostic kernel cannot reload its cubin for a new device"
+            )
+        os.makedirs(os.path.dirname(self.cubin_path), exist_ok=True)
+        with open(self.cubin_path, "wb") as f:
+            f.write(self.cubin_raw)
+        return self.cubin_path
+
     def load_kernel(self, device: int) -> None:
+        if self.device_agnostic:
+            if device in self.functions:
+                return
+            (module, function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
+                self._agnostic_cubin_path(), self.name, self.shared, device
+            )
+            self.modules[device] = module
+            self.functions[device] = function
+            return
+
         if self.function is not None:
             return
 
@@ -169,15 +205,21 @@ class StaticallyLaunchedTritonKernel:
         self.cubin_path = None
         self.cubin_raw = None
 
+    def _current_device(self) -> int:
+        raise NotImplementedError
+
     def close(self) -> None:
-        mod = self.module
-        if mod is None:
-            return
         # Clear Python-visible handles first so repeated cleanup is harmless even if
         # the driver reports an error while unloading.
+        modules = list(self.modules.values())
+        if self.module is not None:
+            modules.append(self.module)
         self.module = None
         self.function = None
-        self.C_impl._unload_kernel(mod)
+        self.modules = {}
+        self.functions = {}
+        for mod in modules:
+            self.C_impl._unload_kernel(mod)
 
     def __del__(self) -> None:
         try:
@@ -303,6 +345,8 @@ class StaticallyLaunchedTritonKernel:
         state = self.__dict__.copy()
         state["function"] = None
         state["module"] = None
+        state["functions"] = {}
+        state["modules"] = {}
         # Cubin paths aren't consistent across processes, so we clear
         # and reload them.
         state["cubin_path"] = None
@@ -335,8 +379,20 @@ class StaticallyLaunchedTritonKernel:
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
+        if self.device_agnostic:
+            # The loaded function is device-bound; pick (loading on demand) the one for
+            # the current device so a shared kernel launches on whatever device the
+            # caller is using.
+            device = self._current_device()
+            function = self.functions.get(device)
+            if function is None:
+                self.load_kernel(device)
+                function = self.functions[device]
+        else:
+            function = self.function
+
         # Assert load_kernel() has been called and args match
-        if self.function is None:
+        if function is None:
             raise AssertionError("load_kernel() must be called before run()")
 
         # TODO: actually, if the args *don't* match, we probably should
@@ -390,7 +446,7 @@ class StaticallyLaunchedTritonKernel:
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
         self.C_impl._launch_kernel(
-            self.function,
+            function,
             grid_x,
             grid_y,
             grid_z,
@@ -425,6 +481,11 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
             )
         super().__init__(kernel)
 
+    def _current_device(self) -> int:
+        import torch
+
+        return torch.cuda.current_device()
+
 
 class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
     @cached_property
@@ -439,6 +500,18 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         super().__init__(kernel)
 
     def load_kernel(self, device: int) -> None:
+        # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
+        # not a separate module/function pair like the CUDA/HIP launcher.
+        if self.device_agnostic:
+            if device in self.functions:
+                return
+            (function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
+                self._agnostic_cubin_path(), self.name, self.shared, device
+            )
+            # XPU has no separate module handle (only the function capsule).
+            self.functions[device] = function
+            return
+
         if self.function is not None:
             return
 
@@ -446,8 +519,6 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
             raise AssertionError("expected cubin_path attribute to be set")
         if self.cubin_path is None:
             raise AssertionError("expected cubin_path to not be None")
-        # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
-        # not a separate module/function pair like the CUDA/HIP launcher.
         (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
             self.cubin_path, self.name, self.shared, device
         )
@@ -455,10 +526,17 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.cubin_path = None
         self.cubin_raw = None
 
+    def _current_device(self) -> int:
+        import torch
+
+        return torch.xpu.current_device()
+
     def close(self) -> None:
         self.module = None
-        # Drop the PyCapsule reference so its destructor can release sycl::kernel.
+        # Drop the PyCapsule references so their destructors can release sycl::kernel.
         self.function = None
+        self.functions = {}
+        self.modules = {}
 
 
 def statically_launched_kernel_by_device(
