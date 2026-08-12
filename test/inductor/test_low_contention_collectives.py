@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 
 import unittest
-from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -9,6 +8,7 @@ from torch._inductor import config
 from torch._inductor.fx_passes.low_contention_collectives import (
     replace_collectives_with_low_contention,
 )
+from torch.distributed._symmetric_memory import _test_mode
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -33,11 +33,7 @@ class TestLowContentionCollectives(TestCase):
         graph.output(wait)
         return graph
 
-    @patch(
-        "torch._inductor.fx_passes.low_contention_collectives._enable_symm_mem",
-        return_value=True,
-    )
-    def test_skip_overlap_check(self, _mock):
+    def test_skip_overlap_check(self):
         c10d_fn = torch.ops._c10d_functional
         symm_mem = torch.ops.symm_mem
         lc_config = {
@@ -49,22 +45,28 @@ class TestLowContentionCollectives(TestCase):
 
         # Default: no compute overlap -> collective NOT replaced
         graph = self._build_ag_graph()
-        with config.patch(
-            {
-                **lc_config,
-                "aten_distributed_optimizations.low_contention_skip_overlap_check": False,
-            }
+        with (
+            _test_mode(),
+            config.patch(
+                {
+                    **lc_config,
+                    "aten_distributed_optimizations.low_contention_skip_overlap_check": False,
+                }
+            ),
         ):
             replace_collectives_with_low_contention(graph)
         self.assertIn(c10d_fn.all_gather_into_tensor.default, get_targets(graph))
 
         # skip_overlap_check=True: collective replaced despite no compute
         graph = self._build_ag_graph()
-        with config.patch(
-            {
-                **lc_config,
-                "aten_distributed_optimizations.low_contention_skip_overlap_check": True,
-            }
+        with (
+            _test_mode(),
+            config.patch(
+                {
+                    **lc_config,
+                    "aten_distributed_optimizations.low_contention_skip_overlap_check": True,
+                }
+            ),
         ):
             replace_collectives_with_low_contention(graph)
         self.assertIn(symm_mem._low_contention_all_gather.default, get_targets(graph))
