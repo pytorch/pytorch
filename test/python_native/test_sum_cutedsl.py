@@ -385,6 +385,19 @@ class TestSumCuteDSLOverride(TestCase):
             got = x.prod(dim=1)
         self.assertFalse(torch.equal(got, ref))
 
+    @skipIfRocm
+    def test_prod_output_hash(self):
+        cases = [
+            (torch.float32, 128, 8192, "37bd2a1dc47b71c5"),
+            (torch.float64, 8, 200000, "374e728d5c174437"),
+        ]
+        for dtype, m, n, expected in cases:
+            with self.subTest(dtype=dtype, m=m, n=n):
+                x = self._make_prod_input(m, n, dtype)
+                with self._inner_tree_flag():
+                    result = x.prod(dim=1)
+                self.assertEqual(self._sha(result), expected)
+
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_prod_low_precision_matches_aten(self, dtype):
         # 0.75 and 1.25 are exactly representable in fp16/bf16; a sparse set of
@@ -455,6 +468,159 @@ class TestSumCuteDSLOverride(TestCase):
         with self._inner_tree_flag():
             result = x.prod(dim=1)
         self.assertEqual(result, torch.ones(17, device="cuda", dtype=dtype))
+
+    # --- nansum (shares the inner-tree sum DAG after filtering loaded NaNs) ---
+
+    def _make_nansum_input(self, m, n, dtype):
+        compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        cols = torch.arange(n, device="cuda", dtype=compute_dtype).reshape(1, n)
+        rows = torch.arange(m, device="cuda", dtype=compute_dtype).reshape(m, 1)
+        values = (cols % 9) - 4 + (rows % 3) - 1
+        values[:, ::17] = float("nan")
+        return values.to(dtype)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nansum_override_matches_aten(self, dtype):
+        # Exact small integers keep every fp32 partial sum below 2**24, making
+        # the reference independent of its different reduction order.
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nansum_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nansum(x, dim=1)
+                with self._inner_tree_flag():
+                    got = torch.nansum(x, dim=1)
+                self.assertEqual(got, ref, rtol=0, atol=0)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_nansum_matches_sum_of_nan_to_num(self, dtype):
+        view_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        for m, n in [(128, 15), (128, 8195), (8, 200003)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_order_sensitive_input(m, n, dtype)
+                x[:, ::17] = float("nan")
+                zero = torch.zeros((), device=x.device, dtype=x.dtype)
+                with self._inner_tree_flag():
+                    got = torch.nansum(x, dim=1)
+                    expected = torch.sum(torch.where(torch.isnan(x), zero, x), dim=1)
+                self.assertTrue(
+                    torch.equal(got.view(view_dtype), expected.view(view_dtype))
+                )
+
+    def test_nansum_override_engaged(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nansum_input(128, 8195, torch.float32)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.nansum(x, dim=1)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_nansum_into",
+                wraps=inner_tree_kernel.inner_tree_nansum_into,
+            ) as nansum_into,
+            self._inner_tree_flag(),
+        ):
+            got = torch.nansum(x, dim=1)
+        self.assertEqual(nansum_into.call_count, 1)
+        self.assertEqual(got, ref, rtol=0, atol=0)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_nansum_low_precision_matches_aten(self, dtype):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_nansum_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nansum(x, dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nansum(x, dim=1)
+                self.assertEqual(nansum_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_nansum_override_out_variant(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_order_sensitive_input(128, 8195, torch.float32)
+        x[:, ::17] = float("nan")
+        with self._inner_tree_flag():
+            functional = torch.nansum(x, dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        with (
+            mock.patch.object(
+                inner_tree_kernel,
+                "inner_tree_nansum_into",
+                wraps=inner_tree_kernel.inner_tree_nansum_into,
+            ) as nansum_into,
+            self._inner_tree_flag(),
+        ):
+            returned = torch.nansum(x, dim=1, out=out)
+        self.assertEqual(nansum_into.call_count, 1)
+        self.assertIs(returned, out)
+        self.assertTrue(
+            torch.equal(out.view(torch.int32), functional.view(torch.int32))
+        )
+
+    def test_nansum_nan_to_zero(self):
+        n = 32769
+        x = torch.zeros(3, n, device="cuda", dtype=torch.float32)
+        x[0].fill_(float("nan"))
+        x[1, 0] = 1.0
+        x[1, 3:5] = float("nan")
+        x[1, 4097] = 2.0
+        x[1, 8191:8193] = float("nan")
+        x[1, -1] = -4.0
+        x[2, 0] = float("inf")
+        x[2, 1] = -float("inf")
+        x[2, 8192] = float("nan")
+        x[2, -1] = 1.0
+        with self._inner_tree_flag():
+            result = torch.nansum(x, dim=1)
+        self.assertEqual(result[0].view(torch.int32).item(), 0)
+        self.assertEqual(result[1].item(), -1.0)
+        self.assertTrue(torch.isnan(result[2]).item())
+
+    def test_nansum_unsupported_calls_fall_through(self):
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        x = self._make_nansum_input(4, 32, torch.float32)
+        complex_x = torch.ones(4, 32, device="cuda", dtype=torch.complex64)
+        complex_x[:, ::17] = complex(float("nan"), 0.0)
+        cases = [
+            ("dim_none", x, {"dim": None}),
+            ("multi_dim", x.reshape(2, 2, 32), {"dim": (1, 2)}),
+            ("explicit_dtype", x, {"dim": 1, "dtype": torch.float64}),
+            ("noncontiguous", x[:, ::2], {"dim": 1}),
+            (
+                "integer",
+                torch.arange(128, device="cuda", dtype=torch.int64).reshape(4, 32),
+                {"dim": 1},
+            ),
+            ("complex", complex_x, {"dim": 1}),
+        ]
+        for name, input_, kwargs in cases:
+            with self.subTest(name=name):
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = torch.nansum(input_, **kwargs)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_nansum_into",
+                        wraps=inner_tree_kernel.inner_tree_nansum_into,
+                    ) as nansum_into,
+                    self._inner_tree_flag(),
+                ):
+                    got = torch.nansum(input_, **kwargs)
+                self.assertEqual(nansum_into.call_count, 0)
+                self.assertEqual(got, ref, rtol=0, atol=0)
 
 
 instantiate_parametrized_tests(TestSumCuteDSLOverride)
