@@ -454,22 +454,26 @@ def is_b2b_gemm_good_on(
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
-    if not ((A.shape[1] == B.shape[0]) and (B.shape[1] == C.shape[0])):
-        return False
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
     O, P = C.shape
 
-    # ceildiv() requires int arguments, but FakeTensor shapes may be
-    # torch.SymInt. int(SymInt) guards the symbol to its concrete value, which
-    # works when the shape has a known hint (the common dynamic=True case).
-    # A genuinely unbacked symbolic shape has no value to guard to, and
-    # int(SymInt) raises GuardOnDataDependentSymNode (a RuntimeError, not
-    # TypeError); a non-SymInt, non-int object raises TypeError. In either
-    # case the heuristic can't be evaluated statically, so skip b2b_gemm.
+    # Convert symbolic shape dims to concrete ints up front. FakeTensor shapes
+    # may be torch.SymInt: a hinted SymInt guards to its concrete value, but an
+    # unhinted/unbacked one raises GuardOnDataDependentSymNode (a RuntimeError,
+    # not TypeError); a non-SymInt, non-int raises TypeError. Converting before
+    # the compatibility checks below matters because SymInt == SymInt returns a
+    # SymBool whose bool() raises GuardOnDataDependentSymNode when the symbol
+    # is unbacked, which would otherwise escape this heuristic. Once concrete,
+    # the checks below are plain int comparisons. If we can't make the dims
+    # concrete, the heuristic can't be evaluated statically, so skip b2b_gemm.
     try:
         M, N, O, P = int(M), int(N), int(O), int(P)
+        # contraction dims must line up: A cols == B rows, B cols == C rows.
+        N_b, O_b = int(B.shape[0]), int(B.shape[1])
     except (TypeError, GuardOnDataDependentSymNode):
+        return False
+    if not (N == N_b and O == O_b):
         return False
 
     ratios = []

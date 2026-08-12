@@ -195,6 +195,12 @@ class B2BGEMMTest(TestCase):
         raises GuardOnDataDependentSymNode (a RuntimeError, not TypeError).
         is_b2b_gemm_good_on() must catch it and skip b2b_gemm rather than
         crashing the compiler. The pass should not fire for such a shape.
+
+        Cover two placements of the unbacked symbol:
+        - an outer (batch) dim of A, which is converted by int() directly;
+        - a contraction dim shared by two operands, where the compatibility
+          check (A.shape[1] == B.shape[0]) would otherwise bool() a SymBool and
+          raise GuardOnDataDependentSymNode before the int() block.
         """
 
         class FakeVal:
@@ -207,18 +213,27 @@ class B2BGEMMTest(TestCase):
             def __init__(self, shape):
                 self.meta = {"val": FakeVal(shape)}
 
+        from torch._inductor.fx_passes.b2b_gemm import is_b2b_gemm_good_on
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+        # Unbacked symbol in an outer dim of A (the M dim). int() hits it.
         env = ShapeEnv()
-        u0 = env.create_unbacked_symint()  # unhinted, unbacked
-
-        A_node = FakeNode((u0, 32))
+        u_m = env.create_unbacked_symint()  # unhinted, unbacked
+        A_node = FakeNode((u_m, 32))
         B_node = FakeNode((32, 64))
         C_node = FakeNode((64, 32))
+        self.assertFalse(is_b2b_gemm_good_on(True, A_node, B_node, C_node))
 
-        from torch._inductor.fx_passes.b2b_gemm import is_b2b_gemm_good_on
-
-        # Must return False (skip) instead of raising GuardOnDataDependentSymNode.
+        # Unbacked symbol in a contraction dim, compared against a concrete
+        # dim in the other operand (A's cols == B's rows, where one is unbacked
+        # and the other is a concrete int). The compatibility check would
+        # bool() a SymBool and raise GuardOnDataDependentSymNode before the
+        # int() block if the guard did not cover this path.
+        env = ShapeEnv()
+        u_k = env.create_unbacked_symint()  # unhinted, unbacked
+        A_node = FakeNode((64, u_k))
+        B_node = FakeNode((32, 64))
+        C_node = FakeNode((64, 32))
         self.assertFalse(is_b2b_gemm_good_on(True, A_node, B_node, C_node))
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
