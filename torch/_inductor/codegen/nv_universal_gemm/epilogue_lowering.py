@@ -120,7 +120,7 @@ class NVGemmEpilogueProgram:
                 node.node.get_name(), gemm_name, gemm_dtype, n
             )
             is not None
-            for node in self.evt_nodes
+            for node in self.pointwise_nodes
         )
 
     @property
@@ -160,13 +160,9 @@ class NVGemmEpilogueProgram:
         return tuple(owned)
 
     @property
-    def evt_nodes(self) -> tuple[BaseSchedulerNode, ...]:
+    def pointwise_nodes(self) -> tuple[BaseSchedulerNode, ...]:
         owned = OrderedSet(self.owned_nodes)
         return tuple(node for node in self.capture.nodes if node not in owned)
-
-    @property
-    def pointwise_nodes(self) -> tuple[BaseSchedulerNode, ...]:
-        return self.evt_nodes
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -848,15 +844,7 @@ class NVGemmEpilogueLowering:
             return NVGemmReductionRegion(config=config, nodes=(source,))
         source_name = config.output_name
         candidate, buffer, finalizer = matches[0]
-        if finalizer.kind == "mean" and config.reduction_type == "sum":
-            materialize = True
-        elif finalizer.kind == "absmax_scale" and (
-            config.reduction_type,
-            config.source_type,
-        ) == ("max", "abs"):
-            materialize = True
-        else:
-            materialize = finalizer.kind != "identity"
+        materialize = finalizer.kind != "identity"
         config = dataclasses.replace(config, output_name=buffer.get_name())
         generated_finalizer = (
             NVGemmReductionFinalizer(source_name=source_name, buffer=buffer)
