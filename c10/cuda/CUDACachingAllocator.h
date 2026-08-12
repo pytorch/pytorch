@@ -127,10 +127,14 @@ struct StreamSegmentSize {
 
 // One CUDA capture records one per-capture CUDA DAG. Parent IDs link each
 // conditional body capture to its parent, forming a conditional capture tree.
+// The primary capture stream starts the capture. The parent dependency stream
+// orders parent work before a conditional body capture.
 struct CaptureRegistration {
   MempoolId_t mempool_id;
   CaptureId_t capture_id{0};
+  cudaStream_t primary_capture_stream;
   std::optional<CaptureId_t> parent_capture_id;
+  std::optional<cudaStream_t> parent_dependency_stream;
 };
 
 class CUDAAllocator : public DeviceAllocator {
