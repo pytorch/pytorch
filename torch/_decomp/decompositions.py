@@ -2128,11 +2128,13 @@ def _batch_norm_cpu_output_memory_format(
 
 
 def _to_memory_format_strides(t: Tensor, memory_format: torch.memory_format) -> Tensor:
-    # empty_like() always builds fresh strides for the requested memory format,
-    # while contiguous()/to() are no-ops whenever the tensor already qualifies.
-    # Those differ when a size-1 dimension leaves its stride unconstrained, so
-    # go through empty_like to match what the eager kernels allocate.
-    return torch.empty_like(t, memory_format=memory_format).copy_(t)
+    # The eager kernels allocate with empty_like, which always builds fresh
+    # strides for the requested memory format, whereas contiguous() is a no-op
+    # whenever the tensor already qualifies. Those differ when a size-1
+    # dimension leaves its stride unconstrained. copy=True forces the restride
+    # while staying functional: an empty_like().copy_() would put a copy_ on an
+    # intermediate into the graph and trip assert_functional_graph.
+    return t.to(memory_format=memory_format, copy=True)
 
 
 def native_batch_norm_helper(
