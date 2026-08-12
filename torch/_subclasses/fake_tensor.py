@@ -3206,7 +3206,8 @@ class FakeTensorMode(TorchDispatchMode):
             # sparse invariant checks read index data, which meta tensors lack
             suppress_invariants = (
                 torch.sparse.check_sparse_tensor_invariants(False)
-                if any(is_sparse_any(t) for t in flat_arg_fake_tensors)
+                if torch.sparse.check_sparse_tensor_invariants.is_enabled()
+                and any(is_sparse_any(t) for t in flat_arg_fake_tensors)
                 else contextlib.nullcontext()
             )
             with in_kernel_invocation_manager(self), suppress_invariants:
