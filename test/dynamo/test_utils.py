@@ -28,6 +28,21 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    def test_cleanup_hook_tolerates_missing_name(self):
+        # During interpreter shutdown the scope's module __dict__ may already be
+        # cleared before the weakref callback fires the hook. The hook must not
+        # raise KeyError (which would surface as an "Exception ignored in
+        # weakref callback").
+        scope = {}
+        hook = utils.CleanupHook.create(scope, "myglobal", object())
+        del scope["myglobal"]
+        hook()
+
+        # The normal path still removes the installed global.
+        hook2 = utils.CleanupHook.create(scope, "myglobal", object())
+        hook2()
+        self.assertNotIn("myglobal", scope)
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
@@ -115,7 +130,7 @@ class TestUtils(TestCase):
         """
 
         def run_forward_backward():
-            model = torch.compile(TestModel())
+            model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
             x = torch.rand([3], requires_grad=True)
             output = model(x)
             loss_fn = torch.nn.MSELoss()
@@ -187,8 +202,6 @@ class TestUtils(TestCase):
             nonlocal traced_code_lists
             traced_code_lists.append(get_traced_code())
             return gm.forward
-
-        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
 
         # === no inlining ===
         @torch.compile(backend=my_backend)
@@ -282,12 +295,12 @@ class TestUtils(TestCase):
         self.assertIn(
             expected_tensor_key,
             ReinplaceCounters._values,
-            f"Expected key {expected_tensor_key} not found",
+            lambda msg: f"{msg}\nExpected key {expected_tensor_key} not found",
         )
         self.assertIn(
             expected_bytes_key,
             ReinplaceCounters._values,
-            f"Expected key {expected_bytes_key} not found",
+            lambda msg: f"{msg}\nExpected key {expected_bytes_key} not found",
         )
 
         # Verify the values are correct
@@ -305,7 +318,7 @@ class TestUtils(TestCase):
         self.assertIn(
             expected_key2,
             ReinplaceCounters._values,
-            f"Expected key {expected_key2} not found",
+            lambda msg: f"{msg}\nExpected key {expected_key2} not found",
         )
         self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
 
@@ -349,7 +362,7 @@ class TestDynamoTimed(TestCase):
             torch._dynamo.reset_recompile_user_contexts()
 
     def run_forward_backward(self):
-        model = torch.compile(TestModel())
+        model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
         x = torch.rand([3], requires_grad=True)
         output = model(x)
         loss_fn = torch.nn.MSELoss()
@@ -1112,7 +1125,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(1))
+            torch.compile(test1)(torch.randn(1))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertIn(
             '"job_id": "test_job_id"',
@@ -1127,14 +1140,14 @@ class TestDynamoTimed(TestCase):
     def test_ir_count(self):
         # Different python versions have different potential IR counts.
         version = (sys.version_info[0], sys.version_info[1])
-        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14)))
+        self.assertIn(version, ((3, 10), (3, 11), (3, 12), (3, 13), (3, 14), (3, 15)))
         first, second = {
-            (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (11, 7),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
             (3, 14): (11, 7),
+            (3, 15): (11, 7),
         }[version]
 
         def test1(x):
@@ -1144,7 +1157,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(10, 10))
+            torch.compile(test1)(torch.randn(10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, first)
 
@@ -1154,7 +1167,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test2)(torch.randn(10, 10))
+            torch.compile(test2)(torch.randn(10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
 
@@ -1172,7 +1185,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(graph_module)(torch.randn(6, 6))
+            torch.compile(graph_module)(torch.randn(6, 6))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(
             compilation_events[0].inductor_provenance,
@@ -1185,7 +1198,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def f(x):
                 return x * x
 
@@ -1204,7 +1217,7 @@ class TestDynamoTimed(TestCase):
             mock.patch("torch._dynamo.utils.log_compilation_event") as log_event,
         ):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def f(x):
                 return x * x
 
@@ -1235,7 +1248,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             m = ModelSimple()
-            torch.compile(m)(torch.randn(1, 10, 10))
+            torch.compile(m)(torch.randn(1, 10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 520)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 520)
@@ -1253,7 +1266,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             m = ModelWrapped()
-            torch.compile(m)(torch.randn(1, 10, 10))
+            torch.compile(m)(torch.randn(1, 10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 1040)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
@@ -1265,7 +1278,7 @@ class TestDynamoTimed(TestCase):
         m = nn.Sequential(l1, nn.Sequential(l1, l2))
         self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 16, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(m)(torch.randn(4, 4))
+            torch.compile(m)(torch.randn(4, 4))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 40)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 40)
@@ -1278,7 +1291,7 @@ class TestDynamoTimed(TestCase):
         m = nn.Sequential(l1, nn.Sequential(l2))
         self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(m)(torch.randn(4, 4))
+            torch.compile(m)(torch.randn(4, 4))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 24)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 24)

@@ -57,7 +57,7 @@ namespace {
 std::string iValueToString(const c10::IValue& val) {
   std::ostringstream oss;
   oss << val;
-  return oss.str();
+  return std::move(oss).str();
 }
 #endif
 
@@ -182,7 +182,7 @@ std::string dumpValueSet(
     oss << '%' << val->debugName() << ", ";
   }
   oss << '}';
-  return oss.str();
+  return std::move(oss).str();
 }
 
 namespace {
@@ -1216,7 +1216,7 @@ c10::IValue BlockRunner::move_outputs_to_tuple(uint32_t num_outputs) {
 /// with its schema by cloning the alias. Because all managed tensors' data_ptrs
 /// are part of the internal buffer that the MemoryPlanner allocates, we can
 /// check aliases by checking the memory overlap with this internal buffer. But
-/// a tensor's storage can be resized during inferenceso we need another way to
+/// a tensor's storage can be resized during inference so we need another way to
 /// handle the resized case.
 ///
 /// There are two ways for incorrect schema to break memory planning. Let's look

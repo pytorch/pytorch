@@ -10,9 +10,9 @@ class CustomClassBaseMeta(type):
         # custom classes (constant types, metaclass-only symbolic types, and
         # FakeScriptObject wrappers).
         if cls is CustomClassBase:
-            from torch._library.opaque_object import is_opaque_value
+            from torch._library.opaque_object import is_custom_class_obj
 
-            return is_opaque_value(instance)
+            return is_custom_class_obj(instance)
 
         if super().__instancecheck__(instance):
             return True

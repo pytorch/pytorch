@@ -13,6 +13,7 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
+#include <c10/metal/common.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
@@ -699,12 +700,13 @@ template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
                                                        T params,
-                                                       const std::string& params_type_name) {
+                                                       const std::string& params_type_name,
+                                                       const std::optional<uint32_t> ilp_threshold) {
   using namespace at::mps;
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel_with_params(sub_iter, name, params, params_type_name);
+      exec_unary_kernel_with_params(sub_iter, name, params, params_type_name, ilp_threshold);
     }
     return;
   }
@@ -715,9 +717,16 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
   if (length == 0) {
     return;
   }
+  // ILP is opt-in per call site (mirrors exec_unary_kernel's opt-in castout
+  // ILP): callers that know their functor is cheap enough to be
+  // bandwidth-bound pass a crossover threshold; everyone else keeps the
+  // one-thread-per-element dense kernel.
+  const bool dense_ilp = iter.is_contiguous() && ilp_threshold.has_value() && length >= ilp_threshold.value();
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 iter.is_contiguous() ? "dense" : "strided",
+                                 dense_ilp                  ? "dense_ilp"
+                                     : iter.is_contiguous() ? "dense"
+                                                            : "strided",
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  fmt::format("_{}", params_type_name));
@@ -728,7 +737,7 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
     dispatch_sync(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
-      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
+      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
@@ -741,11 +750,15 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
         const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
         const auto outer = static_cast<NSUInteger>(length) / inner;
         mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      } else if (dense_ilp) {
+        mtl_setBytes(computeEncoder, length, 3);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
       } else {
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
 
-      getMPSProfiler().endProfileKernel(cplState);
+      getMPSProfiler().endProfileKernel(cplState, mpsStream);
     });
   }
 }
@@ -809,7 +822,7 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
       auto computeEncoder = mpsStream->commandEncoder();
       auto binaryPSO = getPipelineStateForFunc(kernel_name);
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other}, mpsStream);
       [computeEncoder setComputePipelineState:binaryPSO];
       // Set input and output tensors
       bind_iter_tensors(computeEncoder, iter);
@@ -836,7 +849,7 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
             computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
-      getMPSProfiler().endProfileKernel(binaryPSO);
+      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });
 }
