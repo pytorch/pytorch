@@ -16,7 +16,7 @@ set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
  # UBSAN triggers when compiling protobuf, so we need to disable it.
-set(UBSAN_FLAG "-fsanitize=undefined")
+set(UBSAN_FLAG "-fsanitize=undefined -fno-sanitize=float-divide-by-zero")
 
 macro(disable_ubsan)
   if(CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
