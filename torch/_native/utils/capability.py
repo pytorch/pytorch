@@ -21,6 +21,30 @@ def is_cow(t: torch.Tensor) -> bool:
     return torch._C._is_cow_tensor(t)  # pyrefly: ignore[missing-attribute]
 
 
+def dlpack_offset_ok(t: torch.Tensor) -> bool:
+    """TEMPORARY: decline any tensor whose DLPack byte_offset would be nonzero.
+
+    CuteDSL's tvm-ffi entry point loads `byte_offset` from the DLTensor purely to assert
+    it is ZERO (base_dsl/tvm_ffi_builder/tvm_ffi_builder.py -- the value is never added
+    to `data`, so the kernel addresses the storage BASE). pytorch#182924 then made DLPack
+    export report `byte_offset = storage_offset * itemsize` for every device instead of
+    folding it into `data`, so any view with a nonzero storage offset -- x[4:], chunk /
+    split / narrow, an arena or KV-cache slice -- now trips that assert mid-call.
+
+    Serving such a tensor is not an option: with the assert suppressed the kernel would
+    silently read and write from the storage base. So this is a genuine CAPABILITY limit
+    ("we cannot hand CuteDSL a nonzero byte_offset"), the same species as the neg/conj
+    and 16-byte-alignment gates -- not a performance threshold. Declining costs only the
+    acceleration; aten computes the same values.
+
+    Remove this (and its call sites) once CuteDSL folds byte_offset into the pointer on
+    ingest, which it already does for direct-address devices in
+    tvm/ffi/container/tensor.h, or drops the assert. Tracked as task #38; standalone
+    repro in agent_space/cutedsl_byte_offset_repro.py.
+    """
+    return t.storage_offset() == 0
+
+
 def is_traced(t: torch.Tensor) -> bool:
     # FakeTensor (compile/export tracing) and meta tensors have no real storage to
     # launch a kernel on; the decomposition / shape-inference path should use aten's

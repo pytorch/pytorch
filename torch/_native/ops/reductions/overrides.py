@@ -195,6 +195,7 @@ def _base_cond(self, dim, nouts=1, has_index=False) -> bool:
         and cap.on_current_device(self)
         and not self.is_neg()
         and not self.is_conj()
+        and cap.dlpack_offset_ok(self)
         and self.const_data_ptr() % 16 == 0
         and _dims_ok(dim, self.dim())
         and _geometry_supported(self, dim, nouts, has_index)
