@@ -68,6 +68,7 @@ if HAS_CPU and TRITON_HAS_CPU:
             unittest.skip("Triton CPU: slow test")(getattr(CpuTritonTests, name)),
         )
 
+    # TODO: support generating inductor backend subclasses in instantiate_device_type_tests
     def make_inductor_opinfo_triton_cpu_cls():
         ops_subset = [
             next(
@@ -76,6 +77,8 @@ if HAS_CPU and TRITON_HAS_CPU:
                 if op.full_name == "index_add"
             )
         ]
+        # Clone the base opinfo class and use that in `instantiate_device_type_tests`
+        # in order to preserve DecorateInfo references to TestTorchInductorOpInfo
         TestTorchInductorOpInfo = test_torchinductor_opinfo.make_inductor_opinfo_cls(
             test_torchinductor_opinfo._ops(ops_subset),
             skipOps(test_torchinductor_opinfo.test_skips_or_fails),
@@ -83,6 +86,7 @@ if HAS_CPU and TRITON_HAS_CPU:
         opinfo_scope = {
             TestTorchInductorOpInfo.__name__: TestTorchInductorOpInfo,
         }
+
         instantiate_device_type_tests(
             TestTorchInductorOpInfo, opinfo_scope, only_for="cpu"
         )
