@@ -1388,6 +1388,23 @@ std::vector<Tensor> stack_tensors_backward(
   return grad_inputs;
 }
 
+Tensor pad_packed_sequence_backward(
+    const Tensor& grad,
+    const Tensor& lengths,
+    bool batch_first,
+    c10::SymIntArrayRef data_size) {
+  for (const auto i : c10::irange(1, data_size.size())) {
+    if (data_size[i] == 0) {
+      return grad.sum().expand_symint(data_size);
+    }
+  }
+  auto grad_data =
+      std::get<0>(at::_pack_padded_sequence(grad, lengths, batch_first));
+  std::vector<c10::SymInt> pad(2 * grad_data.dim(), 0);
+  pad.back() = data_size[0] - grad_data.sym_size(0);
+  return at::constant_pad_nd_symint(grad_data, pad, 0);
+}
+
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<Tensor> block_diag_backward(
     const Tensor& grad,

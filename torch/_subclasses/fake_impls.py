@@ -2308,6 +2308,7 @@ def _pad_packed_sequence(
         ),
     )
     torch._check(batch_sizes.numel() > 0, lambda: "batch_sizes can not be empty")
+    torch._check(data.dim() >= 1, lambda: "'data' must be at least 1D")
 
     if (
         fake_mode.shape_env is None
