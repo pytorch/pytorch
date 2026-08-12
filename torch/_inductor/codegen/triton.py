@@ -7322,6 +7322,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             },
         )
 
+        if self._strict_reduction_rblock() is not None:
+            triton_meta["enable_fp_fusion"] = False
+
         if self.cooperative_reduction:
             # Cooperative reductions rely on multi-block synchronization that
             # requires cooperative-grid launches to avoid hanging.
