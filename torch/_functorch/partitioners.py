@@ -1370,6 +1370,24 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
+    # Stamp is_static_input on primal placeholders for the backward
+    # compiler; see Note: [static_input_idxs semantics] in
+    # torch/_inductor/compile_fx.py. This must happen here, while primals
+    # are still 1:1 with flat forward inputs, because staticness is tracked
+    # positionally (static_lifetime_input_nodes derives from
+    # fw_metadata.static_input_indices) and the backward graph's input
+    # ordering destroys that correspondence. The meta dict is shared by
+    # reference with the extracted fwd/bwd placeholder nodes
+    # (_extract_graph_with_inputs_outputs), so the stamp is visible on
+    # bw_module's placeholders regardless of how saving reorders them.
+    #
+    # TODO: staticness arguably belongs on the AOTInput descriptors
+    # (meta["desc"]); today those cannot express it (the dynamo frontend
+    # emits PlainAOTInput even for lifted params, and mark_static_address
+    # lives on the tensor object), so we use a dedicated meta key.
+    if static_lifetime_input_nodes is not None:
+        for node in primal_inputs:
+            node.meta["is_static_input"] = node in static_lifetime_input_nodes
     tangent_inputs = (
         [] if omit_aot_autograd_runtime else [*filter(_is_tangent, placeholders)]
     )
