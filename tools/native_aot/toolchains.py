@@ -40,6 +40,8 @@ Properties consumed by the driver scripts:
     caffe2/CMakeLists.txt, which cannot import this file; see the
     assertion in the tests).
   * ``launcher_includes``: per-kind includes for the generated .cpp.
+  * ``kernel_includes(sidecar)``: per-kernel includes for that same file,
+    for toolchains whose export writes a header (CuTeDSL's ABI struct).
 
 Export runs as stage 2 of the two-stage build (build torch -> build
 the AOT lib), so torch is always importable during export.
@@ -106,6 +108,12 @@ class Toolchain:
     def gen_launcher(self, sidecar: dict) -> str:
         """Emit the launch_<prefix>() helper for one sidecar."""
         raise NotImplementedError
+
+    def kernel_includes(self, sidecar: dict) -> list[str]:
+        """Per-KERNEL includes for the generated .cpp, e.g. the ABI header
+        export wrote. launcher_includes is the per-KIND counterpart, and
+        most toolchains need only that."""
+        return []
 
 
 class CuteDslToolchain(Toolchain):
