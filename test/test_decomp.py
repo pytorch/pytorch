@@ -230,6 +230,17 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
 }
 
+# XPU-specific tolerance overrides. These are only applied when the compared
+# tensors live on an xpu device, and are max-combined with op_assert_ref_tol_table.
+# This keeps the shared (CPU/CUDA) tolerances untouched while allowing XPU to be
+# looser where its eager kernels accumulate rounding differently from the
+# decomposition (XPU can never become stricter than the shared table this way).
+op_assert_ref_tol_table_xpu = {
+    # XPU eager reflection_pad2d_backward accumulates slightly larger bfloat16
+    # rounding error than the decomposition; shared 5e-3 is marginally too tight.
+    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 1e-2,
+}
+
 
 def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs):
     if orig.dtype != decomp.dtype:
@@ -248,6 +259,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()
         atol = op_assert_ref_tol_table.get((test_dtype, op), 1e-7)
+        if orig.device.type == "xpu":
+            atol = max(atol, op_assert_ref_tol_table_xpu.get((test_dtype, op), 0.0))
         if decomp_diff > orig_diff + atol:
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
@@ -448,6 +461,26 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "nn.functional.adaptive_max_pool1d"),
     (None, None, "nn.functional.adaptive_max_pool2d"),
     (None, None, "nn.functional.adaptive_max_pool3d"),
+    ("xpu", None, "max_pool2d_with_indices_backward"),
+    ("xpu", torch.int8, "__rmatmul__"),  # "dot_xpu_mkl" not implemented for int8
+    ("xpu", torch.uint8, "__rmatmul__"),  # "dot_xpu_mkl" not implemented for uint8
+    ("xpu", torch.int8, "tensordot"),  # "dot_xpu_mkl" not implemented for int8
+    ("xpu", torch.uint8, "tensordot"),  # "dot_xpu_mkl" not implemented for uint8
+    # XPU: oneDNN uses saturated arithmetic for int8/uint8 BLAS ops (values clamp to
+    # the dtype boundary), while PyTorch's decompositions compute in wider types and
+    # wrap modularly. For example, the fused native baddbmm saturates the full
+    # batch1@batch2 + self result, while the decomposition does bmm (saturated) then
+    # a separate int8 addition (which wraps). mv/addmv/addmm have the same mismatch
+    # because their native XPU path routes through onednn::matmul.
+    ("xpu", torch.int8, "baddbmm"),
+    ("xpu", torch.uint8, "baddbmm"),
+    ("xpu", torch.int8, "addmm"),
+    ("xpu", torch.uint8, "addmm"),
+    ("xpu", torch.int8, "addmv"),
+    ("xpu", torch.uint8, "addmv"),
+    ("xpu", torch.int8, "mv"),
+    ("xpu", torch.uint8, "mv"),
+
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -459,6 +492,8 @@ CROSS_REF_BACKWARD_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    ("xpu", None, "nn.functional.max_pool1d"),
+    ("xpu", None, "nn.functional.max_pool2d"),
 }
 
 all_decomposed = set()
@@ -1044,6 +1079,7 @@ def forward(self, scores_1, mask_1, value_1):
     def do_cross_ref(self, device, dtype, op, *, run_all):
         test_keys = [
             (torch.device(device).type, dtype, op.name),
+            (torch.device(device).type, None, op.name),
             (None, dtype, op.name),
             (None, None, op.name),
         ]
@@ -1174,7 +1210,7 @@ def forward(self, scores_1, mask_1, value_1):
         torch.testing.assert_close(ref, res, check_dtype=True)
 
 
-instantiate_device_type_tests(TestDecomp, globals())
+instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
 
 
 class DecompOneOffTests(TestCase):
