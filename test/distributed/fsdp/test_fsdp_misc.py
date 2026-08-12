@@ -32,7 +32,16 @@ from torch.distributed.fsdp.wrap import (
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    run_subtests,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
     DEVICEInitMode,
@@ -44,7 +53,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
     run_tests,
@@ -78,7 +87,117 @@ class MyModel(nn.Module):
         return self.b(self.a(x + y))
 
 
+class TestFSDPMiscCPU(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.GENERIC
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "gloo"
+
+    @classmethod
+    def device_type(cls):
+        return "cpu"
+
+    def run_subtests(self, *args, **kwargs):
+        return run_subtests(self, *args, **kwargs)
+
+    def test_fsdp_cpu_training(self):
+        """Tests FSDP training on CPU."""
+        gloo_pg = dist.new_group(backend="gloo")
+        for ss in [
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP,
+        ]:
+            torch.manual_seed(42)
+            model = MyModel()
+            ref_model = DDP(deepcopy(model), process_group=gloo_pg)
+            model = FSDP(
+                model,
+                sharding_strategy=ss,
+                auto_wrap_policy=always_wrap_policy,
+                process_group=gloo_pg,
+                device_id=torch.device("cpu"),
+            )
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            torch.manual_seed(42 + self.rank)
+            inp = torch.randn(2, 2)
+            for _ in range(10):
+                losses = []
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    loss = _model(inp, inp).sum()
+                    losses.append(loss)
+                    loss.backward()
+                    _optim.step()
+                    _optim.zero_grad()
+                self.assertEqual(losses[0], losses[1])
+
+    def test_summon_full_params_offload_to_cpu_on_cpu_model(self):
+        """
+        Tests ``summon_full_params(offload_to_cpu=True)`` when the FSDP compute
+        device is already CPU. There, the unsharded ``FlatParameter`` is already
+        on CPU, so ``to_cpu()`` must skip freeing the unsharded storage that
+        ``flat_param`` and its views alias; otherwise the summoned parameters
+        read freed memory.
+        """
+        gloo_pg = dist.new_group(backend="gloo")
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                ],
+                "use_orig_params": [False, True],
+                "writeback": [False, True],
+            },
+            self._test_summon_full_params_offload_to_cpu_on_cpu_model,
+            gloo_pg,
+        )
+
+    def _test_summon_full_params_offload_to_cpu_on_cpu_model(
+        self,
+        gloo_pg,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        writeback: bool,
+    ):
+        torch.manual_seed(42)
+        ref_model = MyModel()
+        ref_params = dict(ref_model.named_parameters())
+        model = FSDP(
+            deepcopy(ref_model),
+            sharding_strategy=sharding_strategy,
+            auto_wrap_policy=always_wrap_policy,
+            process_group=gloo_pg,
+            device_id=torch.device("cpu"),
+            use_orig_params=use_orig_params,
+        )
+        cpu = torch.device("cpu")
+        with FSDP.summon_full_params(model, offload_to_cpu=True, writeback=writeback):
+            summoned = dict(model.named_parameters())
+            self.assertEqual(len(summoned), len(ref_params))
+            for name, param in summoned.items():
+                self.assertEqual(param.device, cpu)
+                self.assertEqual(param, ref_params[clean_tensor_name(name)])
+            if writeback:
+                with torch.no_grad():
+                    for param in model.parameters():
+                        param.add_(1.0)
+        for param in model.parameters():
+            self.assertEqual(param.device, cpu)
+        # Re-summon to confirm the exit path resharded correctly and that the
+        # in-place edit was (not) persisted according to `writeback`.
+        delta = 1.0 if writeback else 0.0
+        with FSDP.summon_full_params(model, offload_to_cpu=True):
+            for name, param in model.named_parameters():
+                self.assertEqual(param, ref_params[clean_tensor_name(name)] + delta)
+
+
 class TestFSDPMiscMultiProcess(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -87,6 +206,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
     def test_fsdp_device_id(self, use_index):
@@ -157,6 +277,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             torch.device(device_type, torch.accelerator.current_device_index()),
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_zero2_eval_with_prefetch(self):
         # Test FSDP validation with SHARD_GRAD_OP and forward_prefetch
@@ -275,6 +396,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             losses.clear()
             grads.clear()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
     @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
@@ -318,6 +440,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             self.assertIsNotNone(a_grad)
             self.assertIsNone(b_grad)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_not_all_outputs_used_in_loss(self):
         self.run_subtests(
@@ -408,6 +531,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
 
         dist.barrier()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optim_overlap_no_use_orig_params_error(self):
         fsdp_overlap = FSDP(
@@ -430,6 +554,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
         ):
             fsdp_overlap(inp, inp)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optimizer_overlap(self):
         torch.manual_seed(0)
@@ -537,100 +662,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                         (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
                     ]
 
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_cpu_training(self):
-        """Tests FSDP training on CPU."""
-        gloo_pg = dist.new_group(backend="gloo")
-        for ss in [
-            ShardingStrategy.NO_SHARD,
-            ShardingStrategy.FULL_SHARD,
-            ShardingStrategy.SHARD_GRAD_OP,
-        ]:
-            torch.manual_seed(42)
-            model = MyModel()
-            ref_model = DDP(deepcopy(model), process_group=gloo_pg)
-            model = FSDP(
-                model,
-                sharding_strategy=ss,
-                auto_wrap_policy=always_wrap_policy,
-                process_group=gloo_pg,
-                device_id=torch.device("cpu"),
-            )
-            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-            torch.manual_seed(42 + self.rank)
-            inp = torch.randn(2, 2)
-            for _ in range(10):
-                losses = []
-                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                    loss = _model(inp, inp).sum()
-                    losses.append(loss)
-                    loss.backward()
-                    _optim.step()
-                    _optim.zero_grad()
-                self.assertEqual(losses[0], losses[1])
-
-    @skip_if_lt_x_gpu(2)
-    def test_summon_full_params_offload_to_cpu_on_cpu_model(self):
-        """
-        Tests ``summon_full_params(offload_to_cpu=True)`` when the FSDP compute
-        device is already CPU. There, the unsharded ``FlatParameter`` is already
-        on CPU, so ``to_cpu()`` must skip freeing the unsharded storage that
-        ``flat_param`` and its views alias; otherwise the summoned parameters
-        read freed memory.
-        """
-        gloo_pg = dist.new_group(backend="gloo")
-        self.run_subtests(
-            {
-                "sharding_strategy": [
-                    ShardingStrategy.FULL_SHARD,
-                    ShardingStrategy.SHARD_GRAD_OP,
-                ],
-                "use_orig_params": [False, True],
-                "writeback": [False, True],
-            },
-            self._test_summon_full_params_offload_to_cpu_on_cpu_model,
-            gloo_pg,
-        )
-
-    def _test_summon_full_params_offload_to_cpu_on_cpu_model(
-        self,
-        gloo_pg,
-        sharding_strategy: ShardingStrategy,
-        use_orig_params: bool,
-        writeback: bool,
-    ):
-        torch.manual_seed(42)
-        ref_model = MyModel()
-        ref_params = dict(ref_model.named_parameters())
-        model = FSDP(
-            deepcopy(ref_model),
-            sharding_strategy=sharding_strategy,
-            auto_wrap_policy=always_wrap_policy,
-            process_group=gloo_pg,
-            device_id=torch.device("cpu"),
-            use_orig_params=use_orig_params,
-        )
-        cpu = torch.device("cpu")
-        with FSDP.summon_full_params(model, offload_to_cpu=True, writeback=writeback):
-            summoned = dict(model.named_parameters())
-            self.assertEqual(len(summoned), len(ref_params))
-            for name, param in summoned.items():
-                self.assertEqual(param.device, cpu)
-                self.assertEqual(param, ref_params[clean_tensor_name(name)])
-            if writeback:
-                with torch.no_grad():
-                    for param in model.parameters():
-                        param.add_(1.0)
-        for param in model.parameters():
-            self.assertEqual(param.device, cpu)
-        # Re-summon to confirm the exit path resharded correctly and that the
-        # in-place edit was (not) persisted according to `writeback`.
-        delta = 1.0 if writeback else 0.0
-        with FSDP.summon_full_params(model, offload_to_cpu=True):
-            for name, param in model.named_parameters():
-                self.assertEqual(param, ref_params[clean_tensor_name(name)] + delta)
-
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
         # Move me to MT test once warning logging and backward collective issue
@@ -660,6 +692,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
         inp = fsdp_model.module.get_input(device=torch.device("cpu"))
         fsdp_model(*inp).sum().backward()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_cpu_init_with_sync_module_states(self):
         """
@@ -718,6 +751,8 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
 
 
 class TestFSDPMiscMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -726,6 +761,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_namedtuple(self):
         class MyModule(nn.Module):
@@ -755,6 +791,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         # https://github.com/pytorch/pytorch/issues/83107 and
         # https://github.com/pytorch/pytorch/issues/83129
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_device_id_auto_wrap(self):
         """Tests that ``auto_wrap_policy`` propagates ``device_id`` to all
@@ -789,6 +826,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 torch.device(device_type, torch.accelerator.current_device_index()),
             )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_device_id_cpu_offload(self):
         """
@@ -828,6 +866,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         for handle in traversal_utils._get_fsdp_handles(fsdp_model):
             self.assertEqual(handle.flat_param.device, cpu_device)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):
         """Tests that specifying a ``device_id`` argument to FSDP for a GPU
@@ -855,6 +894,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 fsdp_kwargs={"device_id": 0},
             )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_cpu_gpu_module(self):
         """Tests a CPU + GPU module supported if device_id is passed
@@ -879,6 +919,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
             FSDP(CPUGPUModule())
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ignored_module_meta(self):
         torch.accelerator.set_device_index(self.rank)
@@ -909,6 +950,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         )
         self.assertEqual(meta_device, next(m.a.parameters()).device)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_device_id_no_move_ignored_params_and_bufs(self):
         torch.accelerator.set_device_index(self.rank)
@@ -927,6 +969,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         for t in chain(ignored_params, ignored_bufs):
             self.assertEqual(torch.device("cpu"), t.device)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_multigpu_module(self):
         """
@@ -947,6 +990,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         ):
             FSDP(MultiGPUModule(self.rank))
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_no_params(self):
         """
@@ -983,6 +1027,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         with context:
             FSDP(no_params, device_id=0)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_fsdp_same_model_across_ranks(self):
         """
@@ -1026,6 +1071,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/105024")
     @skip_if_lt_x_gpu(2)
     def test_homogeneous_attributes(self):
@@ -1079,6 +1125,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             inp = fsdp_model.module.get_input(torch.device(device_type))
             fsdp_model(*inp)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/137948")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_unsupported_module_cls(self):
@@ -1094,10 +1141,13 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
 
 class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 1
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     def test_world_size_1_sharding_strategy_warning(self):
         """
@@ -1142,6 +1192,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
                 sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
     def test_training_device_mismatch_errors(self):
         """
@@ -1173,6 +1224,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         ):
             fsdp_model(inp)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_unsafe_setattr(self):
         """
@@ -1228,8 +1280,16 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         self.assertTrue(called_setattr_override)
 
 
-instantiate_parametrized_tests(TestFSDPMiscMultiThread)
-instantiate_parametrized_tests(TestFSDPMiscMultiProcess)
+devices = ("cuda", "hpu", "xpu", "privateuse1")
+instantiate_device_type_tests(
+    TestFSDPMiscMultiThread, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPMiscMultiProcess, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPMiscWorldSize1, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
