@@ -134,7 +134,7 @@ struct InlineEvent final {
     backend_.synchronizeEvent(event_);
   }
 
-  std::string ipcHandle() const {
+  std::string ipcHandle() {
     TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Event is not an IPC event.");
     return backend_.getEventIPCHandle(&event_, device_index_);
   }
