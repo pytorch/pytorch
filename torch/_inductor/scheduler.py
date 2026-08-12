@@ -57,7 +57,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, Identity
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -633,8 +633,10 @@ class NestedReduction:
 
         has_reduction = False
         parent_source_names: OrderedSet[str] = OrderedSet()
-        # TODO(#190595): Also accept unique full-resolution writes from preceding
-        # pointwise stages; standalone codegen currently materializes only loads.
+        # TODO(#190595): Also accept sources written by preceding pointwise stages.
+        # This requires proving that the write has one normalized full-resolution
+        # index and materializing that value for the derived-domain epilogue;
+        # standalone codegen currently materializes reduction inputs only.
         for node in scheduler_nodes:
             if node.is_reduction():
                 has_reduction = True
@@ -698,24 +700,39 @@ class NestedReduction:
         numel: sympy.Expr,
         rnumel: sympy.Expr,
     ) -> tuple[tuple[SchedulerNode, ...], int] | None:
-        """The pointwise nodes that can run at lane resolution.
+        """Classify a candidate group and return its lane-resolution nodes.
 
-        Their group is ``(numel * rnumel / factor, 1)`` and their ranges must be
-        compatible with ``(numel, rnumel / factor)``.
+        Other members must fit the parent reduction, reduced-output, or
+        full-parent domain.
         """
         factor = cls.INTERLEAVED_SUB_PARENT_FACTOR
         expected_groups = (numel, FloorDiv(rnumel, factor))
-        candidates = tuple(
-            node
-            for node in nodes
-            if not node.is_reduction()
-            and cls._pointwise_node_matches_domain(
+        parent_full_numel = V.graph.sizevars.simplify(numel * rnumel)
+        candidates: list[SchedulerNode] = []
+        for node in nodes:
+            _, (node_numel, node_rnumel) = node.group
+            if node.is_reduction():
+                if not (
+                    V.graph.sizevars.statically_known_equals(node_numel, numel)
+                    and V.graph.sizevars.statically_known_equals(node_rnumel, rnumel)
+                ):
+                    return None
+                continue
+            if cls._pointwise_node_matches_domain(
                 node, sympy_product(expected_groups), expected_groups
-            )
-        )
+            ):
+                candidates.append(node)
+                continue
+            if cls._pointwise_node_matches_domain(node, numel, (numel,)):
+                continue
+            if cls._pointwise_node_matches_domain(
+                node, parent_full_numel, (numel, rnumel)
+            ):
+                continue
+            return None
         if not candidates:
             return None
-        return candidates, factor
+        return tuple(candidates), factor
 
     @staticmethod
     def _pointwise_node_matches_domain(
@@ -757,6 +774,8 @@ class NestedReduction:
         extent_subs: dict[sympy.Expr, sympy.Expr],
         source_sizes: tuple[sympy.Expr, ...] = (),
     ) -> sympy.Expr:
+        # Identity controls emitted index width but does not change the lane.
+        index = index.replace(Identity, lambda x: x)
         extent_subs = dict(extent_subs)
         expanded_sizes = [
             V.graph.sizevars.simplify(floor_div.args[1] * floor_div)
@@ -802,18 +821,14 @@ class NestedReduction:
         Independent epilogue inputs remain ordinary derived-domain loads. Shared
         parent inputs must have one normalized parent access, and every epilogue
         access must equal it under ``parent_r = factor * child_r + lane``.
-
-        TODO(#190595): Also resolve sources produced by parent-stage pointwise nodes.
         """
-        from .tiling_utils import (
-            _FusedNodeView,
-            extract_normalized_read_writes,
-            FusedNormalizedReadsWrites,
-        )
+        from .codegen.simd import CantSplit, SIMDKernel
+        from .utils import sympy_index_symbol
 
         fused_buffer_names = OrderedSet.union(
             *(node.get_buffer_names() for node in (*parent_nodes, *epilogue_nodes))
         )
+        # External derived-domain reads need an index that can be normalized.
         if any(
             not isinstance(dep, MemoryDep) and dep.name not in fused_buffer_names
             for node in epilogue_nodes
@@ -821,127 +836,97 @@ class NestedReduction:
         ):
             return None
 
-        parent_full_numel = V.graph.sizevars.simplify(parent_numel * parent_rnumel)
-        for node in parent_nodes:
-            _, (node_numel, node_rnumel) = node.group
-            if node.is_reduction():
-                compatible = V.graph.sizevars.statically_known_equals(
-                    node_numel, parent_numel
-                ) and V.graph.sizevars.statically_known_equals(
-                    node_rnumel, parent_rnumel
-                )
-            else:
-                compatible = V.graph.sizevars.statically_known_equals(
-                    node_rnumel, 1
-                ) and (
-                    V.graph.sizevars.statically_known_equals(node_numel, parent_numel)
-                    or V.graph.sizevars.statically_known_equals(
-                        node_numel, parent_full_numel
-                    )
-                )
-            if not compatible:
-                return None
+        internal_source_names = parent_source_names & fused_buffer_names
+        if any(
+            dep.name in internal_source_names
+            for node in epilogue_nodes
+            for dep in node.read_writes.reads
+        ):
+            return None
+        external_source_names = parent_source_names - fused_buffer_names
 
-        def normalized_accesses(
-            nodes: Sequence[SchedulerNode], group: tuple[sympy.Expr, sympy.Expr]
-        ) -> FusedNormalizedReadsWrites | None:
-            view = _FusedNodeView(
-                nodes,
-                dependencies.ReadWrites.merge_list(
-                    [node.read_writes for node in nodes]
-                ),
-                (nodes[0].group[0], group),
+        def remapped_source_indices(
+            nodes: Sequence[SchedulerNode],
+            groups: tuple[sympy.Expr, sympy.Expr],
+            values: tuple[sympy.Symbol, sympy.Symbol],
+        ) -> dict[str, OrderedSet[sympy.Expr]] | None:
+            var_ranges = dict(zip(values, groups, strict=True))
+            result: dict[str, OrderedSet[sympy.Expr]] = collections.defaultdict(
+                OrderedSet
             )
-            return extract_normalized_read_writes(view)
+
+            def split_values(
+                *new_ranges: Sequence[sympy.Expr],
+            ) -> list[list[sympy.Expr]]:
+                return [
+                    decompose_index(value, ranges)
+                    for value, ranges in zip(values, new_ranges, strict=True)
+                ]
+
+            for node in nodes:
+                if not any(
+                    dep.name in external_source_names for dep in node.read_writes.reads
+                ):
+                    continue
+                try:
+                    args = SIMDKernel.map_kernel_groups_to_node_sizes(
+                        groups, node.get_ranges(), split_values
+                    )
+                except CantSplit:
+                    return None
+                accesses = dependencies.extract_loop_body_with_args(
+                    node._body, args, var_ranges
+                )
+                for dep in accesses._reads:
+                    if isinstance(dep, MemoryDep) and dep.name in external_source_names:
+                        # Canonical tmp symbols do not retain indirect-index provenance.
+                        if dep.is_indirect():
+                            return None
+                        index = dep.index.replace(Identity, lambda x: x)
+                        result[dep.name].add(
+                            V.graph.sizevars.simplify_with_ranges(index, dep.ranges)
+                        )
+            return result
 
         child_rnumel = FloorDiv(parent_rnumel, sub_parent_factor)
-        parent_accesses = normalized_accesses(
-            parent_nodes, (parent_numel, parent_rnumel)
-        )
-        epilogue_accesses = normalized_accesses(
-            epilogue_nodes, (parent_numel, child_rnumel)
-        )
-        if parent_accesses is None or epilogue_accesses is None:
-            return None
-        # TODO: Have normalized views expose a directly comparable domain signature.
-        parent_x = tuple(parent_accesses.index_vars)
-        child_x = tuple(epilogue_accesses.index_vars)
-        parent_reduction = tuple(parent_accesses.reduce_vars)
-        child_reduction = tuple(epilogue_accesses.reduce_vars)
-        if (
-            parent_x != child_x
-            or any(
-                not V.graph.sizevars.statically_known_equals(
-                    parent_accesses.var_ranges[parent_var],
-                    epilogue_accesses.var_ranges[child_var],
-                )
-                for parent_var, child_var in zip(parent_x, child_x, strict=True)
-            )
-            or not parent_reduction
-            or parent_reduction != child_reduction
-            or any(
-                not V.graph.sizevars.statically_known_equals(
-                    parent_accesses.var_ranges[parent_var],
-                    epilogue_accesses.var_ranges[child_var],
-                )
-                for parent_var, child_var in zip(
-                    parent_reduction[:-1], child_reduction[:-1], strict=True
-                )
-            )
-        ):
-            return None
-
-        parent_r = parent_reduction[-1]
-        child_r = child_reduction[-1]
-        parent_r_extent = parent_accesses.var_ranges[parent_r]
-        child_r_extent = epilogue_accesses.var_ranges[child_r]
-        if not (
-            V.graph.sizevars.statically_known_equals(
-                sympy_product(
-                    parent_accesses.var_ranges[var] for var in parent_reduction
-                ),
-                parent_rnumel,
-            )
-            and V.graph.sizevars.statically_known_equals(
-                sympy_product(
-                    epilogue_accesses.var_ranges[var] for var in child_reduction
-                ),
-                child_rnumel,
-            )
-            and V.graph.sizevars.statically_known_equals(
-                child_r_extent, FloorDiv(parent_r_extent, sub_parent_factor)
-            )
-        ):
-            return None
         extent_subs = cls.try_get_sub_parent_extent_subs(
-            parent_r_extent, sub_parent_factor
+            parent_rnumel, sub_parent_factor
         )
         if extent_subs is None:
+            return None
+        x = sympy_index_symbol("_sub_parent_x")
+        parent_r = sympy_index_symbol("_sub_parent_r")
+        child_r = sympy_index_symbol("_sub_parent_child_r")
+        parent_indices = remapped_source_indices(
+            parent_nodes,
+            (parent_numel, parent_rnumel),
+            (x, parent_r),
+        )
+        child_indices = remapped_source_indices(
+            epilogue_nodes,
+            (parent_numel, child_rnumel),
+            (x, child_r),
+        )
+        if parent_indices is None or child_indices is None:
             return None
 
         source_layouts: list[tuple[str, NestedReduction.SubParentSourceLayout]] = []
         for name in parent_source_names:
-            child_indices = OrderedSet(
-                index
-                for index, names in epilogue_accesses.reads.items()
-                if name in names
-            )
-            if not child_indices:
+            source_child_indices = child_indices.get(name)
+            if not source_child_indices:
                 continue
-            parent_indices = OrderedSet(
-                index for index, names in parent_accesses.reads.items() if name in names
-            )
             # TODO: Extend #188180's structural load-index cache to support
             # multiple parent accesses to one source buffer.
-            if len(parent_indices) != 1:
+            source_parent_indices = parent_indices.get(name)
+            if source_parent_indices is None or len(source_parent_indices) != 1:
                 return None
-            parent_index = sympy_subs(next(iter(parent_indices)), extent_subs)
-            for child_index in child_indices:
+            parent_index = sympy_subs(next(iter(source_parent_indices)), extent_subs)
+            for child_index in source_child_indices:
                 lane = cls.interleaved_sub_parent_lane(
                     child_index,
                     sub_parent_factor,
                     extent_subs,
-                    tuple(parent_accesses.var_ranges.values()),
+                    (parent_numel, parent_rnumel),
                 )
                 if not any(
                     V.graph.sizevars.statically_known_equals(lane, value)

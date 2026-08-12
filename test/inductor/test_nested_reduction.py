@@ -952,6 +952,26 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, z))
         self.check_fusion()
 
+    def test_cat_producer_standalone_sub_parent_epilogue(self):
+        B, D = 4, 512
+
+        def f(x, y):
+            joined = torch.cat((x, y), dim=-1)
+            scale = (joined.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = joined.view(B, D // 2, 2)
+            return (
+                pairs[..., 0].float() / scale.unsqueeze(-1),
+                pairs[..., 1].float() / scale.unsqueeze(-1),
+                scale,
+            )
+
+        x = torch.randn(B, D // 2, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn_like(x)
+        self.check_nested_matches_unnested(f, (x, y))
+        self.check_fusion()
+
     def _standalone_sub_parent_graph(self, B=32, D=1024, G=16):
         def f(x):
             xg = x.view(B, D // G, G)
@@ -1139,6 +1159,43 @@ class _NestedReductionBase:
         x = torch.randn(256, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_numeric(f, (x,))
         self.check_no_fusion()
+
+    def test_standalone_sub_parent_rejects_offset_source(self):
+        B, D = 4, 16
+
+        def f(storage):
+            x = torch.as_strided(storage, (B, D), (D + 1, 1), storage_offset=1)
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            return (
+                pairs[..., 0].float() / scale.unsqueeze(-1),
+                pairs[..., 1].float() / scale.unsqueeze(-1),
+                scale,
+            )
+
+        storage = torch.randn(B * (D + 1), device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (storage,))
+        self.check_no_fusion()
+
+    def test_standalone_sub_parent_mismatched_masked_source(self):
+        B, D = 4, 16
+
+        def f(x):
+            parent = torch.nn.functional.pad(x, (2, 0), value=0.0)
+            child = torch.nn.functional.pad(x, (2, 0), value=1.0)
+            scale = (parent.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = child.view(B, D // 2, 2)
+            return (
+                pairs[..., 0].float() / scale.unsqueeze(-1),
+                pairs[..., 1].float() / scale.unsqueeze(-1),
+                scale,
+            )
+
+        x = torch.randn(B, D - 2, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_fusion()
 
     def test_standalone_sub_parent_rejects_same_buffer_scalar(self):
         B, D, G = 32, 1024, 16

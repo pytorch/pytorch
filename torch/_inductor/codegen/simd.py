@@ -2188,7 +2188,11 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         self._load_transform = load_transform
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        value = self._family.resolve_load(name, index)
+        value = None
+        # TODO: Use the indexed load cache so masked forwarding can preserve
+        # its mask and fill value through the normal explicit-where path.
+        if self._kernel._load_mask is None:
+            value = self._family.resolve_load(name, index)
         if value is not None:
             return value
         remapped_index = self._family.remap_index(index)
@@ -2245,7 +2249,11 @@ class _SubParentSourceLoadMaterializer(WrapperHandler):  # type: ignore[type-arg
         """
         value = self._inner.load(name, index)
         source_layout = self._source_layouts.get(name)
-        if source_layout is None or name in self._sub_parent_family.remapped_values:
+        if (
+            self._kernel._load_mask is not None
+            or source_layout is None
+            or name in self._sub_parent_family.remapped_values
+        ):
             return value
         materialized = self._layout.materialize_value_at_sub_parent_resolution(
             self._kernel,
