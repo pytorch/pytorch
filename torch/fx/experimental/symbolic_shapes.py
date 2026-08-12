@@ -7273,7 +7273,9 @@ class ShapeEnv:
                 continue
             axiom = canonicalize_bool_expr(axiom)
             if isinstance(axiom, (sympy.Lt, sympy.Le)):
-                edges.setdefault(axiom.lhs, []).append((axiom.rhs, isinstance(axiom, sympy.Lt)))
+                edges.setdefault(axiom.lhs, []).append(
+                    (axiom.rhs, isinstance(axiom, sympy.Lt))
+                )
 
         def is_implied(query: sympy.Basic) -> bool:
             query = canonicalize_bool_expr(query)
@@ -7290,9 +7292,7 @@ class ShapeEnv:
                 term, has_strict = work.pop()
                 for next_term, edge_is_strict in edges.get(term, ()):
                     next_has_strict = has_strict or edge_is_strict
-                    if next_term == query.rhs and (
-                        next_has_strict or not need_strict
-                    ):
+                    if next_term == query.rhs and (next_has_strict or not need_strict):
                         return True
                     key = (next_term, next_has_strict)
                     if key in seen:
