@@ -63,6 +63,11 @@ class ExpCommCounts(NamedTuple):
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
+    # loss_parallel cross-entropy all_reduces float32 partial sums across ranks.
+    # Float32 non-associativity produces ~22-ULP / 2.6e-6 relative differences
+    # vs. the single-process reference. Loosen to 4e-6 to accommodate this.
+    _rel_tol: float = 4e-6
+
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
