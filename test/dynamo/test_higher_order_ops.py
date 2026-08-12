@@ -3499,6 +3499,33 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(q, k, v)
 
+    def test_flex_attention_mask_mod_input_aliasing_supported(self):
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        bounds = torch.tensor([[[0, 0], [1, 1]]])
+        lower = bounds[:, 0, :]
+        upper = bounds[:, 1, :]
+
+        def mask_mod(b, h, q, k):
+            return (lower[b, q] <= k) & (k <= upper[b, q])
+
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=1, Q_LEN=2, KV_LEN=2, device="cpu"
+        )
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        q = torch.randn(1, 1, 2, 4)
+        k = torch.randn(1, 1, 2, 4)
+        v = torch.randn(1, 1, 2, 4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            expected = fn(q, k, v)
+        self.assertEqual(opt_fn(q, k, v), expected)
+
     def test_wrap_with_set_grad_enabled_allows_aliasing_and_input_mutation(self):
         from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
 

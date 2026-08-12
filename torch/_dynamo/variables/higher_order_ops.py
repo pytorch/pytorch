@@ -1464,6 +1464,7 @@ def check_aliasing_and_input_mutation(
     graph: torch.fx.Graph,
     supports_input_mutation: bool,
     supports_aliasing: bool,
+    supports_input_input_aliasing: bool,
     source_target: Optional["HigherOrderOperator"],
 ) -> None:
     name = source_target.name if source_target else "<UNKNOWN>"
@@ -1482,7 +1483,9 @@ def check_aliasing_and_input_mutation(
             )
 
     if not supports_aliasing:
-        aliasing_info = subtracer.has_aliasing()
+        aliasing_info = subtracer.has_aliasing(
+            allow_input_input_aliasing=supports_input_input_aliasing
+        )
         if aliasing_info.has_aliasing:
             context = f"{aliasing_info.msg} in\n {graph}"
             unimplemented(
@@ -1704,6 +1707,9 @@ def speculate_subgraph_with_auto_output_flattening(
     filter_aliased_intermediates: bool = False,
     supports_input_mutation: bool = False,
     supports_aliasing: bool = False,
+    # Whether multiple subgraph inputs may share storage. Input-to-output and
+    # output-to-output aliases still require supports_aliasing=True.
+    supports_input_input_aliasing: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -1963,6 +1969,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 graph,
                 supports_input_mutation,
                 supports_aliasing,
+                supports_input_input_aliasing,
                 source_target,
             )
             # Return both the output VT and the graph output VTs separately:
@@ -2030,6 +2037,9 @@ def speculate_subgraph(
     remove_consts_from_outputs: bool = True,
     supports_input_mutation: bool = False,
     supports_aliasing: bool = False,
+    # Whether multiple subgraph inputs may share storage. Input-to-output and
+    # output-to-output aliases still require supports_aliasing=True.
+    supports_input_input_aliasing: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -2163,6 +2173,7 @@ def speculate_subgraph(
                     graph,
                     supports_input_mutation,
                     supports_aliasing,
+                    supports_input_input_aliasing,
                     source_target,
                 )
                 mutation_info = subtracer.has_input_mutation()
@@ -2304,7 +2315,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -4735,6 +4746,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
                 supports_aliasing=(fn_name == "score_mod"),
+                supports_input_input_aliasing=(fn_name == "mask_fn"),
             )
 
         gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -5026,6 +5038,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
                 supports_aliasing=(fn_name == "score_mod"),
+                supports_input_input_aliasing=(fn_name == "mask_fn"),
             )
 
         body_name = tx.output.install_subgraph(
@@ -5132,7 +5145,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare

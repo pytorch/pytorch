@@ -139,11 +139,11 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source});
+      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, source, output, dimensions);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
   return output;
@@ -217,16 +217,16 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights});
+      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output, params, bias ? *bias : activation);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads_per_threadgroup];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
 }
 
-// conv3d forward on the Metal kernels: MPP on macOS 26+, simdgroup otherwise;
+// conv3d forward on the Metal kernels: MPP on macOS 26.2+, simdgroup otherwise;
 // planes past int32 take the long-indexed simdgroup variant on any macOS.
 static void conv3d_metal_forward(const Tensor& input_t,
                                  const Tensor& weight_t,
@@ -267,7 +267,7 @@ static void conv3d_metal_forward(const Tensor& input_t,
   const int64_t input_channels_per_group = input_channels / groups;
   TORCH_CHECK(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group <= kInt32Max,
               "conv3d: kernel volume times channels per group exceeds int32");
-  const bool use_mpp = !use_long_index && is_macos_at_least(MacOSVersion::MACOS_26_0);
+  const bool use_mpp = !use_long_index && has_mpp();
 
   const auto activation = conv3d_to_ndhwc(input_t); // NDHWC
   const auto weights = weight_t.permute({2, 3, 4, 1, 0}).contiguous(); // DHWIO
@@ -719,7 +719,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     auto outputPlaceholder = output_c
         ? Placeholder(cachedGraph->outputTensor_, *output_c)
         : make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, output_c ? weight_t.contiguous() : weight_t);
+    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+    auto weightsPlaceholder =
+        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
     if (bias_defined) {
@@ -905,7 +907,9 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     const auto grad_out_for_graph =
         grad_input_c ? grad_output_t.contiguous() : materialize_for_conv(grad_output_t, desc_layout);
     auto gradOutputPlaceholder = make_conv_placeholder(cachedGraph->gradOutputTensor_, grad_out_for_graph, desc_layout);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, grad_input_c ? weight_t.contiguous() : weight_t);
+    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+    auto weightsPlaceholder =
+        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
     auto outputPlaceholder = grad_input_c
         ? Placeholder(cachedGraph->gradInputTensor_, *grad_input_c)
         : make_conv_placeholder(cachedGraph->gradInputTensor_, grad_input_t, desc_layout);
