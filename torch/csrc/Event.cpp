@@ -48,12 +48,11 @@ static PyObject* THPEvent_pynew(
   self->weakreflist = nullptr;
 
   // See note [Flags defining the behavior of events]
+  (void)interprocess;
   const c10::EventFlag flag =
       (enable_timing ? c10::EventFlag::TIMING
                      : c10::EventFlag::PYTORCH_DEFAULT) |
-      (blocking ? c10::EventFlag::BLOCKING : c10::EventFlag::PYTORCH_DEFAULT) |
-      (interprocess ? c10::EventFlag::INTERPROCESS
-                    : c10::EventFlag::PYTORCH_DEFAULT);
+      (blocking ? c10::EventFlag::BLOCKING : c10::EventFlag::PYTORCH_DEFAULT);
 
   new (&self->event) c10::Event(device->type(), flag);
 
@@ -138,23 +137,19 @@ static PyObject* THPEvent_from_ipc_handle(
   auto r = parser.parse(args, kwargs, parsed_args);
 
   at::Device device = r.device(0);
-  std::string handle_string = r.string(1);
-  const auto acc_type = at::accelerator::getAccelerator(true).value();
-
-  TORCH_CHECK(
-      device.type() == acc_type,
-      "IPC Event can only be created on ",
-      acc_type,
-      " devices, but got device type ",
-      device.type());
-
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.Event ipc is not supported yet, please open an issue if you need this!");
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     return nullptr;
   }
   THPEvent* self = reinterpret_cast<THPEvent*>(ptr.get());
 
-  new (&self->event) c10::Event(device, handle_string);
+  // TODO: for constructing event from ipc handle, the c10::Event needs to have
+  // more general constructor to achieve that.
+  new (&self->event) c10::Event(device.type(), c10::EventFlag::PYTORCH_DEFAULT);
+
   return static_cast<PyObject*>(ptr.release());
   END_HANDLE_TH_ERRORS
 }
@@ -163,10 +158,12 @@ static PyObject* THPEvent_ipc_handle(
     PyObject* _self [[maybe_unused]],
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPEvent*>(_self);
-  auto handle = self->event.ipcHandle();
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.Event ipc is not supported yet, please open an issue if you need this!");
+  constexpr const char* handle = "0";
   return PyBytes_FromStringAndSize(
-      handle.c_str(), static_cast<Py_ssize_t>(handle.size()));
+      handle, std::char_traits<char>::length(handle));
   END_HANDLE_TH_ERRORS
 }
 
