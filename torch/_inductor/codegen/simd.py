@@ -1916,7 +1916,7 @@ class _GroupedReductionLayout:
             block_offset=FloorDiv(self.group_tree.block_offset(), factor),
             name_suffix=f"half{factor}",
         )
-        lane_index_subs = scheduler.NestedReduction.sub_parent_extent_subs(
+        lane_index_subs = scheduler.NestedReduction.try_get_sub_parent_extent_subs(
             self.group_tree.numel, factor
         )
         if lane_index_subs is None:

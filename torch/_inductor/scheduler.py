@@ -633,14 +633,16 @@ class NestedReduction:
 
         has_reduction = False
         fused_buffer_names: OrderedSet[str] = OrderedSet()
-        reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
+        # TODO(#190595): Also accept unique full-resolution writes from preceding
+        # pointwise stages; standalone codegen currently materializes only loads.
+        parent_reads_by_name: dict[str, list[MemoryDep]] = collections.defaultdict(list)
         for node in scheduler_nodes:
             fused_buffer_names |= node.get_buffer_names()
             if node.is_reduction():
                 has_reduction = True
                 for dep in node.read_writes.reads:
                     if isinstance(dep, MemoryDep):
-                        reduction_reads[dep.name].append(dep)
+                        parent_reads_by_name[dep.name].append(dep)
         if not has_reduction:
             return None
 
@@ -653,25 +655,19 @@ class NestedReduction:
         if candidate is None:
             return None
         epilogue_nodes, sub_parent_factor = candidate
-        if cls.sub_parent_extent_subs(parent_rnumel, sub_parent_factor) is None:
+        if cls.try_get_sub_parent_extent_subs(parent_rnumel, sub_parent_factor) is None:
             return None
-        source_deps = cls._sub_parent_epilogue_source_deps(
+        source_layouts = cls._try_get_sub_parent_source_layouts(
             epilogue_nodes,
             fused_buffer_names,
             full_numel,
-            reduction_reads,
+            parent_reads_by_name,
             sub_parent_factor,
+            ambiguity_nodes=scheduler_nodes,
         )
-        if not source_deps:
+        if not source_layouts:
             return None
-        planned_source_deps = tuple(dep for dep, _layout in source_deps)
         epilogue_node_set = OrderedSet(epilogue_nodes)
-        if not cls._sub_parent_epilogue_source_loads_are_unambiguous(
-            scheduler_nodes,
-            epilogue_node_set,
-            planned_source_deps,
-        ):
-            return None
         if check_leaves and not cls._sub_parent_epilogue_outputs_unread(
             scheduler_nodes, epilogue_node_set
         ):
@@ -680,7 +676,7 @@ class NestedReduction:
             scheduler_nodes,
             epilogue_node_set,
             numel,
-            OrderedSet(reduction_reads),
+            OrderedSet(parent_reads_by_name),
         ):
             return None
         return StagedReductionPlan(
@@ -693,9 +689,7 @@ class NestedReduction:
             sub_parent_stages=(
                 SubParentEpilogueStage(
                     factor=sub_parent_factor,
-                    source_layouts=tuple(
-                        (dep.name, layout) for dep, layout in source_deps
-                    ),
+                    source_layouts=source_layouts,
                     epilogue_nodes=tuple(epilogue_nodes),
                 ),
             ),
@@ -719,7 +713,7 @@ class NestedReduction:
             node
             for node in nodes
             if not node.is_reduction()
-            and cls._pointwise_node_is_compatible(
+            and cls._pointwise_node_matches_domain(
                 node, sympy_product(expected_groups), expected_groups
             )
         )
@@ -728,7 +722,7 @@ class NestedReduction:
         return candidates, factor
 
     @staticmethod
-    def _pointwise_node_is_compatible(
+    def _pointwise_node_matches_domain(
         node: SchedulerNode,
         expected_numel: sympy.Expr,
         expected_groups: Sequence[sympy.Expr],
@@ -743,10 +737,13 @@ class NestedReduction:
         )
 
     @staticmethod
-    def sub_parent_extent_subs(
+    def try_get_sub_parent_extent_subs(
         parent_extent: sympy.Expr, factor: int
     ) -> dict[sympy.Expr, sympy.Expr] | None:
-        """Normalize a parent extent known to be divisible by ``factor``."""
+        """Return extent substitutions, or ``None`` if divisibility is unproven.
+
+        On success, the mapping may be empty if the extent is already normalized.
+        """
         rounded_extent = V.graph.sizevars.simplify(
             factor * FloorDiv(parent_extent, factor)
         )
@@ -787,7 +784,7 @@ class NestedReduction:
                     ):
                         extent_subs[symbol] = expanded_size
                         break
-                symbol_subs = cls.sub_parent_extent_subs(symbol, factor)
+                symbol_subs = cls.try_get_sub_parent_extent_subs(symbol, factor)
                 if symbol_subs is not None:
                     extent_subs.update(symbol_subs)
         return V.graph.sizevars.simplify(
@@ -795,26 +792,30 @@ class NestedReduction:
         )
 
     @classmethod
-    def _sub_parent_epilogue_source_deps(
+    def _try_get_sub_parent_source_layouts(
         cls,
-        nodes: Sequence[BaseSchedulerNode],
+        epilogue_nodes: Sequence[SchedulerNode],
         fused_buffer_names: OrderedSet[str],
         full_numel: sympy.Expr,
-        reduction_reads: dict[str, list[MemoryDep]],
+        parent_reads_by_name: dict[str, list[MemoryDep]],
         sub_parent_factor: int,
-    ) -> tuple[tuple[MemoryDep, NestedReduction.SubParentSourceLayout], ...] | None:
-        """Which reads feed the epilogue at lane resolution, and how.
+        *,
+        ambiguity_nodes: Sequence[BaseSchedulerNode],
+    ) -> tuple[tuple[str, NestedReduction.SubParentSourceLayout], ...] | None:
+        """Find parent-resolution sources reused by lane-resolution reads.
 
-        A lane read is only legal if it is provably a sub-slice of a read the
-        *reduction* already makes -- otherwise the value would not be in
-        registers when the epilogue runs. The proof is index equality under
-        ``parent_r = factor * child_r + lane``, not a shape match.
+        Reads of a reduction source must be exact lane sub-slices of its parent
+        read. Independent external inputs remain ordinary derived-domain loads.
+        The proof is index equality under ``parent_r = factor * child_r + lane``.
 
-        Note the two falsy returns differ: ``None`` rejects the plan, ``()``
-        means nothing needed planning. Callers that write ``if not source_deps``
-        collapse them.
+        TODO(#190595): Also resolve sources produced by parent-stage pointwise nodes.
+
+        ``None`` rejects the plan; ``()`` means no source needs materialization.
+        The caller rejects both.
         """
-        source_deps: list[tuple[MemoryDep, NestedReduction.SubParentSourceLayout]] = []
+        planned_sources: list[
+            tuple[MemoryDep, NestedReduction.SubParentSourceLayout]
+        ] = []
         source_layouts: dict[str, NestedReduction.SubParentSourceLayout] = {}
 
         def add_source(
@@ -824,11 +825,11 @@ class NestedReduction:
             existing = source_layouts.get(dep.name)
             if existing is not None:
                 return existing is layout
-            source_deps.append((dep, layout))
+            planned_sources.append((dep, layout))
             source_layouts[dep.name] = layout
             return True
 
-        for node in nodes:
+        for node in epilogue_nodes:
             for dep in node.read_writes.reads:
                 if not isinstance(dep, MemoryDep):
                     if dep.name in fused_buffer_names:
@@ -838,53 +839,65 @@ class NestedReduction:
                     sub_parent_factor * sympy_product(dep.ranges.values()), full_numel
                 ):
                     if (
-                        dep.name in reduction_reads
+                        dep.name in parent_reads_by_name
                         and dep.name not in fused_buffer_names
                     ):
                         return None
                     continue
-                if dep.name in fused_buffer_names and dep.name not in reduction_reads:
+                if (
+                    dep.name in fused_buffer_names
+                    and dep.name not in parent_reads_by_name
+                ):
                     continue
-                reduction_deps = reduction_reads.get(dep.name, [])
-                if not reduction_deps:
+                parent_deps = parent_reads_by_name.get(dep.name, [])
+                if not parent_deps:
                     if dep.name in V.graph.removed_buffers:
                         return None
                     continue
-                if len(reduction_deps) != 1:
+                if len(parent_deps) != 1:
                     return None
-                reduction_dep = reduction_deps[0]
-                half_dim = cls._unique_trailing_sub_parent_dim(
-                    dep, reduction_dep, sub_parent_factor
+                parent_dep = parent_deps[0]
+                sub_parent_dim = cls._unique_trailing_sub_parent_dim(
+                    dep, parent_dep, sub_parent_factor
                 )
-                if half_dim is None:
+                if sub_parent_dim is None:
                     return None
-                parent_size = reduction_dep.size[half_dim]
-                extent_subs = cls.sub_parent_extent_subs(parent_size, sub_parent_factor)
+                parent_size = parent_dep.size[sub_parent_dim]
+                extent_subs = cls.try_get_sub_parent_extent_subs(
+                    parent_size, sub_parent_factor
+                )
                 if extent_subs is None:
                     return None
                 lane = cls.interleaved_sub_parent_lane(
                     dep.index,
                     sub_parent_factor,
                     extent_subs,
-                    reduction_dep.size,
+                    parent_dep.size,
                 )
                 if sub_parent_factor == cls.INTERLEAVED_SUB_PARENT_FACTOR and (
                     any(
                         V.graph.sizevars.statically_known_equals(lane, value)
                         for value in range(sub_parent_factor)
                     )
-                    and cls._interleaved_sub_parent_epilogue_read_matches_reduction_read(
-                        dep, reduction_dep, lane, sub_parent_factor
+                    and cls._interleaved_sub_parent_epilogue_read_matches_parent_read(
+                        dep, parent_dep, lane, sub_parent_factor
                     )
                 ):
                     if not add_source(
-                        reduction_dep,
+                        parent_dep,
                         cls.SubParentSourceLayout.INTERLEAVED,
                     ):
                         return None
                     continue
                 return None
-        return tuple(source_deps)
+        # Check exact accesses before collapsing the codegen contract to names.
+        if not cls._sub_parent_epilogue_source_loads_are_unambiguous(
+            ambiguity_nodes,
+            OrderedSet(epilogue_nodes),
+            tuple(dep for dep, _layout in planned_sources),
+        ):
+            return None
+        return tuple((dep.name, layout) for dep, layout in planned_sources)
 
     @staticmethod
     def _sub_parent_epilogue_outputs_unread(
@@ -920,6 +933,9 @@ class NestedReduction:
         A source buffer is materialized once, split into lanes. Another node
         reading the same buffer through a *different* index would silently be
         handed a lane rather than the value it asked for.
+
+        TODO: Extend #188180's structural load-index cache to derived projections
+        so distinct accesses to one buffer need not be rejected here.
         """
         source_deps_by_name: dict[str, OrderedSet[MemoryDep]] = {}
         for dep in source_deps:
@@ -968,7 +984,7 @@ class NestedReduction:
     @staticmethod
     def _unique_trailing_sub_parent_dim(
         dep: MemoryDep,
-        reduction_dep: MemoryDep,
+        parent_dep: MemoryDep,
         sub_parent_factor: int,
     ) -> int | None:
         """The dim the lane split applies to, if it is unambiguously the last one.
@@ -977,61 +993,61 @@ class NestedReduction:
         shapes like ``[B, factor*C, C]``, where the split could be read against
         an interior axis and produce a valid-looking but wrong index.
         """
-        if len(dep.var_names) != len(reduction_dep.var_names):
+        if len(dep.var_names) != len(parent_dep.var_names):
             return None
 
-        reduction_half_dims = [
+        sub_parent_dims = [
             i
-            for i, size in enumerate(reduction_dep.size)
+            for i, size in enumerate(parent_dep.size)
             if V.graph.sizevars.statically_known_equals(
                 size, dep.size[i] * sub_parent_factor
             )
         ]
-        if len(reduction_half_dims) != 1:
+        if len(sub_parent_dims) != 1:
             return None
-        half_dim = reduction_half_dims[0]
-        if half_dim != len(dep.var_names) - 1:
+        sub_parent_dim = sub_parent_dims[0]
+        if sub_parent_dim != len(dep.var_names) - 1:
             return None
-        return half_dim
+        return sub_parent_dim
 
     @staticmethod
-    def _interleaved_sub_parent_epilogue_read_matches_reduction_read(
+    def _interleaved_sub_parent_epilogue_read_matches_parent_read(
         dep: MemoryDep,
-        reduction_dep: MemoryDep,
+        parent_dep: MemoryDep,
         lane: sympy.Expr,
         sub_parent_factor: int,
     ) -> bool:
-        """Whether ``dep`` is exactly lane ``lane`` of ``reduction_dep``.
+        """Whether ``dep`` is exactly lane ``lane`` of ``parent_dep``.
 
         Substitutes ``parent_r = factor * child_r + lane`` on the split dim and
         identity elsewhere, then requires the indices to be *equal*. Matching
         shapes is not enough -- two reads can agree on extents and still address
         different elements.
         """
-        half_dim = NestedReduction._unique_trailing_sub_parent_dim(
-            dep, reduction_dep, sub_parent_factor
+        sub_parent_dim = NestedReduction._unique_trailing_sub_parent_dim(
+            dep, parent_dep, sub_parent_factor
         )
-        if half_dim is None:
+        if sub_parent_dim is None:
             return False
 
         substitutions: dict[sympy.Symbol, sympy.Expr] = {}
-        extent_subs = NestedReduction.sub_parent_extent_subs(
-            reduction_dep.size[half_dim], sub_parent_factor
+        extent_subs = NestedReduction.try_get_sub_parent_extent_subs(
+            parent_dep.size[sub_parent_dim], sub_parent_factor
         )
         if extent_subs is None:
             return False
-        for i, reduction_var in enumerate(reduction_dep.var_names):
+        for i, parent_var in enumerate(parent_dep.var_names):
             dep_var = dep.var_names[i]
-            if i == half_dim:
-                substitutions[reduction_var] = sub_parent_factor * dep_var + lane
+            if i == sub_parent_dim:
+                substitutions[parent_var] = sub_parent_factor * dep_var + lane
             elif V.graph.sizevars.statically_known_equals(
-                reduction_dep.size[i], dep.size[i]
+                parent_dep.size[i], dep.size[i]
             ):
-                substitutions[reduction_var] = dep_var
+                substitutions[parent_var] = dep_var
             else:
                 return False
 
-        expected = sympy_subs(reduction_dep.index, extent_subs).subs(substitutions)
+        expected = sympy_subs(parent_dep.index, extent_subs).subs(substitutions)
         return V.graph.sizevars.statically_known_equals(dep.index, expected)
 
     @classmethod
@@ -1205,7 +1221,7 @@ class NestedReduction:
                 domain_context.grouped_numel * domain_context.grouped_rnumel
             )
             expected_groups = domain_context.parent_full_domain
-        return cls._pointwise_node_is_compatible(sn, expected_numel, expected_groups)
+        return cls._pointwise_node_matches_domain(sn, expected_numel, expected_groups)
 
     @classmethod
     def _min_block_unprofitable_for_kernel(
