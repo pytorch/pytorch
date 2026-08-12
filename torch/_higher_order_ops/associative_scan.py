@@ -32,6 +32,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
+    get_proxy_mode,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -775,7 +776,9 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
 
             def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
-                return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
+                g_bw = bw * bw_next
+                g_gl = torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
+                return [g_bw, g_gl]
 
             # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
             # associative_scan_op HOP (not generic_associative_scan) so this scan is
@@ -887,10 +890,31 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
 
 
 class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
-    """``_VmapCombineFnWrapper`` specialization for ``combine_mode="pointwise"``."""
+    """``_VmapCombineFnWrapper`` specialization for ``combine_mode="pointwise"``.
+
+    The base wrapper re-vmaps ``combine_fn`` with the batch dim parked on the last
+    axis; that round-trips the batch dim to the front and back, injecting a
+    canceling pair of layout ops around the ``combine_fn`` core. Under compile those
+    ops would survive into the Inductor combine subgraph and force it to elide them,
+    which breaks the pointwise lowering.
+
+    The fast path instead calls ``combine_fn`` directly on the last-axis-batched
+    args, leaving the combine subgraph clean. This is only sound when ``combine_fn``
+    is genuinely elementwise, so that treating the trailing batch axis as an ordinary
+    data axis is a no-op. A dim-sensitive combine (e.g. one calling ``transpose``)
+    still passes the frontend pointwise gate but would be silently miscomputed by the
+    direct call. We therefore restrict the fast path to tracing (compile), where a
+    non-elementwise combine fails loudly in the pointwise lowering; in eager we defer
+    to the always-correct base re-vmap path, which vmaps over the real batch axis.
+    """
 
     def __call__(self, *args: Any) -> Any:
-        if not all(bdim is not None for bdim in self.in_dims):
+        # Only take the fast path under tracing (all args batched at -1). In eager the
+        # base re-vmap path is correct for any combine_fn; the fast path is a
+        # compile-only optimization to keep the Inductor combine subgraph elementwise.
+        if get_proxy_mode() is None or not all(
+            bdim is not None for bdim in self.in_dims
+        ):
             return super().__call__(*args)
         outputs = self.combine_fn(*args)
         # All inputs are batched at -1 and combine_fn is elementwise, so every
@@ -944,6 +968,7 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
             interpreter.batch_size(),
             interpreter.randomness(),
             expected_out_dims=xs_move_dims,
+            op_name="associative_scan",
         )
         unwrapped_out = associative_scan_op(
             wrapper, unbatched_xs, unbatched_additional_inputs
