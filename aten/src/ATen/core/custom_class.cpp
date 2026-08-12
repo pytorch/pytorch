@@ -70,7 +70,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto name = class_type->name()->qualifiedName();
   TORCH_CHECK(
-      !customClasses().count(name),
+      !customClasses().contains(name),
       "Custom class with name ",
       name,
       " is already registered. Ensure that registration with torch::class_ is only called once.");
