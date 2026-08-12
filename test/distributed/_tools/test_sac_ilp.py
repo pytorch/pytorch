@@ -15,8 +15,8 @@ from torch.distributed._tools.ilp_utils import (
 from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -45,10 +45,14 @@ except ImportError:
 # spec (torch/_inductor/analysis/device_info.py) to make them hardware-independent.
 @pytest.mark.multigpu
 class TestSACILP(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
-        self.device = torch.cuda.current_device()
         self.estimate_mode = "operator-level-cost-model"
+
+    def _init_device(self, device):
+        self.device = torch.device(device)
         # Pin the roofline device spec so runtime estimates are deterministic
         # across the physical GPU the test happens to run on.
         self.gpu_type = "NVIDIA H100"
@@ -147,13 +151,13 @@ class TestSACILP(TestCase):
                 mem_tracker,
                 runtime_estimator,
                 sac_estimator,
-                torch.device(self.device),
+                self.device,
             )
         return mod_info
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    def test_sac_ilp_case1(self):
+    def test_sac_ilp_case1(self, device):
+        self._init_device(device)
         """
         This is a case where the memory budget is either binding or too tight,
         meaning that with some AC, the model can fit into GPU memory.
@@ -195,9 +199,9 @@ class TestSACILP(TestCase):
                 ratio, 1, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be <= 1"
             )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    def test_sac_ilp_case2(self):
+    def test_sac_ilp_case2(self, device):
+        self._init_device(device)
         """
         This is a case where the memory budget is not binding, meaning that no
         AC is needed to fit the model into memory.
@@ -211,9 +215,9 @@ class TestSACILP(TestCase):
         self.assertEqual(recomputation_time, 0)
         self.assertGreater(peak_mem, 1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    def test_sac_ilp_case3(self):
+    def test_sac_ilp_case3(self, device):
+        self._init_device(device)
         """
         This is a case where the memory budget is too tight, meaning that even with
         aggressive AC, the model cannot fit into memory.
@@ -231,6 +235,8 @@ class TestSACILP(TestCase):
 class TestOptimalCheckpointingPolicy(TestCase):
     # tests are adapted from tests in xformers
     # https://github.com/facebookresearch/xformers/blob/c6c0ac31f1b08542a0bc27278c6ed10f825f6963/tests/test_checkpoint.py#L222
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         data = [
@@ -254,7 +260,6 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_get_optimial_checkpointing_policy_per_module(self):
         for memory_budget, optimal_soln in [
@@ -271,6 +276,12 @@ class TestOptimalCheckpointingPolicy(TestCase):
             )
             self.assertEqual(optimal_soln, soln)
 
+
+instantiate_device_type_tests(
+    TestSACILP,
+    globals(),
+    only_for="cuda"
+)
 
 if __name__ == "__main__":
     run_tests()
