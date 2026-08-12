@@ -5,11 +5,14 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
+#include <c10/util/TypeCast.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -18,10 +21,14 @@
 #else
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/nanmedian_native.h>
 #include <ATen/ops/sort.h>
 #include <ATen/ops/sort_native.h>
 #include <ATen/ops/topk_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 namespace at::native {
 namespace {
@@ -200,35 +207,35 @@ static void sort_radix(const Tensor& input,
         const Tensor& k_out_buf = ping ? keys_0 : keys_1;
         const Tensor& i_out_buf = ping ? idxs_0 : idxs_1;
 
-        const auto dims = std::array<int32_t, 3>{sort_size, n_blocks, shift};
+        const auto dims = c10::metal::vec3<int32_t>{sort_size, n_blocks, shift};
         const auto flags = std::array<uint8_t, 2>{static_cast<uint8_t>(descending), static_cast<uint8_t>(first_pass)};
 
         if (use_fused_count_scan) {
-          getMPSProfiler().beginProfileKernel(count_scan_pso, count_scan_kernel, {k_in});
+          getMPSProfiler().beginProfileKernel(count_scan_pso, count_scan_kernel, {k_in}, mpsStream);
           [enc setComputePipelineState:count_scan_pso];
           mtl_setArgs(enc, k_in, histograms, dims, descending);
           [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-          getMPSProfiler().endProfileKernel(count_scan_pso);
+          getMPSProfiler().endProfileKernel(count_scan_pso, mpsStream);
         } else {
-          getMPSProfiler().beginProfileKernel(count_pso, count_kernel, {k_in});
+          getMPSProfiler().beginProfileKernel(count_pso, count_kernel, {k_in}, mpsStream);
           [enc setComputePipelineState:count_pso];
           mtl_setArgs(enc, k_in, histograms, dims, descending);
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1)
               threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-          getMPSProfiler().endProfileKernel(count_pso);
+          getMPSProfiler().endProfileKernel(count_pso, mpsStream);
 
           if (!use_fused_scan) {
-            getMPSProfiler().beginProfileKernel(scan_pso, "radix_scan", {histograms});
+            getMPSProfiler().beginProfileKernel(scan_pso, "radix_scan", {histograms}, mpsStream);
             [enc setComputePipelineState:scan_pso];
             mtl_setArgs(enc, histograms, n_entries);
             [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
-            getMPSProfiler().endProfileKernel(scan_pso);
+            getMPSProfiler().endProfileKernel(scan_pso, mpsStream);
           }
         }
 
         auto pso = use_direct ? scatter_final_pso : scatter_pso;
         const auto& kernel_name = use_direct ? scatter_final_kernel : scatter_kernel;
-        getMPSProfiler().beginProfileKernel(pso, kernel_name, {k_in});
+        getMPSProfiler().beginProfileKernel(pso, kernel_name, {k_in}, mpsStream);
         [enc setComputePipelineState:pso];
         if (use_direct && sel_mode) {
           mtl_setArgs(
@@ -239,7 +246,7 @@ static void sort_radix(const Tensor& input,
           mtl_setArgs(enc, k_in, i_in, k_out_buf, i_out_buf, histograms, dims, flags);
         }
         [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, mpsStream);
 
         ping = !ping;
       }
@@ -279,7 +286,7 @@ static void sort_single_block(const Tensor& input,
     @autoreleasepool {
       auto enc = mpsStream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(kernel);
-      getMPSProfiler().beginProfileKernel(pso, kernel, {input});
+      getMPSProfiler().beginProfileKernel(pso, kernel, {input}, mpsStream);
       [enc setComputePipelineState:pso];
       const auto strides = std::array<int64_t, 2>{stride_sort, stride_seg};
       if (sel_mode) {
@@ -289,7 +296,7 @@ static void sort_single_block(const Tensor& input,
         mtl_setArgs(enc, input, values, indices, sort_size, strides, descending);
       }
       [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -369,11 +376,11 @@ static void sort_multi_block(const Tensor& input,
 
       // Stage 1: independently sort each block
       auto block_pso = lib.getPipelineStateForFunc(block_fn);
-      getMPSProfiler().beginProfileKernel(block_pso, block_fn, {work_in});
+      getMPSProfiler().beginProfileKernel(block_pso, block_fn, {work_in}, mpsStream);
       [enc setComputePipelineState:block_pso];
       mtl_setArgs(enc, work_in, buf_v0, buf_i0, sort_size, std::array<int64_t, 2>{stride_sort, stride_seg}, descending);
       [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-      getMPSProfiler().endProfileKernel(block_pso);
+      getMPSProfiler().endProfileKernel(block_pso, mpsStream);
 
       // Stage 2: pairwise merge passes, doubling run length each round
       if (n_blocks > 1) {
@@ -392,16 +399,16 @@ static void sort_multi_block(const Tensor& input,
           // Final keyed merge inverts keys with the real direction; intermediate
           // keyed merges sort keys ascending (direction already baked into the key).
           const bool stage_desc = (keyed && !is_last) ? false : descending;
-          getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in});
+          getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in}, mpsStream);
           [enc setComputePipelineState:pso];
-          const auto dims = std::array<int32_t, 3>{sort_size, merge_tiles, n_blocks};
+          const auto dims = c10::metal::vec3<int32_t>{sort_size, merge_tiles, n_blocks};
           if (is_last && sel_mode) {
             mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc, std::array<int32_t, 2>{sel.offset, sel.count});
           } else {
             mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc);
           }
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-          getMPSProfiler().endProfileKernel(pso);
+          getMPSProfiler().endProfileKernel(pso, mpsStream);
         }
       }
     }
@@ -534,8 +541,9 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
     indices.copy_(values.toType(at::ScalarType::Long));
     return;
   }
-  // to mimic cpu behaviour
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "kthvalue_mps", [] {});
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "kthvalue_mps not implemented for ",
+                              self.scalar_type());
 
   sort_out_mps_impl(self,
                     /*stable=*/false,
@@ -544,6 +552,133 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
                     values,
                     indices,
                     TopKParams{/*offset=*/static_cast<int>(k - 1), /*count=*/1});
+}
+
+// Float median: full sort along the last dim, then a per-row NaN-aware pick.
+static void median_sort_gather(const Tensor& in_l, const Tensor& out_vals, const Tensor& out_idxs, bool ignore_nan) {
+  const int64_t sort_size = in_l.size(-1);
+  const int64_t n_rows = in_l.numel() / sort_size;
+  auto sorted_vals = at::empty(in_l.sizes(), in_l.options());
+  auto sorted_idxs = at::empty(in_l.sizes(), in_l.options().dtype(kLong));
+  sort_out_mps_impl(in_l, /*stable=*/false, in_l.dim() - 1, /*descending=*/false, sorted_vals, sorted_idxs);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = mpsStream->commandEncoder();
+      const auto kernel = fmt::format("median_gather_{}", scalarToMetalTypeString(in_l));
+      auto pso = lib.getPipelineStateForFunc(kernel);
+      getMPSProfiler().beginProfileKernel(pso, kernel, {sorted_vals}, mpsStream);
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, sorted_vals, sorted_idxs, out_vals, out_idxs, static_cast<uint32_t>(sort_size), ignore_nan);
+      mtl_dispatch1DJob(enc, pso, n_rows);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
+    }
+  });
+}
+
+static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
+                                                                 Tensor& indices,
+                                                                 const Tensor& self,
+                                                                 int64_t dim,
+                                                                 bool keepdim,
+                                                                 bool ignore_nan) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "median_mps not implemented for ",
+                              self.scalar_type());
+  checkDeviceType("median", {values, indices}, self.device().type());
+  checkScalarType("median", {indices, "indices", 1}, kLong);
+  checkSameType("median", {values, "values", 0}, {self, "self", 2});
+
+  std::vector<int64_t> out_shape = self.sizes().vec();
+  zero_numel_check_dims(self, dim, "median()");
+  if (self.dim() > 0) {
+    if (keepdim) {
+      out_shape[dim] = 1;
+    } else {
+      out_shape.erase(out_shape.begin() + dim);
+    }
+  }
+
+  resize_output(values, out_shape);
+  resize_output(indices, out_shape);
+
+  if (self.numel() == 0) {
+    return std::forward_as_tuple(values, indices);
+  }
+  if (self.dim() == 0) {
+    values.copy_(self);
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+
+  Tensor vals = keepdim ? values : values.unsqueeze(dim);
+  Tensor inds = keepdim ? indices : indices.unsqueeze(dim);
+
+  if (!self.is_floating_point()) {
+    // no NaNs possible: select rank (n-1)/2 directly, like kthvalue
+    const auto k = static_cast<int>((self.size(dim) - 1) / 2);
+    sort_out_mps_impl(self, /*stable=*/false, dim, /*descending=*/false, vals, inds, TopKParams{k, 1});
+  } else {
+    const bool direct = vals.is_contiguous() && inds.is_contiguous();
+    Tensor mv = direct ? vals : at::empty(vals.sizes(), vals.options());
+    Tensor mi = direct ? inds : at::empty(inds.sizes(), inds.options());
+    Tensor in_l = dim == self.dim() - 1 ? self : self.movedim(dim, -1);
+    median_sort_gather(in_l, mv, mi, ignore_nan);
+    if (!direct) {
+      vals.copy_(mv);
+      inds.copy_(mi);
+    }
+  }
+  return std::forward_as_tuple(values, indices);
+}
+
+// Global median via radix selection (see Sort.metal); no sort materialized.
+static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool ignore_nan) {
+  const int n_passes = static_cast<int>(flat.element_size());
+  const auto numel = c10::checked_convert<uint32_t>(flat.numel(), "uint32_t");
+  auto state = at::zeros({3}, flat.options().dtype(kLong));
+  auto hist = at::zeros({257}, flat.options().dtype(kInt));
+  const auto n_tgs = std::min<uint32_t>(at::ceil_div(numel, 256u), 256u);
+
+  const auto type_str = scalarToMetalTypeString(flat);
+  const auto hist_name = fmt::format("median_select_hist_{}", type_str);
+  const auto pick_name = fmt::format("median_select_pick_{}", type_str);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = mpsStream->commandEncoder();
+      auto hist_pso = lib.getPipelineStateForFunc(hist_name);
+      auto pick_pso = lib.getPipelineStateForFunc(pick_name);
+      getMPSProfiler().beginProfileKernel(hist_pso, hist_name, {flat}, mpsStream);
+      for (int p = 0; p < n_passes; p++) {
+        const auto shift = static_cast<uint32_t>((n_passes - 1 - p) * 8);
+        const bool first = p == 0;
+        const bool last = p == n_passes - 1;
+        [enc setComputePipelineState:hist_pso];
+        mtl_setArgs(enc, flat, state, hist, numel, shift, first);
+        [enc dispatchThreadgroups:MTLSizeMake(n_tgs, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [enc setComputePipelineState:pick_pso];
+        mtl_setArgs(enc, out_val, state, hist, numel, first, last, ignore_nan);
+        mtl_dispatch1DJob(enc, pick_pso, 1);
+      }
+      getMPSProfiler().endProfileKernel(hist_pso, mpsStream);
+    }
+  });
+}
+
+static Tensor median_impl_mps(const Tensor& self, bool ignore_nan) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self) || isIntegralType(self.scalar_type(), /*includeBool=*/false),
+                              "median_mps not implemented for ",
+                              self.scalar_type());
+  if (self.numel() == 0) {
+    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
+  }
+  auto out_val = at::empty({}, self.options());
+  median_radix_select(self.flatten().contiguous(), out_val, ignore_nan);
+  return out_val;
 }
 
 } // namespace
@@ -637,5 +772,29 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_mps(const Tensor& self,
   }
 
   return std::forward_as_tuple(values, indices);
+}
+
+Tensor median_mps(const Tensor& self) {
+  return median_impl_mps(self, /*ignore_nan=*/false);
+}
+
+Tensor nanmedian_mps(const Tensor& self) {
+  return median_impl_mps(self, /*ignore_nan=*/self.is_floating_point());
+}
+
+std::tuple<Tensor&, Tensor&> median_out_mps(const Tensor& self,
+                                            int64_t dim,
+                                            bool keepdim,
+                                            Tensor& values,
+                                            Tensor& indices) {
+  return median_with_indices_impl_mps(values, indices, self, dim, keepdim, /*ignore_nan=*/false);
+}
+
+std::tuple<Tensor&, Tensor&> nanmedian_out_mps(const Tensor& self,
+                                               int64_t dim,
+                                               bool keepdim,
+                                               Tensor& values,
+                                               Tensor& indices) {
+  return median_with_indices_impl_mps(values, indices, self, dim, keepdim, /*ignore_nan=*/self.is_floating_point());
 }
 } // namespace at::native

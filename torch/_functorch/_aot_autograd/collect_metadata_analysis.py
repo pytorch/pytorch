@@ -19,7 +19,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -49,6 +49,7 @@ from .functional_utils import (
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
+    was_shallow_copy_data,
 )
 from .schemas import (
     InputAliasInfo,
@@ -69,6 +70,66 @@ zip = strict_zip
 
 log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
+
+
+def _collect_output_autograd_dependencies(
+    output_edges: list[tuple[torch.autograd.graph.Node, int] | None],
+) -> list[tuple[int, ...]]:
+    """Collect candidate dependencies while the outer output edges are still live.
+
+    Using the FunctionalTensor outputs avoids confusing detached dataflow with
+    autograd connectivity and preserves outer tensor-subclass and view structure.
+    Paths through custom autograd Functions are omitted conservatively because
+    ``next_functions`` cannot say which inputs their backward returns gradients for.
+    """
+    if sum(edge is not None for edge in output_edges) < 2:
+        return [() for _ in output_edges]
+
+    edge_to_output_indices: dict[tuple[torch.autograd.graph.Node, int], list[int]] = (
+        collections.defaultdict(list)
+    )
+    for output_idx, edge in enumerate(output_edges):
+        if edge is not None:
+            edge_to_output_indices[edge].append(output_idx)
+
+    output_dependencies: list[tuple[int, ...]] = []
+    for output_idx, edge in enumerate(output_edges):
+        dependencies: set[int] = set()
+        stack: list[tuple[torch.autograd.graph.Node, int]] = (
+            [] if edge is None else [edge]
+        )
+        seen: set[tuple[torch.autograd.graph.Node, int]] = set()
+        while stack:
+            node, output_nr = stack.pop()
+            current_edge = (node, output_nr)
+            if current_edge in seen:
+                continue
+            seen.add(current_edge)
+
+            current_dependencies = {
+                dependency_idx
+                for dependency_idx in edge_to_output_indices.get((node, output_nr), ())
+                if dependency_idx != output_idx
+            }
+            if current_dependencies:
+                dependencies.update(current_dependencies)
+                # Store only the nearest sibling outputs. Runtime validation
+                # follows these edges transitively, avoiding quadratic metadata
+                # for functions that return a long chain of intermediates.
+                continue
+
+            if type(node).__name__ == "CppFunction" or isinstance(
+                node, torch.autograd.function.BackwardCFunction
+            ):
+                continue
+
+            stack.extend(
+                (next_node, next_output_nr)
+                for next_node, next_output_nr in node.next_functions
+                if next_node is not None
+            )
+        output_dependencies.append(tuple(sorted(dependencies)))
+    return output_dependencies
 
 
 # Note [Tangents memory format]
@@ -190,7 +251,7 @@ def run_functionalized_fw_and_collect_metadata(
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         if not all(
-            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            isinstance(a, tuple(KNOWN_TYPES)) or is_custom_class(type(a))
             for a in flat_args
         ):
             raise AssertionError("all flat_args must be KNOWN_TYPES or opaque types")
@@ -208,7 +269,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(
+            _allow_token_discovery=True,
+            _keep_input_mutations=keep_input_mutations,
+        )
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
@@ -251,18 +315,10 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for arg, f_arg in zip(flat_args, flat_f_args):
-            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
-            # strides between the functionalized arg inner tensors and non-functionalized arg inner
-            # tensors. This is a problem as the inner tensor stride change may not be reflected
-            # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
-            if mutates_metadata and is_traceable_wrapper_subclass(arg):
-                raise RuntimeError(
-                    "Metadata mutations are currently not allowed on tensor subclasses"
-                )
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
@@ -287,6 +343,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
+                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
@@ -426,6 +483,7 @@ def run_functionalized_fw_and_collect_metadata(
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
         intermediate_bases_descs: list[AOTInput] = []
+        output_grad_edges: list[tuple[torch.autograd.graph.Node, int] | None] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -446,7 +504,7 @@ def run_functionalized_fw_and_collect_metadata(
         #     return out
         #
         # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
-        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # However, due to how set_() and more specifically, set is functionalized, is defined to preserve eager semantics,
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
@@ -482,6 +540,9 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(o, Tensor):
                 with FunctionalTensorMode():
                     grad_fn = o.grad_fn
+            output_grad_edges.append(
+                None if grad_fn is None else (grad_fn, o.output_nr)
+            )
 
             is_result_of_custom_autograd_fn = False
             # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
@@ -662,7 +723,7 @@ from a multi-output view call"
                 #    (iii) alias_of_intermediate_base_is_user_output.
                 #
                 # No need to worry about in-place view operations here, since
-                # this functionalization step elimitates mutations.
+                # this functionalization step eliminates mutations.
                 #
                 # i.e. we have access to the actual base tensor, before the
                 # in-place operation was applied.
@@ -874,6 +935,9 @@ from a multi-output view call"
             subclass_inp_meta=subclass_inp_meta,
             subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
             subclass_tangent_meta=subclass_tangent_meta,
+            compiled_autograd_output_deps=_collect_output_autograd_dependencies(
+                output_grad_edges
+            ),
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,

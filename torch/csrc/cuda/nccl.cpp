@@ -226,7 +226,7 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
       << ncclGetErrorString(to_nccl_result(status));
-  TORCH_CHECK(false, err.str());
+  TORCH_CHECK(false, std::move(err).str());
 }
 
 struct NcclCommList {
@@ -333,7 +333,7 @@ void check_inputs(
     std::stringstream err;
     err << "inputs and outputs sequences have to be of the same length, but got input of length "
         << len << " and output of length " << outputs.size();
-    TORCH_CHECK(false, err.str());
+    TORCH_CHECK(false, std::move(err).str());
   }
 
   device_set devices;
@@ -525,10 +525,13 @@ size_t get_max_count() {
 
 void broadcast(
     TensorList tensors,
+    int32_t root,
     const stream_list& streams,
     const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
+  TORCH_CHECK(
+      root >= 0 && static_cast<size_t>(root) < tensors.size(), "invalid root");
   check_inputs(tensors, tensors, 1, 1);
   auto data_type = to_nccl_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
@@ -558,7 +561,7 @@ void broadcast(
         tensors[i].mutable_data_ptr(),
         numel,
         data_type,
-        0,
+        root,
         to_nccl_comm(comm),
         stream));
   }
@@ -764,12 +767,14 @@ void all2all_single_equal_split(
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.mutable_data_ptr());
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) || defined(NCCL_ALLTOALL_SUPPORTED)
-  // NCCL_ALLTOALL_SUPPORTED is used so NCCL can differentiate send/recv
-  // operations issued as a part of the collective (e.g. alltoall) vs those
-  // inside traditional p2p operations.
+#if defined(USE_ROCM)
+  // RCCL spells the collective with a capital T.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#elif defined(NCCL_ALLTOALL_SUPPORTED) || \
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  // Using the collective rather than a send/recv loop lets NCCL differentiate
+  // send/recv operations issued as part of the collective (e.g. alltoall) vs
+  // those inside traditional p2p operations.
   NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   int numranks = 0;
