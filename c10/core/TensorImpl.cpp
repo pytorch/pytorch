@@ -333,6 +333,10 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  if (extra_meta_ && extra_meta_->fake_constant_) {
+    extra_meta_->fake_constant_.reset();
+    extra_meta_->fake_tensor_mode_.reset();
+  }
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -1100,15 +1104,10 @@ void FakeTensorMode::set_constant(
   // a registered fake tensor always has ExtraMeta (set by set_fake_device)
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
-  // The cleanup contract requires this fake to belong to this mode: ~ExtraMeta
-  // calls extra_meta->fake_tensor_mode_->remove_constant(extra_meta), so an
-  // entry registered here against a different mode would leak / dangle.
-  TORCH_INTERNAL_ASSERT(extra_meta->fake_tensor_mode_.get() == this);
   if (constant_storage) {
     constant_storage_mapping_[constant_storage].emplace_back(fake_impl);
   }
-  extra_meta->has_fake_constant_ = true;
-  tensor_to_constant_[extra_meta] = std::move(constant);
+  extra_meta->fake_constant_ = std::move(constant);
 }
 
 c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
@@ -1118,11 +1117,7 @@ c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
   if (extra_meta == nullptr) {
     return nullptr;
   }
-  auto it = tensor_to_constant_.find(extra_meta);
-  if (it == tensor_to_constant_.end()) {
-    return nullptr;
-  }
-  return it->second;
+  return extra_meta->fake_constant_;
 }
 
 void FakeTensorMode::invalidate_constant_aliases(
@@ -1136,48 +1131,13 @@ void FakeTensorMode::invalidate_constant_aliases(
     auto impl = weak_ref.lock();
     if (impl) {
       if (auto* extra_meta = impl->maybe_get_extra_meta()) {
-        // clear the flag so the tensor's later ~ExtraMeta skips the redundant
-        // remove_constant (the entry is gone); safe since impl is alive here.
-        extra_meta->has_fake_constant_ = false;
-        tensor_to_constant_.erase(extra_meta);
+        extra_meta->fake_constant_.reset();
       }
     }
   }
   constant_storage_mapping_.erase(it);
 }
 
-void FakeTensorMode::remove_constant(c10::ExtraMeta* extra_meta) {
-  std::lock_guard<std::mutex> lock(constant_mutex_);
-  // get the constant storage associated with this tensor
-  auto constant_it = tensor_to_constant_.find(extra_meta);
-  if (constant_it == tensor_to_constant_.end()) {
-    return;
-  }
-  c10::StorageImpl* storage = constant_it->second->has_storage()
-      ? constant_it->second->storage().unsafeGetStorageImpl()
-      : nullptr;
-  tensor_to_constant_.erase(constant_it);
-  if (storage == nullptr) {
-    return;
-  }
-  // remove all invalid aliases from constant_storage_mapping_
-  auto it = constant_storage_mapping_.find(storage);
-  if (it == constant_storage_mapping_.end()) {
-    return;
-  }
-  auto& aliases = it->second;
-  std::erase_if(aliases, [](const c10::weak_intrusive_ptr<c10::TensorImpl>& w) {
-    return w.expired();
-  });
-  if (aliases.empty()) {
-    constant_storage_mapping_.erase(it);
-  }
-}
-
-ExtraMeta::~ExtraMeta() {
-  if (has_fake_constant_ && fake_tensor_mode_) {
-    fake_tensor_mode_->remove_constant(this);
-  }
-}
+ExtraMeta::~ExtraMeta() = default;
 
 } // namespace c10
