@@ -24,6 +24,7 @@ import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -141,6 +142,7 @@ class CPythonTestCase(TestCase):
     tracing through unittest methods.
     """
 
+    hw_classification = HardwareClassification.GENERIC
     _stack: contextlib.ExitStack
     dynamo_strict_nopython = True
 

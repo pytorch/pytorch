@@ -176,8 +176,12 @@ class _KinetoProfile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exists, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -901,8 +905,12 @@ class profile(_KinetoProfile):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exists, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
