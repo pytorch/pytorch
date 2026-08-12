@@ -25,10 +25,20 @@ struct XPUEvent {
       : device_index_(device_index) {
     // Events reconstructed from an IPC handle cannot be re-exported via
     // ipc_handle(). So keep `enable_ipc_` false to avoid confusion.
+    auto& device = c10::xpu::get_raw_device(device_index);
+    reusable_ = device.has(sycl::aspect::ext_oneapi_ipc_event) &&
+        device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+    TORCH_CHECK(
+        reusable_,
+        "XPUEvent reconstructed from an IPC handle must be reusable.");
     event_ = std::make_unique<sycl::event>(
         sycl::ext::oneapi::experimental::ipc::event::open(
             handle_data, c10::xpu::get_device_context()));
-    reusable_ = true;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+    }
   }
 #endif
 
@@ -196,6 +206,7 @@ struct XPUEvent {
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
     }
+    TORCH_CHECK(reusable_, "XPUEvent must be reusable to support IPC.");
     return sycl::ext::oneapi::experimental::ipc::event::get(*event_).data();
   }
 #endif
