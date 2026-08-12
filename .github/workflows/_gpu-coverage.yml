@@ -70,6 +70,8 @@ jobs:
 
       - name: Collect changed files
         id: changed
+        # Container jobs default to `sh`, which lacks the bash builtins used below.
+        shell: bash
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
@@ -96,18 +98,22 @@ jobs:
 
       - name: Check GPU smoke-list coverage
         if: steps.changed.outputs.count != '0'
+        shell: bash
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           TESTINTRO_CACHE: ${{ runner.temp }}/testintro-cache
         run: |
           set -ex
+          shopt -s nullglob
+          wheels=(dist/*.whl)
           # A pruned or failed build leaves no wheel. Exiting 0 here would report a
           # green check having measured nothing.
-          if ! compgen -G 'dist/*.whl' > /dev/null; then
-            echo "::error::no build artifact; gpu-coverage measured nothing"
+          if [ ${#wheels[@]} -eq 0 ]; then
+            echo "::error::no build artifact in $(pwd)/dist; gpu-coverage measured nothing"
+            ls -la . dist 2>&1 || true
             exit 1
           fi
           # gpu_coverage imports no torch itself; the wheel is imported only by
           # collector worker subprocesses, which are launched by path.
-          pip install "$(echo dist/*.whl)[opt-einsum]"
+          pip install "${wheels[0]}[opt-einsum]"
           python tools/testing/gpu_coverage.py --changed
