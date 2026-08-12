@@ -188,7 +188,7 @@ class TestAsyncProcessExecutorPrefixStore(TestCase):
 
     @skip_if_win32()
     @retry_on_connect_failures
-    def test_checkpoint_save_with_prefix_store_enabled(self) -> None:
+    def test_checkpoint_save_with_prefix_store_enabled(self, device) -> None:
         """Test that checkpoint save works when DCP_USE_PREFIX_STORE is enabled."""
 
         test_state_dict = {
@@ -382,6 +382,9 @@ class TestProcessGroupInitInfo(DTensorTestBase):
 
 
 instantiate_device_type_tests(TestAsyncProcessExecutor, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestAsyncProcessExecutorPrefixStore, globals(), only_for="cpu"
+)
 instantiate_device_type_tests(TestProcessGroupInitInfo, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
