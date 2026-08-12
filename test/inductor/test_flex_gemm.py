@@ -1819,8 +1819,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 inline_asm_elementwise(
                     acc.float(),
                     asm_str=(
-                        "{ .reg .b16 h; cvt.rn.bf16.f32 h, $1; "
-                        "cvt.f32.bf16 $0, h; }"
+                        "{ .reg .b16 h; cvt.rn.bf16.f32 h, $1; cvt.f32.bf16 $0, h; }"
                     ),
                     constraints="=f,f",
                     dtype=torch.float32,
@@ -1853,9 +1852,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             with self.subTest(round_acc=round_acc):
                 actual, (code,) = run_and_get_code(
                     torch.compile(
-                        lambda a, b, packed: fn(
-                            a, b, packed, round_acc=round_acc
-                        ),
+                        lambda a, b, packed: fn(a, b, packed, round_acc=round_acc),
                         backend="inductor",
                         fullgraph=True,
                     ),
@@ -1864,7 +1861,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     packed,
                 )
                 torch.testing.assert_close(
-                    actual[0], reference[0], atol=3e-1 if not round_acc else 1e-4, rtol=0
+                    actual[0],
+                    reference[0],
+                    atol=3e-1 if not round_acc else 1e-4,
+                    rtol=0,
                 )
                 self.assertEqual(actual[1], reference[1])
                 self.assertIn("packed_preact=", code)

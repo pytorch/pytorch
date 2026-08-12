@@ -10,7 +10,7 @@ import dataclasses
 import hashlib
 import math
 import operator
-from typing import Any
+from typing import Any, cast
 
 from sympy import Max, Min
 
@@ -1712,7 +1712,7 @@ def packed_interleaved_b16x2_match(
     matches = []
     for capture_view, lanes in candidates.items():
         capture_view_args = view_or_reshape_args(capture_view)
-        if set(lanes) != {0, 1} or capture_view_args is None:
+        if OrderedSet(lanes) != OrderedSet([0, 1]) or capture_view_args is None:
             continue
         capture = capture_view_args[0]
         capture_meta = capture.meta.get("val")
@@ -1728,7 +1728,10 @@ def packed_interleaved_b16x2_match(
                 (gemm_meta.shape[0], gemm_meta.shape[1], 2),
             )
             or not all(
-                any(local_reduce.graph.depends_on(value, lane) for value in returned_values)
+                any(
+                    local_reduce.graph.depends_on(value, lane)
+                    for value in returned_values
+                )
                 for lane in lanes.values()
             )
         ):
@@ -2855,13 +2858,16 @@ class FlexGemmEpiModEmitter:
             self.env[node] = self.env[plan.capture]
             return True
         if node in plan.select_indices:
-            self.env[node] = self.value(f"c[{plan.select_indices[node]}]", torch.bfloat16)
+            self.env[node] = self.value(
+                f"c[{plan.select_indices[node]}]", torch.bfloat16
+            )
             return True
         if node in plan.output_lane_wrappers:
-            self.env[node] = self.env[node.args[0]]
+            source = cast(torch.fx.Node, node.args[0])
+            self.env[node] = self.env[source]
             return True
         if node is plan.output_pack:
-            values = node.args[0]
+            values = cast(tuple[torch.fx.Node, ...], node.args[0])
             self.env[node] = tuple(
                 flex_gemm_epilogue_arg(value, self.env) for value in values
             )
