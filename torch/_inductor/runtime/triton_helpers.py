@@ -236,6 +236,16 @@ def prod(input, axis):
 
 
 @triton.jit
+def prod_inner_tree(input, axis, reduction_ordering: tl.constexpr):
+    # Strict-numerics only. Emitted solely on the strict path, which is gated
+    # behind has_triton_reduction_ordering(), so Triton builds lacking the
+    # keyword never compile this helper -- keeping default `prod` portable.
+    return tl.reduce(
+        input, axis, _prod_accumulate, reduction_ordering=reduction_ordering
+    )
+
+
+@triton.jit
 def minimum(a, b):
     return tl.minimum(a, b, propagate_nan=tl.PropagateNan.ALL)
 
