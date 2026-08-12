@@ -117,7 +117,7 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
 
     with unset_fake_temporarily():
         all_hashes: list[int] = [0] * world_size
-        dist.all_gather_object(all_hashes, structure_hash, pg, weights_only=True)
+        dist.all_gather_object(all_hashes, structure_hash, pg)
 
     if all(h == all_hashes[0] for h in all_hashes):
         return True
@@ -126,7 +126,7 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
     fingerprint = _build_diag_fingerprint(gm)
     with unset_fake_temporarily():
         all_fingerprints: list[tuple[object, ...]] = [() for _ in range(world_size)]
-        dist.all_gather_object(all_fingerprints, fingerprint, pg, weights_only=True)
+        dist.all_gather_object(all_fingerprints, fingerprint, pg)
 
     report = _build_mismatch_report(all_fingerprints, rank, world_size)
 

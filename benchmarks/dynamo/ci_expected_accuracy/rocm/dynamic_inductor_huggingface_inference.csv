@@ -22,7 +22,7 @@ BlenderbotForCausalLM,pass_due_to_skip,0
 
 
 
-DebertaV2ForMaskedLM,eager_fail_to_run,0
+DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 

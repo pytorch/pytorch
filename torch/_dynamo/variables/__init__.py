@@ -63,7 +63,7 @@ from .dicts import (
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
-    OrderedItemsDictVariable,
+    OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -129,7 +129,9 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolContextVariable, CUDAMemPoolVariable
 from .misc import (
+    AttributeErrorVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CallMethodVariable,
@@ -139,12 +141,14 @@ from .misc import (
     ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
+    NameErrorVariable,
     NewGlobalVariable,
     NumpyVariable,
     ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
+    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TracebackVariable,
@@ -189,7 +193,6 @@ from .user_defined import (
     InspectVariable,
     MutableMappingVariable,
     NamedTupleVariable,
-    OrderedDictVariable,
     RemovableHandleVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
@@ -208,6 +211,7 @@ from .user_defined import (
 
 __all__ = [
     "AcceleratorDeviceIndexVariable",
+    "AttributeErrorVariable",
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
@@ -226,6 +230,8 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
+    "CUDAMemPoolContextVariable",
+    "CUDAMemPoolVariable",
     "CudagraphOverrideVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
@@ -252,6 +258,7 @@ __all__ = [
     "ListIteratorVariable",
     "ListVariable",
     "MappingProxyVariable",
+    "NameErrorVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewGlobalVariable",
@@ -260,7 +267,6 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "OrderedDictVariable",
-    "OrderedItemsDictVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
@@ -271,6 +277,7 @@ __all__ = [
     "SetAttrBuiltinVariable",
     "SkipFunctionVariable",
     "SliceVariable",
+    "StopIterationVariable",
     "StringFormatVariable",
     "StructSequenceVariable",
     "SuperVariable",

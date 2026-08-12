@@ -1,8 +1,11 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
+import ctypes
 import gc
 import typing
+import warnings
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
@@ -44,6 +47,12 @@ __all__ = [
     "make_graphed_callables",
     "export_dot",
     "export_graph_data",
+    "register_graph_capture_start_hook",
+    "register_graph_capture_end_hook",
+    "register_graph_instantiate_hook",
+    "register_graph_replay_start_hook",
+    "register_graph_replay_end_hook",
+    "register_graph_destroy_hook",
 ]
 
 
@@ -108,6 +117,181 @@ def _require_cuda_bindings() -> None:
         )
 
 
+class _RetainedCallbacks:
+    r"""Holds destroy callbacks and retained objects for a single capture cycle
+    of a :class:`CUDAGraph`.
+
+    A :class:`CUDAGraph` owns one of these and arms a :func:`weakref.finalize`
+    bound to :meth:`fire`. The holder deliberately does NOT reference the graph,
+    so the finalizer cannot keep the graph alive; :meth:`fire` can still sync the
+    replay streams because they are mirrored onto the holder, not read off the
+    graph. Callbacks and objects live in ``OrderedDict``s keyed by
+    ``RemovableHandle`` id so registrations can be individually removed.
+    """
+
+    def __init__(self) -> None:
+        self.callbacks: OrderedDict[int, Callable[[], None]] = OrderedDict()
+        self.objects: OrderedDict[int, object] = OrderedDict()
+        # Streams the graph was replayed on; drained before firing. A set (not a
+        # single stream) because concurrent replays on multiple streams leave
+        # work in flight on all of them and we cannot know which finishes last.
+        # Stream hashes/compares by value, so same-stream replays dedup to one
+        # entry -- the common case. Only populated when a caller requested sync.
+        self.replay_streams: set[torch.cuda.Stream] = set()
+        self.sync_before_fire: bool = False
+        self._fired: bool = False
+
+    def fire(self) -> None:
+        # Fired at most once (guards the reset()-then-destroy double trigger).
+        if self._fired:
+            return
+        self._fired = True
+        if self.sync_before_fire:
+            # Drain in-flight replays before releasing anything the graph may
+            # reference. Guarded so a sync failure does not skip the callbacks.
+            for stream in self.replay_streams:
+                try:
+                    stream.synchronize()
+                except Exception:
+                    pass
+        for cb in list(self.callbacks.values()):
+            try:
+                cb()
+            except Exception:
+                pass  # match finalizer semantics: swallow, don't abort the rest
+        self.callbacks.clear()
+        self.objects.clear()
+
+
+# Global CUDA-graph lifecycle hooks (the module-level counterpart of the per-graph
+# _capture_start_hooks / _capture_end_hooks / _post_instantiate_hooks / _replay_*_hooks). A
+# consumer (e.g. a profiler observer) registers a hook that fires for every graph, so the graph
+# code stays free of consumer knowledge and a consumer sees captures of graphs it did not build
+# (an inductor or NCCL capture); registering a hook is the opt-in. Keyed by RemovableHandle id.
+# The fan-out (_run_global_hooks) swallows per-hook errors so one consumer cannot break a graph
+# lifecycle step for another -- unlike the per-graph hooks, whose errors propagate to the owner.
+_global_capture_start_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = (
+    OrderedDict()
+)
+_global_capture_end_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = OrderedDict()
+_global_instantiate_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = OrderedDict()
+_global_replay_start_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = (
+    OrderedDict()
+)
+_global_replay_end_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = OrderedDict()
+
+
+def _register_global_hook(
+    registry: OrderedDict[int, Callable[[CUDAGraph], None]],
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(registry)
+    registry[handle.id] = fn
+    return handle
+
+
+def _run_global_hooks(
+    registry: OrderedDict[int, Callable[[CUDAGraph], None]],
+    torch_cuda_graph: CUDAGraph,
+) -> None:
+    for fn in list(registry.values()):
+        try:
+            fn(torch_cuda_graph)
+        except Exception:
+            pass
+
+
+def register_graph_capture_start_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph as its capture begins. Returns a
+    RemovableHandle; call ``.remove()`` to unregister.
+
+    .. warning::
+        The hook runs with capture already live on the current stream, so it must not issue
+        CUDA work: anything it launches is captured into the graph, and under the default
+        ``"global"`` capture error mode an unsafe call (e.g. an allocation) raises. Querying
+        capture state is fine. Do preparation that needs CUDA before the capture instead.
+    """
+    return _register_global_hook(_global_capture_start_hooks, fn)
+
+
+def register_graph_capture_end_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph when its capture ends, while the captured
+    ``cudaGraph_t`` is still live (see :meth:`CUDAGraph.register_capture_end_hook`). Returns a
+    RemovableHandle; call ``.remove()`` to unregister."""
+    return _register_global_hook(_global_capture_end_hooks, fn)
+
+
+def register_graph_instantiate_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph right after it is instantiated. Returns a
+    RemovableHandle; call ``.remove()`` to unregister."""
+    return _register_global_hook(_global_instantiate_hooks, fn)
+
+
+def register_graph_replay_start_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph at the start of every replay, just before it
+    is launched. Returns a RemovableHandle; call ``.remove()`` to unregister.
+
+    .. note::
+        Replay is the hot path and this fires for EVERY graph on EVERY replay -- keep it
+        cheap. With nothing registered the cost is a single dict emptiness check.
+    """
+    return _register_global_hook(_global_replay_start_hooks, fn)
+
+
+def register_graph_replay_end_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph at the end of every replay, once the replay is
+    *enqueued* (the launch is asynchronous, so the GPU work has not completed). Fires even if
+    the launch raised, so a start hook is always balanced by an end. Returns a RemovableHandle;
+    call ``.remove()`` to unregister. See the hot-path note on
+    :func:`register_graph_replay_start_hook`."""
+    return _register_global_hook(_global_replay_end_hooks, fn)
+
+
+# Graph-destroy hooks, each handed the destroyed graph's exec ids (tools_id >> 32) so a
+# consumer can purge its per-graph state. A CUDAGraph arms a single destroy callback (only
+# while a hook is registered, see _graph_destroy_hooks_active) that fans out here.
+_global_destroy_hooks: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
+
+
+def register_graph_destroy_hook(fn: Callable[[set[int]], None]) -> RemovableHandle:
+    """Register ``fn(exec_ids)`` to run when a CUDA graph is destroyed. Returns a handle whose
+    ``remove()`` unregisters it."""
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(_global_destroy_hooks)
+    _global_destroy_hooks[handle.id] = fn
+    return handle
+
+
+def _graph_destroy_hooks_active() -> bool:
+    """True when any graph-destroy hook is registered -- the gate a CUDAGraph checks before
+    arming its destroy callback."""
+    return bool(_global_destroy_hooks)
+
+
+def _run_graph_destroy_hooks(exec_graph_ids: set[int]) -> None:
+    """Invoke every registered hook with the destroyed exec graph ids, swallowing per-hook
+    errors so one failure does not abort the rest (matching the destroy-callback fire
+    semantics). The single entry point a graph's destroy callback calls."""
+    for fn in list(_global_destroy_hooks.values()):
+        try:
+            fn(exec_graph_ids)
+        except Exception:
+            pass
+
+
 # Python shim helps Sphinx process docstrings more reliably.
 class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
@@ -121,7 +305,7 @@ class CUDAGraph(_CUDAGraph):
             ``keep_graph=True`` and access it via ``raw_cuda_graph`` after
             ``capture_end``. Note that the cudaGraphExec_t will not be
             instantiated at the end of ``capture_end`` in this
-            case. Instead, it will be instantiated via an explicit called
+            case. Instead, it will be instantiated via an explicit call
             to ``instantiate`` or automatically on the first call to
             ``replay`` if ``instantiate`` was not already called. Calling
             ``instantiate`` manually before ``replay`` is recommended to
@@ -147,21 +331,87 @@ class CUDAGraph(_CUDAGraph):
     # before the first remap. Lets a re-instantiate (which produces a fresh exec
     # id) rekey annotations from the previous exec id to the new one.
     _remapped_exec_id: int | None
+    # Exec graph ids a consumer has recorded per-graph state under (one per
+    # instantiate). Handed to the graph-destroy hooks on destruction so consumers
+    # can purge that state and their maps do not grow across the run.
+    _recorded_exec_ids: set[int]
     _keep_graph: bool
-    # User hooks fired by capture_end / instantiate (see register_*_hook).
+    # User hooks fired by capture_begin / capture_end / instantiate (see register_*_hook).
+    _capture_start_hooks: dict[int, Callable[[CUDAGraph], None]]
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     _post_instantiate_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Transient get_graph_data() cache shared across a single instantiate()'s
+    # post-instantiate hooks, so multiple consumers (dependency recording, an
+    # export_graph_data dump) query the topology once instead of once each.
+    # Only populated while _caching_graph_data is set; dropped right after the
+    # hooks run so the topology is not retained for the graph's lifetime.
+    _caching_graph_data: bool
+    _instantiate_graph_data: dict | None
+    # Replay lifecycle hooks, fired around each replay (hot path -- only iterated
+    # when non-empty). See register_replay_start_hook / register_replay_end_hook.
+    _replay_start_hooks: dict[int, Callable[[CUDAGraph], None]]
+    _replay_end_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Destroy callbacks / retained objects for the current capture cycle, plus
+    # the weakref.finalize armed on this graph that fires the holder on
+    # collection. reset() fires the current holder and re-arms a fresh pair.
+    _retained: _RetainedCallbacks
+    _retained_finalizer: weakref.finalize | None
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
+        instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
+        instance._capture_start_hooks = OrderedDict()
         instance._capture_end_hooks = OrderedDict()
         instance._post_instantiate_hooks = OrderedDict()
+        instance._caching_graph_data = False
+        instance._instantiate_graph_data = None
+        instance._replay_start_hooks = OrderedDict()
+        instance._replay_end_hooks = OrderedDict()
+        instance._retained_finalizer = None
+        instance._arm_retained()
         return instance
+
+    def _arm_retained(self) -> None:
+        # Install a fresh destroy-callback holder and finalizer. The finalizer is
+        # bound to the holder, NOT to `self`: a finalizer arg referencing the
+        # graph would keep it alive forever and never fire. The holder does not
+        # point back at the graph, so fire() can still sync the last replay
+        # stream off it without pinning the graph.
+        self._retained = _RetainedCallbacks()
+        self._retained_finalizer = weakref.finalize(self, self._retained.fire)
+        # When a consumer (e.g. the CUPTI monitor) has registered graph-destroy
+        # hooks, arm the per-graph state purge for this capture cycle. The callback
+        # captures the exec-id SET OBJECT (empty now, filled as this graph
+        # records/instantiates) and the module fan-out function, never self and never
+        # a hook: a closure reachable to the graph would pin it past collection so it
+        # never fires. reset() re-arms a fresh holder, so this re-registers per cycle;
+        # a graph that records nothing just fires on an empty set (a no-op).
+        if _graph_destroy_hooks_active():
+            exec_ids = self._recorded_exec_ids
+            self.register_destroy_callback(lambda: _run_graph_destroy_hooks(exec_ids))
+
+    def register_capture_start_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run when capture begins on this graph, right
+        after capture is under way on the current stream. Hooks fire in registration
+        order. Returns a handle whose ``remove()`` deregisters the hook.
+
+        .. warning::
+            The hook runs inside the capture: any CUDA work it issues is captured into
+            the graph, and under the default ``"global"`` capture error mode an unsafe
+            call raises. See :func:`torch.cuda.graphs.register_graph_capture_start_hook`.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._capture_start_hooks)
+        self._capture_start_hooks[handle.id] = hook
+        return handle
 
     def register_capture_end_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -193,6 +443,102 @@ class CUDAGraph(_CUDAGraph):
         self._post_instantiate_hooks[handle.id] = hook
         return handle
 
+    def register_replay_start_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run at the start of every :meth:`replay`,
+        just before the graph is launched (after any on-demand instantiation, so
+        :meth:`raw_cuda_graph_exec` is valid). Hooks fire in registration order.
+        Returns a handle whose ``remove()`` deregisters the hook.
+
+        .. note::
+            Replay is the hot path and a registered hook runs on every replay --
+            keep it cheap. With no hook registered the cost is a single dict
+            emptiness check.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._replay_start_hooks)
+        self._replay_start_hooks[handle.id] = hook
+        return handle
+
+    def register_replay_end_hook(
+        self, hook: Callable[[CUDAGraph], None]
+    ) -> RemovableHandle:
+        r"""Register ``hook(graph)`` to run at the end of every :meth:`replay`,
+        just after the graph is launched. The launch is asynchronous, so the hook
+        runs once the replay is *enqueued*, not once the GPU work completes. Hooks
+        fire in registration order. Returns a handle whose ``remove()``
+        deregisters the hook. See the hot-path note on
+        :meth:`register_replay_start_hook`.
+
+        End hooks fire even if the launch raises -- so a start hook is always
+        balanced by an end -- and the launch error then propagates. (Start hooks
+        that raise abort the replay before launch, and no end hook fires.)
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._replay_end_hooks)
+        self._replay_end_hooks[handle.id] = hook
+        return handle
+
+    def register_destroy_callback(
+        self,
+        cb: Callable[[], None],
+        *,
+        synchronize_before_release: bool = False,
+    ) -> RemovableHandle:
+        r"""Register ``cb()`` to run when this graph is destroyed (finalized) or
+        explicitly :meth:`reset`, just before its CUDA resources are freed.
+        Callbacks fire once per capture cycle, in registration order; exceptions
+        are swallowed so one failure does not abort the rest. ``cb`` must NOT
+        reference this graph: the finalizer that fires it is held by a global
+        registry, so a callback reachable to the graph keeps the graph alive
+        until interpreter exit (it is never collected, hence never fired).
+        Returns a handle whose ``remove()`` deregisters the callback.
+
+        Teardown does not synchronize CUDA, and ``cudaGraphExecDestroy`` frees an
+        in-flight graph only asynchronously, so a callback that frees device
+        memory the graph reads/writes is a use-after-free if a replay is still
+        in flight. Pass ``synchronize_before_release=True`` to synchronize every
+        stream this graph was replayed on before firing. Otherwise callbacks
+        must not free anything the graph references.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        if synchronize_before_release:
+            self._retained.sync_before_fire = True
+        handle = RemovableHandle(self._retained.callbacks)
+        self._retained.callbacks[handle.id] = cb
+        return handle
+
+    def retain_object(
+        self,
+        obj: object,
+        *,
+        synchronize_before_release: bool = False,
+    ) -> RemovableHandle:
+        r"""Keep ``obj`` alive for this graph's current capture cycle and release
+        it when the graph is destroyed (finalized) or explicitly :meth:`reset`.
+        No callback runs; normal refcounting drops ``obj`` when the retained
+        reference is released. Returns a handle whose ``remove()`` drops the
+        retained reference early. As with :meth:`register_destroy_callback`,
+        ``obj`` must NOT reference this graph, or the graph is kept alive until
+        interpreter exit and ``obj`` is never released.
+
+        ``synchronize_before_release`` has the same meaning and caveats as in
+        :meth:`register_destroy_callback`: set it if releasing ``obj`` frees device
+        memory the graph reads/writes (e.g. ``obj`` is the last reference to a
+        tensor the graph uses) and replays may still be in flight.
+        """
+        from torch.utils.hooks import RemovableHandle
+
+        if synchronize_before_release:
+            self._retained.sync_before_fire = True
+        handle = RemovableHandle(self._retained.objects)
+        self._retained.objects[handle.id] = obj
+        return handle
+
     def _maybe_remap_annotations(self) -> None:
         # Remap recorded kernel annotations to the current exec graph id. No-op
         # unless a capture id was stamped (annotations enabled). Called from
@@ -205,12 +551,25 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
+        # Record the exec id we remapped to so the destroy callback (armed in
+        # capture_end_post) hands it to the graph-destroy hooks for per-graph state
+        # cleanup. A re-instantiate mints a fresh exec id, so the set accumulates each.
+        if self._remapped_exec_id is not None:
+            self._recorded_exec_ids.add(self._remapped_exec_id)
+
+    def _release_python_resources(self) -> None:
+        # Single source of truth for GC-critical Python resources released by
+        # both reset() and __del__. Destroy callbacks are NOT fired here: on the
+        # destruction path the armed weakref.finalize fires them (after __del__,
+        # before the C++ resources are freed), so user code stays out of
+        # __del__; reset() fires + re-arms the holder itself (see reset()).
+        tracker, self._tracker = self._tracker, None
+        if tracker is not None:
+            tracker.stop()
 
     def __del__(self) -> None:
         try:
-            tracker, self._tracker = self._tracker, None
-            if tracker is not None:
-                tracker.stop()
+            self._release_python_resources()
         except Exception:
             pass  # don't raise under GC
 
@@ -256,6 +615,13 @@ class CUDAGraph(_CUDAGraph):
 
             self._tracker = _CUDAGraphInputLivenessTracker()
             self._tracker.start()
+        # Capture is live from here, so a hook must not issue CUDA work (see
+        # register_capture_start_hook). Global hooks run before the per-graph ones,
+        # matching instantiate().
+        if _global_capture_start_hooks:
+            _run_global_hooks(_global_capture_start_hooks, self)
+        for hook in list(self._capture_start_hooks.values()):
+            hook(self)
 
     def capture_end_pre(self) -> None:
         r"""End capture but do not finalize: leaves the captured ``cudaGraph_t``
@@ -289,6 +655,8 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import maybe_stamp_capture_graph_id
 
         maybe_stamp_capture_graph_id(self)
+        if _global_capture_end_hooks:
+            _run_global_hooks(_global_capture_end_hooks, self)
         for hook in list(self._capture_end_hooks.values()):
             hook(self)
         if not self._keep_graph:
@@ -306,25 +674,65 @@ class CUDAGraph(_CUDAGraph):
         """
         super().instantiate()
         self._maybe_remap_annotations()
-        for hook in list(self._post_instantiate_hooks.values()):
-            hook(self)
+        # Fire registered instantiate hooks (e.g. a profiler observer inspecting the freshly
+        # instantiated graph). Registering a hook is the opt-in; no consumer -> a no-op.
+        # get_graph_data() is cached for the duration of the hooks so several consumers share
+        # one query; the cache is dropped afterwards so nothing is retained for the graph.
+        self._caching_graph_data = True
+        try:
+            if _global_instantiate_hooks:
+                _run_global_hooks(_global_instantiate_hooks, self)
+            for hook in list(self._post_instantiate_hooks.values()):
+                hook(self)
+        finally:
+            self._caching_graph_data = False
+            self._instantiate_graph_data = None
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
         if self._tracker is not None:
             self._tracker.check_alive(self.pools())
+        if self._retained.sync_before_fire:
+            # Record the replay stream on the holder so fire() can drain it
+            # before releasing graph-referenced resources, without the holder
+            # referencing the graph. Only recorded when a caller opted into sync.
+            self._retained.replay_streams.add(torch.cuda.current_stream())
         # With keep_graph=True the exec graph is instantiated on demand here on
         # the first replay; the C++ replay() requires it to already exist. The
         # annotation remap rides on instantiate(), so it is handled by that call.
         if not self._has_graph_exec:
             self.instantiate()
-        super().replay()
+        if _global_replay_start_hooks:
+            _run_global_hooks(_global_replay_start_hooks, self)
+        if self._replay_start_hooks:
+            for hook in list(self._replay_start_hooks.values()):
+                hook(self)
+        try:
+            super().replay()
+        finally:
+            if _global_replay_end_hooks:
+                _run_global_hooks(_global_replay_end_hooks, self)
+            if self._replay_end_hooks:
+                for hook in list(self._replay_end_hooks.values()):
+                    hook(self)
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
-        if self._tracker is not None:
-            self._tracker.stop()
-            self._tracker = None
+        self._release_python_resources()
+        # also-fire-on-reset: reset() destroys this capture's CUDA resources and
+        # the graph may be re-captured, so fire the current destroy callbacks and
+        # re-arm a fresh holder + finalizer for the next capture cycle (the old
+        # finalizer is bound to the now-spent holder). detach() cancels it and
+        # drops its reference to the spent holder promptly.
+        self._retained.fire()
+        if self._retained_finalizer is not None:
+            self._retained_finalizer.detach()
+        # Start a fresh id set BEFORE re-arming: _arm_retained captures it into the
+        # next cycle's destroy callback. The just-fired holder dropped the old one.
+        self._recorded_exec_ids = set()
+        self._arm_retained()
+        # Reset-only state: scrubbed here because the object is reused after
+        # reset(); on death these ints die with the object.
         self._capture_graph_id = None
         self._remapped_exec_id = None
         super().reset()
@@ -404,12 +812,26 @@ class CUDAGraph(_CUDAGraph):
                         "graph_id": int,
                         "node_id": int,
                         "kernel_name": str or None,
+                        "event_ptr": int,
+                        "host_fn_addr": int,
+                        "host_fn_name": str or None,
                         "dependencies": [int, ...],
                         "dependents": [int, ...],
                     },
                     ...,
                 ],
             }
+
+        ``event_ptr`` is the ``cudaEvent_t`` handle (as an int) an event-record
+        or event-wait node records / waits on -- these nodes produce no timed
+        CUPTI record, so matching a wait to the record that signals it is the
+        only way to reason about the cross-stream sync it encodes. It is ``0``
+        for other node types.
+
+        ``host_fn_addr`` / ``host_fn_name`` are populated for host nodes (a CPU
+        callback run as a graph node): the callback address and a best-effort
+        demangled symbol name for it (``None`` when it resolves to no exported
+        symbol). They are ``0`` / ``None`` for other node types.
 
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
@@ -421,12 +843,24 @@ class CUDAGraph(_CUDAGraph):
         is a true dependency (encoded in the graph) or a fake dependency
         caused by mapping of independent streams to the same hardware
         channel.
+
+        Child-graph and conditional nodes are reported as nodes in their own
+        right, but this walk does not descend into their bodies (those are
+        separate ``cudaGraph_t`` objects), so the work inside them is absent
+        from ``nodes`` and a warning is issued. The ids that *are* reported
+        stay valid: the exec graph preserves top-level node ids.
         """
+        # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
+        if self._instantiate_graph_data is not None:
+            return self._instantiate_graph_data
         from torch.cuda._graph_annotations import _is_tools_id_unavailable
 
         _require_cuda_bindings()
         # Narrow for the type checker (cuda bindings are present past the check).
-        assert _cuda_runtime is not None and _cuda_driver is not None  # noqa: S101
+        if _cuda_runtime is None or _cuda_driver is None:
+            raise AssertionError(
+                "expected _cuda_runtime and _cuda_driver to be not None"
+            )
 
         if _is_tools_id_unavailable():
             raise RuntimeError(
@@ -446,7 +880,14 @@ class CUDAGraph(_CUDAGraph):
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
         }
+        # Node types whose work lives in a separate cudaGraph_t (see the warning below).
+        nested_graph_types = {
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+        }
+        nested_node_types: set[str] = set()
 
         raw = self.raw_cuda_graph()
 
@@ -463,6 +904,8 @@ class CUDAGraph(_CUDAGraph):
             handle_to_idx[int(node)] = i
 
             ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            if ntype in nested_graph_types:
+                nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
             graph_id = tools_id >> 32
             node_id = tools_id & 0xFFFFFFFF
@@ -477,6 +920,37 @@ class CUDAGraph(_CUDAGraph):
                     if err == _cuda_driver.CUresult.CUDA_SUCCESS:
                         kernel_name = name.decode() if isinstance(name, bytes) else name
 
+            # Event record/wait nodes carry a cudaEvent_t but emit no timed CUPTI record;
+            # capture the handle so a wait node can be matched to the record that signals it.
+            # Not best-effort like the kernel-name lookup above (a name can legitimately be
+            # unavailable): the node type is already established here, so these calls are
+            # expected to succeed. Swallowing a failure would leave event_ptr 0 and make the
+            # record/wait match quietly wrong rather than loud.
+            event_ptr = 0
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
+                    )
+                )
+            elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
+                    )
+                )
+
+            # Host nodes carry no name in the CUPTI record; recover the callback address
+            # from the node params and resolve a best-effort symbol name (see
+            # _resolve_host_fn_name). Both are None/0 for other node types.
+            host_fn_addr = 0
+            host_fn_name = None
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost:
+                err, params = _cuda_runtime.cudaGraphHostNodeGetParams(node)
+                if err == _cuda_runtime.cudaError_t.cudaSuccess:
+                    host_fn_addr = int(params.fn)
+                    host_fn_name = _resolve_host_fn_name(host_fn_addr)
+
             node_infos.append(
                 {
                     "index": i,
@@ -485,6 +959,9 @@ class CUDAGraph(_CUDAGraph):
                     "graph_id": graph_id,
                     "node_id": node_id,
                     "kernel_name": kernel_name,
+                    "event_ptr": event_ptr,
+                    "host_fn_addr": host_fn_addr,
+                    "host_fn_name": host_fn_name,
                     "dependencies": [],
                     "dependents": [],
                 }
@@ -514,10 +991,48 @@ class CUDAGraph(_CUDAGraph):
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
             info["graph_id"] = exec_graph_id
 
-        return {
+        if nested_node_types:
+            # What is returned stays correct: the exec graph preserves top-level node
+            # ids and numbers the nested ones after them. Those nested nodes do execute
+            # and do show up in a profiler trace (under this exec graph id, with the
+            # appended node ids), they are just missing from the topology below.
+            warnings.warn(
+                f"get_graph_data: this graph contains {sorted(nested_node_types)} "
+                "nodes; the work inside them is in a separate cudaGraph_t that this "
+                "walk does not descend into, so it is absent from the returned nodes",
+                stacklevel=2,
+            )
+
+        data = {
             "exec_graph_id": exec_graph_id,
             "nodes": node_infos,
         }
+        if self._caching_graph_data:
+            self._instantiate_graph_data = data
+        return data
+
+
+class _DlInfo(ctypes.Structure):
+    _fields_ = [
+        ("dli_fname", ctypes.c_char_p),
+        ("dli_fbase", ctypes.c_void_p),
+        ("dli_sname", ctypes.c_char_p),
+        ("dli_saddr", ctypes.c_void_p),
+    ]
+
+
+def _resolve_host_fn_name(addr: int) -> str | None:
+    """Best-effort symbol name for a host-node callback address via dladdr + demangle.
+    Returns None when the address resolves to no exported symbol (e.g. an anonymous
+    trampoline). Host nodes carry no name in the CUPTI record, so this is the only source."""
+    if not addr:
+        return None
+    info = _DlInfo()
+    if not ctypes.CDLL(None).dladdr(ctypes.c_void_p(addr), ctypes.byref(info)):
+        return None
+    if not info.dli_sname:
+        return None
+    return torch._C._demangle(info.dli_sname.decode())
 
 
 def _dump_graph_dot(cuda_graph: CUDAGraph, path: str, *, verbose: bool = True) -> None:
@@ -673,6 +1188,11 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
+        # The capture stream is now capturing into the top-level graph; remember it so
+        # mark_kernels can tell a conditional-node body apart from this graph.
+        from torch.cuda._graph_annotations import maybe_stamp_capture_root
+
+        maybe_stamp_capture_root(torch.cuda.current_stream())
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda._graph_annotations import (
@@ -706,6 +1226,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> _ModuleOrCallable: ...
 
 
@@ -717,6 +1238,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -727,6 +1249,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -761,6 +1284,11 @@ def make_graphed_callables(
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
             :class:`~torch.cuda.MemPool` that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+        enable_annotations (bool, optional): If ``True``, the forward and backward
+            captures record kernel annotations from
+            :func:`torch.cuda.graph_annotations.mark_kernels` scopes inside the
+            callables (backward kernels are tagged via the scopes' autograd node
+            hooks). See :mod:`torch.cuda.graph_annotations`. Default: ``False``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -900,6 +1428,7 @@ def make_graphed_callables(
             stream=stream,
             pool=mempool,
             capture_error_mode=capture_error_mode,
+            enable_annotations=enable_annotations,
         ):
             func_outputs = func(*args)
 
@@ -929,6 +1458,7 @@ def make_graphed_callables(
                 stream=stream,
                 pool=mempool,
                 capture_error_mode=capture_error_mode,
+                enable_annotations=enable_annotations,
             ):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
