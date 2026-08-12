@@ -118,13 +118,21 @@ def _mul(a, b):
 
 
 class _Reduction(NamedTuple):
-    name: str  # aten op name ("sum" / "prod"); disambiguates the compile cache
+    name: str  # aten op name; disambiguates the compile cache
     op: Callable  # trace-time combiner: _add / _mul
     identity: float  # reduction identity: 0.0 for sum, 1.0 for prod
+    # Trace-time per-element map applied to each loaded value before the combiner.
+    pre: Callable | None = None
+
+
+def _nan_to_zero(v):
+    dtype = v.dtype
+    return dtype(cutlass.select_(v != v, dtype(0.0), v))
 
 
 _SUM = _Reduction("sum", _add, 0.0)
 _PROD = _Reduction("prod", _mul, 1.0)
+_NANSUM = _Reduction("nansum", _add, 0.0, pre=_nan_to_zero)
 
 
 # ---------------------------------------------------------------------------
@@ -185,12 +193,17 @@ def _warp_butterfly(val, op):
     return val
 
 
-def _load_vec_static(mIn, row, base: int, N: int, vec_size: int, acc, zero, op):
+def _load_vec_static(mIn, row, base: int, N: int, vec_size: int, acc, zero, op, pre):
     """Load + reduce one vector group with compile-time ``base`` (multirow)."""
     vals = []
     for i in range(vec_size):
         off = base + i
-        vals.append(acc(mIn[row, off]) if off < N else zero)
+        v = zero
+        if off < N:
+            v = acc(mIn[row, off])
+            if const_expr(pre is not None):
+                v = pre(v)
+        vals.append(v)
     return _reduce_vec(vals, vec_size, op)
 
 
@@ -204,6 +217,7 @@ def _load_vec_dyn(
     acc: cutlass.Constexpr,
     zero,
     op: cutlass.Constexpr,
+    pre: cutlass.Constexpr,
 ):
     """Load + reduce one vector group with a runtime ``base`` (warp paths).
 
@@ -219,6 +233,8 @@ def _load_vec_dyn(
         v = zero
         if off < Int32(N):
             v = acc(mIn[row, off])
+            if const_expr(pre is not None):
+                v = pre(v)
         vals.append(v)
     return _reduce_vec(vals, vec_size, op)
 
@@ -242,7 +258,15 @@ def _make_multirow(in_dt, acc, out_dt, N: int, vec_size: int, red: _Reduction):
             tree = []
             for load in cutlass.range_constexpr(num_loads):
                 val = _load_vec_static(
-                    mIn, row, load * vec_size, N, vec_size, acc, zero, red.op
+                    mIn,
+                    row,
+                    load * vec_size,
+                    N,
+                    vec_size,
+                    acc,
+                    zero,
+                    red.op,
+                    red.pre,
                 )
                 _streaming_push(tree, val, load, _MULTIROW_MAX_DEPTH, red.op)
             mOut[row] = out_dt(tree[0])
@@ -321,7 +345,9 @@ def _make_looped(
                 v = zero
                 if Int32(load) < this_batch_loads:
                     v = _warp_butterfly(
-                        _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero, red.op),
+                        _load_vec_dyn(
+                            mIn, row, base, N, vec_size, acc, zero, red.op, red.pre
+                        ),
                         red.op,
                     )
                 _streaming_push(tree, v, load, p.depth, red.op)
@@ -422,7 +448,9 @@ def _make_two_partial(
             v = zero
             if Int32(load) < this_batch_loads:
                 v = _warp_butterfly(
-                    _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero, red.op),
+                    _load_vec_dyn(
+                        mIn, row, base, N, vec_size, acc, zero, red.op, red.pre
+                    ),
                     red.op,
                 )
             _streaming_push(tree, v, load, p.depth, red.op)
@@ -642,7 +670,8 @@ def _inner_tree_reduce_into(
     out: torch.Tensor, src: torch.Tensor, red: _Reduction
 ) -> None:
     """Compute ``out[r] = reduce(src[r, :])`` for every row ``r`` in the
-    inner-tree order, where ``reduce`` is ``red`` (``sum`` or ``prod``).
+    inner-tree order, where ``reduce`` is ``red`` (``sum``, ``prod``, or
+    ``nansum``).
 
     ``src`` is a 2D ``(M, N)`` view with inner-dim stride 1 (outer row stride
     may differ from N); ``out`` is a 1D ``(M,)`` view (its stride may differ
@@ -702,3 +731,8 @@ def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
 def inner_tree_prod_into(out: torch.Tensor, src: torch.Tensor) -> None:
     """Row-wise inner-tree ``prod`` (see ``_inner_tree_reduce_into``)."""
     _inner_tree_reduce_into(out, src, _PROD)
+
+
+def inner_tree_nansum_into(out: torch.Tensor, src: torch.Tensor) -> None:
+    """Row-wise inner-tree ``nansum`` (see ``_inner_tree_reduce_into``)."""
+    _inner_tree_reduce_into(out, src, _NANSUM)
