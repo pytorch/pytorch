@@ -124,9 +124,6 @@ class profile:
     Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
 
-        use_cuda (bool, optional): Enables timing of CUDA events as well
-            using the cudaEvent API. (will be deprecated)
-
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
             The valid devices options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
@@ -155,8 +152,12 @@ class profile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -214,7 +215,6 @@ class profile:
         self,
         enabled=True,
         *,
-        use_cuda=False,  # Deprecated
         use_device=None,
         record_shapes=False,
         with_flops=False,
@@ -232,17 +232,7 @@ class profile:
         self.enabled: bool = enabled
         if not self.enabled:
             return
-        self.use_cuda = use_cuda
-        if self.use_cuda:
-            warn(
-                "The attribute `use_cuda` will be deprecated soon, "
-                "please use ``use_device = 'cuda'`` instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            self.use_device: str | None = "cuda"
-        else:
-            self.use_device = use_device
+        self.use_device: str | None = use_device
         # TODO Consider changing _function_events into data structure with size cap
         self._function_events: EventList | None = None
         self._old_function_events: EventList | None = None
@@ -277,6 +267,15 @@ class profile:
                 FutureWarning,
                 stacklevel=2,
             )
+        if with_modules:
+            warn(
+                "with_modules is deprecated and will be removed in a future release. "
+                "It only collects data for TorchScript models, which are themselves "
+                "deprecated, and does nothing in eager mode. Use with_stack=True, "
+                "which records nn.Module events for eager models.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -304,7 +303,6 @@ class profile:
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
                 warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
-                self.use_cuda = False
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
@@ -732,6 +730,7 @@ class profile:
                 activity_type=kineto_event.activity_type(),
                 metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
+                typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),
                 flow_type=kineto_event.flow_type(),
                 flow_start=kineto_event.flow_start(),
