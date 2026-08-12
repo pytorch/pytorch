@@ -49,9 +49,22 @@ PROD_CASES = (
     ("split_fp32", (8, 65536), 1, torch.float32),
 )
 
-# Split fp16/bf16 is excluded due to a pre-existing strict Triton compile hang
-# tracked separately, consistent with SUM_CASES/PROD_CASES.
+# Split fp16/bf16 is excluded from NANSUM_CASES/MEAN_CASES due to a pre-existing
+# strict Triton compile hang tracked separately, consistent with SUM_CASES/PROD_CASES.
 NANSUM_CASES = (
+    ("persistent_fp16", (64, 256), 1, torch.float16),
+    ("persistent_bf16", (64, 256), 1, torch.bfloat16),
+    ("persistent_fp32", (64, 256), 1, torch.float32),
+    ("persistent_fp64", (64, 256), 1, torch.float64),
+    ("looped_fp16", (8, 12000), 1, torch.float16),
+    ("looped_bf16", (8, 12000), 1, torch.bfloat16),
+    ("looped_fp32", (8, 12000), 1, torch.float32),
+    ("looped_fp64", (8, 12000), 1, torch.float64),
+    ("split_fp32", (8, 65536), 1, torch.float32),
+    ("split_fp64", (8, 65536), 1, torch.float64),
+)
+
+MEAN_CASES = (
     ("persistent_fp16", (64, 256), 1, torch.float16),
     ("persistent_bf16", (64, 256), 1, torch.bfloat16),
     ("persistent_fp32", (64, 256), 1, torch.float32),
@@ -74,6 +87,11 @@ OUT_OF_SCOPE_CASES = (
 NANSUM_OUT_OF_SCOPE_CASES = (
     ("dtype", lambda z: torch.nansum(z, 1, dtype=torch.float64)),
     ("dim_none", lambda z: torch.nansum(z, dim=None)),
+)
+
+MEAN_OUT_OF_SCOPE_CASES = (
+    ("dim_none", lambda z: torch.mean(z, dim=None)),
+    ("dtype", lambda z: torch.mean(z, 1, dtype=torch.float64)),
 )
 
 LAYOUT_CASES = (
@@ -210,6 +228,29 @@ class StrictNumericsTest(TestCase):
         else:
             self.assertEqual(code.count(INNER_TREE_CALL), 2)
 
+    @parametrize("case", MEAN_CASES, name_fn=lambda c: c[0])
+    def test_mean_bitwise(self, device, case):
+        name, shape, dim, dtype = case
+        x = torch.randn(*shape, device=device, dtype=dtype)
+
+        def fn(z):
+            return torch.mean(z, dim)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertIn(INNER_TREE_CALL, code)
+        if name.startswith("persistent"):
+            self.assertIn("@triton_heuristics.persistent_reduction(", code)
+            self.assertEqual(code.count(INNER_TREE_CALL), 1)
+        elif name.startswith("looped"):
+            self.assertIn("for r0_offset in", code)
+            self.assertEqual(code.count(INNER_TREE_CALL), 1)
+        else:
+            self.assertEqual(code.count(INNER_TREE_CALL), 2)
+        if dtype in (torch.float16, torch.bfloat16, torch.float32):
+            self.assertIn("triton.language.div_rn", code)
+
     def test_prod_out_of_scope_uses_default_order(self, device):
         # A dtype-casting prod is out of scope -> falls back to the default order.
         x = self._make_prod_input((64, 300), torch.float32, device)
@@ -220,6 +261,13 @@ class StrictNumericsTest(TestCase):
     def test_nansum_out_of_scope_uses_default_order(self, device, case):
         _, fn = case
         x = self._make_nansum_input((64, 300), torch.float32, device)
+        _, code = self._run(fn, x)
+        self.assertNotIn(INNER_TREE_CALL, code)
+
+    @parametrize("case", MEAN_OUT_OF_SCOPE_CASES, name_fn=lambda c: c[0])
+    def test_mean_out_of_scope_uses_default_order(self, device, case):
+        _, fn = case
+        x = torch.randn(64, 300, device=device)
         _, code = self._run(fn, x)
         self.assertNotIn(INNER_TREE_CALL, code)
 
