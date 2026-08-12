@@ -47,8 +47,6 @@ the AOT lib), so torch is always importable during export.
 
 from __future__ import annotations
 
-import os
-
 
 class Toolchain:
     kind: str = ""
