@@ -943,6 +943,12 @@ def _get_neighbor_placements(
     - Shard(d1) -> Shard(d2): all-to-all, valid if neither d1 nor d2 sharded right
     - Partial -> Replicate: allreduce, always valid
     - Partial -> Shard(d): reduce-scatter, valid if d not sharded to the right
+
+    Shard -> Partial("sum") is intentionally absent. Although explicit
+    redistribution supports it, the conversion materializes a global-shape
+    local tensor. Because the strategy cost model accounts only for communication,
+    we exclude this transition to avoid selecting it without accounting for its
+    memory and copy costs.
     """
     # Note: circular import
     from torch.distributed.tensor.placement_types import Partial
