@@ -1138,7 +1138,7 @@ def gen_pyi(
                         "compressed_indices: Tensor | list",
                         "plain_indices: Tensor | list",
                         "values: Tensor | list",
-                        "size: _size | None = None",
+                        "size: _symsize | None = None",
                         "*",
                         "dtype: _dtype | None = None",
                         "layout: _layout | None = None",
