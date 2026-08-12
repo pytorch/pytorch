@@ -15,6 +15,14 @@ We register eight ATen dispatcher entries on ``CUDA``:
 * ``nansum`` / ``nansum.out`` -- ``x.nansum(dim=...)`` + ``.out``.
 * ``mean.dim`` / ``mean.out`` -- ``x.mean(dim=...)`` + ``.out``.
 
+``nanmean`` is covered compositionally and intentionally has no dispatcher
+entry here. ATen's CompositeImplicitAutograd implementation computes an
+``int64`` count with ``(~isnan(x)).sum(dim)`` and divides the result of its
+nested ``nansum`` / ``nansum.out`` call by that count. Those calls route
+through the overrides above, preserving the inner-tree nansum numerator while
+ATen retains the count, tensor/tensor true division, and composite autograd
+behavior. Registering ``nanmean`` here would shadow that composite.
+
 The reductions share identical inner-tree geometry and eligibility. Their
 combiner, identity, and optional pre/post maps are threaded through the kernel
 in ``inner_tree_kernel.py``.
