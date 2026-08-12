@@ -3810,6 +3810,7 @@ make_fallback(aten.resize_)
 make_fallback(aten.resize_as_)
 
 # Linalg
+make_fallback(aten.linalg_vector_norm, override_decomp=True, warn=False)
 make_fallback(aten._linalg_det)
 make_fallback(aten.linalg_householder_product)
 make_fallback(aten.linalg_inv_ex)
@@ -7424,6 +7425,7 @@ def _make_scan_inner(x, *, axis, dtype):
 
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
@@ -7432,11 +7434,14 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     output_dtype = x.get_dtype()
     if output_dtype in (torch.float16, torch.bfloat16):
         x = to_dtype(x, torch.float)
-    sum_result = sum_(x, axis, keepdim)
+    sum_result = make_reduction("sum", strict_reduction=strict_reduction)(
+        x, axis, keepdim
+    )
     denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return to_dtype(div(sum_result, denom), output_dtype)
+    divide = _div_rn if strict_reduction else div
+    return to_dtype(divide(sum_result, denom), output_dtype)
 
 
 def var_mean_sum_(x, axis, correction, keepdim, return_mean):
@@ -7740,6 +7745,28 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
+def _is_strict_reduction_result(x) -> bool:
+    name = ir.try_get_name(x)
+    if name is None:
+        return False
+    buffer = V.graph.try_get_buffer(name)
+    return (
+        isinstance(buffer, ir.ComputedBuffer)
+        and isinstance(buffer.data, Reduction)
+        and buffer.data.strict_reduction_rblock is not None
+    )
+
+
+def _lowp_pointwise_barrier(x):
+    dtype = x.get_dtype()
+
+    def inner(value):
+        value = ops.to_dtype(value, dtype, use_compute_types=False)
+        return ops.to_dtype(value, dtype)
+
+    return make_pointwise(inner, override_return_dtype=dtype)(x)
+
+
 @make_pointwise
 def _div_rn(a, b):
     return ops.div_rn(a, b)
@@ -7883,6 +7910,11 @@ def div(a, b):
     a, b = promote_constants(
         (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     )
+    if _is_strict_reduction_result(a):
+        if a.get_dtype() in (torch.float16, torch.bfloat16):
+            a = _lowp_pointwise_barrier(a)
+            b = _lowp_pointwise_barrier(b)
+        return _div_rn(a, b)
     return div_prim(a, b)
 
 
@@ -7908,7 +7940,8 @@ def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     if (
         current_node is None
         or config.numerics != "strict"
-        or current_node.target not in (aten.sum.dim_IntList, aten.prod.dim_int)
+        or current_node.target
+        not in (aten.sum.dim_IntList, aten.prod.dim_int, aten.mean.dim)
         or dtype is not None
         or axis is None
         or not has_triton_reduction_ordering()

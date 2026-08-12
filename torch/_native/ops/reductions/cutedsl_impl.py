@@ -1,4 +1,4 @@
-"""CuTeDSL override registrations for ``aten::sum`` / ``aten::prod`` (inner-tree).
+"""CuTeDSL overrides for inner-tree reductions.
 
 CuTeDSL port of the Triton-style inner-tree reduction kernel that
 otherwise lives in ``aten/src/ATen/native/cuda/ReduceSumProdKernel.cu``
@@ -8,13 +8,31 @@ is the feature-rollout gate for these operators -- it is *not* gated by the
 global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
 ``cutedsl_utils`` at registration time).
 
-We register four ATen dispatcher entries on ``CUDA``:
+We register eleven ATen dispatcher entries on ``CUDA``:
 
 * ``sum.dim_IntList`` / ``sum.IntList_out`` -- ``x.sum(dim=...)`` + ``.out``.
 * ``prod.dim_int`` / ``prod.int_out`` -- ``x.prod(dim=...)`` + ``.out``.
+* ``nansum`` / ``nansum.out`` -- ``x.nansum(dim=...)`` + ``.out``.
+* ``mean.dim`` / ``mean.out`` -- ``x.mean(dim=...)`` + ``.out``.
+* ``linalg_vector_norm`` / ``linalg_vector_norm.out`` -- p=1 and p=2 norms.
+* ``logsumexp`` -- functional logsumexp, composed over ``sum.IntList_out``.
 
-sum/prod share the identical inner-tree geometry and eligibility; only the
-combiner (``+`` vs ``*``) and its identity (``0`` vs ``1``) differ, threaded
+``nanmean`` is covered compositionally and intentionally has no dispatcher
+entry here. ATen's CompositeImplicitAutograd implementation computes an
+``int64`` count with ``(~isnan(x)).sum(dim)`` and divides the result of its
+nested ``nansum`` / ``nansum.out`` call by that count. Those calls route
+through the overrides above, preserving the inner-tree nansum numerator while
+ATen retains the count, tensor/tensor true division, and composite autograd
+behavior. Registering ``nanmean`` here would shadow that composite.
+
+``logsumexp`` is also covered compositionally. Its functional override
+pre-sizes the output and delegates to ATen's ``logsumexp.out`` implementation,
+whose nested ``sum.IntList_out`` call routes through the sum override above.
+The out overload is intentionally not registered, preserving ATen's native
+resize/error behavior for mis-sized outputs.
+
+The kernel-backed reductions share identical inner-tree geometry and
+eligibility. Their combiner, identity, and optional pre/post maps are threaded
 through the kernel in ``inner_tree_kernel.py``.
 
 ``sum.dim_IntList`` is ``structured_delegate: sum.IntList_out``, so its
@@ -101,6 +119,16 @@ def _single_dim(dim, ndim: int) -> int | None:
     return _normalize_dim(dims[0], ndim)
 
 
+def _vector_norm_order(ord) -> int | None:
+    if isinstance(ord, bool) or not isinstance(ord, (int, float)):
+        return None
+    if ord == 1:
+        return 1
+    if ord == 2:
+        return 2
+    return None
+
+
 def _keepdim_out_shape(self: torch.Tensor, d: int) -> list[int]:
     shape = list(self.shape)
     shape[d] = 1
@@ -175,6 +203,8 @@ def _geometry(self: torch.Tensor, out: torch.Tensor, it: TensorIterator):
 def _base_cond_ok(self: torch.Tensor, dim, dtype) -> int | None:
     """Shared front gate. Returns the normalized reduced dim if the call is a
     candidate, else ``None``."""
+    if dim is None:
+        return None
     if not _inner_tree_enabled():
         return None
     if not self.is_cuda or is_fake_tensor(self):
@@ -192,7 +222,7 @@ def _base_cond_ok(self: torch.Tensor, dim, dtype) -> int | None:
     return d
 
 
-def _cond(self, dim, keepdim=False, *, dtype=None) -> bool:
+def _cond(self, dim=None, keepdim=False, *, dtype=None) -> bool:
     d = _base_cond_ok(self, dim, dtype)
     if d is None:
         return False
@@ -200,7 +230,11 @@ def _cond(self, dim, keepdim=False, *, dtype=None) -> bool:
     return _eligibility(self, d, out) is not None
 
 
-def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
+def _logsumexp_cond(self, dim, keepdim=False) -> bool:
+    return _cond(self, dim, keepdim)
+
+
+def _out_cond(self, dim=None, keepdim=False, *, dtype=None, out) -> bool:
     d = _base_cond_ok(self, dim, dtype)
     if d is None:
         return False
@@ -215,6 +249,24 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
     return _eligibility(self, d, out_kd) is not None
 
 
+def _vector_norm_cond(self, ord=2, dim=None, keepdim=False, *, dtype=None) -> bool:
+    if _vector_norm_order(ord) is None or not _cond(self, dim, keepdim, dtype=dtype):
+        return False
+    d = _single_dim(dim, self.ndim)
+    return d is not None and self.shape[d] != 1
+
+
+def _vector_norm_out_cond(
+    self, ord=2, dim=None, keepdim=False, *, dtype=None, out
+) -> bool:
+    if _vector_norm_order(ord) is None or not _out_cond(
+        self, dim, keepdim, dtype=dtype, out=out
+    ):
+        return False
+    d = _single_dim(dim, self.ndim)
+    return d is not None and self.shape[d] != 1
+
+
 def _sum_into():
     from .inner_tree_kernel import inner_tree_sum_into
 
@@ -227,7 +279,25 @@ def _prod_into():
     return inner_tree_prod_into
 
 
-def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
+def _nansum_into():
+    from .inner_tree_kernel import inner_tree_nansum_into
+
+    return inner_tree_nansum_into
+
+
+def _mean_into():
+    from .inner_tree_kernel import inner_tree_mean_into
+
+    return inner_tree_mean_into
+
+
+def _vector_norm_into():
+    from .inner_tree_kernel import inner_tree_vector_norm_into
+
+    return inner_tree_vector_norm_into
+
+
+def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into, *args) -> None:
     """Run ``reduce_into`` writing the reduction of ``self`` along ``d`` into
     the keepdim-shaped ``out_kd``. Caller has validated eligibility."""
     it = _eligibility(self, d, out_kd)
@@ -238,11 +308,13 @@ def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
         return
     in_2d = self.as_strided((m, n), (in_rs, 1))
     out_1d = out_kd.as_strided((m,), (out_rs,))
-    reduce_into()(out_1d, in_2d)
+    reduce_into()(out_1d, in_2d, *args)
 
 
 def _make_impl(reduce_into):
-    def _impl(self, dim, keepdim=False, *, dtype=None):
+    def _impl(self, dim=None, keepdim=False, *, dtype=None):
+        if dim is None:
+            raise AssertionError("_cond guaranteed a non-None dim")
         d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
         out_kd = torch.empty(
             _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
@@ -254,7 +326,9 @@ def _make_impl(reduce_into):
 
 
 def _make_out_impl(reduce_into):
-    def _out_impl(self, dim, keepdim=False, *, dtype=None, out):
+    def _out_impl(self, dim=None, keepdim=False, *, dtype=None, out):
+        if dim is None:
+            raise AssertionError("_out_cond guaranteed a non-None dim")
         d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
         out_kd = _out_keepdim_view(self, d, keepdim, out)
         if out_kd is None:
@@ -267,9 +341,48 @@ def _make_out_impl(reduce_into):
     return _out_impl
 
 
+def _logsumexp_impl(self, dim, keepdim=False):
+    d = _single_dim(dim, self.ndim)
+    if d is None:
+        raise AssertionError("_logsumexp_cond guaranteed a single dim")
+    out_kd = torch.empty(
+        _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
+    )
+    out = out_kd if keepdim else out_kd.squeeze(d)
+    return torch.ops.aten.logsumexp.out(self, dim, keepdim=keepdim, out=out)
+
+
+def _vector_norm_impl(self, ord=2, dim=None, keepdim=False, *, dtype=None):
+    p = _vector_norm_order(ord)
+    if p is None:
+        raise AssertionError("_vector_norm_cond guaranteed p=1 or p=2")
+    if dim is None:
+        raise AssertionError("_vector_norm_cond guaranteed a non-None dim")
+    d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
+    out_kd = torch.empty(
+        _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
+    )
+    _run(self, d, out_kd, _vector_norm_into, p)
+    return out_kd if keepdim else out_kd.squeeze(d)
+
+
+def _vector_norm_out_impl(self, ord=2, dim=None, keepdim=False, *, dtype=None, out):
+    p = _vector_norm_order(ord)
+    if p is None:
+        raise AssertionError("_vector_norm_out_cond guaranteed p=1 or p=2")
+    if dim is None:
+        raise AssertionError("_vector_norm_out_cond guaranteed a non-None dim")
+    d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
+    out_kd = _out_keepdim_view(self, d, keepdim, out)
+    if out_kd is None:
+        raise AssertionError("_vector_norm_out_cond guaranteed a reduced-shape out")
+    _run(self, d, out_kd, _vector_norm_into, p)
+    return out
+
+
 def register_to_dispatch() -> None:
-    # Eligibility (_cond/_out_cond) is reduction-agnostic; only the kernel
-    # entry differs between sum and prod.
+    # Eligibility (_cond/_out_cond) is reduction-agnostic; vector norm adds
+    # its order check before using the same geometry predicate.
     cu.register_op_override(
         "aten", "sum.dim_IntList", "CUDA", cond=_cond, impl=_make_impl(_sum_into)
     )
@@ -285,4 +398,41 @@ def register_to_dispatch() -> None:
     )
     cu.register_op_override(
         "aten", "prod.int_out", "CUDA", cond=_out_cond, impl=_make_out_impl(_prod_into)
+    )
+    cu.register_op_override(
+        "aten", "nansum", "CUDA", cond=_cond, impl=_make_impl(_nansum_into)
+    )
+    cu.register_op_override(
+        "aten",
+        "nansum.out",
+        "CUDA",
+        cond=_out_cond,
+        impl=_make_out_impl(_nansum_into),
+    )
+    cu.register_op_override(
+        "aten", "mean.dim", "CUDA", cond=_cond, impl=_make_impl(_mean_into)
+    )
+    cu.register_op_override(
+        "aten",
+        "mean.out",
+        "CUDA",
+        cond=_out_cond,
+        impl=_make_out_impl(_mean_into),
+    )
+    cu.register_op_override(
+        "aten",
+        "linalg_vector_norm",
+        "CUDA",
+        cond=_vector_norm_cond,
+        impl=_vector_norm_impl,
+    )
+    cu.register_op_override(
+        "aten",
+        "linalg_vector_norm.out",
+        "CUDA",
+        cond=_vector_norm_out_cond,
+        impl=_vector_norm_out_impl,
+    )
+    cu.register_op_override(
+        "aten", "logsumexp", "CUDA", cond=_logsumexp_cond, impl=_logsumexp_impl
     )
