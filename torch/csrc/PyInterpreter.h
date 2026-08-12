@@ -5,7 +5,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 namespace c10 {
-struct FakeTensorMode;  // c++ faketensormode
+struct FakeTensorMode; // c++ faketensormode
 }
 
 namespace torch::detail {
