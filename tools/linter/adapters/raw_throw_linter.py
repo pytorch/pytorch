@@ -35,21 +35,26 @@ LINTER_CODE = "RAWTHROW"
 
 MARKER = "@allow-raw-throw"
 
-# pybind11's exception types are that library's own protocol for reaching the
-# interpreter. No TORCH_CHECK stands in for them.
-PYBIND_NAMESPACES = ("py::", "pybind11::")
-
-# Typed exceptions that are control flow rather than error reporting: each one
-# is caught by name in the subsystem that throws it, so a TORCH_CHECK would
-# break the code that handles it. Add a name here only with that justification,
-# never because converting a site looked awkward. Names are matched exactly as
-# written at the throw, so a type thrown both qualified and unqualified needs
-# both spellings.
+# Exceptions that no TORCH_CHECK can stand in for: either they are typed
+# control flow that something catches by name, or they reach the interpreter as
+# a Python type c10 has no equivalent of. Add a name here only with that
+# justification, never because converting a site looked awkward. Names are
+# matched exactly as written at the throw and are not scoped to a directory, so
+# a type thrown both qualified and unqualified needs both spellings.
+#
+# Deliberately absent: py::type_error, py::value_error and py::index_error.
+# Those are exactly TORCH_CHECK_TYPE, TORCH_CHECK_VALUE and TORCH_CHECK_INDEX -
+# same Python type and same message - because the translator registered in
+# torch/csrc/Module.cpp maps c10::TypeError and friends onto PyExc_TypeError.
 ALLOWED_EXCEPTION_TYPES = frozenset(
     {
         "PythonError",  # torch/csrc/fx/node.cpp, caught in the same file
         "WorkerException",  # torch/csrc/api dataloader, carries a worker's error
         "c10::AcceleratorError",  # carries the device error code alongside the message
+        "py::cast_error",  # pybind11's own cast-failure protocol
+        "py::error_already_set",  # a Python error is set; rethrowing preserves it
+        "py::key_error",  # would become RuntimeError, not KeyError
+        "py::stop_iteration",  # drives the iterator protocol; no c10 equivalent
     }
 )
 
@@ -86,7 +91,10 @@ _NUMBER_CHARS = re.compile(r"[\w']")
 _THROW = re.compile(r"\bthrow\b")
 _QUALIFIED_NAME = re.compile(r"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*")
 _BARE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
-_MARKER_LINE = re.compile(rf"{re.escape(MARKER)}(?P<rest>.*)")
+_WORD = re.compile(r"[A-Za-z]")
+# The marker has to be the whole point of its comment. Prose that merely
+# mentions it - as the docs for this linter do - must not license anything.
+_MARKER_LINE = re.compile(rf"^\s*(?://+|/\*)\s*{re.escape(MARKER)}\b(?P<rest>.*)")
 
 
 def scan_source(text: str) -> tuple[str, str]:
@@ -123,10 +131,7 @@ def scan_source(text: str) -> tuple[str, str]:
                 if nl == -1:
                     end = n
                     break
-                cont = nl - 1
-                if cont >= 0 and text[cont] == "\r":
-                    cont -= 1
-                if cont >= 0 and text[cont] == "\\":
+                if _is_continued(text, nl):
                     end = nl + 1
                     continue
                 end = nl
@@ -180,6 +185,14 @@ def scan_source(text: str) -> tuple[str, str]:
     return "".join(code), "".join(comments)
 
 
+def _is_continued(text: str, newline: int) -> bool:
+    """Whether the newline at `newline` is a backslash line continuation."""
+    i = newline - 1
+    if i >= 0 and text[i] == "\r":
+        i -= 1
+    return i >= 0 and text[i] == "\\"
+
+
 def _end_of_quoted(text: str, start: int, quote: str) -> int:
     """Offset just past the literal opening at `start`, or end of line if the
     literal is unterminated."""
@@ -204,9 +217,12 @@ def find_throws(code: str) -> list[Throw]:
     n = len(code)
     for match in _THROW.finditer(code):
         depth = 0
+        seen = False
         i = match.end()
         while i < n:
             ch = code[i]
+            if not ch.isspace():
+                seen = True
             if ch in "([{":
                 depth += 1
             elif ch in ")]}":
@@ -215,8 +231,18 @@ def find_throws(code: str) -> list[Throw]:
                 depth -= 1
             elif ch in ";," and depth == 0:
                 break
+            elif ch == "\n" and depth == 0 and seen and not _is_continued(code, i):
+                # A macro body has no trailing `;`, so without this the scan
+                # would run to the end of the file. Requiring `seen` keeps an
+                # operand written on the next line attached to its throw, so
+                # that it cannot be mistaken for a bare `throw;`, and a
+                # clang-format-wrapped throw is inside brackets here anyway.
+                break
             i += 1
-        expression = _unwrap(" ".join(code[match.end() : i].split()))
+        # Line continuations inside a macro body are noise, not part of the
+        # expression.
+        tokens = (t.rstrip("\\") for t in code[match.end() : i].split())
+        expression = _unwrap(" ".join(t for t in tokens if t))
         throws.append(Throw(code.count("\n", 0, match.start()) + 1, expression))
     return throws
 
@@ -247,8 +273,6 @@ def is_allowed(expression: str) -> bool:
     # but every occurrence in this repo constructs a fresh exception and moves
     # it to avoid a copy, so the type still has to be judged on its merits.
     thrown = expression.removeprefix("::")
-    if thrown.startswith(PYBIND_NAMESPACES):
-        return True
     match = _QUALIFIED_NAME.match(thrown)
     if match is None or match.group(0) not in ALLOWED_EXCEPTION_TYPES:
         return False
@@ -263,7 +287,7 @@ def display(expression: str) -> str:
     prefix = "::" if expression.startswith("::") else ""
     thrown = expression.removeprefix("::")
     match = _QUALIFIED_NAME.match(thrown)
-    if match and "(" in thrown:
+    if match and thrown[match.end() :].startswith("("):
         return f"{prefix}{match.group(0)}(...)"
     return expression
 
@@ -280,22 +304,26 @@ def replacement_macro(path: str) -> str:
 
 
 def describe(path: str, expression: str) -> str:
-    if _BARE_IDENTIFIER.fullmatch(expression):
-        return (
-            f"`throw {expression};` throws a copy of `{expression}` with its "
-            "static type, so a derived exception would be sliced. Write "
-            "`throw;` to re-raise the original."
-        )
     macro = replacement_macro(path)
-    lines = [
-        f"`throw {display(expression)}` is a raw throw. Use {macro} instead.",
-    ]
+    if _BARE_IDENTIFIER.fullmatch(expression):
+        lines = [
+            f"`throw {expression};` throws a copy of `{expression}` with its "
+            "static type, so a derived exception would be sliced. If it is "
+            "re-raising the exception being handled, write `throw;`; if it is "
+            f"reporting a fresh error, use {macro}.",
+        ]
+    else:
+        lines = [
+            f"`throw {display(expression)}` is a raw throw. Use {macro} instead.",
+        ]
     if macro == "TORCH_CHECK":
         lines.append(
-            "Preserve the exception type: std::runtime_error -> TORCH_CHECK, "
-            "std::invalid_argument -> TORCH_CHECK_VALUE, "
-            "std::out_of_range -> TORCH_CHECK_INDEX. "
-            "See c10/util/Exception.h for the full list."
+            "c10::Error surfaces as RuntimeError, which is already what "
+            "HANDLE_TH_ERRORS does with every std:: exception, so TORCH_CHECK "
+            "is usually an exact swap. The type only matters if this throw "
+            "escapes through a bare pybind11 binding, which maps "
+            "std::invalid_argument to ValueError and std::out_of_range to "
+            "IndexError; TORCH_CHECK_VALUE and TORCH_CHECK_INDEX preserve those."
         )
     lines.append(
         "If this exception is typed control flow that something catches by "
@@ -360,7 +388,7 @@ def check_source(path: str, text: str) -> list[LintMessage]:
         else:
             licensed.add(lineno + 1)
             rest = marker.group("rest").strip()
-            if not (rest.startswith(":") and rest[1:].strip()):
+            if not (rest.startswith(":") and _WORD.search(rest)):
                 messages.append(
                     message(
                         lineno,
@@ -377,7 +405,7 @@ def check_source(path: str, text: str) -> list[LintMessage]:
         if is_allowed(throw.expression):
             continue
         messages.append(
-            message(throw.line, "raw throw statement", describe(path, throw.expression))
+            message(throw.line, "raw-throw", describe(path, throw.expression))
         )
 
     messages.sort(key=lambda m: (m.line or 0, m.name))
