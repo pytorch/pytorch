@@ -8,6 +8,7 @@ import functorch
 import torch
 import torch._inductor.config as config
 import torch.autograd
+import torch.nn.functional as F
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
@@ -845,6 +846,56 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def _run_partitioning_cat_log_softmax(self) -> str:
+        def f(
+            hidden, base_weight, correction_hidden, correction_weight, targets, weights
+        ):
+            base = hidden @ base_weight
+            correction = correction_hidden @ correction_weight
+            base_3d = base.view(2, 16, 33)
+            final = torch.cat(
+                (base_3d[:, :1], base_3d[:, 1:] + correction), dim=1
+            ).reshape_as(base)
+            final_loss = F.cross_entropy(final, targets, reduction="none") * weights
+            base_loss = F.cross_entropy(base, targets, reduction="none") * weights
+            return (
+                final_loss,
+                base_loss,
+                final.argmax(-1).float(),
+                base.argmax(-1).float(),
+            )
+
+        torch._dynamo.reset()
+        inp = (
+            T(32, 8, grad=True),
+            T(8, 33, grad=True),
+            T(2, 15, 8, grad=True),
+            T(8, 33, grad=True),
+            torch.arange(32, device=DEVICE) % 33,
+            T(32),
+        )
+        ref_inputs = tuple(arg.detach().clone().requires_grad_() for arg in inp[:4])
+        ref = f(*ref_inputs, *inp[4:])
+        sum(output.mean() for output in ref).backward()
+
+        count = count_numel_train(f, *inp)
+        for actual, expected in zip(inp[:4], ref_inputs):
+            self.assertEqual(actual.grad, expected.grad)
+        return count
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_log_softmax(self):
+        self.assertExpectedInline(self._run_partitioning_cat_log_softmax(), """20338""")
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    @patch.object(
+        functorch.compile.config,
+        "recompute_cat_log_softmax",
+        False,
+    )
+    def test_partitioning_cat_log_softmax_disabled(self):
+        self.assertExpectedInline(self._run_partitioning_cat_log_softmax(), """21268""")
 
     def test_partitioning_relu(self):
         def f(x):

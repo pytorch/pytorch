@@ -55,6 +55,9 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# Prefer rematerializing a virtual cat feeding log-softmax over saving its output.
+recompute_cat_log_softmax = True
+
 # When the partitioner's _size_of encounters a (Fake)ScriptObject in node
 # metadata, it has no general way to know the object's true memory footprint:
 # a ScriptObject may hold tensors internally. By default we raise rather than
