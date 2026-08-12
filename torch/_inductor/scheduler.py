@@ -822,7 +822,6 @@ class NestedReduction:
         parent inputs must have one normalized parent access, and every epilogue
         access must equal it under ``parent_r = factor * child_r + lane``.
         """
-        from .codegen.simd import CantSplit, SIMDKernel
         from .utils import sympy_index_symbol
 
         fused_buffer_names = OrderedSet.union(
@@ -845,47 +844,23 @@ class NestedReduction:
             return None
         external_source_names = parent_source_names - fused_buffer_names
 
-        def remapped_source_indices(
+        def source_indices_in_domain(
             nodes: Sequence[SchedulerNode],
-            groups: tuple[sympy.Expr, sympy.Expr],
-            values: tuple[sympy.Symbol, sympy.Symbol],
+            source_names: OrderedSet[str],
+            var_names: tuple[sympy.Symbol, sympy.Symbol],
+            sizes: tuple[sympy.Expr, sympy.Expr],
         ) -> dict[str, OrderedSet[sympy.Expr]] | None:
-            var_ranges = dict(zip(values, groups, strict=True))
             result: dict[str, OrderedSet[sympy.Expr]] = collections.defaultdict(
                 OrderedSet
             )
-
-            def split_values(
-                *new_ranges: Sequence[sympy.Expr],
-            ) -> list[list[sympy.Expr]]:
-                return [
-                    decompose_index(value, ranges)
-                    for value, ranges in zip(values, new_ranges, strict=True)
-                ]
-
             for node in nodes:
-                if not any(
-                    dep.name in external_source_names for dep in node.read_writes.reads
-                ):
-                    continue
-                try:
-                    args = SIMDKernel.map_kernel_groups_to_node_sizes(
-                        groups, node.get_ranges(), split_values
-                    )
-                except CantSplit:
-                    return None
-                accesses = dependencies.extract_loop_body_with_args(
-                    node._body, args, var_ranges
-                )
-                for dep in accesses._reads:
-                    if isinstance(dep, MemoryDep) and dep.name in external_source_names:
-                        # Canonical tmp symbols do not retain indirect-index provenance.
-                        if dep.is_indirect():
+                for dep in node.read_writes.reads:
+                    if isinstance(dep, MemoryDep) and dep.name in source_names:
+                        normalized = dep.normalize_with_ranges(var_names, sizes)
+                        if normalized is None:
                             return None
-                        index = dep.index.replace(Identity, lambda x: x)
-                        result[dep.name].add(
-                            V.graph.sizevars.simplify_with_ranges(index, dep.ranges)
-                        )
+                        index = normalized.index.replace(Identity, lambda x: x)
+                        result[dep.name].add(index)
             return result
 
         child_rnumel = FloorDiv(parent_rnumel, sub_parent_factor)
@@ -897,17 +872,21 @@ class NestedReduction:
         x = sympy_index_symbol("_sub_parent_x")
         parent_r = sympy_index_symbol("_sub_parent_r")
         child_r = sympy_index_symbol("_sub_parent_child_r")
-        parent_indices = remapped_source_indices(
-            parent_nodes,
-            (parent_numel, parent_rnumel),
-            (x, parent_r),
-        )
-        child_indices = remapped_source_indices(
+        child_indices = source_indices_in_domain(
             epilogue_nodes,
-            (parent_numel, child_rnumel),
+            external_source_names,
             (x, child_r),
+            (parent_numel, child_rnumel),
         )
-        if parent_indices is None or child_indices is None:
+        if child_indices is None:
+            return None
+        parent_indices = source_indices_in_domain(
+            parent_nodes,
+            OrderedSet(child_indices),
+            (x, parent_r),
+            (parent_numel, parent_rnumel),
+        )
+        if parent_indices is None:
             return None
 
         source_layouts: list[tuple[str, NestedReduction.SubParentSourceLayout]] = []

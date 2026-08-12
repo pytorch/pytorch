@@ -1216,6 +1216,59 @@ class _NestedReductionBase:
         self.check_no_fusion()
         self.assertGreater(metrics.generated_kernel_count, 1)
 
+    def test_standalone_sub_parent_rejects_shared_broadcast_source(self):
+        B, D = 4, 16
+
+        # A normalized dep cannot recover which nontrivial domain was broadcast.
+        def f(x, row):
+            scale = (
+                (x + row[:, None]).float().abs().amax(dim=-1) / 6.0
+            ).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            row = row[:, None]
+            even = pairs[..., 0].float() / scale[:, None] + row
+            odd = pairs[..., 1].float() / scale[:, None] - row
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        row = torch.randn(B, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x, row))
+        self.check_no_fusion()
+
+    def test_standalone_sub_parent_parent_only_broadcast_source(self):
+        B, D = 4, 16
+
+        def f(x, row):
+            scale = (
+                (x + row[:, None]).float().abs().amax(dim=-1) / 6.0
+            ).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / scale[:, None]
+            odd = pairs[..., 1].float() / scale[:, None]
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        row = torch.randn(B, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, row))
+        self.check_fusion()
+
+    def test_standalone_sub_parent_shared_scalar_source(self):
+        B, D = 4, 16
+
+        def f(x, scalar):
+            scale = (
+                (x * scalar).float().abs().amax(dim=-1) / 6.0
+            ).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / scale[:, None] + scalar
+            odd = pairs[..., 1].float() / scale[:, None] - scalar
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        scalar = torch.tensor(2.0, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, scalar))
+        self.check_fusion()
+
     def test_standalone_sub_parent_rejects_ambiguous_source_load(self):
         B, D, G = 32, 1024, 16
 
