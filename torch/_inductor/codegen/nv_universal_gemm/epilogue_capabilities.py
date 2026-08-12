@@ -49,6 +49,8 @@ class NVGemmReductionCapabilities:
     def supports_contract(
         self, contract: GemmReductionPlan | GemmReductionArguments
     ) -> bool:
+        if contract.group <= 1 or contract.group & (contract.group - 1):
+            return False
         if (
             self.max_n_axis_consumer_group is not None
             and contract.axis == 1
