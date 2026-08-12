@@ -143,9 +143,10 @@ static PyObject* THPEvent_from_ipc_handle(
 
   TORCH_CHECK(
       device.type() == acc_type,
-      "IPC Event can only be created on " acc_type,
+      "IPC Event can only be created on ",
+      acc_type,
       " devices, but got device type ",
-      device.type())
+      device.type());
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
@@ -163,8 +164,9 @@ static PyObject* THPEvent_ipc_handle(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
-  auto handle = self->event.ipc_handle();
-  return PyBytes_FromStringAndSize(handle.c_str(), handle.size());
+  auto handle = self->event.ipcHandle();
+  return PyBytes_FromStringAndSize(
+      handle.c_str(), static_cast<Py_ssize_t>(handle.size()));
   END_HANDLE_TH_ERRORS
 }
 
