@@ -37,6 +37,7 @@ TEST(XPUEventTest, IPCSupport) {
 
   c10::xpu::XPUEvent event3(true);
   event3.record();
+  event3.synchronize();
   EXPECT_THROW(event3.ipc_handle(), c10::Error);
   EXPECT_THROW(event3.elapsed_time(event2), c10::Error);
 #else
