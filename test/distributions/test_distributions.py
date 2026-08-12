@@ -107,12 +107,8 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import softmax
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
-    dtypesIfCUDA,
-    dtypesIfMPS,
-    dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -127,7 +123,6 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     skipIfTorchDynamo,
     HardwareClassification,
-    TEST_XPU,
     TestCase,
 )
 
@@ -4673,8 +4668,8 @@ class TestDistributionsDevice(DistributionsTestCase):
                 torch.tensor(0.0, dtype=torch.float32, device=device),
                 torch.tensor(1.0, dtype=torch.float32, device=device),
                 validate_args=False,
-            ).cdf(torch.tensor(20.0, device=device)),
-            torch.tensor(1.0, device=device),
+            ).cdf(20.0),
+            1.0,
             atol=1e-4,
             rtol=0,
         )
@@ -4683,8 +4678,8 @@ class TestDistributionsDevice(DistributionsTestCase):
                 torch.tensor(0.0, dtype=torch.float32, device=device),
                 torch.tensor(1.0, dtype=torch.float32, device=device),
                 validate_args=False,
-            ).cdf(torch.tensor(-5.0, device=device)),
-            torch.tensor(0.0, device=device),
+            ).cdf(-5.0),
+            0.0,
             atol=1e-4,
             rtol=0,
         )
@@ -4694,8 +4689,8 @@ class TestDistributionsDevice(DistributionsTestCase):
                     torch.tensor(0.0, dtype=torch.float64, device=device),
                     torch.tensor(1.0, dtype=torch.float64, device=device),
                     validate_args=False,
-                ).cdf(torch.tensor(50.0, device=device)),
-                torch.tensor(1.0, device=device),
+                ).cdf(50.0),
+                1.0,
                 atol=1e-4,
                 rtol=0,
             )
@@ -4704,8 +4699,8 @@ class TestDistributionsDevice(DistributionsTestCase):
                     torch.tensor(0.0, dtype=torch.float64, device=device),
                     torch.tensor(1.0, dtype=torch.float64, device=device),
                     validate_args=False,
-                ).cdf(torch.tensor(-10.0, device=device)),
-                torch.tensor(0.0, device=device),
+                ).cdf(-10.0),
+                0.0,
                 atol=1e-8,
                 rtol=0,
             )
