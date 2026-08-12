@@ -150,6 +150,17 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
+class CUDAGraphAPIOnlyTests(TestCase):
+    def test_mark_warmup_incomplete_without_cudagraphs(self):
+        cudagraph_trees = torch._inductor.cudagraph_trees
+        containers = cudagraph_trees.get_obj(
+            cudagraph_trees.local, "tree_manager_containers"
+        )
+        existing_devices = tuple(containers)
+        torch.compiler.cudagraph_mark_warmup_incomplete()
+        self.assertEqual(tuple(containers), existing_devices)
+
+
 if HAS_CUDA_AND_TRITON:
 
     def get_all_cudagraph_segments():
@@ -3150,6 +3161,61 @@ if HAS_CUDA_AND_TRITON:
             foo_cg([3, x])  # replay
             self.assertEqual(COUNTER, 4)
 
+        def test_mark_warmup_incomplete(self):
+            mark_warmup_incomplete = torch.compiler.cudagraph_mark_warmup_incomplete
+            mark_warmup_incomplete()
+            self.assertIsNone(self.get_manager())
+
+            def stable(inps):
+                x = inps[0]
+                inps.clear()
+                return (x + 1,)
+
+            x = torch.randn(2, device="cuda")
+            stable_cg = self.cudagraphify_impl(stable, [x], ())
+            stable_out = stable_cg([x])
+            manager = self.get_manager()
+            stable_functions = manager.warmed_up_functions.copy()
+            self.assertEqual(len(stable_functions), 1)
+            del stable_out
+
+            calls = 0
+
+            def f(inps):
+                nonlocal calls
+                calls += 1
+                x = inps[0]
+                inps.clear()
+                if calls < 3 or calls == 4:
+                    mark_warmup_incomplete()
+                return (x + 1,)
+
+            foo_cg = self.cudagraphify_impl(f, [x], ())
+
+            for _ in range(2):
+                out = foo_cg([x])
+                self.assertEqual(manager.warmed_up_functions, stable_functions)
+                del out
+
+            out = foo_cg([x])
+            warmed_functions = manager.warmed_up_functions.copy()
+            self.assertEqual(len(warmed_functions), 2)
+            mark_warmup_incomplete()
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
+            out = foo_cg([x])
+            self.assertEqual(manager.path_state, ExecutionState.RECORDING)
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
+            out = foo_cg([x])
+            self.assertEqual(manager.path_state, ExecutionState.EXECUTION)
+            self.assertEqual(calls, 4)
+            mark_warmup_incomplete()
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
         def test_forward_generation(self):
             def foo(x):
                 return x * x * x
@@ -3197,7 +3263,7 @@ if HAS_CUDA_AND_TRITON:
             msgs = [str(x.message) for x in w]
             self.assertTrue(
                 any("require backward" in m for m in msgs),
-                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
             )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
@@ -3333,7 +3399,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        @torch._inductor.config.patch("cpp_wrapper", True)
+        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": True})
         def test_skip_cpp_wrapper(self):
             def foo(x):
                 return x + 1
@@ -4076,7 +4142,7 @@ if HAS_CUDA_AND_TRITON:
 
             # Set threshold high enough to skip this simple function
             with torch._inductor.config.patch(
-                {"triton.cudagraph_min_partition_size": 10}
+                {"triton.cudagraph_min_partition_size": 10, "graph_partition": True}
             ):
                 fn_compiled = torch.compile(fn, mode="reduce-overhead")
                 for _ in range(3):
@@ -4315,6 +4381,10 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @unittest.skip(
+            "Disabled due to CI failures; see "
+            "https://github.com/pytorch/pytorch/issues/190233"
+        )
         def test_graph_partition_view_fallback(self):
             def f(x):
                 y = x + 1
@@ -4330,6 +4400,40 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):

@@ -3012,7 +3012,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
  * redundant computations: we're calling `sin` twice as much as in the first
  * version.
  *
- * Ultimately, we nede to choose at what point we prefer to compute values of
+ * Ultimately, we need to choose at what point we prefer to compute values of
  * A[i,j] - we can do it in the very beginning for the entire buffer A (the
  * first option) or compute it on the fly when we compute B (the second option).
  * There are also options in between those two: we can compute a part of B which

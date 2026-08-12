@@ -11,12 +11,12 @@ from torch.testing._internal.common_utils import \
     (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
      subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, onlyAccelerator, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -80,7 +80,7 @@ class TestScatterGather(TestCase):
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
-            if device != "cpu":
+            if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
@@ -259,7 +259,7 @@ class TestScatterGather(TestCase):
         else:
             # When we are running opportunistic_fastatomics, we will expect some floating point rounding
             # errors as the order of operation is not guaranteed.
-            if TEST_WITH_ROCM and CDNA3OrLater() \
+            if TEST_WITH_ROCM and gfx_arch_supports_opportunistic_fastatomics() \
                     and not torch.are_deterministic_algorithms_enabled():
                 self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
             else:
@@ -319,7 +319,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
     @serialTest()
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.half, torch.bfloat16)
     def test_scatter_add_large(self, device, dtype):
         # test larger shapes that exercise the vectorized/TMA scatter_add path
@@ -338,7 +338,7 @@ class TestScatterGather(TestCase):
         else:
             shapes.append((4, 4, 16384 * 256))
         for (m, n, k) in shapes:
-            if device != "cpu":
+            if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
@@ -634,9 +634,10 @@ def _misaligned_view(rows, cols, dtype):
     # Sanity check: if the allocator ever hands us a base such that the
     # +1-element slice is still 16B-aligned, the test silently passes
     # without exercising the misalignment path.
-    assert t.data_ptr() % 16 != 0, (  # noqa: S101
-        f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
-    )
+    if t.data_ptr() % 16 == 0:
+        raise AssertionError(
+            f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
+        )
     return t
 
 

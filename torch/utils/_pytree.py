@@ -1387,6 +1387,12 @@ class LeafSpec(TreeSpec):
     def __repr__(self, indent: int = 0) -> str:
         return "*"
 
+    def __reduce__(self) -> tuple[Callable[[], "LeafSpec"], tuple[()]]:
+        # Reconstruct via the factory rather than the deprecated LeafSpec
+        # constructor, so copy/pickle round-trips don't emit the FutureWarning
+        # and reuse the shared singleton.
+        return (treespec_leaf, ())
+
 
 # All leaves are equivalent, so represent with a single object to save on
 # object construction time
