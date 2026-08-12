@@ -506,7 +506,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
             self.assertEqual(wrapper.supports_coalescing, unwrapped.supports_coalescing)
             self.assertEqual(
-                wrapper.supports_time_estimate, unwrapped.supports_time_estimate
+                wrapper._supports_time_estimate, unwrapped._supports_time_estimate
             )
             self.assertEqual(
                 wrapper.supports_tensor_alloc(device),
