@@ -3066,9 +3066,23 @@ Arguments:
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
-              "supports_time_estimate",
+              "_supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
-              "(test whether the backend supports collective time estimation)")
+              R"(Test whether the backend supports collective time estimation.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_start_time_estimate",
+              &::c10d::Backend::startTimeEstimate,
+              R"(Start estimating the duration of subsequent collectives.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_end_time_estimate",
+              &::c10d::Backend::endTimeEstimate,
+              R"(Stop estimating collectives and return their duration in microseconds.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
               &::c10d::Backend::supportsShrinking,
@@ -3827,10 +3841,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
-              "_start_time_estimate",
-              &::c10d::ProcessGroupNCCL::startTimeEstimate)
-          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
-          .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def(
@@ -4163,22 +4173,26 @@ Returns:
       intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL2", backend)
           .def(
-              py::init(
-                  [](const c10::intrusive_ptr<::c10d::Store>& store,
-                     int rank,
-                     int size,
-                     c10::intrusive_ptr<
-                         ::c10d::nccl2::ProcessGroupNCCL::Options> options) {
-                    // gil_scoped_release is not safe as a call_guard in init.
-                    // https://github.com/pybind/pybind11/issues/5473
-                    py::gil_scoped_release nogil{};
-                    return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          c10::intrusive_ptr<
+                              ::c10d::nccl2::ProcessGroupNCCL::Options> options,
+                          std::optional<at::Device> device_id) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                auto backend =
+                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
                         store, rank, size, std::move(options));
-                  }),
+                backend->setBoundDeviceId(device_id);
+                return backend;
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
+              py::arg("device_id") = std::nullopt,
               R"(Create a new ProcessGroupNCCL2 instance.)")
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4187,8 +4201,11 @@ Returns:
                 py::gil_scoped_release nogil{};
                 auto options =
                     ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
-                    store, rank, size, options);
+                auto backend =
+                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                        store, rank, size, options);
+                backend->setBoundDeviceId(std::nullopt);
+                return backend;
               }),
               py::arg("store"),
               py::arg("rank"),
@@ -4223,15 +4240,20 @@ Returns:
                       int rank,
                       int size,
                       const c10::intrusive_ptr<
-                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
+                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options,
+                      std::optional<at::Device> device_id) {
             py::gil_scoped_release nogil{};
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
+            auto backend =
+                c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+            backend->setBoundDeviceId(device_id);
+            return backend;
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
           py::arg("options"),
+          py::arg("device_id") = std::nullopt,
           R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4239,8 +4261,11 @@ Returns:
                       int size) {
             py::gil_scoped_release nogil{};
             auto options = ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
+            auto backend =
+                c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+            backend->setBoundDeviceId(std::nullopt);
+            return backend;
           }),
           py::arg("store"),
           py::arg("rank"),

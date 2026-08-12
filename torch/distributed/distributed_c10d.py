@@ -732,6 +732,39 @@ def _nccl2_options(
     return backend_options
 
 
+def _nccl2_device(
+    opts: _DistributedBackendOptions,
+) -> torch.device | None:
+    if opts.enable_reconfigure:
+        return None
+
+    process_group = opts.process_group
+    device = process_group.bound_device_id if process_group is not None else None
+    if device is not None:
+        return device
+
+    if torch.cuda.is_initialized():
+        device_index = torch.cuda.current_device()
+    elif "LOCAL_RANK" in os.environ:
+        device_index = get_node_local_rank()
+    else:
+        device_count = torch.cuda.device_count()
+        if device_count == 0:
+            raise RuntimeError("nccl2 requires at least one CUDA device")
+        global_rank = (
+            opts.global_ranks_in_group[opts.group_rank]
+            if opts.global_ranks_in_group
+            else opts.group_rank
+        )
+        device_index = global_rank % device_count
+
+    device = torch.device("cuda", device_index)
+    if process_group is not None:
+        process_group.bound_device_id = device
+
+    return device
+
+
 def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> C10DBackend:
@@ -750,7 +783,14 @@ def _create_nccl2_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
-    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
+    backend = ProcessGroupNCCL2(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        pg_options,
+        _nccl2_device(opts),
+    )
+    return backend
 
 
 def _create_nccl_lazy_process_group(
@@ -771,9 +811,14 @@ def _create_nccl_lazy_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
-    return ProcessGroupNCCLLazy(
-        opts.store, opts.group_rank, opts.group_size, pg_options
+    backend = ProcessGroupNCCLLazy(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        pg_options,
+        _nccl2_device(opts),
     )
+    return backend
 
 
 def _create_ucc_process_group(
@@ -3680,45 +3725,49 @@ def _time_estimator(
     group: ProcessGroup | None = None,
     device: torch.device | None = None,
 ) -> collections.abc.Iterator[_TimeEstimator]:
-    """
-    Context manager used to estimate time of collectives.
-    Within the context manager, nothing is actually run and the backend just simulates
-    the collective time only.
+    r"""_time_estimator(group=None, device=None) -> Iterator[_TimeEstimator]
 
-    Args:
-        group (`ProcessGroup`, optional): The process group to work on. If None,
-            the default process group will be used.
-        device (`torch.device`, optional): Default is None, set to a device if
-            there isn't a `**_coalesced` implementation by the backend.
+    Estimate the execution time of collectives without running them.
 
-    Examples:
-        >>> # xdoctest: +SKIP("no rank")
-        >>> # Synchronous ops
-        >>> with _time_estimator() as cm:
-        >>>     for i in range(num_colls):
-        >>>         dist.all_reduce(tensors[i])
-        >>> # estimate time is stored in cm.estimated_time
+    A supported backend simulates collectives issued inside the context. After the
+    context exits, ``estimated_time`` contains their total duration in microseconds.
 
     .. warning::
-       :func:`_time_estimator` currently only support NCCL backend but it can
-       easily be extended to other backends.
+        This API is experimental and subject to change. It currently supports only
+        NCCL-based backends. The NCCL communicator must be initialized before entering
+        the context so the estimate reflects its actual topology. Pass ``device_id``
+        to :func:`init_process_group` or issue a collective first.
 
-       Also a NCCL communicator needs to be created because only with a real communicator can we do accurate estimation.
-       The communicator internally has knowledge about the links it runs on
-       (e.g. intra-node or inter-node, whether the links are NVLink or PCI-e or IB).
+    Args:
+        group (ProcessGroup, optional): Process group whose backend should simulate the
+          collectives. Default: ``None`` uses the default process group.
+        device (torch.device, optional): Device whose backend should perform the
+          estimation. Default: ``None`` uses the process group's default device.
+
+    Yields:
+        _TimeEstimator: Context object whose ``estimated_time`` attribute is populated
+          when the context exits.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("no rank")
+        >>> tensor = torch.ones(1024, device="cuda")
+        >>> dist.all_reduce(tensor)  # Initialize the communicator.
+        >>> with dist._time_estimator() as estimate:
+        ...     dist.all_reduce(tensor)
+        >>> estimate.estimated_time  # Total simulated duration in microseconds.
     """
-    # TODO: We need to also support torch inductor for the time estimator.
     group = group or _get_default_group()
     device = device or _get_pg_default_device(group)
     backend = group._get_backend(device)
-    if not backend.supports_time_estimate:
+    if not backend._supports_time_estimate:
         raise NotImplementedError(
             f"collective time estimator is not supported in the current version of backend {backend}"
         )
-    backend._start_time_estimate()  # type: ignore[attr-defined]
+    backend._start_time_estimate()
     cm = _TimeEstimator()
     yield cm
-    cm.estimated_time = backend._end_time_estimate()  # type: ignore[attr-defined]
+    cm.estimated_time = backend._end_time_estimate()
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
@@ -7581,7 +7630,7 @@ def _prepare_shrink_target_group(
     target_pg = group if group is not None else _get_default_group()
 
     # Cache frequently accessed properties to avoid repeated calls
-    group_size = int(target_pg.size())
+    group_size = target_pg.size()
     group_info: _ShrinkGroupInfo = {
         "process_group": target_pg,
         "is_default_group": (target_pg == _get_default_group()),

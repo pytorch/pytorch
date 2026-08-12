@@ -1,7 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 //
-// c10d::Backend surface for ProcessGroupNCCL: the constructor, lazy device
-// binding, and the virtual overrides. Each override unwraps the c10d
+// c10d::Backend surface for ProcessGroupNCCL: the constructor, device binding,
+// and the virtual overrides. Each override unwraps the c10d
 // tensor-list shape and forwards the c10d option fields (c10d::ReduceOp,
 // rootRank, asyncOp, resolved timeout) directly to the internal NCCL engine
 // helpers, then tags the returned c10d::Work with its output tensors.
@@ -16,6 +16,7 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -140,7 +141,6 @@ void ProcessGroupNCCL::ensureInitialized(at::Device device) {
       !options_c10d_->enable_reconfigure,
       "ProcessGroupNCCL has not been initialized. Call reconfigure() before "
       "issuing collectives when enable_reconfigure=True.");
-  // Lazy one-time bootstrap (replaces torchcomms' eager init(device)).
   init(device);
 }
 
@@ -150,12 +150,58 @@ c10::intrusive_ptr<::c10d::Backend::Options> ProcessGroupNCCL::
       options_c10d_);
 }
 
+void ProcessGroupNCCL::startTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  checkInitialized();
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+#else
+  TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
+#endif
+}
+
+float ProcessGroupNCCL::endTimeEstimate() {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->groupSimulateEnd(&simInfo),
+      "NCCL GroupSimulateEnd failed");
+  return simInfo.estimatedTime;
+#else
+  TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
+#endif
+}
+
 void ProcessGroupNCCL::setTimeout(std::chrono::milliseconds timeout) {
   options_c10d_->timeout = timeout;
 }
 
+void ProcessGroupNCCL::setBoundDeviceId(std::optional<at::Device> device) {
+  if (options_c10d_->enable_reconfigure) {
+    Backend::setBoundDeviceId(device);
+    return;
+  }
+  if (!device.has_value() && init_state_ == InitializationState::INITIALIZED) {
+    device = device_;
+  }
+  if (!device.has_value()) {
+    const auto deviceCount = c10::cuda::device_count_ensure_non_zero();
+    uint64_t deviceRank = static_cast<uint64_t>(getRank());
+    const auto& globalRanks = options_c10d_->global_ranks_in_group;
+    if (static_cast<size_t>(getRank()) < globalRanks.size()) {
+      deviceRank = globalRanks[getRank()];
+    }
+    device = at::Device(
+        at::kCUDA, static_cast<c10::DeviceIndex>(deviceRank % deviceCount));
+  }
+  Backend::setBoundDeviceId(device);
+  ensureInitialized(*device);
+}
+
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
-  ensureInitialized(device);
+  setBoundDeviceId(device);
 }
 
 void ProcessGroupNCCL::runAbortHooks() {
@@ -281,23 +327,65 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   return allocator;
 }
 
+bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  return ::c10d::cuda::deviceSupportsMulticast(deviceIdx);
+}
+
+at::Tensor ProcessGroupNCCL::allocateTensor(
+    long size,
+    at::TensorOptions options) {
+  TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
+  auto device = options.device();
+  TORCH_CHECK_VALUE(
+      device.is_cuda(),
+      "NCCL tensor allocator expects a CUDA device but got ",
+      device);
+  if (!device.has_index()) {
+    device = getBoundDeviceId().value_or(
+        at::Device(at::kCUDA, at::cuda::current_device()));
+    options = options.device(device);
+  }
+  TORCH_CHECK(
+      supportsTensorAlloc(device.index()),
+      "NCCL tensor allocation is not supported on ",
+      device);
+
+  checkInitialized();
+  TORCH_CHECK(
+      device == device_,
+      "ProcessGroupNCCL is bound to device ",
+      device_,
+      " but allocation was requested on ",
+      device);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  if (!memPool_) {
+    auto allocator = std::static_pointer_cast<
+        c10::cuda::CUDACachingAllocator::CUDAAllocator>(getMemAllocator());
+    auto pool = std::make_unique<at::cuda::MemPool>(std::move(allocator));
+    registerMemPool(pool.get(), /*symm=*/false);
+    memPool_ = std::move(pool);
+  }
+
+  auto threadId = std::this_thread::get_id();
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      memPool_->device(), memPool_->id(), [threadId](cudaStream_t) {
+        return std::this_thread::get_id() == threadId;
+      });
+  auto tensor = at::empty({size}, options);
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(
+      memPool_->device(), memPool_->id());
+  c10::cuda::CUDACachingAllocator::releasePool(
+      memPool_->device(), memPool_->id());
+  return tensor;
+}
+
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
   TORCH_CHECK(
       supportsWindow(),
       "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
       "supported on ROCm");
-  // Trigger the lazy bootstrap: prefer the tensor's device, then the bound
-  // device, then the current CUDA device.
-  if (init_state_ != InitializationState::INITIALIZED) {
-    at::Device dev = at::Device(at::kCUDA, at::cuda::current_device());
-    if (tensor.has_value()) {
-      dev = tensor->device();
-    } else if (getBoundDeviceId().has_value()) {
-      dev = getBoundDeviceId().value();
-    }
-    ensureInitialized(dev);
-  }
   checkInitialized();
   auto window = c10::make_intrusive<WindowNCCL>(
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
@@ -331,7 +419,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
   if (tensor.is_complex()) {
     tensor = at::view_as_real(tensor);
   }
-  ensureInitialized(tensor.device());
   ++sequence_number_;
   auto work = broadcastImpl(
       tensor,
@@ -355,7 +442,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
         "on complex tensors");
     tensor = at::view_as_real(tensor);
   }
-  ensureInitialized(tensor.device());
   ++sequence_number_;
   auto work = all_reduce(
       tensor, opts.reduceOp, opts.asyncOp, operationTimeout(opts.timeout));
@@ -367,7 +453,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceCoalescedOptions& opts) {
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
-  ensureInitialized(tensors.at(0).device());
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(tensors.size());
@@ -395,7 +480,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
         "on complex tensors");
     tensor = at::view_as_real(tensor);
   }
-  ensureInitialized(tensor.device());
   ++sequence_number_;
   auto work = reduceImpl(
       tensor,
@@ -414,7 +498,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   TORCH_CHECK(
       outputTensors.size() == 1 && inputTensors.size() == 1,
       "Only single tensor / single list supported");
-  ensureInitialized(inputTensors.at(0).device());
   ++sequence_number_;
   const auto& input = inputTensors.at(0);
   auto& outputList = outputTensors.at(0);
@@ -457,7 +540,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
   TORCH_CHECK(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
-  ensureInitialized(inputTensors.at(0).device());
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   std::vector<at::Tensor> outputs;
@@ -488,7 +570,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
   TORCH_CHECK(
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
-  ensureInitialized(inputs.at(0).device());
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(inputs.size());
@@ -510,7 +591,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::AllgatherOptions& opts) {
-  ensureInitialized(inputBuffer.device());
   ++sequence_number_;
   auto work = allGatherSingleImpl(
       outputBuffer, inputBuffer, opts.asyncOp, operationTimeout(opts.timeout));
@@ -523,7 +603,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::GatherOptions& opts) {
   TORCH_CHECK(inputTensors.size() == 1, "Only single input tensor supported");
-  ensureInitialized(inputTensors.at(0).device());
   if (getRank() == opts.rootRank) {
     TORCH_CHECK(outputTensors.size() == 1, "Only single output list on root");
   } else if (outputTensors.empty()) {
@@ -550,8 +629,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
       opts.rootRank >= 0 && opts.rootRank < getSize(),
       "invalid root rank: ",
       opts.rootRank);
-  ensureInitialized(inputBuffer.device());
-
   // outputBuffer is only meaningful on the root; elsewhere the caller passes an
   // empty placeholder and gatherImpl ignores the (empty) output list.
   std::vector<at::Tensor> outputList;
@@ -586,7 +663,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ::c10d::ScatterOptions& opts) {
   TORCH_CHECK(outputTensors.size() == 1, "Only single output tensor supported");
-  ensureInitialized(outputTensors.at(0).device());
   if (getRank() == opts.rootRank) {
     TORCH_CHECK(inputTensors.size() == 1, "Only single input list on root");
   } else {
@@ -611,7 +687,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce_scatter(
   TORCH_CHECK(
       outputTensors.size() == 1 && inputTensors.size() == 1,
       "Only single tensor / single list supported");
-  ensureInitialized(outputTensors.at(0).device());
   ++sequence_number_;
   auto work = reduce_scatter(
       outputTensors.at(0),
@@ -631,7 +706,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
   TORCH_CHECK(
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
-  ensureInitialized(outputs.at(0).device());
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(outputs.size());
@@ -654,7 +728,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::ReduceScatterOptions& opts) {
-  ensureInitialized(outputBuffer.device());
   ++sequence_number_;
   auto work = reduceScatterSingleImpl(
       outputBuffer,
@@ -672,7 +745,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const ::c10d::AllToAllOptions& opts) {
-  ensureInitialized(outputBuffer.device());
   ++sequence_number_;
   auto timeout = operationTimeout(opts.timeout);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
@@ -699,7 +771,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllToAllOptions& opts) {
   TORCH_CHECK(!inputTensors.empty(), "alltoall requires input tensors");
-  ensureInitialized(inputTensors.at(0).device());
   ++sequence_number_;
   auto work = all_to_all(
       outputTensors,
@@ -712,20 +783,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::barrier(
     const ::c10d::BarrierOptions& opts) {
-  // Resolve a device for lazy init: prefer an explicit device id, then the
-  // bound device, then the conventional rank-to-device mapping.
-  if (init_state_ != InitializationState::INITIALIZED) {
-    const auto device_count = c10::cuda::device_count_ensure_non_zero();
-    at::Device dev = at::Device(
-        at::kCUDA, static_cast<c10::DeviceIndex>(getRank() % device_count));
-    if (!opts.device_ids.empty()) {
-      dev = at::Device(
-          at::kCUDA, static_cast<c10::DeviceIndex>(opts.device_ids[0]));
-    } else if (getBoundDeviceId().has_value()) {
-      dev = getBoundDeviceId().value();
-    }
-    ensureInitialized(dev);
-  }
   ++sequence_number_;
   return barrierImpl(/*async_op=*/false, operationTimeout(opts.timeout));
 }
@@ -735,7 +792,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::send(
     int dstRank,
     [[maybe_unused]] int tag) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  ensureInitialized(tensors.at(0).device());
   if (coalescing_batch_.has_value()) {
     coalescing_batch_->send(tensors.at(0), dstRank);
     return c10::make_intrusive<CompletedWork>(tensors);
@@ -751,7 +807,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
     int srcRank,
     [[maybe_unused]] int tag) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  ensureInitialized(tensors.at(0).device());
   if (coalescing_batch_.has_value()) {
     coalescing_batch_->recv(tensors.at(0), srcRank);
     return c10::make_intrusive<CompletedWork>(tensors);
