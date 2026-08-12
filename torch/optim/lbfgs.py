@@ -3,7 +3,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import _to_scalar, Optimizer, ParamsT
+from .optimizer import _maximize_doc, _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["LBFGS"]
@@ -204,38 +204,7 @@ def _strong_wolfe(
 
 
 class LBFGS(Optimizer):
-    """Implements L-BFGS algorithm.
-
-    Heavily inspired by `minFunc
-    <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
-
-    .. warning::
-        This optimizer doesn't support per-parameter options and parameter
-        groups (there can be only one).
-
-    .. warning::
-        Right now all parameters have to be on a single device. This will be
-        improved in the future.
-
-    .. note::
-        This is a very memory intensive optimizer (it requires additional
-        ``param_bytes * (history_size + 1)`` bytes). If it doesn't fit in memory
-        try reducing the history size, or use a different algorithm.
-
-    Args:
-        params (iterable): iterable of parameters to optimize. Parameters must be real.
-        lr (float, optional): learning rate (default: 1)
-        max_iter (int, optional): maximal number of iterations per optimization step
-            (default: 20)
-        max_eval (int, optional): maximal number of function evaluations per optimization
-            step (default: max_iter * 1.25).
-        tolerance_grad (float, optional): termination tolerance on first order optimality
-            (default: 1e-7).
-        tolerance_change (float, optional): termination tolerance on function
-            value/parameter changes (default: 1e-9).
-        history_size (int, optional): update history size (default: 100).
-        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
-    """
+    r"""Implements L-BFGS algorithm."""
 
     def __init__(
         self,
@@ -247,6 +216,8 @@ class LBFGS(Optimizer):
         tolerance_change: float = 1e-9,
         history_size: int = 100,
         line_search_fn: str | None = None,
+        *,
+        maximize: bool = False,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -262,6 +233,7 @@ class LBFGS(Optimizer):
             "tolerance_change": tolerance_change,
             "history_size": history_size,
             "line_search_fn": line_search_fn,
+            "maximize": maximize,
         }
         super().__init__(params, defaults)
 
@@ -294,7 +266,10 @@ class LBFGS(Optimizer):
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
-        return torch.cat(views, 0)
+        flat_grad = torch.cat(views, 0)
+        if self.param_groups[0].get("maximize", False):
+            flat_grad.neg_()
+        return flat_grad
 
     def _add_grad(self, step_size, update) -> None:
         offset = 0
@@ -318,6 +293,8 @@ class LBFGS(Optimizer):
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
         loss = float(closure())
+        if self.param_groups[0].get("maximize", False):
+            loss = -loss
         flat_grad = self._gather_flat_grad()
         self._set_param(x)
         return loss, flat_grad
@@ -338,6 +315,13 @@ class LBFGS(Optimizer):
         # Make sure the closure is always called with grad enabled
         closure = torch.enable_grad()(closure)
 
+        # There is nothing to optimize, so skip the step like the other optimizers
+        # do, but still evaluate the closure so the caller gets a loss back. The
+        # rest of the step cannot run anyway: the global state below is keyed on
+        # the first parameter, and the flat gradient would be empty.
+        if len(self._params) == 0:
+            return closure()
+
         group = self.param_groups[0]
         lr = _to_scalar(group["lr"])
         max_iter = group["max_iter"]
@@ -346,6 +330,7 @@ class LBFGS(Optimizer):
         tolerance_change = group["tolerance_change"]
         line_search_fn = group["line_search_fn"]
         history_size = group["history_size"]
+        maximize = group.get("maximize", False)
 
         # NOTE: LBFGS has only global state, but we register it as state for
         # the first param, because this helps with casting in load_state_dict
@@ -355,7 +340,7 @@ class LBFGS(Optimizer):
 
         # evaluate initial f(x) and df/dx
         orig_loss = closure()
-        loss = float(orig_loss)
+        loss = -float(orig_loss) if maximize else float(orig_loss)
         current_evals = 1
         state["func_evals"] += 1
 
@@ -489,7 +474,7 @@ class LBFGS(Optimizer):
                     # no use to re-evaluate that function here
                     with torch.enable_grad():
                         loss = closure()
-                    loss = float(loss)
+                    loss = -float(loss) if maximize else float(loss)
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1
@@ -528,3 +513,41 @@ class LBFGS(Optimizer):
         state["prev_loss"] = prev_loss
 
         return orig_loss
+
+
+LBFGS.__doc__ = (
+    r"""Implements L-BFGS algorithm.
+
+    Heavily inspired by `minFunc
+    <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
+
+    .. warning::
+        This optimizer doesn't support per-parameter options and parameter
+        groups (there can be only one).
+
+    .. warning::
+        Right now all parameters have to be on a single device. This will be
+        improved in the future.
+
+    .. note::
+        This is a very memory intensive optimizer (it requires additional
+        ``param_bytes * (history_size + 1)`` bytes). If it doesn't fit in memory
+        try reducing the history size, or use a different algorithm.
+    """
+    + rf"""
+    Args:
+        params (iterable): iterable of parameters to optimize. Parameters must be real.
+        lr (float, optional): learning rate (default: 1)
+        max_iter (int, optional): maximal number of iterations per optimization step
+            (default: 20)
+        max_eval (int, optional): maximal number of function evaluations per optimization
+            step (default: max_iter * 1.25).
+        tolerance_grad (float, optional): termination tolerance on first order optimality
+            (default: 1e-7).
+        tolerance_change (float, optional): termination tolerance on function
+            value/parameter changes (default: 1e-9).
+        history_size (int, optional): update history size (default: 100).
+        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
+        {_maximize_doc}
+    """
+)
