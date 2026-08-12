@@ -2127,16 +2127,6 @@ def _batch_norm_cpu_output_memory_format(
     return utils.suggest_memory_format(input)
 
 
-def _to_memory_format_strides(t: Tensor, memory_format: torch.memory_format) -> Tensor:
-    # The eager kernels allocate with empty_like, which always builds fresh
-    # strides for the requested memory format, whereas contiguous() is a no-op
-    # whenever the tensor already qualifies. Those differ when a size-1
-    # dimension leaves its stride unconstrained. copy=True forces the restride
-    # while staying functional: an empty_like().copy_() would put a copy_ on an
-    # intermediate into the graph and trip assert_functional_graph.
-    return t.to(memory_format=memory_format, copy=True)
-
-
 def native_batch_norm_helper(
     input: Tensor,
     weight: Tensor | None,
@@ -2224,9 +2214,19 @@ def native_batch_norm_helper(
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
     if output_memory_format is not None:
-        output = _to_memory_format_strides(output, output_memory_format)
+        # copy=True forces the restride: to() alone leaves the strides untouched
+        # whenever the tensor already qualifies for the format, which differs
+        # from the empty_like() the kernel allocates with when a size-1
+        # dimension leaves its stride unconstrained. Folding it into the dtype
+        # cast keeps this to a single copy, and staying out-of-place avoids
+        # putting a copy_ on an intermediate into the graph.
+        output = output.to(
+            dtype=input.dtype, memory_format=output_memory_format, copy=True
+        )
+    else:
+        output = output.to(dtype=input.dtype)
     return (
-        output.to(dtype=input.dtype),
+        output,
         save_mean,
         save_rstd,
         new_running_mean,
@@ -2764,15 +2764,28 @@ def native_batch_norm_backward(
         grad_input = grad_out_cast * grad_scale
 
     if input.device.type == "cpu":
-        # batch_norm_backward_cpu allocates grad_input as
-        # empty_like(input, input.suggest_memory_format()) rather than
-        # inheriting the input's strides. CUDA is left alone here: it picks
-        # between several kernels based on runtime properties (channels-last
-        # layout, 32-bit indexability), so its strides cannot be reproduced
-        # statically.
-        grad_input = _to_memory_format_strides(
-            grad_input, utils.suggest_memory_format(input)
+        # batch_norm_backward_cpu allocates grad_input rather than inheriting
+        # the input's strides. It takes a contiguous fast path that requires
+        # input and grad_out to agree on layout, and picks the output format
+        # differently in each case. CUDA is left alone: it dispatches between
+        # several kernels based on runtime properties (channels-last layout,
+        # 32-bit indexability), so its strides cannot be reproduced statically.
+        all_contiguous = (
+            _is_contiguous_in_any_format(input)
+            and _is_contiguous_in_any_format(grad_out)
+            and utils.suggest_memory_format(input)
+            == utils.suggest_memory_format(grad_out)
         )
+        grad_input_memory_format = (
+            _suggest_memory_format_contig(input)
+            if all_contiguous
+            else utils.suggest_memory_format(input)
+        )
+        grad_input = grad_input.to(
+            dtype=input_dtype, memory_format=grad_input_memory_format, copy=True
+        )
+    else:
+        grad_input = grad_input.to(input_dtype)
 
     if output_mask[1]:
         grad_weight = dot_p * invstd
@@ -2785,7 +2798,7 @@ def native_batch_norm_backward(
         grad_bias = None  # "None" doesn't work with vjp, should use zeros for vjp
 
     return (
-        grad_input.to(input_dtype),
+        grad_input,
         _maybe_cast(grad_weight, weight_dtype),
         _maybe_cast(grad_bias, weight_dtype),
     )

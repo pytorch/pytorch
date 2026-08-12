@@ -736,25 +736,34 @@ class FakeTensorTest(TestCase):
                 fake_out = torch.ops.aten.native_batch_norm.default(*make_args())[0]
             self.assertEqual(fake_out.stride(), eager_out.stride())
 
+        cl, cl3d = torch.channels_last, torch.channels_last_3d
         for training in (True, False):
-            # A noncontiguous input gets a contiguous output from the kernel.
+            # Noncontiguous inputs get a contiguous output from the kernel.
             check(torch.randn(2, 3, 4).transpose(1, 2), training)
-            # channels_last inputs must keep their layout, not be made contiguous.
-            check(torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last), training)
+            check(torch.randn(2, 4, 3), training)
+            check(torch.randn(8, 8, 4, 2).permute(3, 2, 0, 1), training)
+            check(torch.randn(4, 5, 6, 7).transpose(0, 2), training)
+            # Contiguous and channels_last inputs keep their layout.
+            check(torch.randn(2, 3, 8, 8), training)
+            check(torch.randn(2, 3, 8, 8).to(memory_format=cl), training)
+            check(torch.randn(2, 3, 4, 5, 5).to(memory_format=cl3d), training)
             # A size-1 dim leaves its stride unconstrained, so the kernel's
             # freshly allocated strides can differ from the input's even though
             # the input already counts as contiguous.
             check(torch.randn(2, 4).as_strided((2, 1, 4), (4, 999, 1)), training)
-            check(torch.randn(2, 1, 8, 8).to(memory_format=torch.channels_last), training)
+            check(torch.randn(2, 1, 8, 8).to(memory_format=cl), training)
+            check(torch.randn(2, 3, 1, 1).to(memory_format=cl), training)
+            check(torch.randn(1, 3, 8, 8).to(memory_format=cl), training)
 
     def test_native_batch_norm_backward_cpu_strides(self):
-        # batch_norm_backward_cpu allocates grad_input with
-        # empty_like(input, input.suggest_memory_format()).
+        # batch_norm_backward_cpu allocates grad_input rather than inheriting
+        # the input's strides, and picks the format differently depending on
+        # whether input and grad_out agree on layout.
         # https://github.com/pytorch/pytorch/issues/192668
-        def check(x, train):
+        def check(x, train, grad_out=None):
             c = x.size(1)
             args = (
-                torch.randn_like(x),
+                torch.randn_like(x) if grad_out is None else grad_out,
                 x,
                 torch.ones(c),
                 # eval mode reads the running stats, so they must be provided
@@ -771,10 +780,25 @@ class FakeTensorTest(TestCase):
                 fake_out = torch.ops.aten.native_batch_norm_backward.default(*args)[0]
             self.assertEqual(fake_out.stride(), eager_out.stride())
 
+        cl, cl3d = torch.channels_last, torch.channels_last_3d
         for train in (True, False):
             check(torch.randn(2, 3, 4).transpose(1, 2), train)
-            check(torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last), train)
+            check(torch.randn(8, 8, 4, 2).permute(3, 2, 0, 1), train)
+            check(torch.randn(2, 3, 8, 8), train)
+            check(torch.randn(2, 3, 8, 8).to(memory_format=cl), train)
+            check(torch.randn(2, 3, 4, 5, 5).to(memory_format=cl3d), train)
             check(torch.randn(2, 4).as_strided((2, 1, 4), (4, 999, 1)), train)
+            # A size-1 channel or spatial dim makes channels_last and contiguous
+            # indistinguishable, and the kernel resolves the tie differently in
+            # its contiguous fast path.
+            check(torch.randn(2, 1, 8, 8).to(memory_format=cl), train)
+            check(torch.randn(2, 3, 1, 1).to(memory_format=cl), train)
+            # The fast path also requires input and grad_out to agree on layout.
+            check(
+                torch.randn(2, 3, 8, 8).to(memory_format=cl),
+                train,
+                grad_out=torch.randn(2, 3, 8, 8),
+            )
 
     def test_private_convolution_symint(self):
         shape_env = ShapeEnv()
