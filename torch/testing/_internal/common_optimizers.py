@@ -463,6 +463,20 @@ def optim_error_inputs_func_adafactor(device, dtype):
 
 
 def optim_inputs_func_adagrad(device, dtype=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "capturable": True},
+            desc="capturable with weight decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001), "capturable": True},
+            desc="Tensor lr with capturable",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(
@@ -489,7 +503,7 @@ def optim_inputs_func_adagrad(device, dtype=None):
             kwargs={"lr": torch.tensor(0.001)},
             desc="Tensor lr",
         ),
-    ]
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_adagrad(device, dtype):
@@ -1624,6 +1638,7 @@ optim_db: list[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adagrad,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable", "fused"),
+        has_capturable_arg=True,
         not_og_supported_flags=(
             "foreach",
             "differentiable",
