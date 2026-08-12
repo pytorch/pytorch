@@ -85,6 +85,20 @@ def _create_tensor_with_layout(layout, rows, cols, dtype, device="cuda"):
         raise ValueError(f"Unknown layout: {layout}")
 
 
+def _make_nvfp4_scaled_mm_inputs(m, n, k):
+    packed_k = k // 2
+    a = _create_tensor_with_layout("contiguous", m, packed_k, torch.float4_e2m1fn_x2)
+    b = _create_tensor_with_layout("contiguous", n, packed_k, torch.float4_e2m1fn_x2).T
+    scale_k = _prep_k(k, 16)
+    scale_a = torch.rand(_round_up(m, 128) * scale_k, device="cuda").to(
+        torch.float8_e4m3fn
+    )
+    scale_b = torch.rand(_round_up(n, 128) * scale_k, device="cuda").to(
+        torch.float8_e4m3fn
+    )
+    return a, b, scale_a, scale_b
+
+
 def _nvgemm_config(**overrides):
     """Standard NVGEMM test config. Always disables ATen fallback."""
     cfg = {
@@ -3280,21 +3294,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     def test_scaled_mm_large_epilogue_fusion(self):
         m, n, k = self.M, self.N, self.K
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
         biases = tuple(
             torch.randn(n, device="cuda", dtype=torch.bfloat16) for _ in range(5)
         )
@@ -3606,26 +3606,12 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 self.skipTest("requires INNER_TREE Triton")
             with config.patch({"numerics": "strict"}):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
-            self.assertNotIn("'local_reduce_out'", strict_code)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
     def test_scaled_mm_grouped_reduce_with_multi_store_epilogue(self):
         m, n, k, group = 128, 128, 512, 32
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -3707,21 +3693,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     def test_scaled_mm_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 512, 64
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -3774,7 +3746,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             fn, a, b, scale_a, scale_b, expected_kernels=2
         )
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("output=", code)
+        self.assertNotIn("'local_reduce': GemmReductionArguments", code)
 
     @parametrize("group", (128, 256))
     def test_scaled_mm_coda_rmsnorm_partial_fusion(self, group):
@@ -3893,21 +3865,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     def test_scaled_mm_grouped_softmax_support(self, case):
         group, supported, n = case
         m, k = 128, 512
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -3932,9 +3890,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         if supported:
             self.assertIn("accum.to(cutlass.Float32)", code)
             self.assertIn("numerator.reduce", code)
-            self.assertNotIn("reduction_type='online_softmax'", code)
-        else:
-            self.assertNotIn("reduction_type='online_softmax'", code)
+        self.assertNotIn("reduction_type='online_softmax'", code)
 
     @parametrize(
         "case",
@@ -3962,21 +3918,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         reverse = mode.startswith("reverse")
         denominator_bias = 1.0 if mode.endswith("bias") else 0.0
         m, n, k = 128, 128, 512
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -4032,21 +3974,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         axis, group = case[:2]
         normalization = case[2] if len(case) == 3 else "sum"
         m, n, k = 128, 128, 512
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -4106,29 +4034,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     @parametrize(
         "case",
-        ((0, 1.0, 1.0), (1, 1.0, 1.0), (0, 0.5, 1.0)),
-        name_fn=lambda case: f"axis_{case[0]}_scale_{case[1]:g}_bias_{case[2]:g}".replace(
-            ".", "_"
-        ),
+        ((0, 1.0), (1, 1.0), (0, 0.5)),
+        name_fn=lambda case: f"axis_{case[0]}_scale_{case[1]:g}".replace(".", "_"),
     )
     def test_scaled_mm_grouped_sum_normalize_trailing_add(self, case):
-        axis, affine_scale, affine_bias = case
+        axis, affine_scale = case
+        affine_bias = 1.0
         m, n, k, group = 128, 128, 512, 8
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
-            torch.float4_e2m1fn_x2
-        )
-        b = b.T
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
@@ -4160,22 +4073,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     @parametrize("case", ("composite", "hidden", "mixed_group"))
     def test_scaled_mm_grouped_reduce_feed_main_falls_back(self, case):
         m, n, k, group = 128, 128, 512, 8
-        packed_k = k // 2
-        a = _create_tensor_with_layout(
-            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
-        )
-        b = (
-            torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8)
-            .view(torch.float4_e2m1fn_x2)
-            .T
-        )
-        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
-        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
-            torch.float8_e4m3fn
-        )
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
         def fn(a, b, scale_a, scale_b):
             result = torch._scaled_mm(
