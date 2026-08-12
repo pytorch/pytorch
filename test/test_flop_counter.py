@@ -1699,25 +1699,21 @@ class TestSkipUnsupported(TestCase):
         self.assertGreater(flops, 0)
 
     def test_flex_attention_hop_end_to_end(self):
-        """The flex_attention HOP executes under FlopCounterMode and its FLOPs
-        are counted via the registered formula (registered-HOP dispatch path)."""
-        from torch.nn.attention.flex_attention import (
-            _create_empty_block_mask,
-            _identity,
-        )
+        """The public flex_attention API executes under FlopCounterMode and its
+        FLOPs are counted via the registered formula. This is the exact call from
+        issue #134385."""
+        from torch.nn.attention.flex_attention import flex_attention
 
         q = torch.randn(2, 4, 128, 64)
         k = torch.randn(2, 4, 128, 64)
         v = torch.randn(2, 4, 128, 64)
-        block_mask = _create_empty_block_mask(q, k)
 
-        with FlopCounterMode() as mode:
-            out = torch.ops.higher_order.flex_attention(
-                q, k, v, _identity, block_mask.as_tuple(), 0.125, {}
-            )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode() as mode:
+                out = flex_attention(q, k, v)
 
-        self.assertIsInstance(out, tuple)
-        self.assertEqual(out[0].shape, q.shape)
+        self.assertEqual(out.shape, q.shape)
         self.assertEqual(
             mode.get_total_flops(), sdpa_flop_count(q.shape, k.shape, v.shape)
         )

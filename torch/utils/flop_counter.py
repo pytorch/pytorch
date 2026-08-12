@@ -949,7 +949,7 @@ class FlopCounterMode:
     programmatically.
 
     Args:
-        mods: Optional module or list of modules for hierarchical output (deprecated).
+        mods: Ignored; accepted for backward compatibility. Passing it emits a warning.
         depth: Maximum depth for hierarchical display (default: 2).
         display: Whether to print the FLOP table on exit (default: True).
         custom_mapping: Optional dictionary mapping operations to custom FLOP counting functions.
@@ -1173,6 +1173,15 @@ class _FlopCounterMode(TorchDispatchMode):
                     kernel_name = kernel_name.fn
                 else:
                     break
+            if kernel_name not in self.counter.flop_registry and self.counter.skip_unsupported:
+                op_name = getattr(kernel_name, "__name__", str(kernel_name))
+                self.counter._unsupported_ops[op_name] += 1
+                warnings.warn(
+                    f"FlopCounterMode does not have a registered FLOP formula for triton kernel {op_name}. "
+                    "Executing without counting FLOPs.",
+                    stacklevel=2
+                )
+                return func(*args, **kwargs)
             return self.counter._count_flops(kernel_name, None, args, kwargs)
 
         if func is torch.ops.higher_order.cond:
