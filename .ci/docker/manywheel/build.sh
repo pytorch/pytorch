@@ -79,7 +79,17 @@ case ${image} in
         DEVTOOLSET_VERSION="13"
         # Common gfx arch list shared by all ROCm builds; each path extends it.
         PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151"
-        if [[ "$GPU_ARCH_VERSION" == *"7.14"* ]]; then
+        if [[ "$GPU_ARCH_VERSION" == *"preview"* ]]; then
+            # ROCm preview tracks the TheRock nightly (preview) wheel index. The
+            # preview ROCm version is pinned here as the single source of truth
+            # (mirrors the rocm-preview CI image in .ci/docker/build.sh). Keep the
+            # runtime dep in generate_binary_build_matrix.py in sync with this.
+            TARGET=rocm_final
+            GPU_IMAGE=amd64/almalinux:8
+            THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
+            ROCM_VERSION="7.15.0a20260712"
+            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
+        elif [[ "$GPU_ARCH_VERSION" == *"7.14"* ]]; then
             # ROCm 7.14 installs from the TheRock multi-arch wheel index instead of
             # rocm/dev-almalinux-8 OS packages; start from a plain almalinux base.
             TARGET=rocm_final
