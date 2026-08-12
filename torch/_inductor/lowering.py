@@ -45,6 +45,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -2793,7 +2794,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
     if t.is_meta:
         return True
 
-    if t.is_sparse:
+    if is_sparse_any(t):
         return True
 
     if not is_triton_fp8_dtype_supported(t.dtype, t.device):
