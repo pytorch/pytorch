@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
     skipIfRocmArch,
-    skipIfXpu,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -322,7 +321,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184490")
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -339,8 +337,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    # TODO: fix accuracy failure of the triton template on XPU.
-    # and enable this test case.
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile
@@ -372,6 +368,43 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
+    def test_mm_plus_mm_xpu_ascending_k_loop(self):
+        # Regression: triton-xpu miscompiles descending-K loops
+        # (range(K1, 0, -BLOCK_K)) when the K loop runs more than one iteration,
+        # so XPU must render both mm_plus_mm K loops ascending.
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        a = torch.randn(512, 512, device=GPU_TYPE)
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        c = torch.randn(512, 512, device=GPU_TYPE)
+        d = torch.randn(512, 512, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
+        code = code[0]
+        # K1 is the mm_plus_mm template's K variable (plain mm uses K), so its
+        # presence proves the fused template was selected and that it ascended.
+        self.assertIn("tl.cdiv(K1, BLOCK_K)", code)
+        FileCheck().check_not("range(K1, 0, -").run(code)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
+    def test_bmm_xpu_ascending_k_loop(self):
+        # Same regression guard for bmm (also used by baddbmm). K=512 keeps the
+        # K loop multi-iteration for every admissible BLOCK_K (< 128).
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(2, 128, 512, device=GPU_TYPE)
+        b = torch.randn(2, 512, 128, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(foo), a, b)
+        code = code[0]
+        self.assertIn("triton_tem_fused_bmm", code)
+        FileCheck().check_not("range(K, 0, -").run(code)
 
     @patches
     def test_mm_dup_args(self):
