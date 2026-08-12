@@ -648,8 +648,8 @@ class OverlapScheduler:
             return True
 
         start_index = self.current_compute_index
-        # memory_tracker is fixed after __init__; skip Check 2 wholesale when uncapped.
-        track_memory = self.memory_tracker is not None
+        # memory_tracker is fixed after __init__, so this is loop-invariant.
+        check_budget = self.memory_tracker is not None
 
         # then, check future mem
         for compute_idx in range(start_index, domination_index):
@@ -662,7 +662,7 @@ class OverlapScheduler:
                 return True
 
             # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
-            if track_memory:
+            if check_budget:
                 baseline_mem = self.original_mem_before_compute_index[compute_idx]
                 projected = baseline_mem + cumulative_prefetch + size
 
@@ -1144,18 +1144,11 @@ class OverlapScheduler:
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
         if self.memory_tracker is not None:
             self.memory_tracker.schedule_node(node)
-            log.debug(
-                "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
-                node.name,
-                self.memory_tracker.get_current_memory_bytes(),
-                len(self.scheduled),
-            )
-        else:
-            log.debug(
-                "Scheduled node %s: total_scheduled=%d",
-                node.name,
-                len(self.scheduled),
-            )
+        log.debug(
+            "Scheduled node %s: total_scheduled=%d",
+            node.name,
+            len(self.scheduled),
+        )
 
         for user in node.users:
             self.in_degree[user] -= 1
@@ -1892,7 +1885,7 @@ def schedule_overlap_bucketing(
             estimates (deterministic, no GPU sync), "benchmark" uses GPU benchmarking (more accurate).
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
-            Uses minimum of absolute and ratio limits when both are specified.
+            Uses maximum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
         bucket_mode: Bucketing mode for grouping collectives.
         pre_bucketing_fsdp_collectives: Pre-bucket FSDP collectives into bandwidth-saturating
@@ -1984,6 +1977,8 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "insert_overlap_deps",
         "collective_estimator",
         "compute_estimator",
+        "max_memory_increase_gb",
+        "max_memory_increase_ratio",
         "compute_overlap_multipler",
         "max_in_flight_gb",
         "max_coll_distance",
@@ -1999,10 +1994,6 @@ def schedule_overlap_bucketing_from_inductor_configs(
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:
             kwargs[key] = val
-
-    # Always forward the caps so an explicit None means uncapped rather than unset.
-    kwargs["max_memory_increase_gb"] = dist_opts.max_memory_increase_gb
-    kwargs["max_memory_increase_ratio"] = dist_opts.max_memory_increase_ratio
 
     # Profile-guided latency estimation
     pge_path = dist_opts.profile_guided_estimations_profile_path
