@@ -6,6 +6,7 @@ NVIDIA Universal GEMM scheduling for PyTorch Inductor.
 from __future__ import annotations
 
 import dataclasses
+import enum
 import hashlib
 import logging
 from typing import Any, cast, Literal, overload, TYPE_CHECKING
@@ -63,6 +64,12 @@ class NVGemmGeneratedSource:
     source: str
     epilogue_reads: tuple[str, ...]
     output_buffers: tuple[str, ...]
+
+
+class NVGemmVerticalFusionDecision(enum.Enum):
+    FUSE = enum.auto()
+    DEFER = enum.auto()
+    REJECT = enum.auto()
 
 
 class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
@@ -212,6 +219,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        return (
+            self.vertical_fusion_decision(node1, node2)
+            is NVGemmVerticalFusionDecision.FUSE
+        )
+
+    def vertical_fusion_decision(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> NVGemmVerticalFusionDecision:
         if self.is_nv_universal_gemm_template(node1):
             return self._can_fuse_epilogue_impl(
                 cast(SchedulerNode, node1),
@@ -225,7 +240,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 None,
             )
             if template_snode is None:
-                return False
+                return NVGemmVerticalFusionDecision.REJECT
             return self._can_fuse_epilogue_impl(
                 cast(SchedulerNode, template_snode),
                 [
@@ -235,7 +250,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 ],
                 node2,
             )
-        return False
+        return NVGemmVerticalFusionDecision.REJECT
 
     @staticmethod
     def _lower_pointwise_epilogue(
@@ -267,15 +282,15 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         gemm_template_node: SchedulerNode,
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
-    ) -> bool:
+    ) -> NVGemmVerticalFusionDecision:
         from .nv_universal_gemm import GemmVariant
 
         if not config.epilogue_fusion:
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         ir_node = gemm_template_node.node
         if not isinstance(ir_node, (NVUniversalGemmBuffer, MultiTemplateBuffer)):
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
             if ir_node.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
@@ -283,13 +298,13 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     "NVGEMM epilogue fusion: not supported for %s variant",
                     ir_node.variant.op_name,
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
             if not ir_node.supports_epilogue_fusion:
                 log.debug(
                     "NVGEMM epilogue fusion: kernel %s does not support epilogue fusion",
                     ir_node.kernel_metadata.get("kernel_name", "unknown"),
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
             variants = (ir_node.variant,)
         elif isinstance(ir_node, MultiTemplateBuffer):
             # Use _choices, not choice_timings() — the latter forces autotune sync.
@@ -301,7 +316,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             )
             if not variants:
                 log.debug("NVGEMM epilogue fusion: no EFC kernel available in choices")
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
             if any(
                 variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM)
                 for variant in variants
@@ -309,7 +324,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 log.debug(
                     "NVGEMM epilogue fusion: MultiTemplateBuffer has unsupported EFC choices"
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
         epilogue_program = self._lower_epilogue(
             ir_node, (*existing_epilogue_nodes, node_to_fuse)
@@ -317,7 +332,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         all_scheduler_nodes = epilogue_program.capture.nodes
         if not epilogue_program.supported:
             log.debug("NVGEMM could not lower every captured reduction region")
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
         feeds_main = epilogue_program.feeds_main
         if feeds_main:
             fused_names = OrderedSet(
@@ -327,7 +342,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             if not V.graph.scheduler.can_buffer_be_removed_through_fusion(
                 ir_node.get_name(), fused_names
             ):
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
         reduction_region = epilogue_program.reduction_partition.region_for(
             node_to_fuse.get_nodes()
         )
@@ -341,7 +356,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
         if reduction_plan is not None and self._uses_swap_ab(ir_node):
             log.debug("NVGEMM swap_ab does not support fused local reductions")
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
         if (
             reduction_plan is not None
             and not direct_softmax
@@ -349,20 +364,20 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 variant.supports_reduction(reduction_plan) for variant in variants
             )
         ):
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
             node = s_node.node
             if not isinstance(node, ComputedBuffer):
                 log.debug("NVGEMM epilogue fusion: %s is not a ComputedBuffer", node)
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
         if not feeds_main:
             for s_node in epilogue_program.pointwise_nodes:
                 node = cast(ComputedBuffer, s_node.node)
                 if not isinstance(node.data, Pointwise):
                     log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 if not V.graph.sizevars.statically_known_list_equals(
                     node.get_size(), ir_node.get_size()
                 ):
@@ -371,7 +386,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         node.get_size(),
                         ir_node.get_size(),
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 if not V.graph.sizevars.statically_known_list_equals(
                     node.data.ranges, ir_node.get_size()
                 ):
@@ -380,7 +395,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         node.data.ranges,
                         ir_node.get_size(),
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
         # Epilogue inputs support matrix, row, and column loads here. Reject
         # other broadcast patterns before the pointwise lowerer's capability check.
         gemm_size = ir_node.get_size()
@@ -388,26 +403,24 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         internal_names = OrderedSet([ir_node.get_name()]) | OrderedSet(
             [s_node.get_name() for s_node in all_scheduler_nodes]
         )
-        epilogue_inputs: OrderedSet[str] = OrderedSet()
         for s_node in epilogue_program.pointwise_nodes:
             for rd in s_node.read_writes.reads:
                 if rd.name in internal_names:
                     continue
-                epilogue_inputs.add(rd.name)
                 read_buf = name_to_buf.get(rd.name)
                 if read_buf is None:
                     log.debug(
                         "NVGEMM epilogue fusion: read %s not in name_to_buffer/graph_inputs, refusing to fuse",
                         rd.name,
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 read_size = read_buf.get_size()
                 if len(read_size) > len(gemm_size):
                     log.debug(
                         "NVGEMM epilogue fusion: read buffer %s has unsupported rank",
                         rd.name,
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 padded_size = [1] * (len(gemm_size) - len(read_size)) + list(read_size)
                 supported_shapes = (
                     gemm_size,
@@ -425,23 +438,23 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         read_size,
                         gemm_size,
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
         if not existing_epilogue_nodes:
             reads = OrderedSet(rd.name for rd in node_to_fuse.read_writes.reads)
             if ir_node.get_name() not in reads:
                 log.debug(
                     "NVGEMM epilogue fusion: first epilogue node doesn't read from GEMM output"
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
         if node_to_fuse.has_aliasing_or_mutation():
             log.debug("NVGEMM epilogue fusion: node has aliasing or mutation")
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
         elif (
             node_to_fuse.is_reduction() and reduction_region is None and not feeds_main
         ):
             log.debug("NVGEMM epilogue fusion: reductions not supported")
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         fused_buffer_names = OrderedSet(
             n.get_name() for n in [gemm_template_node, *epilogue_program.capture.nodes]
@@ -457,12 +470,34 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             trial_removed_buffers.add(ir_node.get_name())
         try:
             trial_reads: tuple[str, ...] = ()
+            epilogue_dtype = ir_node.get_dtype()
             pointwise_nodes = epilogue_program.pointwise_nodes
             if pointwise_nodes:
                 lowered_epilogue = self._lower_pointwise_epilogue(
                     ir_node.get_name(), pointwise_nodes, trial_removed_buffers
                 )
                 trial_reads = lowered_epilogue.reads
+                epilogue_dtype = V.graph.get_dtype(lowered_epilogue.writes[0])
+            if GemmVariant.GEMM in variants:
+                for read_name in trial_reads:
+                    read_buf = name_to_buf.get(read_name)
+                    read_dtype = None if read_buf is None else read_buf.get_dtype()
+                    try:
+                        dtype_supported = read_dtype is None or (
+                            read_dtype.is_floating_point
+                            and torch.promote_types(read_dtype, epilogue_dtype)
+                            == epilogue_dtype
+                        )
+                    except (RuntimeError, TypeError):
+                        dtype_supported = False
+                    if not dtype_supported:
+                        log.debug(
+                            "NVGEMM dense epilogue input %s has dtype %s, which cannot be represented by %s",
+                            read_name,
+                            read_dtype,
+                            epilogue_dtype,
+                        )
+                        return NVGemmVerticalFusionDecision.REJECT
             if scaled_epilogue:
                 for read_name in trial_reads:
                     read_buf = name_to_buf.get(read_name)
@@ -471,12 +506,12 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                             "NVGEMM scaled epilogue input %s cannot be resolved",
                             read_name,
                         )
-                        return False
+                        return NVGemmVerticalFusionDecision.DEFER
         except NotImplementedError as e:
             log.debug("NVGEMM epilogue fusion: trial pointwise codegen failed: %s", e)
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
-        return True
+        return NVGemmVerticalFusionDecision.FUSE
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -606,8 +641,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             for node in node1.get_nodes()
             if self.is_nv_universal_gemm_template(node)
         )
-        return self._can_fuse_epilogue_impl(
-            cast(SchedulerNode, template_snode), epilogue_nodes, node2
+        return (
+            self._can_fuse_epilogue_impl(
+                cast(SchedulerNode, template_snode), epilogue_nodes, node2
+            )
+            is NVGemmVerticalFusionDecision.FUSE
         )
 
     @staticmethod

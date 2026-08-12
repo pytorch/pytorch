@@ -17,7 +17,10 @@ from ..scheduler import (
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .flydsl.flydsl_scheduling import FlyDSLScheduling
-from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
+from .nv_universal_gemm.nv_universal_gemm_scheduling import (
+    NVGemmVerticalFusionDecision,
+    NVUniversalGemmScheduling,
+)
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
@@ -97,13 +100,18 @@ class CUDACombinedScheduling(BaseScheduling):
         # Only intercept when node1 is the NVGEMM template (epilogue direction).
         # Prologue direction (node1=pointwise, node2=template) must fall through to
         # Triton, or NVGEMM-winning MTBs silently lose Triton prologue fusion.
-        # For MTBs, if NVGEMM can't fuse, fall through to Triton scheduling so
+        # For MTBs, defer NVGEMM-specific failures to Triton scheduling so
         # Triton choices in the same MTB can still attempt epilogue fusion.
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node1):
-            if self._nv_universal_gemm_scheduling.can_fuse_vertical(node1, node2):
+            decision = self._nv_universal_gemm_scheduling.vertical_fusion_decision(
+                node1, node2
+            )
+            if decision is NVGemmVerticalFusionDecision.FUSE:
                 return True
-            if isinstance(node1, SchedulerNode) and isinstance(
-                node1.node, MultiTemplateBuffer
+            if (
+                decision is NVGemmVerticalFusionDecision.DEFER
+                and isinstance(node1, SchedulerNode)
+                and isinstance(node1.node, MultiTemplateBuffer)
             ):
                 return self._triton_scheduling.can_fuse_vertical(node1, node2)
             return False
