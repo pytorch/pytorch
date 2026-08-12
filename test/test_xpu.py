@@ -3038,7 +3038,7 @@ def _event_handle_exporter_consumer(handle, p2c, c2p):
     stream = torch.xpu.Stream()
     with stream:
         e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
-        torch.xpu._sleep(50_000_000)  # spin for about 500 ms
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
         e1.record()
         c2p.put(0)
 
