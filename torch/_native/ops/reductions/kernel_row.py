@@ -465,14 +465,19 @@ class RowReduce(ReductionBase):
         # index arg entirely, so a bare 0 is fine and avoids calling a None dtype. When
         # it does matter, compute in the trait's index dtype so a huge global column
         # (up to N ~ 4e9) doesn't overflow Int32 before trait.reduce's cast.
+        # The `is not None` guards below sit inside const_expr(...), which a type checker
+        # cannot see through, so it still reads idx_dtype as Optional and flags the calls
+        # as not-callable. The guards are real: a non-index trait takes the `else` branch.
         idx_dtype = getattr(trait, "idx", None)  # compile-time class (Int32/Int64/None)
         if const_expr(self.index_chunks > 1 and idx_dtype is not None):
+            # pyrefly: ignore [not-callable]
             col_base = idx_dtype(row % const_expr(self.index_chunks)) * const_expr(
                 shape[1]
             )
         elif const_expr(self.index_rebase and idx_dtype is not None):
             # Runtime rebase (bucket mode): C from the c_chunks launch arg, the
             # sub-row length from the input's dynamic column extent.
+            # pyrefly: ignore [not-callable]
             col_base = idx_dtype(row % c_chunks) * idx_dtype(shape[1])
         else:
             col_base = 0

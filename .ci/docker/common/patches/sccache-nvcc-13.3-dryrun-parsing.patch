@@ -1,5 +1,5 @@
 diff --git a/src/compiler/cicc.rs b/src/compiler/cicc.rs
-index 2a39e7c..bf4901f 100644
+index 2a39e7c..d5d4dbe 100644
 --- a/src/compiler/cicc.rs
 +++ b/src/compiler/cicc.rs
 @@ -28,7 +28,7 @@ use crate::mock_command::{CommandCreator, CommandCreatorSync, RunCommand};
@@ -29,21 +29,50 @@ index 2a39e7c..bf4901f 100644
  #[async_trait]
  impl CCompilerImpl for Cicc {
      fn kind(&self) -> CCompilerKind {
-@@ -112,7 +123,12 @@ where
+@@ -112,7 +123,21 @@ where
      S: SearchableArgInfo<ArgData>,
  {
      let mut args = arguments.to_vec();
 -    let input_loc = arguments.len() - input_arg_offset_from_end;
-+    let input_loc = match language {
-+        Language::Ptx => arguments.iter().position(is_cicc_input),
-+        Language::Cubin => arguments.iter().position(is_ptxas_input),
-+        _ => None,
-+    }
-+    .unwrap_or(arguments.len() - input_arg_offset_from_end);
++    let is_input = |arg: &OsString| match language {
++        Language::Ptx => is_cicc_input(arg),
++        Language::Cubin => is_ptxas_input(arg),
++        _ => false,
++    };
++    // nvcc has historically passed the input at a fixed offset from the end.
++    // nvcc 13.3+ injects a valueless --simt-only before -o, pushing the input off
++    // that offset, so fall back to locating it by its generated-file suffix. Only
++    // do so when the offset is visibly wrong, so that every command line nvcc
++    // still emits in the old shape parses exactly as it did before.
++    let offset_loc = arguments.len().saturating_sub(input_arg_offset_from_end);
++    let input_loc = match arguments.get(offset_loc) {
++        Some(arg) if is_input(arg) => offset_loc,
++        _ => arguments.iter().position(is_input).unwrap_or(offset_loc),
++    };
      let input = args.splice(input_loc..input_loc + 1, []).next().unwrap();
  
      let mut take_next = false;
-@@ -349,3 +365,68 @@ counted_array!(pub static ARGS: [ArgInfo<ArgData>; _] = [
+@@ -271,7 +296,18 @@ pub fn generate_compile_commands(
+     let lang_str = &parsed_args.language.as_str();
+     let out_file = match parsed_args.outputs.get("obj") {
+         Some(obj) => &obj.path,
+-        None => return Err(anyhow!("Missing {:?} file output", lang_str)),
++        // Report what was parsed: reaching here means the input was located at the
++        // wrong argument, so -o was consumed or dropped. nvcc reshapes these
++        // sub-commands between CUDA releases and the failure is otherwise opaque.
++        None => {
++            return Err(anyhow!(
++                "Missing {:?} file output (input={:?}, common_args={:?}, unhashed_args={:?})",
++                lang_str,
++                parsed_args.input,
++                parsed_args.common_args,
++                parsed_args.unhashed_args
++            ));
++        }
+     };
+ 
+     let mut arguments: Vec<OsString> = vec![];
+@@ -349,3 +385,99 @@ counted_array!(pub static ARGS: [ArgInfo<ArgData>; _] = [
      take_arg!("--stub_file_name", PathBuf, Separated, UnhashedOutput),
      take_arg!("-o", PathBuf, Separated, Output),
  ]);
@@ -111,9 +140,40 @@ index 2a39e7c..bf4901f 100644
 +            parsed.outputs.get("obj")
 +        );
 +    }
++
++    #[test]
++    fn test_parse_ptxas_prefers_offset_when_it_holds_the_input() {
++        // An earlier argument that happens to share the input's suffix must not
++        // displace the input sitting at the historical offset, otherwise command
++        // lines from nvcc versions without --simt-only parse differently than
++        // they did before.
++        let args = os_strings(&[
++            "-arch=sm_80",
++            "other.ptx",
++            "-m64",
++            "kernel.ptx",
++            "-o",
++            "kernel.cubin",
++        ]);
++
++        let parsed =
++            match parse_arguments(&args, ".".as_ref(), Language::Cubin, &ptxas::ARGS[..], 3) {
++                CompilerArguments::Ok(parsed) => parsed,
++                other => panic!("Got unexpected parse result: {:?}", other),
++            };
++
++        assert_eq!(PathBuf::from("kernel.ptx"), parsed.input);
++        assert_eq!(
++            Some(&ArtifactDescriptor {
++                path: PathBuf::from(".").join("kernel.cubin"),
++                optional: false
++            }),
++            parsed.outputs.get("obj")
++        );
++    }
 +}
 diff --git a/src/compiler/nvcc.rs b/src/compiler/nvcc.rs
-index e6f72a7..608526c 100644
+index e6f72a7..6dba231 100644
 --- a/src/compiler/nvcc.rs
 +++ b/src/compiler/nvcc.rs
 @@ -20,7 +20,7 @@ use crate::compiler::c::{ArtifactDescriptor, CCompilerImpl, CCompilerKind, Parse
@@ -147,7 +207,7 @@ index e6f72a7..608526c 100644
  /// A unit struct on which to implement `CCompilerImpl`.
  #[derive(Clone, Debug)]
  pub enum NvccHostCompiler {
-@@ -759,14 +774,20 @@ where
+@@ -759,19 +774,33 @@ where
                      }
                      _ => {}
                  }
@@ -170,7 +230,21 @@ index e6f72a7..608526c 100644
                          }
                      }
                      false
-@@ -824,7 +845,7 @@ where
+                 });
+-                (env_vars.clone(), Cacheable::Yes, group)
++                // For a virtual-only gencode (e.g. -gencode arch=compute_120,
++                // code=compute_120) nvcc runs ptxas with no -o just to verify the
++                // PTX. There is no artifact to cache, so run it directly.
++                let cacheable = if args.iter().any(|arg| arg == "-o") {
++                    Cacheable::Yes
++                } else {
++                    Cacheable::No
++                };
++                (env_vars.clone(), cacheable, group)
+             }
+             // cudafe++ _must be_ cached, because the `.module_id` file is unique to each invocation (new in CTK 12.8)
+             Some("cudafe++") => {
+@@ -824,7 +853,7 @@ where
                          // If the output file ends with...
                          // * .cpp1.ii - cicc/ptxas input
                          // * .cpp4.ii - cudafe++ input
@@ -179,7 +253,7 @@ index e6f72a7..608526c 100644
                              Some(out_name.clone())
                          } else {
                              None
-@@ -1139,22 +1160,9 @@ fn remap_generated_filenames(
+@@ -1139,22 +1168,9 @@ fn remap_generated_filenames(
              // If the argument doesn't start with `-` and is a file that
              // ends in one of the below extensions, rename the file to an
              // auto-incrementing stable name
@@ -205,7 +279,7 @@ index e6f72a7..608526c 100644
  
              // If the argument is a file that ends in one of the above extensions:
              // * If it's our first time seeing this file, create a unique name for it
-@@ -1483,6 +1491,8 @@ mod test {
+@@ -1483,6 +1499,8 @@ mod test {
      use crate::mock_command::*;
      use crate::test::utils::*;
      use std::collections::HashMap;
@@ -214,7 +288,7 @@ index e6f72a7..608526c 100644
      use std::path::PathBuf;
  
      fn parse_arguments_gcc(arguments: Vec<String>) -> CompilerArguments<ParsedArguments> {
-@@ -1538,6 +1548,93 @@ mod test {
+@@ -1538,6 +1556,93 @@ mod test {
          }
      }
  
