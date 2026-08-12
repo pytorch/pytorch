@@ -146,11 +146,11 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
     TORCH_INTERNAL_ASSERT(!rstd_bdim);
     const auto dummy_weight = at::ones(input.size(1), input.options().dtype(dummy_weight_dtype));
     auto result =Func(
-        grad_out.to(input.scalar_type()), input, dummy_weight, running_mean_opt, running_var_opt, mean, rstd, training, eps, {true, false, false});
+        grad_out, input, dummy_weight, running_mean_opt, running_var_opt, mean, rstd, training, eps, {true, false, false});
     return {std::move(std::get<0>(result)), std::nullopt};
   }
 
-  auto grad_out_ = moveBatchDimToFront(grad_out.to(input.scalar_type()), grad_out_bdim);
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto mean_ = moveBatchDimToFront(mean, mean_bdim);
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
@@ -272,7 +272,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   }
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
-      grad_out.transpose(0, 1) * padRight(weight, std::nullopt, grad_out.dim()) : grad_out.transpose(0, 1);           // [B0, C, B, *]
+      grad_out.transpose(0, 1) * padRight(weight.to(grad_out.scalar_type()), std::nullopt, grad_out.dim()) : grad_out.transpose(0, 1);           // [B0, C, B, *]
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input.transpose(0, 1), cur_level);       // [B0, B, C, *]
 
@@ -351,7 +351,7 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & rstd, std::optional<int64_t> rstd_bdim,
     int64_t N, int64_t C, int64_t HxW, int64_t group) {
 
-  auto grad_out_ = moveBatchDimToFront(grad_out.to(input.scalar_type()), grad_out_bdim);
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto mean_ = moveBatchDimToFront(mean, mean_bdim);
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
@@ -424,7 +424,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
 
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
-      grad_out * padRight(weight, std::nullopt, grad_out.dim() - 1) : grad_out;
+      grad_out * padRight(weight.to(grad_out.scalar_type()), std::nullopt, grad_out.dim() - 1) : grad_out;
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
@@ -543,11 +543,11 @@ static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward
   if (!grad_out_bdim.has_value() && !input_bdim.has_value() &&
       !mean_bdim.has_value() && !rstd_bdim.has_value()) {
     auto result = at::native_layer_norm_backward(
-        grad_out.to(input.scalar_type()), input, normalized_shape, mean, rstd, std::nullopt, std::nullopt, {true, false, false});
+        grad_out, input, normalized_shape, mean, rstd, std::nullopt, std::nullopt, {true, false, false});
     return std::make_tuple(std::get<0>(std::move(result)), std::nullopt);
   }
 
-  auto grad_out_ = moveBatchDimToFront(grad_out.to(input.scalar_type()), grad_out_bdim);
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto mean_ = moveBatchDimToFront(mean, mean_bdim);
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
@@ -637,7 +637,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
   }
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
-      grad_out * weight : grad_out;
+      grad_out * weight.to(grad_out.scalar_type()) : grad_out;
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
