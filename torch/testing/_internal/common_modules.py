@@ -4746,7 +4746,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=5e-2, rtol=5e-2)}), "TestModule",
                                 "test_forward", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
-                                "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
+                                "test_save_load", device_type=("cuda", "xpu"), dtypes=[torch.bfloat16]),
                ),
                skips=(
                    # The chunked reduction='none' backward recomputes grads
