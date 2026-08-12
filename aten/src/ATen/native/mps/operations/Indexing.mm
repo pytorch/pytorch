@@ -1081,6 +1081,37 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   return self;
 }
 
+static void put_kernel_mps(TensorIterator& iter, const TensorBase& self_base, const bool accumulate) {
+  // The generic native::put_ builds `iter` with source and the reshaped index
+  // as its two inputs. put_ addresses self by its logical (C-contiguous) flat
+  // position, so recover those tensors and reuse the index_put_ MPS kernels by
+  // treating self as a 1-D tensor addressed by the flat index. When self is
+  // already contiguous the view aliases its storage and the writes land in
+  // place; otherwise copy the result back.
+  const auto& source = iter.tensor(0);
+  const auto& index = iter.tensor(1);
+  auto& self = const_cast<Tensor&>(static_cast<const Tensor&>(self_base));
+
+  auto self_contig = self.contiguous();
+  c10::List<std::optional<Tensor>> indices;
+  indices.push_back(index.reshape(-1));
+  self_contig.view(-1).index_put_(indices, source.reshape(-1), accumulate);
+  if (!self.is_contiguous()) {
+    self.copy_(self_contig.view_as(self));
+  }
+}
+
+static void take_kernel_mps(TensorIterator& iter, const TensorBase& input_base) {
+  // take reads self by its logical (C-contiguous) flat position; the generic
+  // native::take_out builds `iter` with the index-shaped output and the index
+  // as operands. Reuse the advanced-indexing MPS kernel, writing straight into
+  // the output via index.out so no intermediate result tensor is allocated.
+  const auto& index = iter.tensor(1);
+  const auto& input = static_cast<const Tensor&>(input_base);
+  auto& out = const_cast<Tensor&>(iter.tensor(0));
+  at::index_out(out, input.reshape(-1), c10::List<std::optional<Tensor>>({index}));
+}
+
 static void index_fill_mps_kernel(TensorIterator& iter,
                                   int64_t dim,
                                   int64_t self_dim_size,
@@ -1238,4 +1269,6 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
 REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
+REGISTER_DISPATCH(put_stub, &put_kernel_mps)
+REGISTER_DISPATCH(take_stub, &take_kernel_mps)
 } // namespace at::native
