@@ -194,7 +194,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
       capture_dev_,
       {.mempool_id = mempool_id_,
        .capture_id = capture_id_,
-       .parent_capture_id = std::nullopt});
+       .primary_capture_stream = capture_stream_.stream(),
+       .parent_capture_id = std::nullopt,
+       .parent_dependency_stream = std::nullopt});
 
   {
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -501,6 +503,7 @@ void CUDAGraph::begin_capture_to_conditional_node(
 
   TORCH_CHECK(!c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::graph_capture_record_stream_reuse(), "'graph_capture_record_stream_reuse:True' allocator config does not work with conditional control flow in a cuda graph today. See issue #175001 for updates");
 
+  const CUDAStream parent_dependency_stream = getCurrentCUDAStream();
   cudaStreamCaptureStatus status{};
   cudaGraph_t currently_capturing_graph{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
@@ -607,7 +610,9 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
       capture_dev_,
       {.mempool_id = mempool_id_,
        .capture_id = child_capture_id_opt.value(),
-       .parent_capture_id = parent_capture_id});
+       .primary_capture_stream = child_stream.stream(),
+       .parent_capture_id = parent_capture_id,
+       .parent_dependency_stream = parent_dependency_stream.stream()});
 
   conditional_node_streams_.emplace(child_stream);
 
