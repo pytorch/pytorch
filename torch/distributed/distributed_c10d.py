@@ -743,10 +743,10 @@ def _nccl2_device(
     if device is not None:
         return device
 
-    if torch.cuda.is_initialized():
-        device_index = torch.cuda.current_device()
-    elif "LOCAL_RANK" in os.environ:
+    if "LOCAL_RANK" in os.environ:
         device_index = get_node_local_rank()
+    elif torch.cuda.is_initialized():
+        device_index = torch.cuda.current_device()
     else:
         device_count = torch.cuda.device_count()
         if device_count == 0:
