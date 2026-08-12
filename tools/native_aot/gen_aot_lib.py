@@ -162,28 +162,36 @@ def _int32_size_gate(params: str) -> str:
     """Runtime gate: decline any call whose tensor has a dimension that
     does not fit in int32.
 
-    aten stores sizes and strides as int64_t (TensorBase.h: `int64_t
-    size(int64_t)`), but CuTeDSL's export_to_c emits `int32_t
-    dynamic_shapes[]` in the generated per-kernel ABI header, and it
-    does so REGARDLESS of the symbol width the builder asked for --
-    verified by probe: declaring the shape with cute.sym_int64()
-    produces a byte-identical header to cute.sym_int() (strides DO honor
-    sym_int64, sizes do not). So the 2^31 ceiling is imposed by the DSL's
-    C ABI, not by our kernels, and we cannot widen it from this side.
-
-    Without this gate the launcher's `static_cast<int32_t>(t.size(dim))`
-    would silently truncate a >=2^31 dim and hand the kernel a wrong
-    (possibly negative) extent: wrong results or corrupted memory, with
-    no error. Declining instead routes the call to the JIT layer or to
-    stock aten, neither of which has the limit.
+    aten stores sizes as int64_t (TensorBase.h: `int64_t size(int64_t)`),
+    but our fake tensors declare shape symbols with cute.sym_int(), which
+    is 32-bit, so export_to_c emits `int32_t dynamic_shapes[]` and the
+    kernel's C ABI takes i32 extents. Without this gate the launcher's
+    `static_cast<int32_t>(t.size(dim))` would silently truncate a >=2^31
+    dim and hand the kernel a wrong (possibly negative) extent: wrong
+    results or corrupted memory, with no error. Declining instead routes
+    the call to the JIT layer or to stock aten.
 
     Emitted ahead of the declaration's prelude AND into cpp_covers (like
     _arch_gate) so no declaration has to hand-write it, and so coverage
     never claims a shape the stub will refuse.
 
-    TODO(native-aot): drop this once CuTeDSL emits int64_t shape slots
-    (or honors the requested symbol width) in export_to_c; then sizes
-    match aten and the gate becomes dead code.
+    Widening is NOT just switching to cute.sym_int64(), and that switch is
+    actively unsafe on its own: as of cutlass-dsl 4.5.2 the ABI honors the
+    symbol width (the ciface takes `struct<(i64, i64)>`) but the emitted
+    header still declares `int32_t dynamic_shapes[]` -- hardcoded in
+    c_header_generator.py, while the stride width beside it is derived
+    from the arg. Header and ABI then disagree on slot width, so every
+    field after the first shape is read at the wrong offset. Two more
+    ceilings sit behind that one: `t.shape[i]` is Int32 whatever the
+    symbol ("CuTe IR only supports Int32 for now", cute/core.py) so
+    kernels must read extents via cute.size(), and on the JIT path
+    build_memref_desc raises OverflowError outright for a dynamic-marked
+    dim >=2^31.
+
+    TODO(native-aot): to serve >=2^31 dims, fix the header width upstream
+    (NVIDIA's own 4.6+ docs direct users to sym_int64 for shape dims, so
+    the int32 default is a bug), port kernels off .shape[] to cute.size(),
+    and keep this gate for the JIT route, which has its own hard limit.
     """
     # Parameter list -> the at::Tensor names in scope. The prelude sees
     # plain `const at::Tensor & x`; cpp_covers sees the functional schema
