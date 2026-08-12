@@ -62,6 +62,11 @@ class EpilogueInputPack:
     values: tuple
 
 
+@dataclasses.dataclass(frozen=True)
+class EpilogueOutputPack:
+    values: tuple
+
+
 """
 This example provides an experimental implementation of the SM100 batched dense blockscaled GEMM kernel, please note that the APIs and implementation details related to this kernel may change in future releases.
 
@@ -350,10 +355,23 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.epi_tile_n = cute.size(self.epi_tile[1])
 
         # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
-        # Cross-warp reductions need up to three Float32 partial/feed values per N column.
-        self.local_reduce_elements = (
-            self.cta_tile_shape_mnk[1] * 3 if self.has_cross_warp_local_reduce else 1
+        # Cross-warp reductions need three Float32 partial/feed values per N column.
+        self.local_reduce_smem_cols = 3
+        self.local_reduce_smem_shape = (
+            (self.cta_tile_shape_mnk[1], self.local_reduce_smem_cols)
+            if self.has_cross_warp_local_reduce
+            else 1
         )
+        self.local_reduce_smem_stride = (
+            (self.local_reduce_smem_cols, 1)
+            if self.has_cross_warp_local_reduce
+            else None
+        )
+        local_reduce_smem_layout = cute.make_layout(
+            self.local_reduce_smem_shape,
+            stride=self.local_reduce_smem_stride,
+        )
+        self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -441,7 +459,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_input_dtype: cutlass.Constexpr = cutlass.Float32,
         alpha_tensor: cute.Tensor = None,
         epilogue_inputs: EpilogueInputPack = EpilogueInputPack(()),
-        epilogue_outputs: cutlass.Constexpr = (),
+        epilogue_outputs: EpilogueOutputPack = EpilogueOutputPack(()),
         epilogue_output_count: cutlass.Constexpr = 1,
         primary_epilogue_output: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
@@ -565,8 +583,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 for value in epilogue_inputs.values
             )
         )
-        epilogue_outputs = tuple(
-            epilogue_tensor_to_mnl(tensor) for tensor in epilogue_outputs
+        epilogue_outputs = EpilogueOutputPack(
+            tuple(epilogue_tensor_to_mnl(tensor) for tensor in epilogue_outputs.values)
         )
         if cutlass.const_expr(local_reduce_feed_tensor is not None):
             local_reduce_feed_tensor = epilogue_tensor_to_mnl(local_reduce_feed_tensor)
@@ -815,7 +833,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_input_dtype: cutlass.Constexpr,
         alpha_tensor: cute.Tensor,
         epilogue_inputs: EpilogueInputPack,
-        epilogue_outputs: cutlass.Constexpr,
+        epilogue_outputs: EpilogueOutputPack,
         local_reduce_tensor: cute.Tensor,
         local_reduce_feed_tensor: cute.Tensor,
     ):
@@ -861,11 +879,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
-        sLocalReduce = storage.sLocalReduce.get_tensor(
-            cute.make_layout((self.cta_tile_shape_mnk[1], 3))
-            if self.has_cross_warp_local_reduce
-            else cute.make_layout(1)
+        local_reduce_smem_layout = cute.make_layout(
+            self.local_reduce_smem_shape,
+            stride=self.local_reduce_smem_stride,
         )
+        sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
@@ -1773,7 +1791,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     mma_tile_coord_mnl[2],
                                 ] = feed_fragment_flt[i]
                     if cutlass.const_expr(has_epilogue_outputs):
-                        for output_index, tensor in enumerate(epilogue_outputs):
+                        for output_index, tensor in enumerate(epilogue_outputs.values):
                             result_index = cutlass.const_expr(
                                 output_index
                                 if output_index < self.primary_epilogue_output
@@ -1974,7 +1992,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         and group_warp_idx > 0
                                         and group_warp_idx < group_warps
                                     ):
-                                        offset = n_idx * 3 + warp_m_idx - group_idx - 1
+                                        offset = (
+                                            n_idx * self.local_reduce_smem_cols
+                                            + warp_m_idx
+                                            - group_idx
+                                            - 1
+                                        )
                                         shared_value = cute.make_tensor(
                                             sLocalReduce.iterator + offset,
                                             cute.make_layout(1),
@@ -2001,7 +2024,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             1, group_warps
                                         ):
                                             offset = (
-                                                n_idx * 3
+                                                n_idx * self.local_reduce_smem_cols
                                                 + group_warp_start
                                                 + warp_offset
                                                 - group_idx
@@ -2017,7 +2040,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         if cutlass.const_expr(
                                             self.local_reduce_feeds_main
                                         ):
-                                            offset = n_idx * 3 + group_idx
+                                            offset = (
+                                                n_idx * self.local_reduce_smem_cols
+                                                + group_idx
+                                            )
                                             shared_value = cute.make_tensor(
                                                 sLocalReduce.iterator + offset,
                                                 cute.make_layout(1),
@@ -2046,7 +2072,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     ):
                                         row_idx = coord_flt[i][0]
                                         n_idx = coord_flt[i][1]
-                                        offset = n_idx * 3 + row_idx // group
+                                        offset = (
+                                            n_idx * self.local_reduce_smem_cols
+                                            + row_idx // group
+                                        )
                                         reduced_flt[i] = cute.make_tensor(
                                             sLocalReduce.iterator + offset,
                                             cute.make_layout(1),
@@ -2487,7 +2516,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             + cute.size_in_bytes(sf_dtype, sfa_smem_layout_staged_one)
             + cute.size_in_bytes(sf_dtype, sfb_smem_layout_staged_one)
         )
-        c_bytes_per_stage = cute.size_in_bytes(c_dtype, c_smem_layout_staged_one)
         a_elements = cute.cosize(a_smem_layout_stage_one.outer)
         b_elements = cute.cosize(b_smem_layout_staged_one.outer)
         sfa_elements = cute.cosize(sfa_smem_layout_staged_one)

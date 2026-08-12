@@ -158,11 +158,6 @@ class CUDACombinedScheduling(BaseScheduling):
             )
         return False
 
-    def can_fuse_reduction_chain(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        return self._nv_universal_gemm_scheduling.can_fuse_reduction_chain(node1, node2)
-
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:

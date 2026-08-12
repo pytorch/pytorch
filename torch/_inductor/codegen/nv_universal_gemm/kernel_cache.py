@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor.kernel.gemm_epilogue_codegen import get_cutedsl_epilogue_schema
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -55,14 +56,9 @@ def _epilogue_args_signature(epilogue_args: Any) -> tuple:
         return ()
     from cutlass.operators.utils.tensor import TensorWrapper
 
+    schema = get_cutedsl_epilogue_schema(getattr(epilogue_args, "epilogue_fn", None))
     scalar_broadcast_names = tuple(
-        sorted(
-            getattr(
-                getattr(epilogue_args, "epilogue_fn", None),
-                "scalar_broadcast_names",
-                (),
-            )
-        )
+        sorted(schema.scalar_broadcast_names) if schema is not None else ()
     )
     sig: list[tuple] = [("scalar_broadcast_names", scalar_broadcast_names)]
     for name, val in tensors.items():
@@ -664,15 +660,8 @@ def _meta_epilogue_metadata(epilogue_args: Any) -> Any:
             )
         else:
             fake_kwargs[name] = val
-    if getattr(epilogue_args, "_is_direct_cutedsl", False):
-        from types import SimpleNamespace
-
-        fake_args = SimpleNamespace(
-            epilogue_fn=epilogue_args.epilogue_fn,
-            tensors=fake_kwargs,
-            traced_epilogue=None,
-        )
-        return EpilogueMetadata.from_args(fake_args)
+    if get_cutedsl_epilogue_schema(epilogue_args.epilogue_fn) is not None:
+        return EpilogueMetadata.from_args(epilogue_args.with_tensors(fake_kwargs))
     fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
     accum = epilogue_args.traced_epilogue.example_inputs["accum"]
     fake_args.trace(accum.shape, accum.element)

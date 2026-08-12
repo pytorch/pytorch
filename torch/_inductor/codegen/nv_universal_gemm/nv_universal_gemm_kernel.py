@@ -17,7 +17,6 @@ import logging
 import re
 import threading
 from collections import OrderedDict
-from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -41,6 +40,10 @@ from torch._inductor.kernel.gemm_epilogue import (
     GEMM_ACCUMULATOR_ARG_NAME,
     GemmEpiloguePlan,
     GemmReductionArguments,
+)
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    CuTeDSLEpilogueSchema,
+    CuTeDSLEpilogueSource,
 )
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -77,36 +80,32 @@ def _normalize_scalar_epilogue_tensor(value: Any, permute=None) -> Any:
     return value
 
 
-class _CuTeDSLEpilogueSource(str):  # noqa: SLOT000
-    scalar_broadcast_names: frozenset[str]
-
-    def __new__(cls, source: str, scalar_broadcast_names: frozenset[str]):
-        value = super().__new__(cls, source)
-        value.scalar_broadcast_names = scalar_broadcast_names
-        return value
-
-
 @functools.cache
-def _cutedsl_epilogue_names(epilogue_fn: str) -> tuple[str, ...]:
+def _cutedsl_epilogue_io(
+    epilogue_fn: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     from cutlass.operators.fusion import trace_in_out
 
     inputs, outputs = trace_in_out(epilogue_fn)
-    return tuple(
-        name
-        for name in dict.fromkeys((*inputs, *outputs))
-        if name != GEMM_ACCUMULATOR_ARG_NAME
-    )
+    if GEMM_ACCUMULATOR_ARG_NAME not in inputs:
+        inputs = [GEMM_ACCUMULATOR_ARG_NAME, *inputs]
+    return tuple(inputs), tuple(outputs)
 
 
 class CuTeDSLEpilogueArguments:
     """Epilogue arguments for direct CuTeDSL functions that bypass EVT tracing."""
 
-    _is_direct_cutedsl = True
-
     def __init__(self, epilogue_fn: str, **kwargs: Any) -> None:
         import torch
 
-        names = _cutedsl_epilogue_names(epilogue_fn)
+        inputs, outputs = _cutedsl_epilogue_io(epilogue_fn)
+        scalar_broadcast_names = frozenset(
+            name
+            for name, value in kwargs.items()
+            if isinstance(value, torch.Tensor) and value.ndim == 0
+        )
+        schema = CuTeDSLEpilogueSchema(inputs, outputs, scalar_broadcast_names)
+        names = schema.parameter_names
         unexpected = kwargs.keys() - OrderedSet(names)
         missing = OrderedSet(names) - kwargs.keys()
         if missing or unexpected:
@@ -114,14 +113,18 @@ class CuTeDSLEpilogueArguments:
                 f"CuTeDSL epilogue argument mismatch: missing={missing}, "
                 f"unexpected={unexpected}"
             )
-        scalar_broadcast_names = frozenset(
-            name
-            for name, value in kwargs.items()
-            if isinstance(value, torch.Tensor) and value.ndim == 0
-        )
-        self.epilogue_fn = _CuTeDSLEpilogueSource(epilogue_fn, scalar_broadcast_names)
+        self.epilogue_fn = CuTeDSLEpilogueSource(epilogue_fn, schema)
         self.tensors = OrderedDict((name, kwargs[name]) for name in names)
         self.traced_epilogue = None
+
+    def with_tensors(self, tensors: dict[str, Any]) -> CuTeDSLEpilogueArguments:
+        result = object.__new__(type(self))
+        result.epilogue_fn = self.epilogue_fn
+        result.tensors = OrderedDict(
+            (name, tensors[name]) for name in self.epilogue_fn.schema.parameter_names
+        )
+        result.traced_epilogue = None
+        return result
 
     @property
     def parameters(self) -> list[Any]:
@@ -147,23 +150,9 @@ class CuTeDSLEpilogueArguments:
 
 @functools.cache
 def _nvgemm_source_fingerprint() -> str:
-    inductor_dir = Path(__file__).resolve().parents[2]
-    sources = (
-        Path(__file__),
-        inductor_dir / "kernel/vendored_templates/cutedsl/dense_gemm_efc.py",
-        inductor_dir
-        / "kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
-        inductor_dir
-        / "kernel/vendored_templates/cutedsl/wrappers/dense_gemm_efc_kernel.py",
-        inductor_dir
-        / "kernel/vendored_templates/cutedsl/wrappers/dense_blockscaled_gemm_kernel.py",
-        inductor_dir / "codegen/cutedsl/cutedsl_op_overrides.py",
-        inductor_dir / "kernel/gemm_epilogue_codegen.py",
-    )
-    digest = hashlib.sha256()
-    for source in sources:
-        digest.update(source.read_bytes())
-    return digest.hexdigest()
+    from torch._inductor.codecache import torch_key
+
+    return torch_key().hex()
 
 
 def _current_target_sm(dev_idx: int):
