@@ -7,7 +7,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -2152,6 +2152,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2759,19 +2760,27 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 return False
         return True
 
-    def _get_config_generator(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        # No curated autoWS set yet: sweep the full autoWS space for both default
-        # and exhaustive search, and let _get_template_configs_impl prune it.
-        if _use_template_autows():
-            return partial(
-                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        """The Blackwell persistent set crossed with the autoWS-specific knobs."""
+        base = cast(list[BlackwellGPUGemmConfig], self.blackwell_persistent_mm_configs)
+        return [
+            dataclasses.replace(
+                cfg,
+                # 2-CTA caps the pipeline at 2 stages (see _autows_constraints_ok)
+                num_stages=2 if two_ctas else cfg.num_stages,
+                use_meta_ws=True,
+                flatten=False,
+                separate_epilogue_store=True,
+                data_partition_factor=data_partition_factor,
+                two_ctas=two_ctas,
             )
-        return super()._get_config_generator()
+            for cfg in base
+            for data_partition_factor in [1, 2]
+            for two_ctas in [False, True]
+        ]
 
     @staticmethod
-    def _generate_autows_configs() -> list[BaseConfig]:
+    def _generate_autows_exhaustive_configs() -> list[BaseConfig]:
         configs: list[BaseConfig] = []
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
             [32, 64, 128, 256], repeat=3
@@ -3167,8 +3176,12 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
-        self.exhaustive_configs = self._generate_exhaustive_configs()
+        if _use_template_autows():
+            self.mm_configs = self._generate_autows_configs()
+            self.exhaustive_configs = self._generate_autows_exhaustive_configs()
+        else:
+            self.mm_configs = self.blackwell_persistent_mm_configs
+            self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
@@ -3196,6 +3209,9 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
+        if _use_template_autows():
+            # autoWS configs from the base heuristic already apply to addmm
+            return
         # NOTE: to ensure that we pass tests, addmm needs a small config
         self.mm_configs = (
             self.blackwell_persistent_mm_configs
