@@ -609,10 +609,17 @@ AOTITorchError aoti_torch__embedding_bag(
         include_last_offset,
         padding_idx);
 
-    *ret0 = new_tensor_handle(std::move(r0));
-    *ret1 = new_tensor_handle(std::move(r1));
-    *ret2 = new_tensor_handle(std::move(r2));
-    *ret3 = new_tensor_handle(std::move(r3));
+    // Build all outputs into RAII locals first; only release() into the raw
+    // *retN (release() is noexcept) after every new_tensor_handle succeeds, so
+    // a mid-sequence std::bad_alloc cannot orphan the earlier outputs.
+    RAIIAtenTensorHandle h0(new_tensor_handle(std::move(r0)));
+    RAIIAtenTensorHandle h1(new_tensor_handle(std::move(r1)));
+    RAIIAtenTensorHandle h2(new_tensor_handle(std::move(r2)));
+    RAIIAtenTensorHandle h3(new_tensor_handle(std::move(r3)));
+    *ret0 = h0.release();
+    *ret1 = h1.release();
+    *ret2 = h2.release();
+    *ret3 = h3.release();
   });
 }
 
@@ -748,10 +755,16 @@ AOTITorchError aoti_torch__scaled_dot_product_efficient_attention(
         dropout_p,
         is_causal,
         optional_scale);
-    *ret0 = new_tensor_handle(std::move(r0));
-    *ret1 = new_tensor_handle(std::move(r1));
-    *ret2 = new_tensor_handle(std::move(r2));
-    *ret3 = new_tensor_handle(std::move(r3));
+    // Build outputs into RAII locals first; release() into *retN only after all
+    // succeed so a mid-sequence std::bad_alloc cannot orphan earlier outputs.
+    RAIIAtenTensorHandle h0(new_tensor_handle(std::move(r0)));
+    RAIIAtenTensorHandle h1(new_tensor_handle(std::move(r1)));
+    RAIIAtenTensorHandle h2(new_tensor_handle(std::move(r2)));
+    RAIIAtenTensorHandle h3(new_tensor_handle(std::move(r3)));
+    *ret0 = h0.release();
+    *ret1 = h1.release();
+    *ret2 = h2.release();
+    *ret3 = h3.release();
   });
 }
 
