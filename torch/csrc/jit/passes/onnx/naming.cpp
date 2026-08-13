@@ -119,7 +119,7 @@ class ScopedNodeNameGenerator : public NodeNameGenerator {
 std::string NodeNameGenerator::CreateUniqueName(
     std::unordered_map<std::string, size_t>& base_name_count,
     std::string base_name) {
-  if (base_name_count.find(base_name) == base_name_count.end()) {
+  if (!base_name_count.contains(base_name)) {
     base_name_count[base_name] = 0;
   } else {
     auto count = ++base_name_count[base_name];
@@ -141,7 +141,7 @@ bool NodeNameGenerator::IsGraphOutput(
 }
 
 void NodeNameGenerator::UpdateOutputsNames(Node* n) {
-  if (node_names_.find(n) != node_names_.end()) {
+  if (node_names_.contains(n)) {
     auto node_name = node_names_[n];
     for (auto i : c10::irange(n->outputs().size())) {
       auto output = n->output(i);
@@ -169,7 +169,7 @@ void NodeNameGenerator::PopulateNodeNames(Block* b) {
 }
 
 void ScopedNodeNameGenerator::CreateNodeName(Node* n) {
-  if (node_names_.find(n) == node_names_.end()) {
+  if (!node_names_.contains(n)) {
     if (!ONNXScopeName::isCompatibleScope(n->scope())) {
       return;
     }
@@ -186,7 +186,7 @@ void ScopedNodeNameGenerator::CreateNodeName(Node* n) {
 }
 
 std::string ScopedNodeNameGenerator::GetFullScopeName(const ScopePtr& scope) {
-  if (full_scope_names_.find(scope) == full_scope_names_.end()) {
+  if (!full_scope_names_.contains(scope)) {
     auto full_scope_name =
         ONNXScopeName::variableNameFromRoot(scope, layer_separator_);
     full_scope_names_[scope] =
