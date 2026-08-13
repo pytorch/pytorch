@@ -1058,9 +1058,23 @@ elseif(USE_CUDA)
     # generated launchers are the only callers, and they are in the same
     # link. The launchers themselves already have internal linkage (the
     # generated .cpp wraps them in an anonymous namespace).
-    if(NATIVE_AOT_KERNEL_OBJS)
-      target_link_options(torch_cuda PRIVATE
-          "LINKER:--version-script=${CMAKE_CURRENT_LIST_DIR}/../cmake/native_aot_local.ver")
+    #
+    # The script is generated beside the artifacts (gen_aot_lib writes one
+    # anchored pattern set per kernel prefix). UNIX-only: --version-script
+    # and the .o inputs are both ELF-specific, and stage 2 targets
+    # libtorch_cuda.so, so the artifacts dir is always empty elsewhere.
+    if(NATIVE_AOT_KERNEL_OBJS AND UNIX AND NOT APPLE)
+      set(_native_aot_ver "${NATIVE_AOT_ARTIFACTS_DIR}/native_aot_local.ver")
+      if(EXISTS "${_native_aot_ver}")
+        target_link_options(torch_cuda PRIVATE
+            "LINKER:--version-script=${_native_aot_ver}")
+      else()
+        message(FATAL_ERROR
+            "native-AOT: kernel objects present but ${_native_aot_ver} is "
+            "missing. Re-run tools/native_aot/gen_aot_lib.py; without the "
+            "version script the DSL's entry points would join torch_cuda's "
+            "public ABI.")
+      endif()
     endif()
     # Per-op include dirs for the exported CuTeDSL ABI headers.
     file(GLOB _native_aot_op_dirs LIST_DIRECTORIES true
