@@ -63,9 +63,15 @@ def _store_vec(copy_atom, vec_width, elem_dtype, val, div_tensor, idx):
 
 
 def _to_elem(dtype_str: str, elem_dtype, y):
-    if dtype_str == "f32":
+    if const_expr(dtype_str == "f32"):
         return y
     return y.to(elem_dtype)
+
+
+def _to_f32(dtype_str: str, v):
+    if const_expr(dtype_str == "f32"):
+        return v
+    return v.to(fx.Float32)
 
 
 def _dtype_str(dtype: torch.dtype) -> str:
@@ -94,7 +100,13 @@ def _build_rmsnorm_module(
     _, elem_bits = _dtype_config(dtype_str)
     vec_width = 128 // elem_bits
     tile_cols = block_threads * vec_width
-    reduction_slots = max(1, (block_threads + WARP_SIZE - 1) // WARP_SIZE)
+    reduction_slots = (block_threads + WARP_SIZE - 1) // WARP_SIZE
+    # block_reduce_add's second stage reads slots through one masked wave.
+    if reduction_slots > WARP_SIZE:
+        raise AssertionError(
+            f"block_reduce_add cannot combine {reduction_slots} partial sums "
+            f"through one {WARP_SIZE}-lane wave"
+        )
 
     SharedStorage = _make_single_reduction_storage(reduction_slots)
 
@@ -124,8 +136,6 @@ def _build_rmsnorm_module(
             return w
 
         def block_reduce_add(val):
-            if const_expr(reduction_slots == 1):
-                return wave_reduce_add(val)
             lane = tid % WARP_SIZE
             wave = tid // WARP_SIZE
             w = wave_reduce_add(val)
@@ -246,7 +256,7 @@ def _build_rmsnorm_module(
                 tail_valid = tid < scalar_tail_elems
                 tail_idx = scalar_tail_start + tid
                 tail_x_e = row_in[tail_valid.select(tail_idx, 0)]
-                tail_x = tail_x_e if dtype_str == "f32" else tail_x_e.to(fx.Float32)
+                tail_x = _to_f32(dtype_str, tail_x_e)
                 thread_sumsq = thread_sumsq + tail_valid.select(
                     tail_x * tail_x, c_zero_f
                 )
@@ -287,7 +297,7 @@ def _build_rmsnorm_module(
                 tail_idx = scalar_tail_start + tid
                 if tail_valid:
                     g_e = Gamma_buf[tail_idx]
-                    g = g_e if dtype_str == "f32" else g_e.to(fx.Float32)
+                    g = _to_f32(dtype_str, g_e)
                     y = (tail_x * rrms) * g
                     row_out[tail_idx] = _to_elem(dtype_str, elem_dtype, y)
 

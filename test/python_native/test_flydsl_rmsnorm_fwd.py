@@ -21,7 +21,24 @@ DISPATCH_M = 8192
 DISPATCH_N = 4096
 DISPATCH_DTYPE = torch.float16
 BACKWARD_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
-KERNEL_PATH_NS = (3, 4096, 12288, 24576, 114688, 4097, 4103, 8193, 16385, 32769, 98305)
+# 8192 is the band-2 boundary; 2056 is the one generic-path shape with no
+# scalar tail but more than one vector step, which the small N here reach only
+# at vec_steps == 1.
+KERNEL_PATH_NS = (
+    3,
+    2056,
+    4096,
+    8192,
+    12288,
+    24576,
+    114688,
+    4097,
+    4103,
+    8193,
+    16385,
+    32769,
+    98305,
+)
 # (N, minimum rows M) for each band _fused_rms_norm_fwd_perf_wins admits.
 BAND_MINIMUMS = ((4096, 8192), (8192, 4096), (16384, 2048))
 UPPER_BOUND_N = 114688
@@ -391,11 +408,21 @@ class TestFlyDSLRMSNorm(TestCase):
 
     @parametrize("n,min_rows", BAND_MINIMUMS)
     def test_band_minimum_dispatches(self, n, min_rows):
+        # The numerics tests below drive the kernel directly at rows=8. M is
+        # dynamic in the compiled kernel, so the shape that actually reaches
+        # production -- thousands of blocks rather than one wave of them --
+        # only gets compared against aten here.
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
 
         x, weight = self._make_inputs(min_rows, n, DISPATCH_DTYPE)
-        torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self._assert_no_flydsl_compiles()
+
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+        self.assertEqual(got, ref)
+        self.assertEqual(got_rstd, ref_rstd)
 
     @parametrize("n,min_rows", BAND_MINIMUMS)
     def test_one_row_below_band_minimum_falls_back(self, n, min_rows):
@@ -410,8 +437,35 @@ class TestFlyDSLRMSNorm(TestCase):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
 
         x, weight = self._make_inputs(2048, n, DISPATCH_DTYPE)
-        torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+        self._assert_no_flydsl_compiles()
+
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1 if dispatches else 0)
+        self.assertEqual(got, ref)
+        self.assertEqual(got_rstd, ref_rstd)
+
+    def test_nd_input_dispatches_and_matches_aten(self):
+        # rmsnorm_fwd flattens to (M, N) and rebuilds a different stat_shape for
+        # ndim != 2, and (batch, seq, hidden) is what a model actually passes --
+        # but every other dispatching test here, and every OpInfo sample, is 2-D.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        shape = (4, 2048, DISPATCH_N)
+        x = make_tensor(shape, device="cuda", dtype=DISPATCH_DTYPE)
+        weight = make_tensor((DISPATCH_N,), device="cuda", dtype=DISPATCH_DTYPE)
+
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [DISPATCH_N], weight, EPS)
+        self._assert_no_flydsl_compiles()
+
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [DISPATCH_N], weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+        self.assertEqual(got.shape, shape)
+        self.assertEqual(got_rstd.shape, (*shape[:-1], 1))
+        self.assertEqual(got, ref)
+        self.assertEqual(got_rstd, ref_rstd)
 
     def test_nn_rmsnorm_default_eps_dispatches(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
