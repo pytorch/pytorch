@@ -532,6 +532,11 @@ def run_test(
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
     test_file = test_module.name
+    # Stable identifier for CI logs, e.g. "test_ops 3/8". Deliberately built
+    # from .name rather than str(test_module), which also embeds the pytest
+    # filter for partial runs ("test_ops, not (TestA or TestB) 3/8") and would
+    # fragment the log classifier's grouping key.
+    test_label = f"{test_file} {test_module.shard}/{test_module.num_shards}"
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
@@ -692,6 +697,7 @@ def run_test(
                 options.continue_through_error,
                 test_file,
                 options,
+                test_label,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -703,6 +709,7 @@ def run_test(
                 env=env,
                 timeout=timeout,
                 retries=0,
+                label=test_label,
             )
 
             # Pytest return code 5 means no test is collected. Exit code 4 is
@@ -780,6 +787,7 @@ def run_test_retries(
     continue_through_error,
     test_file,
     options,
+    test_label="",
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -819,6 +827,7 @@ def run_test_retries(
             env=env,
             timeout=timeout,
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
+            label=test_label,
         )
         ret_code = 0 if ret_code == 5 else ret_code
         if ret_code == 0 and not sc_command.startswith("--rs="):
@@ -843,6 +852,18 @@ def run_test_retries(
         env = try_set_cpp_stack_traces(env, command, set=False)
         if ret_code != 0:
             num_failures[current_failure] += 1
+
+        if ret_code == 124:
+            # A timeout where we know which test was in flight. This is for the
+            # log classifier, same as FAILED CONSISTENTLY below: without it the
+            # only evidence of a timeout is retry_shell's "Command took >Nmin"
+            # line, which cannot name the test, so every hang in the fleet
+            # collapses into one group and a single hanging test is invisible.
+            # [1:-1] to remove quotes. NB when the hang happens during import
+            # or collection no test has started, there is no stepcurrent entry,
+            # and we never get here -- that case is covered by the file-level
+            # label on the "Command took" line instead.
+            print_to_file(f"TIMED OUT: {current_failure[1:-1]}")
 
         if ret_code == 0:
             # Rerunning the previously failing test succeeded, so now we can

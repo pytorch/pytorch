@@ -91,8 +91,12 @@ inline void set_history(
   }
 }
 
+inline bool isFwGradDefined(const at::Tensor& t) {
+  return t.defined() && t._fw_grad(/*level */ 0).defined();
+}
+
 inline bool isFwGradDefined(const std::optional<at::Tensor>& t) {
-  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
+  return t.has_value() && isFwGradDefined(t.value());
 }
 
 inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
@@ -106,9 +110,9 @@ inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
 inline bool isFwGradDefinedTensorList(
     const c10::List<std::optional<at::Tensor>>& li) {
   bool ret = false;
-  for (auto i : c10::irange(li.size())) {
-    auto t = li.get(i);
-    ret |= isFwGradDefined(t);
+  for (const auto& element : li) {
+    const c10::IValue& ivalue = element.get();
+    ret |= !ivalue.isNone() && isFwGradDefined(ivalue.toTensor());
   }
   return ret;
 }

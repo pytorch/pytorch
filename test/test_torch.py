@@ -2106,6 +2106,8 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_put_fn(x, 0, 5.),
+                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
@@ -2328,7 +2330,7 @@ class TestTorchDeviceType(TestCase):
             for to_ in [-4.2, 0, 42]:
                 if to_ > from_:
                     t = torch.empty(size, dtype=dtype, device=device).uniform_(from_, to_)
-                    res = stats.kstest(t.cpu().to(torch.double), 'uniform', args=(from_, (to_ - from_)))
+                    res = stats.kstest(t.cpu().to(torch.double), stats.uniform(from_, (to_ - from_)).cdf)
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2339,7 +2341,7 @@ class TestTorchDeviceType(TestCase):
         for mean in [-10, 0, 50]:
             for std in [1, 5, 10]:
                 t = torch.empty(size, dtype=dtype, device=device).normal_(mean=mean, std=std)
-                res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
+                res = stats.kstest(t.cpu().to(torch.double), stats.norm(mean, std).cdf)
                 self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2349,7 +2351,7 @@ class TestTorchDeviceType(TestCase):
         size = 50000
         for std in [0.005, 0.01]:
             t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
-            res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(0, std))
+            res = stats.kstest(t.cpu().to(torch.double), stats.norm(0, std).cdf)
             self.assertTrue(
                 res.statistic < 0.01,
                 msg=lambda msg: f"{msg}\nKS statistic {res.statistic:.4f} for {dtype} std={std}",
