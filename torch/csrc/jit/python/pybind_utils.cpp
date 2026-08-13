@@ -13,6 +13,7 @@
 #include <ATen/ScalarOps.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
@@ -899,6 +900,7 @@ py::object invokeOperatorFromPython(
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
+  torch::PyWarningHandler warning_handler;
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
