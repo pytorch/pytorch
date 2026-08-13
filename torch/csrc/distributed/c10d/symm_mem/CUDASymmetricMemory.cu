@@ -908,14 +908,15 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       C10_CUDA_DRIVER_CHECK_MSG(
           driver_api->cuMemImportFromShareableHandle_(
               &handles[r],
-              (void*)(uintptr_t)imported_handles[r],
+              reinterpret_cast<void*>(
+                  static_cast<uintptr_t>(imported_handles[r])),
               CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
           import_err_msg(rank, r, reqs));
     } else {
       C10_CUDA_DRIVER_CHECK_MSG(
           driver_api->cuMemImportFromShareableHandle_(
               &handles[r],
-              (void*)&(imported_handles[r]),
+              static_cast<void*>(&imported_handles[r]),
               CU_MEM_HANDLE_TYPE_FABRIC),
           import_err_msg(rank, r, reqs));
     }
@@ -923,14 +924,15 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       C10_CUDA_DRIVER_CHECK_MSG(
           driver_api->cuMemImportFromShareableHandle_(
               &signal_pad_handles[r],
-              (void*)(uintptr_t)imported_signal_pad_handles[r],
+              reinterpret_cast<void*>(
+                  static_cast<uintptr_t>(imported_signal_pad_handles[r])),
               CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
           import_err_msg(rank, r, reqs));
     } else {
       C10_CUDA_DRIVER_CHECK_MSG(
           driver_api->cuMemImportFromShareableHandle_(
               &signal_pad_handles[r],
-              (void*)&(imported_signal_pad_handles[r]),
+              static_cast<void*>(&imported_signal_pad_handles[r]),
               CU_MEM_HANDLE_TYPE_FABRIC),
           import_err_msg(rank, r, reqs));
     }
@@ -940,7 +942,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 #if ROCM_VERSION >= 70100
         reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
 #else
-        (void*)(uintptr_t)&(imported_handles[r]),
+        static_cast<void*>(&imported_handles[r]),
 #endif
         hipMemHandleTypePosixFileDescriptor));
     C10_CUDA_CHECK(hipMemImportFromShareableHandle(
@@ -949,7 +951,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
         reinterpret_cast<void*>(
             static_cast<uintptr_t>(imported_signal_pad_handles[r])),
 #else
-        (void*)(uintptr_t)&(imported_signal_pad_handles[r]),
+        static_cast<void*>(&imported_signal_pad_handles[r]),
 #endif
         hipMemHandleTypePosixFileDescriptor));
 #else
