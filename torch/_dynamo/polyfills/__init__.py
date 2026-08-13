@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         _collections as _collections,
         builtins as builtins,
         functools as functools,
+        heapq as heapq,
         io as io,
         itertools as itertools,
         operator as operator,
@@ -75,15 +76,20 @@ def _fn_with_ctx(ctx: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T
 
 
 def index(
-    iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
+    iterator: Iterator[T],
+    item: T,
+    start: int = 0,
+    end: int | None = None,
+    not_found_msg: str = "{!r} is not in list",
 ) -> int:
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
         if elem is item or elem == item:
             return i
-    # This will not run in dynamo
-    raise ValueError(f"{item} is not in {type(iterator)}")
+    # Callers pass the message their sequence type raises in CPython, which is
+    # not uniform: list/deque repr the value, tuple ignores it.
+    raise ValueError(not_found_msg.format(item))
 
 
 def repeat(item: T, count: int) -> Iterator[T]:
