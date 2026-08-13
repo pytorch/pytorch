@@ -480,16 +480,22 @@ class TestGroupBatchFusion(TestCase):
         post_grad_fusion_options={},
     )
     def test_batch_linear_lhs_skips_layout_sensitive_users(self):
+        # Only one of three linears feeds the layout-sensitive custom op; the
+        # other two must still fuse (counter == 1) while the offending linear
+        # is skipped. _require_contiguous raises on a non-contiguous input, so
+        # the equality check also proves the custom op got a contiguous tensor.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.proj_large = torch.nn.Linear(64, 192, bias=False)
-                self.proj_small = torch.nn.Linear(64, 16, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
 
             def forward(self, x):
-                large = self.proj_large(x)
-                small = self.proj_small(x)
-                return _require_contiguous(large), torch.sin(small)
+                large = _require_contiguous(self.proj_large(x))
+                a = torch.sin(self.proj_a(x))
+                b = torch.cos(self.proj_b(x))
+                return torch.cat((large, a, b), dim=1)
 
         counters.clear()
         module = M().eval()
@@ -499,7 +505,7 @@ class TestGroupBatchFusion(TestCase):
             actual = torch.compile(module, fullgraph=True)(x)
 
         self.assertEqual(actual, expected)
-        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -518,6 +524,69 @@ class TestGroupBatchFusion(TestCase):
                 large = torch.sin(self.proj_large(x))
                 small = torch.cos(self.proj_small(x))
                 return torch.cat((large, small), dim=1)
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_output_users(self):
+        # The graph output can observe the fused stride directly, so linears
+        # returned straight from forward must not be fused.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_small = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return self.proj_large(x), self.proj_small(x)
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_packet_form_custom_op(self):
+        # Custom ops reached through the OpOverloadPacket call form
+        # (torch.ops.ns.op(x), no .default) must be treated as layout-sensitive
+        # too.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = torch.ops._batch_linear_lhs_test.require_contiguous(
+                    self.proj_large(x)
+                )
+                a = torch.sin(self.proj_a(x))
+                b = torch.cos(self.proj_b(x))
+                return torch.cat((large, a, b), dim=1)
 
         counters.clear()
         module = M().eval()
