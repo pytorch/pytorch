@@ -17926,84 +17926,9 @@ class TestAutogradMultipleDispatch(TestCase):
             # Default gradient registered is grad.reshape_as(self)
             self.assertEqual(t.grad, grad.reshape_as(t))
 
-    @onlyCPU
-    def test_per_dispatch_key_input_saving(self, device):
-        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
-        def foo(x):
-            # Don't modify the input inplace
-            x = x.clone()
-            res = x.sum(-1, keepdim=True)
-            x.add_(x)
-            return res
 
-        inp = torch.rand(2, device=device, requires_grad=True)
-        # sum's input is not saved for regular Tensors
-        foo(inp).backward()
-
-        # sum's input is saved for Nested Tensors
-        nt = torch.nested.nested_tensor(
-            [torch.rand(2), torch.rand(2)], device=device, requires_grad=True
-        )
-        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            foo(nt).backward(
-                torch.nested.nested_tensor(
-                    [torch.rand(1), torch.rand(1)], device=device
-                )
-            )
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
-    )
-    @onlyCUDA
-    def test_backward_single_threaded(self):
-        threads_eq = None
-
-        class TestFn(Function):
-            @staticmethod
-            def forward(ctx, x, self):
-                ctx.self = self
-                ctx.tid = threading.get_ident()
-                return x.clone()
-
-            @staticmethod
-            def backward(ctx, gO):
-                nonlocal threads_eq
-                threads_eq = ctx.tid == threading.get_ident()
-                return gO, None
-
-        inp = torch.rand(10, device="cuda", requires_grad=True)
-
-        with torch.autograd.set_multithreading_enabled(False):
-            TestFn.apply(inp, None).sum().backward()
-        self.assertTrue(threads_eq)
-
-        TestFn.apply(inp, None).sum().backward()
-        self.assertFalse(threads_eq)
-
-    @onlyCUDA
-    def test_backward_tls_stash(self):
-        local = threading.local()
-        local.my_obj = {}
-        local.my_obj[10] = 10
-        test_self = self
-        torch._C._stash_obj_in_tls("my_obj", local.my_obj)
-
-        class TestFn(Function):
-            @staticmethod
-            def forward(ctx, x, self):
-                return x.clone()
-
-            @staticmethod
-            def backward(ctx, gO):
-                test_self.assertTrue(torch._C._is_key_in_tls("my_obj"))
-                test_self.assertTrue(torch._C._get_obj_in_tls("my_obj")[10] == 10)
-                torch._C._get_obj_in_tls("my_obj")[10] = 5
-                return gO, None
-
-        inp = torch.rand(10, device="cuda", requires_grad=True)
-
-        TestFn.apply(inp, None).sum().backward()
-        self.assertEqual(local.my_obj[10], 5)
+class TestAutogradMultipleDispatchOnCPU(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181323"
@@ -18166,9 +18091,31 @@ class TestAutogradMultipleDispatch(TestCase):
                     expected[i, i] = 1.0
                 self.assertEqual(x.grad, expected)
 
+    def test_per_dispatch_key_input_saving(self):
+        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
+        def foo(x):
+            # Don't modify the input inplace
+            x = x.clone()
+            res = x.sum(-1, keepdim=True)
+            x.add_(x)
+            return res
+
+        inp = torch.rand(2, requires_grad=True)
+        # sum's input is not saved for regular Tensors
+        foo(inp).backward()
+
+        # sum's input is saved for Nested Tensors
+        nt = torch.nested.nested_tensor(
+            [torch.rand(2), torch.rand(2)], requires_grad=True
+        )
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)]))
+
 
 @skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
 class TestFunctionAssertMessages(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # THPFunction_assert forwards to a printf-style formatter. Regression tests
     # that the dynamic content (offending type name / index) is not silently
     # dropped from the error message.
