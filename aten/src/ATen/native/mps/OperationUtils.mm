@@ -772,7 +772,7 @@ void MPSGraphCache::profileCachedGraph(const CacheEntry& cacheEntry) const {
     // for interval-based signpost tracing, we begin the interval here to be able
     // to measure the time it takes to compile the graphs (if graph newly created),
     // and also the time potentially spent on gather/scatter of graph's input tensors
-    profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true);
+    profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true, getCurrentMPSStream());
   }
 }
 
@@ -955,7 +955,9 @@ class BundledShaderLibrary : public MetalShaderLibrary {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
 #ifdef CAN_BUILD_METAL_4
-      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_0) ? "metal_40" : "metal_basic";
+      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+      // cooperative-tensor ABI), so only load it on 26.2+.
+      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_2) ? "metal_40" : "metal_basic";
 #else
       const auto section_name = "metal_basic";
 #endif
@@ -1132,7 +1134,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     dispatch_sync(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
-      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
+      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
@@ -1149,7 +1151,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         // input is read at compile-time Tin.
         const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
         if (cast_ilp) {
-          std::array<uint32_t, 3> size_outtype_numel = {
+          c10::metal::vec3<uint32_t> size_outtype_numel = {
               static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())), out_type, length};
           mtl_setBytes(computeEncoder, size_outtype_numel, 2);
           mtl_dispatch1DJob(
@@ -1208,12 +1210,12 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         }
       }
 
-      getMPSProfiler().endProfileKernel(cplState);
+      getMPSProfiler().endProfileKernel(cplState, mpsStream);
     });
   }
 }
 
-void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
+void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
                                                MTLBuffer_t src_buf,
                                                uint32_t src_offs_bytes,
                                                c10::ScalarType src_dtype,
@@ -1233,14 +1235,14 @@ void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(cplState, name, /*isGraph=*/false);
+      getMPSProfiler().beginProfileKernel(cplState, kernel_name, /*isGraph=*/false, mpsStream);
       [computeEncoder setComputePipelineState:cplState];
       [computeEncoder setBuffer:dst_buf offset:dst_offs_bytes atIndex:0];
       [computeEncoder setBuffer:src_buf offset:src_offs_bytes atIndex:1];
       const auto out_type = static_cast<uint32_t>(dst_dtype);
       const auto elem_size = static_cast<uint32_t>(c10::elementSize(dst_dtype));
       if (use_ilp) {
-        std::array<uint32_t, 3> size_outtype_numel = {elem_size, out_type, numel};
+        c10::metal::vec3<uint32_t> size_outtype_numel = {elem_size, out_type, numel};
         mtl_setBytes(computeEncoder, size_outtype_numel, 2);
         mtl_dispatch1DJob(
             computeEncoder, cplState, (numel + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
@@ -1249,7 +1251,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
         mtl_setBytes(computeEncoder, size_outtype, 2);
         mtl_dispatch1DJob(computeEncoder, cplState, numel);
       }
-      getMPSProfiler().endProfileKernel(cplState);
+      getMPSProfiler().endProfileKernel(cplState, mpsStream);
     });
   }
 }
@@ -1482,7 +1484,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       auto computeEncoder = mpsStream->commandEncoder();
       auto binaryPSO = getPipelineStateForFunc(kernel_name);
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other}, mpsStream);
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
       if (output_cast_needed) {
@@ -1577,7 +1579,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
             dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel();
         mtl_dispatch1DJob(computeEncoder, binaryPSO, dispatch_n);
       }
-      getMPSProfiler().endProfileKernel(binaryPSO);
+      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });
 }
@@ -1639,7 +1641,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
       auto computeEncoder = mpsStream->commandEncoder();
       auto binaryPSO = getPipelineStateForFunc(kernel_name);
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other1, other2});
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other1, other2}, mpsStream);
       [computeEncoder setComputePipelineState:binaryPSO];
       // Set input and output tensors
       bind_iter_tensors(computeEncoder, iter);
@@ -1673,7 +1675,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
                        types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
-      getMPSProfiler().endProfileKernel(binaryPSO);
+      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });
 }

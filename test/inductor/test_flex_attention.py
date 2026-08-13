@@ -53,7 +53,6 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
-    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -80,6 +79,7 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
+    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
@@ -98,7 +98,23 @@ running_on_a100_only = skipUnless(
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-torch.set_float32_matmul_precision("high")
+
+
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
+
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -5476,7 +5492,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             "Invalid FlexAttention forward kernel options: Q and KV block sizes "
             "must be divisible by the selected tile sizes.*"
             "SPARSE_Q_BLOCK_SIZE=96.*SPARSE_KV_BLOCK_SIZE=96.*"
-            "BLOCK_M=128.*BLOCK_N=32"
+            "BLOCK_M=\\d+.*BLOCK_N=\\d+"
         )
         block_mask = create_block_mask(
             noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=device
@@ -5691,12 +5707,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self, device):
         make_tensor = functools.partial(
             torch.ones,
             (2, 2, 256, 32),
-            device="cuda:0",
+            device=0,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -5705,7 +5721,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device="cuda:1")
+        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device=1)
         with self.assertRaisesRegex(
             RuntimeError, "Expect q/k/v and block_mask to be on the same device"
         ):
@@ -6528,26 +6544,26 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             compiled_flex(q, k, v)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "detected only one GPU")
     def test_device_cuda_1(self, device):
         class TestModule(torch.nn.Module):
             def forward(self, q, k, v, block_mask):
                 return flex_attention(q, k, v, block_mask=block_mask)
 
-        q = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
-        k = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
-        v = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        q = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
         mask = create_block_mask(
             lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
             B=None,
             H=None,
             Q_LEN=256,
             KV_LEN=256,
-            device="cuda:1",
+            device=1,
         )
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
-        self.assertEqual(attn_output.device, torch.device("cuda:1"))
+        self.assertEqual(attn_output.device, torch.device(1))
 
     @supported_platform
     @skip_on_cpu
@@ -8064,6 +8080,65 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
         with self.assertRaisesRegex(RuntimeError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    def test_block_mask_check_does_not_specialize_backed_dynamic_length(self, device):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        dtype = device_configs[torch.device(device).type].dtypes_fast[0]
+
+        def create_inputs(S):
+            q, k, v = (
+                torch.randn(1, 1, S, 64, dtype=dtype, device=device) for _ in range(3)
+            )
+            block_mask = create_block_mask(mask_mod, None, None, S, S, device=device)
+            return q, k, v, block_mask
+
+        counter = CompileCounterWithBackend("eager")
+        guard_code_parts = []
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def flex_attention_call(q, k, v, block_mask):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        def collect_guard_code_parts(guard_wrapper, f_locals, builder):
+            parts = []
+            for guard in guard_wrapper.root.get_epilogue_lambda_guards():
+                parts.extend(guard.verbose_code_parts())
+            guard_code_parts.append(parts)
+
+        old_hook = torch._dynamo.guards.guard_manager_testing_hook_fn
+        torch._dynamo.guards.guard_manager_testing_hook_fn = collect_guard_code_parts
+        try:
+            with torch.no_grad():
+                for S in (320, 256, 192):
+                    self.assertEqual(
+                        flex_attention_call(*create_inputs(S)).shape, (1, 1, S, 64)
+                    )
+        finally:
+            torch._dynamo.guards.guard_manager_testing_hook_fn = old_hook
+
+        self.assertEqual(counter.frame_count, 2)
+        dynamic_guard_code = "\n".join(guard_code_parts[-1])
+        self.assertIn(
+            "L['block_mask'].seq_lengths[0] == L['q'].size()[2]",
+            dynamic_guard_code,
+        )
+        self.assertIn(
+            "L['block_mask'].seq_lengths[1] == L['k'].size()[2]",
+            dynamic_guard_code,
+        )
+
+        stale_block_mask = create_block_mask(
+            mask_mod, None, None, 320, 320, device=device
+        )
+        with self.assertRaisesRegex(
+            Exception, "block_mask was created for a smaller length"
+        ):
+            flex_attention_call(*create_inputs(512)[:3], stale_block_mask)
 
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])

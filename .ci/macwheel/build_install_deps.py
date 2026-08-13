@@ -29,6 +29,7 @@ NUMPY_PINS: dict[str, str] = {
     "3.12": "2.0.2",
     "3.13": "2.1.0",
     "3.14": "2.3.4",
+    "3.15": "2.5.1",
 }
 
 OMP_PREFIX = Path("/opt/llvm-openmp")
