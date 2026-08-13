@@ -742,6 +742,16 @@ def create_device(interface=None, lazy_init: bool = False):
         )
 
 
+def _is_bf16_supported() -> bool:
+    if torch.accelerator.is_available():
+        device_module = torch.get_device_module(torch.accelerator.current_accelerator())
+        return getattr(device_module, "is_bf16_supported", lambda: False)()
+    return False
+
+
+BFLOAT16_AVAILABLE = _is_bf16_supported()
+
+
 def get_timeout(test_id) -> int:
     return TIMEOUT_OVERRIDE.get(test_id.split(".")[-1], TIMEOUT_DEFAULT)
 
