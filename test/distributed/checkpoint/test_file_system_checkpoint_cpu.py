@@ -24,7 +24,11 @@ from torch.distributed.checkpoint import (
 )
 from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -128,6 +132,8 @@ class BlobState:
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -157,6 +163,8 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
 
 class TestDistributedStateDictSaveLoadRot13(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_tensor_and_blob(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -193,6 +201,8 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
 
 
 class TestDistributedStateDictSaveLoadZStandard(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -226,13 +236,15 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.CPU
+
     @property
     def world_size(self) -> int:
         return 2
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
-    def test_read_write_shard_tensor(self, thread_count) -> None:
+    def test_read_write_shard_tensor(self, thread_count, device) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -279,6 +291,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
 
 
 class TestDistributedReshardOnLoad(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.CPU
+
     @property
     def world_size(self) -> int:
         return 2
@@ -288,14 +302,14 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         dist.broadcast_object_list(paths)
         return paths[0]
 
-    def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
-        res = torch.zeros(tensor.shape, device="cpu") if dist.get_rank() == 0 else None
+    def load_tensor(self, tensor: ShardedTensor, device) -> torch.Tensor:
+        res = torch.zeros(tensor.shape, device=device) if dist.get_rank() == 0 else None
         tensor.gather(out=res)
         return res
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
-    def test_load_with_different_shard_plan(self, thread_count) -> None:
+    def test_load_with_different_shard_plan(self, thread_count, device) -> None:
         path = self.get_file_path()
 
         # We hardcode the assumption of how many shards are around
@@ -394,9 +408,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 )
 
                 dist.barrier()
-                store_tensor = self.load_tensor(model_to_save.sharded_tensor)
+                store_tensor = self.load_tensor(model_to_save.sharded_tensor, device)
                 dist.barrier()
-                load_tensor = self.load_tensor(model_to_load.sharded_tensor)
+                load_tensor = self.load_tensor(model_to_load.sharded_tensor, device)
 
                 if dist.get_rank() == 0:
                     self.assertTrue(
@@ -406,7 +420,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
-    def test_load_rowwise_to_colwise(self, thread_count) -> None:
+    def test_load_rowwise_to_colwise(self, thread_count, device) -> None:
         path = self.get_file_path()
         self.assertEqual(self.world_size, dist.get_world_size())
 
@@ -428,14 +442,14 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ],
         )
 
-        model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
+        model_to_save = MyShardedModel3(src_spec)
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
+        model_to_load = MyShardedModel3(dst_spec)
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
@@ -444,15 +458,15 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         # We can't use torch.allclose since each ST has a different sharding spec
-        store_tensor = self.load_tensor(model_to_save.sharded_tensor)
-        load_tensor = self.load_tensor(model_to_load.sharded_tensor)
+        store_tensor = self.load_tensor(model_to_save.sharded_tensor, device)
+        load_tensor = self.load_tensor(model_to_load.sharded_tensor, device)
 
         if dist.get_rank() == 0:
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
-    def test_save_load_bytes(self, thread_count) -> None:
+    def test_save_load_bytes(self, thread_count, device) -> None:
         path = self.get_file_path()
 
         state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
@@ -470,7 +484,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
-    def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
+    def test_switch_between_sharded_tensor_to_tensor(self, thread_count, device) -> None:
         path = self.get_file_path()
         tensor_size = 32
 
@@ -525,7 +539,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             for load_spec in specs:
                 save_dict = {
                     "sharded": sharded_tensor.rand(save_spec, tensor_size),
-                    "replicated": torch.rand(tensor_size, device="cpu"),
+                    "replicated": torch.rand(tensor_size, device=device),
                 }
                 dist.broadcast(save_dict["replicated"], src=0)
 
@@ -534,15 +548,15 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
                 # Freaky Friday the tensors
                 load_dict = {
-                    "sharded": torch.zeros(tensor_size, device="cpu"),
+                    "sharded": torch.zeros(tensor_size, device=device),
                     "replicated": sharded_tensor.zeros(load_spec, tensor_size),
                 }
 
                 fs_reader = FileSystemReader(path=path)
                 load_state_dict(state_dict=load_dict, storage_reader=fs_reader)
 
-                save_dict_sharded = self.load_tensor(save_dict["sharded"])
-                load_dict_replicated = self.load_tensor(load_dict["replicated"])
+                save_dict_sharded = self.load_tensor(save_dict["sharded"], device)
+                load_dict_replicated = self.load_tensor(load_dict["replicated"], device)
 
                 if dist.get_rank() == 0:
                     self.assertTrue(
@@ -558,9 +572,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
-instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadZStandard)
-instantiate_parametrized_tests(TestDistributedReshardOnLoad)
+
+instantiate_device_type_tests(TestDistributedStateDictSaveLoadWithSharedTensor, globals(), only_for="cpu")
+instantiate_device_type_tests(TestDistributedReshardOnLoad, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
