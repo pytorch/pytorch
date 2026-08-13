@@ -1611,13 +1611,16 @@ class _GroupedReductionLayout:
         kernel: SIMDKernel[Any],
         local_reduction_size: sympy.Integer,
         local_reduction_in_r: bool,
+        *,
+        native_matmul: bool = False,
     ) -> _GroupedReductionLayout:
-        if len(kernel.range_trees) not in (2, 3):
+        expected_trees = 3 if native_matmul else 2
+        if len(kernel.range_trees) != expected_trees:
             raise AssertionError(
-                f"expected 2 or 3 range trees, got {len(kernel.range_trees)}"
+                f"expected {expected_trees} range trees, got {len(kernel.range_trees)}"
             )
         y_tree = None
-        if len(kernel.range_trees) == 3:
+        if native_matmul:
             if local_reduction_in_r:
                 raise AssertionError(
                     "native matmul nested reduction only supports grouping x"
@@ -2809,6 +2812,7 @@ class SIMDScheduling(BaseScheduling):
                 kernel,
                 local_reduction_size,
                 local_reduction_in_r,
+                native_matmul=native_matmul_grouped_x,
             )
             group_reduction_vars: _GroupedReductionVars = (
                 layout.construct_group_reduction_vars(grouped_reduction_body)
