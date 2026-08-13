@@ -7,6 +7,7 @@ import time
 
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfPythonVersionMismatch,
     TemporaryFileName,
@@ -15,6 +16,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestPythonTracer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfPythonVersionMismatch(lambda major, minor, micro: major == 3 and minor == 12)
     def test_method_with_c_function(self):
         class A:
