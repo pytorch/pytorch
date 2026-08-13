@@ -44,6 +44,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     is_iterable_of_tensors,
     noncontiguous_like,
     parametrize,
@@ -358,6 +359,34 @@ vjp_fail = {
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
+xpu_fft_stft_unsupported = {
+    # https://github.com/intel/torch-xpu-ops/issues/4953
+    skip("fft.fft", device_type="xpu"),
+    skip("fft.fft2", device_type="xpu"),
+    skip("fft.fftn", device_type="xpu"),
+    skip("fft.ifft", device_type="xpu"),
+    skip("fft.ifft2", device_type="xpu"),
+    skip("fft.ifftn", device_type="xpu"),
+    skip("fft.rfft", device_type="xpu"),
+    skip("fft.rfft2", device_type="xpu"),
+    skip("fft.rfftn", device_type="xpu"),
+    skip("fft.irfft", device_type="xpu"),
+    skip("fft.irfft2", device_type="xpu"),
+    skip("fft.irfftn", device_type="xpu"),
+    skip("fft.hfft", device_type="xpu"),
+    skip("fft.hfft2", device_type="xpu"),
+    skip("fft.hfftn", device_type="xpu"),
+    skip("fft.ihfft", device_type="xpu"),
+    skip("fft.ihfft2", device_type="xpu"),
+    skip("fft.ihfftn", device_type="xpu"),
+    skip("stft", device_type="xpu"),
+    skip("istft", device_type="xpu"),
+    skip("cumprod", device_type="xpu"),
+    skip("masked.cumprod", device_type="xpu"),
+    skip("masked.prod", device_type="xpu"),
+    skip("nn.functional.conv3d", device_type="xpu"),
+}
+
 aliasing_ops = {
     "T",
     "broadcast_to",
@@ -441,10 +470,12 @@ complex_ordered_op_db = tuple(
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
 class TestOperators(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 xfail(
                     "chalf", "", device_type="cpu"
@@ -469,7 +500,8 @@ class TestOperators(TestCase):
                 decorate(
                     "nn.functional.scaled_dot_product_attention",
                     decorator=expectedFailureIf(not TEST_WITH_ROCM),
-                ),  # Works on ROCm
+                    device_type=("cpu", "cuda"),
+                ),  # Works on ROCm and XPU
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
             }
@@ -609,7 +641,7 @@ class TestOperators(TestCase):
                 xfail("as_strided", "partial_views"),
                 xfail("as_strided_scatter"),
             }
-        ),
+        ).union(xpu_fft_stft_unsupported),
     )
     @opsToleranceOverride(
         "TestOperators",
@@ -743,7 +775,7 @@ class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 xfail("sparse.sampled_addmm", ""),
                 xfail("sparse.mm", "reduce"),
@@ -756,7 +788,8 @@ class TestOperators(TestCase):
                 decorate(
                     "nn.functional.scaled_dot_product_attention",
                     decorator=expectedFailureIf(not TEST_WITH_ROCM),
-                ),  # Works on ROCm
+                    device_type=("cpu", "cuda"),
+                ),  # Works on ROCm and XPU
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
@@ -775,6 +808,11 @@ class TestOperators(TestCase):
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=5e-05, rtol=9e-05)},
                 device_type="cuda",
+            ),
+            tol1(
+                "nn.functional.conv_transpose3d",
+                {torch.float32: tol(atol=5e-05, rtol=9e-05)},
+                device_type="xpu",  # https://github.com/intel/torch-xpu-ops/issues/4953
             ),
             tol1(
                 "nn.functional.binary_cross_entropy_with_logits",
@@ -845,7 +883,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 skip("nn.functional.max_unpool1d"),  # silent incorrectness; Flaky
                 skip("nn.functional.max_unpool2d"),  # silent incorrectness; Flaky
@@ -875,6 +913,11 @@ class TestOperators(TestCase):
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=5e-05, rtol=9e-05)},
                 device_type="cuda",
+            ),
+            tol1(
+                "nn.functional.conv_transpose3d",
+                {torch.float32: tol(atol=5e-05, rtol=9e-05)},
+                device_type="xpu",  # https://github.com/intel/torch-xpu-ops/issues/4953
             ),
             tol1("prod", {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
             tol1("masked.cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -924,7 +967,7 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 skip("atleast_1d"),  # Takes too long
                 skip("atleast_2d"),  # Takes too long
@@ -1091,6 +1134,8 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out)
 
     vmapvjp_fail = vjp_fail.union(
+        xpu_fft_stft_unsupported
+    ).union(
         {
             # -------------------- ALLOWED FAILURES --------------------------------
             # The following are not bugs and are expected behavior
@@ -1193,7 +1238,7 @@ class TestOperators(TestCase):
         ),
     )
     @skipOps(
-        vmapvjp_fail.union(
+        vmapvjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
@@ -1415,7 +1460,9 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps(
-        vmapvjp_fail.union(
+        vmapvjp_fail.union(xpu_fft_stft_unsupported)
+        .union(xpu_fft_stft_unsupported)
+        .union(
             {
                 skip(
                     "to"
@@ -1544,7 +1591,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 skip("bernoulli", ""),  # vjpvmap testing can't handle randomness
                 skip("normal", ""),  # vjpvmap testing can't handle randomness
@@ -1684,7 +1731,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 xfail("to_sparse", ""),  # NYI
                 # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
@@ -1840,7 +1887,7 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps(
-        vjp_fail.union(
+        vjp_fail.union(xpu_fft_stft_unsupported).union(
             {
                 # Following operators take too long, hence skipped
                 skip("atleast_1d"),
@@ -2922,8 +2969,10 @@ class TestOperators(TestCase):
             )
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestOperators, globals(), only_for=only_for, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
