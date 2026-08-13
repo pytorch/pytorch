@@ -109,7 +109,10 @@ log = logging.getLogger(__name__)
 try:
     from triton.runtime.jit import JITFunction as _JITFunction
 except ImportError:
-    if any(getattr(torch.version, attr, None) is not None for attr in ["cuda", "hip", "xpu"]):
+    _has_privateuse1_backend = torch._C._get_privateuse1_backend_name() != "privateuseone"
+    if _has_privateuse1_backend or any(
+        getattr(torch.version, attr, None) is not None for attr in ["cuda", "hip", "xpu"]
+    ):
         log.warning("triton not found; flop counting will not work for triton kernels")
     _JITFunction = NoneType
 
