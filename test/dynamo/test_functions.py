@@ -4028,6 +4028,27 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_contains(self):
+        for seq_type in (list, tuple):
+            with self.subTest(seq_type=seq_type):
+
+                def fn(a, b):
+                    return operator.contains(a, b)
+
+                opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+                seq = seq_type([1, 2, 3])
+                self.assertEqual(opt_fn(seq, 2), fn(seq, 2))
+                self.assertEqual(opt_fn(seq, 99), fn(seq, 99))
+
+    @unittest.skipIf(sys.version_info < (3, 11), "operator.call added in Python 3.11")
+    def test_operator_call(self):
+        def fn(x):
+            return operator.call(torch.abs, x)
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        x = torch.randn(3, 4)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),

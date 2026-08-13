@@ -5,6 +5,7 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
+import sys
 from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "concat", "countOf", "iconcat", "itemgetter", "methodcaller"]
+__all__ = ["attrgetter", "concat", "contains", "countOf", "iconcat", "itemgetter", "methodcaller"]
 
 
 _T = TypeVar("_T")
@@ -75,6 +76,13 @@ def concat(a: Sequence[_T], b: Sequence[_T2], /) -> Sequence[_T | _T2]:
     return a + b  # type: ignore[operator]
 
 
+# Reference: https://docs.python.org/3/library/operator.html#operator.contains
+# Note: operands are reversed vs the `in` operator: contains(a, b) == (b in a)
+@substitute_in_graph(operator.contains, can_constant_fold_through=True)  # type: ignore[arg-type]
+def contains(a: Any, b: Any, /) -> bool:
+    return b in a
+
+
 # Reference: https://docs.python.org/3/library/operator.html#operator.countOf
 @substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
 def countOf(a: Iterable[_T], b: _T, /) -> int:
@@ -130,3 +138,14 @@ def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any
         return getattr(obj, name)(*args, **kwargs)
 
     return caller
+
+
+# operator.call was added in Python 3.11
+if sys.version_info >= (3, 11):
+
+    # Reference: https://docs.python.org/3/library/operator.html#operator.call
+    @substitute_in_graph(operator.call)  # type: ignore[attr-defined,arg-type]
+    def call(obj: Callable[..., _U], /, *args: Any, **kwargs: Any) -> _U:
+        return obj(*args, **kwargs)
+
+    __all__ += ["call"]
