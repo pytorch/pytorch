@@ -23,6 +23,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -105,6 +106,8 @@ def build_collective_info(graph, hiding_annotations):
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests
 class TestOverlapPreservingBucketing(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """
     Unit tests for overlap-preserving bucketing pass.
     """
@@ -1132,6 +1135,8 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 @requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestCrossPGOverlap(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """
     Tests for cross-PG overlap scheduling.
     """
@@ -1300,7 +1305,7 @@ class TestCrossPGOverlap(InductorTestCase):
         last_mm = max(mm_positions)
         self.assertTrue(
             any(p < last_mm for p in rs_starts),
-            f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
+            lambda msg: f"{msg}\nOff-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
         )
 
     @torch._inductor.config.patch(
@@ -1383,6 +1388,8 @@ class TestCrossPGOverlap(InductorTestCase):
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests
 class TestFusibleNodeOverlap(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Test that fusible nodes are used for overlapping with collectives."""
 
     @classmethod
@@ -1551,6 +1558,8 @@ class TestFusibleNodeOverlap(InductorTestCase):
 @requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestOverlapSchedulingFixes(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """
     Test cases for specific bug fixes in overlap scheduling.
     These tests would fail without their corresponding fixes.
@@ -1866,6 +1875,8 @@ class TestOverlapSchedulingFixes(InductorTestCase):
 
 
 class TestForeachGroupsUnit(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
 
     @classmethod
@@ -1905,6 +1916,8 @@ class TestForeachGroupsUnit(InductorTestCase):
 
 
 class TestNodeRuntimeEstimationUnit(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compute_estimation_logging_handles_symbolic_scalar_meta(self):
         from torch._inductor.fx_passes.node_runtime_estimation import (
             _log_compute_estimations,
@@ -2028,6 +2041,8 @@ def _load_pge_profile(data):
 
 
 class TestProfileGuidedEstimation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_profile_loading_and_lookup(self):
         """Load a trace with collectives, aten ops, and a custom op; verify lookups."""
         with torch.library._scoped_library("test_pge", "DEF") as lib:
@@ -2158,6 +2173,8 @@ class TestProfileGuidedEstimation(TestCase):
 @requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestCoalescedCollectiveOverlap(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """
     Tests for coalesced collective support in overlap scheduling.
 
@@ -2324,6 +2341,8 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
 @requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestProfileGuidedEstimatorIntegration(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Integration tests: ProfileGuidedEstimator.__call__ on traced FX graphs."""
 
     @classmethod
@@ -2412,6 +2431,8 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestPreBucketingFsdpCollectives(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -2542,6 +2563,8 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
 
 
 class TestBitsetAncestors(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for BitsetAncestors -- int-bitset transitive ancestor sets."""
 
     def _make_graph(self):
