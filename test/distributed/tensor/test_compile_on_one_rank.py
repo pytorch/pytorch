@@ -14,10 +14,10 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    TEST_ACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -34,9 +34,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else None
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -246,7 +243,7 @@ def _factory_from_input_device(x):
     return torch.zeros(4, x.shape[1], device=x.device, dtype=x.dtype)
 
 
-def _indexed_accelerator_device_nodes(gm):
+def _indexed_accelerator_device_nodes(gm, device_type):
     """Nodes carrying a concrete, indexed accelerator device in their args/kwargs.
 
     These are the rank-specific constants that make a make_fx graph non
@@ -273,7 +270,6 @@ def _current_device_nodes(gm):
     return [n for n in gm.graph.nodes if n.op == "call_function" and n.target is target]
 
 
-@unittest.skipUnless(TEST_ACCELERATOR, "requires an accelerator")
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
@@ -291,14 +287,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @dist_config.patch(compile_on_one_rank=True)
     def test_factory_device_replaced_with_current_device(self):
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
-            torch.randn(2, 8, device=f"{device_type}:0")
+            torch.randn(2, 8, device=f"{self.device_type}:0")
         )
         ca = _current_device_nodes(gm)
         self.assertEqual(
             len(ca), 1, "device should be fetched in-graph via a single node"
         )
         self.assertTrue(ca[0].users, "the current_device() node must be consumed")
-        baked = _indexed_accelerator_device_nodes(gm)
+        baked = _indexed_accelerator_device_nodes(gm, self.device_type)
         self.assertEqual(
             baked,
             [],
@@ -313,27 +309,27 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The runtime device follows the process's current device, not the input's.
         # The input is kept on device 0 in both runs; only the current device changes.
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
-            torch.randn(2, 8, device=f"{device_type}:0")
+            torch.randn(2, 8, device=f"{self.device_type}:0")
         )
         with torch.accelerator.device_index(0):
             self.assertEqual(
-                gm(torch.randn(2, 8, device=f"{device_type}:0")).device,
-                torch.device(device_type, 0),
+                gm(torch.randn(2, 8, device=f"{self.device_type}:0")).device,
+                torch.device(self.device_type, 0),
             )
         with torch.accelerator.device_index(1):
             self.assertEqual(
-                gm(torch.randn(2, 8, device=f"{device_type}:0")).device,
-                torch.device(device_type, 1),
+                gm(torch.randn(2, 8, device=f"{self.device_type}:0")).device,
+                torch.device(self.device_type, 1),
             )
 
     def test_default_path_unchanged_bakes_device(self):
         # Without compile_on_one_rank the device stays baked (the feature must be
         # gated so it does not perturb the default tracing path).
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
-            torch.randn(2, 8, device=f"{device_type}:0")
+            torch.randn(2, 8, device=f"{self.device_type}:0")
         )
         self.assertEqual(_current_device_nodes(gm), [])
-        self.assertTrue(_indexed_accelerator_device_nodes(gm))
+        self.assertTrue(_indexed_accelerator_device_nodes(gm, self.device_type))
 
     @dist_config.patch(compile_on_one_rank=True)
     def test_to_copy_explicit_device_replaced(self):
@@ -341,22 +337,22 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # aten._to_copy with a device= kwarg) also gets its baked device rewired to
         # the current_device() node, alongside the factory-op path.
         def f(x):
-            return x.to(device=f"{device_type}:0", dtype=torch.bfloat16)
+            return x.to(device=f"{self.device_type}:0", dtype=torch.bfloat16)
 
         gm = make_fx(f, tracing_mode="fake")(
-            torch.randn(2, 8, device=f"{device_type}:0")
+            torch.randn(2, 8, device=f"{self.device_type}:0")
         )
         self.assertEqual(len(_current_device_nodes(gm)), 1)
-        self.assertEqual(_indexed_accelerator_device_nodes(gm), [])
+        self.assertEqual(_indexed_accelerator_device_nodes(gm, self.device_type), [])
 
     @dist_config.patch(compile_on_one_rank=True)
     def test_unindexed_accelerator_device_replaced(self):
         # A bare accelerator device (index None) is also replaced.
         def f(x):
-            return torch.zeros(4, x.shape[1], device=device_type, dtype=x.dtype)
+            return torch.zeros(4, x.shape[1], device=self.device_type, dtype=x.dtype)
 
         gm = make_fx(f, tracing_mode="fake")(
-            torch.randn(2, 8, device=f"{device_type}:0")
+            torch.randn(2, 8, device=f"{self.device_type}:0")
         )
         self.assertEqual(len(_current_device_nodes(gm)), 1)
 
@@ -367,7 +363,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             return torch.zeros(4, x.shape[1], device="cpu")
 
         gm = make_fx(f, tracing_mode="fake")(
-            torch.randn(2, 8, device=f"{device_type}:0")
+            torch.randn(2, 8, device=f"{self.device_type}:0")
         )
         self.assertEqual(_current_device_nodes(gm), [])
         cpu_ops = [
@@ -385,24 +381,24 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # Unlike provenance-following, matching the current accelerator needs no input
         # on that device: an accelerator factory in a CPU-input graph is rewritten.
         def f(x):
-            return torch.zeros(x.shape[0], device=f"{device_type}:0")
+            return torch.zeros(x.shape[0], device=f"{self.device_type}:0")
 
         gm = make_fx(f, tracing_mode="fake")(torch.randn(2, device="cpu"))
         self.assertEqual(len(_current_device_nodes(gm)), 1)
-        self.assertEqual(_indexed_accelerator_device_nodes(gm), [])
+        self.assertEqual(_indexed_accelerator_device_nodes(gm, self.device_type), [])
 
     @dist_config.patch(compile_on_one_rank=True)
     def test_wrong_index_raises(self):
         # A non-current index cannot be made SPMD, so the rewrite refuses it.
         def f(x):
-            return torch.zeros(4, device=f"{device_type}:1")
+            return torch.zeros(4, device=f"{self.device_type}:1")
 
         with torch.accelerator.device_index(0):
             with self.assertRaisesRegex(
                 RuntimeError, "index differs from the current accelerator"
             ):
                 make_fx(f, tracing_mode="fake")(
-                    torch.randn(2, device=f"{device_type}:0")
+                    torch.randn(2, device=f"{self.device_type}:0")
                 )
 
     @unittest.skipIf(
@@ -415,12 +411,12 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         def code_on(dev):
             with torch.accelerator.device_index(dev):
                 return make_fx(_factory_from_input_device, tracing_mode="fake")(
-                    torch.randn(2, 8, device=f"{device_type}:{dev}")
+                    torch.randn(2, 8, device=f"{self.device_type}:{dev}")
                 ).code
 
         code0, code1 = code_on(0), code_on(1)
         self.assertEqual(code0, code1)
-        self.assertNotIn(f"{device_type}:", code0)
+        self.assertNotIn(f"{self.device_type}:", code0)
 
 
 def _baked_pg_constants(gm):
@@ -519,6 +515,13 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         self.assertIn("c10d.allreduce_.default", _call_targets(gm))
         self.assertTrue(_baked_pg_constants(gm))
 
+
+instantiate_device_type_tests(
+    TestCompileOnOneRankDeviceAsParameter,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()

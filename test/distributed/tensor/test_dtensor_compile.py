@@ -2818,11 +2818,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Exercise the exact scenario from #188390: two DTensors with identical
         # global specs but local tensors on device 0 vs device 1 must produce
         # different AOTAutograd cache keys.
-        # Hashing only needs mesh metadata; fake PG has no PrivateUse1 registration.
         mesh = DeviceMesh(
             self.device_type,
             torch.arange(self.world_size),
-            _init_backend=self.device_type == "cuda",
         )
         local0 = torch.empty(2, 4, device=f"{self.device_type}:0")
         local1 = torch.empty(2, 4, device=f"{self.device_type}:1")
