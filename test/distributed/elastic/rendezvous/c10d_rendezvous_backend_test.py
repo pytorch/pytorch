@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
 
 class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
     hw_classification = HardwareClassification.GENERIC
+
     _store: ClassVar[TCPStore]
 
     @classmethod
@@ -55,6 +56,7 @@ class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
 
 class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
     hw_classification = HardwareClassification.GENERIC
+
     _store: ClassVar[FileStore]
 
     def setUp(self) -> None:
