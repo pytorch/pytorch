@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import os
+import re
 from typing import Any, Protocol
 
 
@@ -29,12 +30,10 @@ class AotDeclaration(Protocol):
     DISPATCH_KEY: str
     KERNEL_MODULE: str
     # Architectures this op's kernels are valid on (sm strings, e.g.
-    # ("sm_90a", "sm_100a")). Optional in source declarations; the
-    # validating loader defaults it to _DEFAULT_ARCHS and materializes
-    # it, so loaded declarations always carry it (consumers read
-    # d.ARCHS directly, never getattr). Export skips (declaration x
+    # ("sm_90a", "sm_100a")). OPTIONAL in source declarations, so read it
+    # through archs_of(d), never d.ARCHS. Export skips (declaration x
     # arch) pairs outside it; gen_aot_lib emits a runtime gate from the
-    # intersection of ARCHS with the arches actually shipped.
+    # intersection with the arches actually shipped.
     ARCHS: tuple[str, ...]
 
     def kernel_precompile_grid(self) -> list[dict]: ...
@@ -62,17 +61,18 @@ def decl_id(d: AotDeclaration) -> str:
 
 _REQUIRED_CONSTS = ("ATEN_OP", "DISPATCH_KEY", "KERNEL_MODULE")
 _REQUIRED_FNS = {
-    # name -> takes_spec (the cardinality convention: spec-taking exports
-    # render once per precompile point, no-arg exports once per op)
-    "kernel_precompile_grid": False,
+    # name -> positional arity. That arity IS the cardinality convention:
+    # spec-taking exports render once per precompile point, no-arg exports
+    # once per op. cpp_launch also takes the launch_fn name.
+    "kernel_precompile_grid": 0,
     "covered_axes": None,  # schema-shaped; arity not checked here
-    "cpp_dispatch": True,
-    "cpp_launch": True,
+    "cpp_dispatch": 1,
+    "cpp_launch": 2,
 }
 _OPTIONAL_FNS = {
-    "cpp_dispatch_prelude": False,
-    "cpp_helpers": False,
-    "cpp_covers": False,
+    "cpp_dispatch_prelude": 0,
+    "cpp_helpers": 0,
+    "cpp_covers": 0,
 }
 
 # Default ARCHS: every current kernel requires sm90+ features (TMA,
@@ -103,7 +103,15 @@ def load_by_path(name: str, path: str):
     return mod
 
 
-def _check_arity(mod, name: str, takes_spec: bool, path: str) -> None:
+def archs_of(d: AotDeclaration) -> tuple[str, ...]:
+    """The declaration's architectures, defaulted when it omits ARCHS.
+
+    Read this instead of d.ARCHS: ARCHS is optional in a source
+    declaration and the loader validates it without writing it back."""
+    return tuple(getattr(d, "ARCHS", _DEFAULT_ARCHS))
+
+
+def _check_arity(mod, name: str, want: int, path: str) -> None:
     fn = getattr(mod, name)
     params = [
         p
@@ -111,9 +119,8 @@ def _check_arity(mod, name: str, takes_spec: bool, path: str) -> None:
         if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
     ]
     n = len(params)
-    want = (1 if takes_spec else 0) + (1 if name == "cpp_launch" else 0)
     if n != want:
-        kind = "per-point (spec-taking)" if takes_spec else "per-op (no-arg)"
+        kind = "per-op (no-arg)" if want == 0 else "per-point (spec-taking)"
         raise RuntimeError(
             f"{path}: {name} must be {kind}, expected {want} positional "
             f"parameter(s), got {n}"
@@ -125,22 +132,19 @@ def _validate(d, path: str, label: str) -> None:
         if not isinstance(getattr(d, const, None), str):
             raise RuntimeError(f"{path}: {label} missing or non-str constant {const}")
 
-    for name, takes_spec in _REQUIRED_FNS.items():
+    for name, arity in _REQUIRED_FNS.items():
         if not callable(getattr(d, name, None)):
             raise RuntimeError(f"{path}: {label} missing required function {name}()")
-        if takes_spec is not None:
-            _check_arity(d, name, takes_spec, path)
-    for name, takes_spec in _OPTIONAL_FNS.items():
+        if arity is not None:
+            _check_arity(d, name, arity, path)
+    for name, arity in _OPTIONAL_FNS.items():
         if getattr(d, name, None) is not None:
-            _check_arity(d, name, takes_spec, path)
+            _check_arity(d, name, arity, path)
 
-    # Normalize ARCHS here, once: optional in the source module, always
-    # present (as a tuple) on validated declarations. Everything
-    # downstream reads d.ARCHS directly -- this is the only place
-    # absence is legal.
-    import re
-
-    archs = getattr(d, "ARCHS", _DEFAULT_ARCHS)
+    # Validate ARCHS but do NOT write it back: a validating loader that
+    # mutates its input leaves the source module and the declaration
+    # disagreeing. archs_of() applies the default at every read instead.
+    archs = archs_of(d)
     if not archs or not all(
         isinstance(a, str) and re.fullmatch(_SM_RE, a) for a in archs
     ):
@@ -148,7 +152,6 @@ def _validate(d, path: str, label: str) -> None:
             f"{path}: {label} ARCHS must be a non-empty sequence of sm "
             f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
         )
-    d.ARCHS = tuple(archs)
 
     grid = d.kernel_precompile_grid()
     if not isinstance(grid, list) or not grid:
