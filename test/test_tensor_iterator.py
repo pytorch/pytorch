@@ -125,12 +125,6 @@ class TestTensorIteratorBuild(TestCase):
         with self.assertRaises(RuntimeError):
             TensorIterator(outputs=[None], const_inputs=[a, b])
 
-
-class TestTensorIteratorBuildCPUOnly(TestCase):
-    """Build-pipeline tests that depend on a CPU."""
-
-    hw_classification = HardwareClassification.CPU
-
     def test_declare_static_dtype_and_device(self):
         a = torch.zeros(3, dtype=torch.float32)
         out = torch.empty(3, dtype=torch.float64)
@@ -359,10 +353,6 @@ class TestTensorIteratorDeviceType(TestCase):
         self.assertIn("ndim=", r)
         self.assertIn("ntensors=3", r)
 
-
-class TestTensorIteratorAcceleratorOnly(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @onlyAccelerator
     def test_cross_device_check_raises(self, device):
         # Default check_all_same_device=True rejects mixed CPU+accelerator.
@@ -389,10 +379,6 @@ class TestTensorIteratorAcceleratorOnly(TestCase):
 
 
 instantiate_device_type_tests(TestTensorIteratorDeviceType, globals(), allow_xpu=True)
-instantiate_device_type_tests(
-    TestTensorIteratorAcceleratorOnly, globals(), allow_xpu=True
-)
-
 
 if __name__ == "__main__":
     run_tests()
