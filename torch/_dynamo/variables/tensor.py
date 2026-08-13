@@ -1809,9 +1809,6 @@ class TensorVariable(VariableTracker):
     def method___invert__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.nb_invert_impl(tx)
 
-    def method___index__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self.nb_index_impl(tx)
-
     def method___getitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -2460,7 +2457,6 @@ class TensorVariable(VariableTracker):
         "__pos__": Method(method___pos__),
         "__abs__": Method(method___abs__),
         "__invert__": Method(method___invert__),
-        "__index__": Method(method___index__),
         "__getitem__": Method(method___getitem__),
         "__len__": Method(method___len__),
         "__iter__": Method(method___iter__),
