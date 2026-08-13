@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -28,7 +29,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
-    skipIfXpu,
     slowTest,
     TestCase,
 )
@@ -462,7 +462,7 @@ class TestSortAndSelectDevice(TestCase):
         expected = torch.sort(ref, stable=True, dim=1, descending=True)
         self.assertEqual(out, expected)
 
-    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
+    @skipXPU(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)
@@ -828,7 +828,7 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(sort_topk, topk[0])  # check values
         self.assertEqual(sort_topk, a[topk[1]])  # check indices
 
-    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
+    @skipXPU(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
     def test_topk_integral(self, device, dtype):
         small = 10
@@ -875,7 +875,7 @@ class TestSortAndSelectDevice(TestCase):
                         f"dtype={dtype} largest={largest}",
                     )
 
-    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
+    @skipXPU(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     @dtypes(torch.bfloat16, torch.half)
     def test_topk_lower_precision(self, device, dtype):
         small = 10
@@ -884,7 +884,7 @@ class TestSortAndSelectDevice(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
-    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
+    @skipXPU(msg="See https://github.com/intel/torch-xpu-ops/issues/3791")
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
