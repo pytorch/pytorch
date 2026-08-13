@@ -231,7 +231,7 @@ Value* TracingState::getValue(const IValue& var) {
 }
 bool TracingState::hasValue(const IValue& var) const {
   for (const auto& frame : env_stack) {
-    if (frame.count(var)) {
+    if (frame.contains(var)) {
       return true;
     }
   }
@@ -1096,7 +1096,7 @@ void _do_warn(const char* _reason, const char* _kind) {
   std::string kind{_kind ? _kind : ""};
   std::ostringstream s;
   s << reason << kind;
-  warn_callback.load()(s.str());
+  warn_callback.load()(std::move(s).str());
 }
 
 void setWarn(warn_fn_type fn) {

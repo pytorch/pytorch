@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.utils.prune as prune
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     TemporaryFileName,
@@ -16,6 +17,7 @@ from torch.testing._internal.common_utils import (
 
 
 class TestPruningNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -516,7 +518,6 @@ class TestPruningNN(NNTestCase):
         AXIS = 2
         p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
         t = 2 * torch.randint(low=-1, high=2, size=(5, 4, 2)).to(dtype=torch.float32)
-        prune._compute_nparams_toprune(AMOUNT, t.shape[AXIS])
 
         computed_mask = p.compute_mask(t, default_mask=torch.ones_like(t))
         # check that 1 column is fully prune, the others are left untouched
