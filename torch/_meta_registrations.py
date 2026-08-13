@@ -899,9 +899,10 @@ def meta__cslt_sparse_mm(
         torch.bfloat16,
         torch.int8,
         torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
     }:
         raise AssertionError(
-            f"_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3, got {dense_B.dtype}"
+            f"_cslt_sparse_mm only supports fp16, bf16, int8, fp8e4m3, and fp8e4m3fnuz, got {dense_B.dtype}"
         )
     if compressed_A.dtype != dense_B.dtype:
         raise AssertionError(
@@ -912,7 +913,11 @@ def meta__cslt_sparse_mm(
             f"_cslt_sparse_mm only supports 2d inputs, got {len(dense_B.shape)}D"
         )
 
-    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
+    is_fp8_input_type = compressed_A.dtype in [
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+    ]
+    is_8bit_input_type = compressed_A.dtype == torch.int8 or is_fp8_input_type
 
     n = dense_B.size(1)
     m = compressed_A.size(0)
@@ -937,6 +942,16 @@ def meta__cslt_sparse_mm(
             raise AssertionError(
                 f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
             )
+        if is_fp8_input_type and torch.version.hip and out_dtype != torch.float32:
+            # Match the eager TORCH_CHECK in _cslt_sparse_mm_impl so compile
+            # rejects at trace time what eager rejects at call time.
+            raise AssertionError(
+                f"out_dtype must be float32 for fp8 inputs on ROCm, got {out_dtype}"
+            )
+    if out_dtype is None and is_fp8_input_type and torch.version.hip:
+        # hipSparseLt only produces fp32 for fp8 inputs, so _cslt_sparse_mm
+        # forces the result dtype to fp32 when out_dtype is omitted.
+        out_dtype = torch.float32
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
@@ -6264,6 +6279,28 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
+def alloc_with_matching_layout(
+    query: Tensor,
+    res_shape: tuple[int, ...],
+):
+    """Allocate a result with the query's dimension order."""
+    if tuple(query.shape) == res_shape:
+        return torch.empty_like(query)
+
+    fill_order = sorted(
+        range(query.dim()),
+        key=lambda idx: query.stride()[idx] if query.stride()[idx] else math.inf,
+    )
+    strides = [0] * len(fill_order)
+    stride = 1
+    for idx in fill_order:
+        strides[idx] = stride
+        stride *= res_shape[idx]
+    return torch.empty_strided(
+        res_shape, strides, dtype=query.dtype, device=query.device
+    )
+
+
 @register_meta([aten._scaled_dot_product_flash_attention.default])
 def meta__scaled_dot_product_flash_attention(
     query: Tensor,
@@ -6280,7 +6317,7 @@ def meta__scaled_dot_product_flash_attention(
     head_dim = query.size(3)
     max_seqlen_batch_k = key.size(2)
 
-    attention = torch.empty_like(query)
+    attention = alloc_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
@@ -6353,28 +6390,6 @@ def meta__scaled_dot_product_flash_attention_quantized(
         return_debug_mask,
         scale,
     )
-
-
-def alloc_with_matching_layout(
-    query: Tensor,
-    res_shape: tuple[int, ...],
-):
-    if tuple(query.shape) == res_shape:
-        res = torch.empty_like(query)
-    else:
-        dim_order = sorted(
-            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
-        )
-        strides = [0] * len(dim_order)
-        stride = 1
-        for idx in reversed(dim_order):
-            strides[idx] = stride
-            stride *= res_shape[idx]
-        res = torch.empty_strided(
-            res_shape, strides, dtype=query.dtype, device=query.device
-        )
-
-    return res
 
 
 @register_meta([aten._scaled_dot_product_cudnn_attention])
@@ -6824,7 +6839,7 @@ def meta__flash_attention_forward(
     head_dim = query.size(-1)
 
     # Cuda Path
-    attention = torch.empty_like(query)
+    attention = alloc_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     if cum_seq_q is None:
         logsumexp = torch.empty(
             (batch_size, num_heads, max_seqlen_batch_q),

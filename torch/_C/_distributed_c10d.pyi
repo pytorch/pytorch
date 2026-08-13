@@ -880,6 +880,7 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        host_cft_mode: int
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
@@ -1092,6 +1093,9 @@ class _SymmetricMemory:
         sizes: torch.types._size,
         dtype: torch.dtype,
     ) -> torch.Tensor: ...
+    # Host-side NCCL CFT logical endpoint, as (le_id, le_offset).
+    def get_peer_cft_handle(self, peer: int) -> tuple[int, int]: ...
+    def get_multimem_cft_handle(self) -> tuple[int, int]: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
@@ -1151,6 +1155,7 @@ class ProcessGroupNCCL2(Backend):
         rank: int,
         size: int,
         options: ProcessGroupNCCL.Options,
+        device_id: torch.device | None = None,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
     @property
@@ -1163,6 +1168,7 @@ class ProcessGroupNCCLLazy(Backend):
         rank: int,
         size: int,
         options: ProcessGroupNCCL.Options,
+        device_id: torch.device | None = None,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
     def _num_active_channels(self) -> int: ...
