@@ -10,10 +10,11 @@ import inspect
 import logging
 import operator
 import os
-import random
 import re
+import secrets
 import tempfile
 from collections.abc import Callable
+from enum import Enum
 from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
 
@@ -113,6 +114,24 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     if denominator == 1:
         return numerator
     return CleanDiv(numerator, denominator)
+
+
+def _sanitize_for_repr(obj: Any) -> Any:
+    """Convert Enum values to their underlying value for valid Python repr in code generation."""
+    if isinstance(obj, dict):
+        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_repr(v) for v in obj]
+    # For namedtuples (have _fields), reconstruct to preserve the type
+    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+        return getattr(type(obj), "_make")(  # noqa: B009
+            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
+        )
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_for_repr(v) for v in obj)
+    if isinstance(obj, Enum):
+        return _sanitize_for_repr(obj.value)
+    return obj
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -1113,7 +1132,13 @@ class AllocateLine(MemoryPlanningLine):
                 f"{dtype}, "
                 f"{device_arg}, "
                 f'group_name="{group_name}", '
-                f"alloc_id={random.randint(0, 2**64 - 1)})"
+                # alloc_id keys a process-global persistent-allocation map
+                # (SymmetricMemory.cpp) that outlives the graph and rejects
+                # same-id allocations of differing size. Draw from secrets, not
+                # the global random module, which is frequently reseeded (e.g.
+                # TestCase.setUp calls random.seed()) and would yield colliding
+                # ids across graphs.
+                f"alloc_id={secrets.randbits(64)})"
             )
         else:
             raise NotImplementedError(
@@ -3634,7 +3659,8 @@ class PythonWrapperCodegen(CodeGen):
         }
         if backend_option_candidates:
             get_interface_for_device(device).raise_if_triton_unavailable(device)
-            assert GPUTarget is not None  # noqa: S101
+            if GPUTarget is None:
+                raise AssertionError("expected GPUTarget to be not None")
             target = GPUTarget(
                 device_props.type,
                 device_props.cc,
@@ -3752,12 +3778,14 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
+        # Sanitize triton_meta to convert Enum values for valid Python repr
+        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={triton_meta!r},
+                triton_meta={sanitized_triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
