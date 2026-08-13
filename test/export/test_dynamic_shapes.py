@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import HardwareClassification
 
 class TestDimHint(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def test_dimhint_repr(self):
         hint = _DimHint(_DimHintType.DYNAMIC)
         self.assertEqual(repr(hint), "DimHint(DYNAMIC)")

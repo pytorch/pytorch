@@ -3,11 +3,15 @@
 import json
 
 import torch
-from torch.testing._internal.common_utils import HardwareClassification, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+)
 
 
 class TestUpgrader(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         # Register example upgraders dynamically
