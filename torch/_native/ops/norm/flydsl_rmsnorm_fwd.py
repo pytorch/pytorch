@@ -50,11 +50,6 @@ def _dtype_config(dtype_str: str):
         raise ValueError(f"unsupported dtype: {dtype_str!r}") from exc
 
 
-def _dtype_to_elem_type(dtype_str: str):
-    """Map a supported PyTorch dtype string to its FlyDSL type."""
-    return _dtype_config(dtype_str)[0]
-
-
 def _load_vec(copy_atom, vec_width, elem_dtype, div_tensor, idx):
     r = fx.make_rmem_tensor(vec_width, elem_dtype)
     fx.copy_atom_call(copy_atom, div_tensor[None, idx], r)
@@ -68,7 +63,7 @@ def _store_vec(copy_atom, vec_width, elem_dtype, val, div_tensor, idx):
 
 
 def _to_elem(dtype_str: str, elem_dtype, y):
-    if const_expr(dtype_str == "f32"):
+    if dtype_str == "f32":
         return y
     return y.to(elem_dtype)
 
@@ -114,7 +109,7 @@ def _build_rmsnorm_module(
         bid = fx.block_idx.x
         tid = fx.thread_idx.x
 
-        elem_dtype = _dtype_to_elem_type(dtype_str)
+        elem_dtype = _dtype_config(dtype_str)[0]
         eps_c = Eps
         n_float = float(N)
 

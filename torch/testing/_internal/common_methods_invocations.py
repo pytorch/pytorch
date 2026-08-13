@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
-    isRocmArchAnyOf, MI350_ARCH, TEST_CUDA
+    TEST_CUDA
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -23046,6 +23046,10 @@ if "cutedsl" in dsl_ops_by_dsl:
     ])
 
 if "flydsl" in dsl_ops_by_dsl:
+    from torch._native.ops.norm.flydsl_rmsnorm_impl import (
+        _is_supported_arch as _is_flydsl_rmsnorm_supported_arch,
+    )
+
     dsl_ops_by_dsl["flydsl"].append(
         OpInfo(
             "nn.functional.rms_norm",
@@ -23061,11 +23065,20 @@ if "flydsl" in dsl_ops_by_dsl:
             decorators=[
                 onlyCUDA,
                 skipCUDAIf(
-                    not (TEST_CUDA and isRocmArchAnyOf(MI350_ARCH)),
+                    not (
+                        TEST_CUDA
+                        and _is_flydsl_rmsnorm_supported_arch(
+                            torch.cuda.current_device()
+                        )
+                    ),
                     "flydsl rms_norm override requires gfx950",
                 ),
             ],
             skips=(
+                DecorateInfo(
+                    unittest.skip("dedicated test covers noncontiguous ATen fallback"),
+                    "TestCommon", "test_noncontiguous_samples",
+                ),
                 # Unsupported FlyDSL dtypes fall through to aten and appear supported,
                 # so the probe's dtype set never matches the one listed here. xfail
                 # rather than skip: the failure is a plain deterministic assertion, and

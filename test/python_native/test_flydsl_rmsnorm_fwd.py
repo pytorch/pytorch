@@ -21,7 +21,7 @@ DISPATCH_M = 8192
 DISPATCH_N = 4096
 DISPATCH_DTYPE = torch.float16
 BACKWARD_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
-KERNEL_PATH_NS = (4096, 12288, 24576, 114688, 4097, 4103, 8193, 16385, 32769, 98305)
+KERNEL_PATH_NS = (3, 4096, 12288, 24576, 114688, 4097, 4103, 8193, 16385, 32769, 98305)
 # (N, minimum rows M) for each band _fused_rms_norm_fwd_perf_wins admits.
 BAND_MINIMUMS = ((4096, 8192), (8192, 4096), (16384, 2048))
 UPPER_BOUND_N = 114688
@@ -370,6 +370,25 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(got, ref)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
+    def test_cold_cuda_graph_capture_dispatches_and_replays(self):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        x, weight = self._make_dispatch_inputs()
+        self._assert_no_flydsl_compiles()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            got = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+
+        x.neg_()
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        got.zero_()
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(got, ref)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
     @parametrize("n,min_rows", BAND_MINIMUMS)
     def test_band_minimum_dispatches(self, n, min_rows):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
@@ -454,6 +473,27 @@ class TestFlyDSLRMSNorm(TestCase):
 
         torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
         self._assert_no_flydsl_compiles()
+
+    @parametrize("dtype", (torch.float16, torch.float32))
+    def test_misaligned_base_dispatches_and_matches_aten(self, dtype):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        storage = make_tensor(
+            (DISPATCH_M * DISPATCH_N + 1,), device="cuda", dtype=dtype
+        )
+        weight_storage = make_tensor((DISPATCH_N + 1,), device="cuda", dtype=dtype)
+        x = storage[1:].view(DISPATCH_M, DISPATCH_N)
+        weight = weight_storage[1:]
+        self.assertTrue(x.is_contiguous())
+        self.assertNotEqual(x.data_ptr() % 16, 0)
+        self.assertNotEqual(weight.data_ptr() % 16, 0)
+
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        got = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+
+        self.assertEqual(got, ref)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
     @parametrize("cow_arg", ("input", "weight"))
     def test_cow_inputs_fall_back_without_compiling(self, cow_arg):
