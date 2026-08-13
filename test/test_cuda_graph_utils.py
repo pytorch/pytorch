@@ -23,6 +23,7 @@ from torch.cuda.graph_annotations import (
     mark_kernels,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
@@ -99,6 +100,8 @@ _NESTED_NODE_ADDERS = {
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
 )
 class TestMarkKernels(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # Annotations are enabled per-capture via torch.cuda.graph(..,
@@ -801,6 +804,8 @@ class TestMarkKernels(TestCase):
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
 )
 class TestGetGraphData(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_basic_structure(self):
         g = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.zeros([2000], device="cuda")
@@ -959,6 +964,8 @@ class TestGetGraphData(TestCase):
 # (TestMarkKernels skips unless cuda-bindings/driver >= 13.1). A toolsId packs
 # the graph id in the upper 32 bits and the node id in the lower 32.
 class TestRekeyAnnotations(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _tools_id(graph_id, node_id):
         return (graph_id << 32) | node_id
@@ -995,6 +1002,8 @@ class TestRekeyAnnotations(TestCase):
 # Runs everywhere (no capture): the public probe must agree with the private
 # gate that mark_kernels no-ops on, whatever this machine supports.
 class TestIsAvailable(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_matches_private_gate(self):
         expected = torch.cuda.is_available() and not _is_tools_id_unavailable()
         self.assertEqual(is_available(), expected)
@@ -1004,6 +1013,8 @@ class TestIsAvailable(TestCase):
 # CUDAGraph fans out to at the end of instantiate(). The registry just passes the graph
 # through, so a sentinel stands in for it. No CUDA needed.
 class TestGraphInstantiateHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         import torch.cuda.graphs as cg
 
@@ -1052,6 +1063,16 @@ class TestGraphInstantiateHooks(TestCase):
         self._run(graph)  # first raises, second still runs
         self.assertEqual(seen, [graph])
 
+
+class TestGraphInstantiateHooksCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        cg._global_instantiate_hooks.clear()
+        super().tearDown()
+
     @requires_cuda
     def test_fires_once_on_real_graph_instantiate(self):
         import torch.cuda.graphs as cg
@@ -1079,6 +1100,8 @@ class TestGraphInstantiateHooks(TestCase):
 # cleanup hooks that a CUDAGraph invokes (gated on _graph_destroy_hooks_active) via
 # _run_graph_destroy_hooks when a CUDA graph is destroyed. No CUDA needed.
 class TestGraphDestroyHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         import torch.cuda.graphs as cg
 
@@ -1121,6 +1144,16 @@ class TestGraphDestroyHooks(TestCase):
         cg._run_graph_destroy_hooks({1})  # first raises, second still runs
         self.assertEqual(seen, [{1}])
 
+
+class TestGraphDestroyHooksCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        cg._global_destroy_hooks.clear()
+        super().tearDown()
+
     @requires_cuda
     def test_fires_with_recorded_exec_ids_on_teardown(self):
         import torch.cuda.graphs as cg
@@ -1156,6 +1189,8 @@ class TestGraphDestroyHooks(TestCase):
 # requested exec graph ids (tools_id >> 32). (The graph dependency map lives on the
 # profiler observer, not the module, and is exercised in the CUPTI monitor suite.)
 class TestRemoveKernelAnnotations(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _tools_id(graph_id, node_id):
         return (graph_id << 32) | node_id
@@ -1196,6 +1231,8 @@ class TestRemoveKernelAnnotations(TestCase):
 # ("name") and reader tolerance for the two legacy pickle spellings: dicts
 # keyed "str" and bare unwrapped strings.
 class TestAnnotateTrace(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _trace_with_kernel(graph_node_id):
         return {
@@ -1253,6 +1290,8 @@ GLOBAL_HOOK_REGISTRIES = [
 
 @instantiate_parametrized_tests
 class TestGraphGlobalLifecycleHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         import torch.cuda.graphs as cg
 
@@ -1304,6 +1343,17 @@ class TestGraphGlobalLifecycleHooks(TestCase):
 
         self.assertIn(f"register_graph_{name}_hook", cg.__all__)
         self.assertFalse(hasattr(cg, f"run_graph_{name}_hooks"))
+
+
+class TestGraphGlobalLifecycleHooksCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        for name in GLOBAL_HOOK_REGISTRIES:
+            getattr(cg, f"_global_{name}_hooks").clear()
+        super().tearDown()
 
     @requires_cuda
     def test_fire_points_over_a_real_graph(self):
