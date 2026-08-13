@@ -15534,12 +15534,14 @@ def _set_device_index(target_device):
         torch.accelerator.set_device_index(orig_device)
 
 
-def _sleep_if_cuda(cycles):
-    if "cuda" == torch.accelerator.current_accelerator().type:
-        return torch.cuda._sleep(cycles)
-    else:
-        # Update this if non-cuda accelerators support something like sleep
+def _sleep_if_supported(cycles):
+    # Spin the device for a while if the current accelerator exposes _sleep.
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
         return
+    device_module = torch.get_device_module(acc)
+    if hasattr(device_module, "_sleep"):
+        device_module._sleep(cycles)
 
 
 def _get_device_name(idx):
@@ -15593,7 +15595,7 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 out.add_(1)
                 return out
 
@@ -15640,7 +15642,7 @@ class TestAutogradStreamSynchronization(TestCase):
             def backward(ctx, gO):
                 out = gO.to(_get_device_name(0))
                 with _set_device_index(0):
-                    _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                    _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 # It's the node's responsibility to sync back to its canonical stream.
                 out.add_(1)
                 ctx.node_stream.wait_stream(torch.accelerator.current_stream(0))
@@ -15732,7 +15734,7 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 return out.add_(1)
 
         class Consumer(torch.autograd.Function):
@@ -15813,7 +15815,7 @@ class TestAutogradStreamSynchronization(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 return out.mul_(2)
 
         class Consumer(torch.autograd.Function):
@@ -15866,11 +15868,11 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
-    # This test may spuriously fail on non-cuda accelerators (since we won't
-    # be calling sleep)
-    @onlyCUDA
+    @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
         # as soon as we've added to the InputBuffer the first time.
@@ -15912,7 +15914,7 @@ class TestAutogradStreamSynchronization(TestCase):
                 evt.record()
                 events["side_backward_start"] = evt
 
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 result = gO.clone()
 
                 evt = torch.Event(enable_timing=True)
