@@ -77,8 +77,17 @@ extensions = [
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
+    "dollarmath",
     "html_image",
 ]
+
+# dollarmath's default delimiter matching treats any pair of `$` as an equation,
+# which swallows literal shell variables in prose: the `$XDG_CACHE_HOME` and
+# `$HOME` pair in notes/cuda.md parses as one formula. Requiring the delimiters
+# to sit flush against the content keeps those as text while every real formula
+# still renders.
+myst_dmath_allow_space = False
+myst_dmath_allow_digits = False
 
 # Don't execute notebooks during the docs build. Notebook correctness is
 # verified by the separate docs_test CI job; re-executing them here just
@@ -463,8 +472,10 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
-    # deprecated aliases of all_gather_single / reduce_scatter_single
+    # deprecated aliases of all_gather_single / reduce_scatter_single /
+    # gather_single
     "all_gather_into_tensor",
+    "gather_into_tensor",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
