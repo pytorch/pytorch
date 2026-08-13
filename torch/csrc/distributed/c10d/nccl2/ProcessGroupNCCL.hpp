@@ -592,7 +592,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
-  void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
+  void enqueueWork(
+      const c10::intrusive_ptr<WorkNCCL>& work,
+      cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);

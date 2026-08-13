@@ -197,6 +197,10 @@ std::chrono::milliseconds Work::getTimeout() const {
   TORCH_CHECK(false, "This Backend doesn't support getTimeout.");
 }
 
+const void* Work::getCompletionKey() const {
+  return this;
+}
+
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
