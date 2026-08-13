@@ -119,6 +119,23 @@ def _cpython_has_simple_slice_bug() -> bool:
     return False
 
 
+def note_element_read(
+    tx: "InstructionTranslatorBase", item: VariableTracker
+) -> VariableTracker:
+    """Record that ``item`` left a list without deferring an index guard.
+
+    Every element already carries GetItemSource(container, i) from
+    VariableBuilder, which is the source invoke_subgraph reuse is willing to
+    re-derive. A read that did not come through the deferred subscript path
+    expects its element to stay put, so the enclosing region has to know not to
+    move it. See Note: [invoke_subgraph index parameterization].
+    """
+    regions = tx.output.deferred_index_regions
+    if regions and item.source is not None:
+        regions[-1].literal_elements.add(item.source)
+    return item
+
+
 class BaseListVariable(VariableTracker):
     @staticmethod
     def cls_for_instance(obj: Any) -> type["BaseListVariable"]:
@@ -184,11 +201,12 @@ class BaseListVariable(VariableTracker):
         if pyindex_check(maybe_get_python_type(arg)):
             index = pynumber_as_ssize_t(tx, arg).as_python_constant()
             try:
-                return self.items[index]
+                item = self.items[index]
             except IndexError:
                 raise_observed_exception(
                     IndexError, tx, args=["list index out of range"]
                 )
+            return note_element_read(tx, item)
         elif pyslice_check(arg):
             if not isinstance(arg, SliceVariable):
                 raise AssertionError("Expected arg to be a SliceVariable")
@@ -213,7 +231,7 @@ class BaseListVariable(VariableTracker):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        return list(self.items)
+        return [note_element_read(tx, item) for item in self.items]
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for lists, tuples, and range objects."""
@@ -340,7 +358,7 @@ class BaseListVariable(VariableTracker):
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
-            return self.items[index]
+            return note_element_read(tx, self.items[index])
         except IndexError:
             raise_observed_exception(
                 IndexError,
@@ -2347,7 +2365,7 @@ class ListIteratorVariable(IteratorVariable):
 
         tx.output.side_effects.mutation(self)
         self.index += 1
-        return self.items[old_index]
+        return note_element_read(tx, self.items[old_index])
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2368,7 +2386,7 @@ class ListIteratorVariable(IteratorVariable):
         if self.is_exhausted:
             return []
         self.is_exhausted = True
-        return list(self.items[self.index :])
+        return [note_element_read(tx, item) for item in self.items[self.index :]]
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
