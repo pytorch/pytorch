@@ -21,7 +21,7 @@ import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 from torch.utils._pallas import has_torch_tpu
@@ -415,7 +415,7 @@ class CudaInterface(DeviceInterface):
         ) -> Any:
             return torch.cuda.graph(
                 graph,
-                stream=stream,
+                stream=cast(torch.cuda.Stream, stream),
                 pool=pool,
                 capture_error_mode=capture_error_mode,
             )
