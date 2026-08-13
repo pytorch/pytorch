@@ -49,8 +49,10 @@ from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     _unstable_customized_partition_wrapper,
     align_inputs_from_check_idxs,
+    assert_static_inputs_aligned,
     BoxedBool,
     CUDAGraphWrapperMetadata,
+    get_static_input_idxs_to_assert_aligned,
     GraphPartitionMap,
     InputType,
     is_gpu,
@@ -466,6 +468,24 @@ def maybe_realign_inputs(
                 # uses the Sequence[InputType] boxed alias, so re-tag it here.
                 compiled_graph.current_callable = cast("_BoxedCallable", new_callable)
 
+    # Static inputs are exempt from the clone-if-misaligned fixup, so assert their
+    # alignment held: an unguarded static may be swapped to a misaligned address,
+    # which would run an alignment-assuming kernel on a misaligned pointer. This
+    # runs on every path -- including cudagraph_trees, which re-records (rather
+    # than recompiles) on an address change and would otherwise record a kernel
+    # over the new misaligned pointer. Non-trees cudagraphify_impl additionally
+    # asserts pointer equality. See Note: [Static input do-not-copy contract] in
+    # torch/_dynamo/decorators.py.
+    if compiled_graph.alignment_assert_idxs:
+        if compiled_graph.current_callable is None:
+            raise AssertionError("compiled_graph.current_callable must not be None")
+        new_callable = assert_static_inputs_aligned(
+            compiled_graph.current_callable,
+            compiled_graph.alignment_assert_idxs,
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = cast("_BoxedCallable", new_callable)
+
 
 class CompiledFxGraphConstants:
     """Wrapper class that unwraps constants from a compiled fx graph. This
@@ -557,6 +577,7 @@ class CompiledFxGraph(OutputCode):
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
+    alignment_assert_idxs: Sequence[int]
 
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
@@ -648,6 +669,9 @@ class CompiledFxGraph(OutputCode):
         storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
+        self.alignment_assert_idxs = get_static_input_idxs_to_assert_aligned(
+            example_inputs, static_input_idxs
+        )
 
         cudagraph_info = None
         if cudagraphs:

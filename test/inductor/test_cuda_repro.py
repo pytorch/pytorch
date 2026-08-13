@@ -722,6 +722,113 @@ class CudaReproTests(TestCase):
                 for param in model_opt.parameters():
                     param.add_(1.0)
 
+    @config.patch(
+        {
+            "triton.cudagraph_trees": False,
+            "triton.cudagraphs": True,
+            "size_asserts": False,
+        }
+    )
+    def test_cudagraphs_static_input_address_check_no_size_asserts(self):
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+            def forward(self, x):
+                return x @ self.weight
+
+        model = Repro().to(device_type)
+        model_opt = torch.compile(model, backend="inductor")
+        x = torch.randn(8, 8, device=device_type)
+
+        for _ in range(3):
+            model_opt(x)
+
+        with torch.no_grad():
+            model.weight.set_(model.weight.clone())
+
+        with self.assertRaisesRegex(AssertionError, "static input data pointer"):
+            model_opt(x)
+
+    def test_static_input_alignment_assert(self):
+        # Inductor bakes example-input alignment into codegen and skips the
+        # runtime clone-if-misaligned fixup for static inputs. Unguarded static
+        # inputs (params) may legally change address without recompiling; if one
+        # is swapped to a misaligned address, a runtime assert must raise a clear
+        # error rather than run an alignment-assuming kernel on a misaligned
+        # pointer.
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(64, 64))
+
+            def forward(self, x):
+                return (x + self.weight).relu()
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        model = Repro().to(device_type)
+        fn = torch.compile(model, backend=cnt)
+        x = torch.randn(64, 64, device=device_type)
+
+        fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # aligned address change: no recompile, correct numerics
+        with torch.no_grad():
+            model.weight.data = torch.randn(64, 64, device=device_type)
+        out = fn(x)
+        torch.cuda.synchronize()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(out, (x + model.weight).relu())
+
+        # misaligned address change: runtime assert fires, no recompile
+        base = torch.randn(64 * 64 + 4, device=device_type)
+        misaligned = base[1 : 1 + 64 * 64].view(64, 64)
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        with torch.no_grad():
+            model.weight.data = misaligned
+        with self.assertRaisesRegex(RuntimeError, "not 16-byte aligned"):
+            fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @config.patch({"triton.cudagraphs": True, "triton.cudagraph_trees": True})
+    def test_static_input_alignment_assert_cudagraph_trees(self):
+        # cudagraph_trees re-records (rather than recompiles) when a static
+        # input's address changes; a misaligned re-record would run an
+        # alignment-assuming kernel on a misaligned pointer, so the alignment
+        # assert must fire on the trees path too.
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(64, 64))
+
+            def forward(self, x):
+                return (x + self.weight).relu()
+
+        model = Repro().to(device_type)
+        fn = torch.compile(model, backend="inductor")
+        x = torch.randn(64, 64, device=device_type)
+
+        for _ in range(3):
+            fn(x)
+
+        # aligned address change: trees re-records, no error, correct numerics
+        with torch.no_grad():
+            model.weight.data = torch.randn(64, 64, device=device_type)
+        out = fn(x)
+        torch.cuda.synchronize()
+        self.assertEqual(out, (x + model.weight).relu())
+
+        # misaligned address change: alignment assert fires before re-record
+        base = torch.randn(64 * 64 + 4, device=device_type)
+        misaligned = base[1 : 1 + 64 * 64].view(64, 64)
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        with torch.no_grad():
+            model.weight.data = misaligned
+        with self.assertRaisesRegex(RuntimeError, "not 16-byte aligned"):
+            fn(x)
+
     # https://github.com/pytorch/torchdynamo/issues/1850
     def test_inductor_output_aliases_intermediate(self):
         def foo(x):

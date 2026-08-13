@@ -2145,10 +2145,10 @@ def get_input_idxs_to_check(
         with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
             # do not add guards on input's storage offset
-            #
-            # Static inputs are address-stable, so compile-time alignment
-            # holds for every call and cloning would break the address
-            # cudagraphs recorded; see Note: [static_input_idxs semantics].
+            # Static inputs are weight-like and must not be cloned per call;
+            # get_static_input_idxs_to_assert_aligned instead asserts at runtime
+            # that a static aligned here stays aligned. See Note: [Static input
+            # do-not-copy contract] in torch/_dynamo/decorators.py.
             if i in static_input_idxs and tensor_is_aligned(input):
                 continue
             if not should_assume_input_aligned(input):
@@ -2340,8 +2340,35 @@ def cudagraphify_impl(
         copy_indices = [
             idx for idx in range(len(static_inputs)) if idx not in static_input_idxs
         ]
+        # Replaying with a static input whose address moved is an IMA or silent
+        # corruption, so verify addresses even without size_asserts. This is a
+        # single C++ call over only the static indices, negligible vs replay.
+        static_tensor_input_idxs = [
+            idx
+            for idx in static_input_idxs
+            if isinstance(static_inputs[idx], torch.Tensor)
+        ]
+        static_input_data_ptrs: list[int | None] = [
+            x.data_ptr() if isinstance(x, torch.Tensor) else None for x in static_inputs
+        ]
 
         def run(new_inputs: list[InputType]) -> Callable[[list[InputType]], Any]:
+            if not torch._C._tensors_data_ptrs_at_indices_equal(
+                new_inputs,  # type: ignore[arg-type]
+                static_input_data_ptrs,
+                static_tensor_input_idxs,
+            ):
+                mismatch = [
+                    idx
+                    for idx in static_tensor_input_idxs
+                    if new_inputs[idx].data_ptr() != static_input_data_ptrs[idx]  # type: ignore[union-attr]
+                ]
+                raise AssertionError(
+                    f"static input data pointer changed at indices {mismatch}; "
+                    f"replaying the cudagraph would access freed or unrelated memory. "
+                    f"Static inputs (parameters and mark_static_address tensors) must "
+                    f"keep the same address as when the graph was recorded."
+                )
             for idx in copy_indices:
                 expanded_dims = inps_expanded_dims[idx]
                 src = new_inputs[idx]
