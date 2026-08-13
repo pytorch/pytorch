@@ -1281,6 +1281,8 @@ class _NestedReductionBase:
         self.assertGreater(metrics.generated_kernel_count, 1)
 
     def test_producer_consumer_rejects_shifted_reduced_source(self):
+        import torch.nn.functional as F
+
         B, D, G = 4, 1024, 16
 
         def f(x):
@@ -1523,6 +1525,26 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, z))
         self.check_fusion()
 
+    def test_cat_producer_standalone_sub_parent_epilogue(self):
+        B, D = 4, 512
+
+        def f(x, y):
+            joined = torch.cat((x, y), dim=-1)
+            scale = (joined.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = joined.view(B, D // 2, 2)
+            return (
+                pairs[..., 0].float() / scale.unsqueeze(-1),
+                pairs[..., 1].float() / scale.unsqueeze(-1),
+                scale,
+            )
+
+        x = torch.randn(B, D // 2, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn_like(x)
+        self.check_nested_matches_unnested(f, (x, y))
+        self.check_fusion()
+
     def _standalone_sub_parent_graph(self, B=32, D=1024, G=16):
         def f(x):
             xg = x.view(B, D // G, G)
@@ -1696,6 +1718,59 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_fusion()
 
+    def test_looped_internal_source_uses_second_pass(self):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            scale = x.float().abs().amax(dim=-1)
+            pairs = source.view(B, D // 2, 2)
+            scale = scale.unsqueeze(-1)
+            return pairs[..., 0] / scale, pairs[..., 1] / scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        with inductor_config.patch("triton.nested_reduction", False):
+            expected = torch.compile(f)(x)
+        metrics.reset()
+        torch._dynamo.reset()
+        actual, sources = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        FileCheck().check_count("for r0_offset in tl.range", 2, exactly=True).run(
+            "\n".join(sources)
+        )
+
+    def test_looped_internal_source_closes_final_reduction_pass(self):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            first_scale = x.float().abs().amax(dim=-1)
+            shifted = torch.ops._inductor_test.realize(
+                x.float() + first_scale.unsqueeze(-1)
+            )
+            scale = shifted.abs().amax(dim=-1).unsqueeze(-1)
+            pairs = source.view(B, D // 2, 2)
+            return pairs[..., 0] / scale, pairs[..., 1] / scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        with inductor_config.patch("triton.nested_reduction", False):
+            expected = torch.compile(f)(x)
+        metrics.reset()
+        torch._dynamo.reset()
+        actual, sources = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        FileCheck().check_count("for r0_offset in tl.range", 3, exactly=True).run(
+            "\n".join(sources)
+        )
+
     @parametrize("shifted", [False, True])
     def test_producer_consumer_mxfp6_preshuffled_four_to_three_pack(self, shifted):
         B, D = 128, 384
@@ -1786,6 +1861,42 @@ class _NestedReductionBase:
         )
         self.check_fusion()
 
+    def test_looped_mxfp6_rejects_source_before_reduction(self):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(
+                (torch.nn.functional.silu(x) * 7).round().to(torch.int32) & 0x3F
+            )
+            reduction_input = torch.ops._inductor_test.realize(source.float() * 2)
+            scale = reduction_input.abs().amax(dim=-1)
+            return _mxfp6_pack_four_to_three(source), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_no_fusion()
+
+    def test_looped_mxfp6_rejects_source_chain_used_by_reduction(self):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        B, D = 8, 16384
+
+        def f(x):
+            base = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            source = torch.ops._inductor_test.realize(base + 1)
+            scale = x.float().abs().amax(dim=-1)
+            sibling = base.float().abs().amax(dim=-1)
+            pairs = source.view(B, D // 2, 2)
+            return pairs[..., 0], pairs[..., 1], scale, sibling
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_no_fusion()
+
     def test_standalone_sub_parent_rejects_output_fullres_reader(self):
         B, D, G = 32, 1024, 16
 
@@ -1818,6 +1929,91 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_non_leaf_epilogue_fallback()
 
+    def test_standalone_sub_parent_leaves_incompatible_reader_unfused(self):
+        B, D = 4, 512
+
+        def f(x):
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / scale.unsqueeze(-1)
+            odd = pairs[..., 1].float() / scale.unsqueeze(-1)
+            side = torch.sin(even[:, ::2])
+            return even, odd, side, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_standalone_sub_parent_multidimensional_reduction(self):
+        B, C, D = 4, 4, 16
+
+        def f(x):
+            scale = (x.float().abs().amax(dim=(-2, -1)) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = x.view(B, C, D // 2, 2)
+            scale_f = scale[:, None, None]
+            even = pairs[..., 0].float() / scale_f
+            odd = pairs[..., 1].float() / scale_f
+            return even, odd, scale
+
+        x = torch.randn(B, C, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
+    def test_standalone_sub_parent_rejects_mismatched_parent_coordinates(self):
+        def f(x):
+            parent = torch.as_strided(x, (2, 6, 8), (100, 10, 1))
+            scale = (parent.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            even = torch.as_strided(x, (3, 4, 4), (100, 10, 2))
+            odd = torch.as_strided(x, (3, 4, 4), (100, 10, 2), storage_offset=1)
+            scale_f = scale.reshape(3, 4, 1)
+            return even.float() / scale_f, odd.float() / scale_f, scale
+
+        x = torch.randn(256, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+
+    def test_standalone_sub_parent_rejects_offset_source(self):
+        B, D = 4, 16
+
+        def f(storage):
+            x = torch.as_strided(storage, (B, D), (D + 1, 1), storage_offset=1)
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = x.view(B, D // 2, 2)
+            return (
+                pairs[..., 0].float() / scale.unsqueeze(-1),
+                pairs[..., 1].float() / scale.unsqueeze(-1),
+                scale,
+            )
+
+        storage = torch.randn(B * (D + 1), device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (storage,))
+        self.check_no_fusion()
+
+    def test_standalone_sub_parent_mismatched_masked_source(self):
+        B, D = 4, 16
+
+        def f(x):
+            parent = torch.nn.functional.pad(x, (2, 0), value=0.0)
+            child = torch.nn.functional.pad(x, (2, 0), value=1.0)
+            scale = (parent.float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = child.view(B, D // 2, 2)
+            return (
+                pairs[..., 0].float() / scale.unsqueeze(-1),
+                pairs[..., 1].float() / scale.unsqueeze(-1),
+                scale,
+            )
+
+        x = torch.randn(B, D - 2, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_fusion()
+
     def test_standalone_sub_parent_rejects_same_buffer_scalar(self):
         B, D, G = 32, 1024, 16
 
@@ -1836,6 +2032,59 @@ class _NestedReductionBase:
         self.check_numeric(f, (x,))
         self.check_no_fusion()
         self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_standalone_sub_parent_rejects_shared_broadcast_source(self):
+        B, D = 4, 16
+
+        # A normalized dep cannot recover which nontrivial domain was broadcast.
+        def f(x, row):
+            scale = ((x + row[:, None]).float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = x.view(B, D // 2, 2)
+            row = row[:, None]
+            even = pairs[..., 0].float() / scale[:, None] + row
+            odd = pairs[..., 1].float() / scale[:, None] - row
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        row = torch.randn(B, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x, row))
+        self.check_no_fusion()
+
+    def test_standalone_sub_parent_parent_only_broadcast_source(self):
+        B, D = 4, 16
+
+        def f(x, row):
+            scale = ((x + row[:, None]).float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / scale[:, None]
+            odd = pairs[..., 1].float() / scale[:, None]
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        row = torch.randn(B, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, row))
+        self.check_fusion()
+
+    def test_standalone_sub_parent_shared_scalar_source(self):
+        B, D = 4, 16
+
+        def f(x, scalar):
+            scale = ((x * scalar).float().abs().amax(dim=-1) / 6.0).clamp(
+                min=1e-12, max=448.0
+            )
+            pairs = x.view(B, D // 2, 2)
+            even = pairs[..., 0].float() / scale[:, None] + scalar
+            odd = pairs[..., 1].float() / scale[:, None] - scalar
+            return even, odd, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        scalar = torch.tensor(2.0, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, scalar))
+        self.check_fusion()
 
     def test_standalone_sub_parent_rejects_ambiguous_source_load(self):
         B, D, G = 32, 1024, 16
