@@ -488,19 +488,17 @@ ROCM_NUMERICAL_TOLERANCE_OVERRIDES = {
 
 EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
-        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "nn.functional.rms_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
     "inductor_default": {
-        "reciprocal": {fp32},
         "remainder": {ALL},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.silu": {fp16, fp32},
+        "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
@@ -508,7 +506,6 @@ EAGER_EQUIV_XFAILS = {
         "remainder": {ALL},
         "sigmoid": {fp32},
         "sub": {ALL},
-        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -534,7 +531,6 @@ UNARY_NUMERICAL_XFAILS = {
         "exp2": {bf16, fp32},
         "expm1": {bf16, fp32},
         "log1p": {fp32},
-        "reciprocal": {fp32},
         "rsqrt": {bf16, fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
