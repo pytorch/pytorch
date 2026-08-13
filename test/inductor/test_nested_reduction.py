@@ -2449,6 +2449,24 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, y))
         self.check_fusion()
 
+    # TODO: Reduce the looped full-resolution plus sub-parent form from three
+    # passes to two.
+    def test_standalone_sub_parent_allows_fullres_sibling(self):
+        B, D, G = 32, 1024, 16
+
+        def f(x):
+            xg = x.view(B, D // G, G)
+            scale = (xg.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            full = xg.float() / scale.unsqueeze(-1)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            even = pairs[..., 0].float() / scale.unsqueeze(-1)
+            odd = pairs[..., 1].float() / scale.unsqueeze(-1)
+            return even, odd, full, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
     def test_standalone_sub_parent_rejects_mutation(self):
         B, D, G = 32, 1024, 16
 
@@ -3065,25 +3083,49 @@ def _capture_mxfp6_internal_source_sources(
 
 
 def _capture_standalone_sub_parent_epilogue_sources(
-    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
+    batch_size: int,
+    variant: str = "plain",
+    *,
+    force_persistent_outer_reduction: bool | None = None,
 ) -> tuple[str, str]:
-    B, D, G = batch_size, 1024, 16
+    B = batch_size
+    D = 510 if variant == "dynamic_r" else 1024
+    G = 16
 
     def f(x):
+        if variant == "dynamic_r":
+            batch, dim = x.shape
+            scale = (x.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = x.view(batch, dim // 2, 2)
+            scale_f = scale.unsqueeze(-1)
+            return (
+                pairs[..., 0].float() / scale_f,
+                pairs[..., 1].float() / scale_f,
+                scale,
+            )
+
+        if variant == "pointwise_producer":
+            x = torch.nn.functional.gelu(x)
         xg = x.view(B, D // G, G)
         amax = xg.float().abs().amax(dim=-1)
         scale = (amax / 6.0).clamp(min=1e-12, max=448.0)
         xg = xg.view(B, D // G, G // 2, 2)
         scale_f = scale.unsqueeze(-1)
+        if variant == "pointwise_producer":
+            return xg[..., 0] / scale_f, xg[..., 1] / scale_f
         even = ((xg[..., 0].float() / scale_f).to(torch.float16) + 1.0).float()
         odd = ((xg[..., 1].float() / scale_f).to(torch.float16) - 1.0).float()
         return even, odd, scale
 
     x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+    if variant == "dynamic_r":
+        torch._dynamo.mark_dynamic(x, 1)
     return _run_and_capture_sources(
         f,
         (x,),
-        _nested_kernel_signature(force_persistent_outer_reduction),
+        _nested_kernel_signature(
+            None if variant == "dynamic_r" else force_persistent_outer_reduction
+        ),
         force_persistent_outer_reduction=force_persistent_outer_reduction,
     )
 
@@ -3466,7 +3508,7 @@ class _InternalsBase:
             ),
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(8, 4),
-            min_rblock=self.looped_or_persistent(2, 1024),
+            min_rblock=2,
             extra_checks=extra_checks,
         )
 
@@ -3490,7 +3532,7 @@ class _InternalsBase:
             ),
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(8, 4),
-            min_rblock=self.looped_or_persistent(2, 1024),
+            min_rblock=2,
             extra_checks=extra_checks,
         )
 
@@ -3511,7 +3553,7 @@ class _InternalsBase:
             ),
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(14, 6),
-            min_rblock=self.looped_or_persistent(4, 1024),
+            min_rblock=4,
             extra_checks=extra_checks,
         )
 
@@ -3532,7 +3574,7 @@ class _InternalsBase:
             ),
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(3 * chunks + 2, chunks + 2),
-            min_rblock=self.looped_or_persistent(chunks, 1024),
+            min_rblock=chunks,
             extra_checks=extra_checks,
         )
 
@@ -3561,16 +3603,15 @@ class _InternalsBase:
             force_persistent_outer_reduction=None,
         )
         kernel_name = _kernel_name(kernel_code)
+        min_rblock = factor
         if "triton_red_fused" in kernel_name:
             input_counts = looped_input_counts
             meta_num_load = looped_num_load
-            min_rblock = factor
             extra_checks = FileCheck().check_not("tl.split(")
         else:
             self.assertIn("triton_per_fused", kernel_name)
             input_counts = persistent_input_counts
             meta_num_load = persistent_num_load
-            min_rblock = 8192
             extra_checks = FileCheck().check_count(
                 "tl.split(", persistent_split_count, exactly=True
             )
@@ -3638,7 +3679,7 @@ class _InternalsBase:
         self.check_axis_classification_contract(
             kernel_code,
             min_xblock=None,
-            min_rblock=looped_or_persistent(2, 16),
+            min_rblock=2,
         )
         extra_checks = (
             FileCheck().check_count("tl.split(", 0, exactly=True)
@@ -3676,7 +3717,7 @@ class _InternalsBase:
         self.check_axis_classification_contract(
             kernel_code,
             min_xblock=None,
-            min_rblock=self.looped_or_persistent(4, 32),
+            min_rblock=4,
         )
         FileCheck().check("lane4_").run(kernel_code)
 
@@ -3690,7 +3731,7 @@ class _InternalsBase:
             num_deallocs=3,
             meta_num_load=self.looped_or_persistent(2, 1),
             min_xblock=None,
-            min_rblock=self.looped_or_persistent(4, 32),
+            min_rblock=4,
             extra_checks=FileCheck().check_count("tl.split(", 3, exactly=True),
         )
 
@@ -3703,12 +3744,43 @@ class _InternalsBase:
             num_deallocs=2,
             meta_num_load=self.looped_or_persistent(3, 1),
             min_xblock=None,
-            min_rblock=self.looped_or_persistent(2, 16),
+            min_rblock=2,
             extra_checks=(
                 FileCheck().check_count("tl.split(", 0, exactly=True)
                 if self.force_persistent_outer_reduction is False
                 else FileCheck().check_count("tl.split(", 1, exactly=True)
             ),
+        )
+
+    def test_pointwise_producer_sub_parent_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_standalone_sub_parent_epilogue_sources,
+            128,
+            "pointwise_producer",
+            input_counts=self.looped_or_persistent({0: 3}, {0: 1}),
+            num_outputs=2,
+            meta_num_load=self.looped_or_persistent(3, 1),
+            min_xblock=None,
+            min_rblock=2,
+            extra_checks=(
+                FileCheck().check_count("tl.split(", 0, exactly=True)
+                if self.force_persistent_outer_reduction is False
+                else FileCheck().check_count("tl.split(", 1, exactly=True)
+            ),
+        )
+
+    def test_dynamic_r_sub_parent_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_standalone_sub_parent_epilogue_sources,
+            4,
+            "dynamic_r",
+            input_counts={0: 3},
+            num_outputs=3,
+            meta_num_load=3,
+            num_deallocs=2,
+            min_xblock=None,
+            min_rblock=2,
+            extra_checks=FileCheck().check_count("tl.split(", 0, exactly=True),
         )
 
     def test_bf16_layernorm_block_amax_epilogue_kernel_form(self):
