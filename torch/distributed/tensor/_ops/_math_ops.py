@@ -1027,6 +1027,7 @@ register_single_dim_strategy(
 _REPLICATE_ONLY_OPS = [
     aten._linalg_svd.default,
     aten.linalg_qr.default,
+    aten.linalg_qr_piv.default,
     # TODO: The diagonal ops can have an improved sharding strategy for
     # shard placements that does not require redistributing to replicate.
     aten.diagonal_copy.default,
