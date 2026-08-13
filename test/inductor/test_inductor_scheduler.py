@@ -34,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     parametrize,
     run_tests,
     TestCase,
@@ -142,6 +143,36 @@ class TestScheduler(TestCase):
                 )
             )
         )
+
+    @parametrize("nested_reduction", [False, True])
+    def test_reverse_reduction_pointwise_retry_is_config_gated(self, nested_reduction):
+        consumer = self._mock_base_snode("consumer")
+        producer = self._mock_base_snode("producer")
+        consumer.used_buffer_names.return_value = OrderedSet(["buf"])
+        producer.used_buffer_names.return_value = OrderedSet(["buf"])
+        consumer.is_foreach.return_value = False
+        producer.is_foreach.return_value = False
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        producer.is_reduction.return_value = True
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.unfusable_node = Mock(return_value=False)
+        scheduler.can_fuse = Mock(
+            side_effect=lambda node1, node2, is_reorder_round: node1 is producer
+        )
+        scheduler.get_possible_fusions_with_highest_priority = Mock(
+            side_effect=lambda pairs: pairs
+        )
+        scheduler.score_fusion_key = Mock(return_value=0)
+
+        with inductor_config.patch("triton.nested_reduction", nested_reduction):
+            fusions = scheduler.get_possible_fusions(
+                [consumer, producer], is_reorder_round=False
+            )
+
+        self.assertEqual(fusions, [(producer, consumer)] if nested_reduction else [])
+        self.assertEqual(scheduler.can_fuse.call_count, 2 if nested_reduction else 1)
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
@@ -1087,6 +1118,50 @@ class TestScheduler(TestCase):
 
         with inductor_config.patch(deterministic=True):
             check_realizes()
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize("op", ["select_scatter", "index_put"])
+    # Both settings are pinned so the test can only pass via graph_fanout:
+    # deterministic mode makes expand realize src on its own, and the read
+    # threshold decides whether src counts as expensive at all.
+    @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
+    def test_scatter_realizes_expensive_src(self, op):
+        def src(a, b, c, d, e):
+            return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
+
+        if op == "select_scatter":
+
+            def fn(base, *args):
+                return torch.select_scatter(base, src(*args), dim=2, index=1)
+        else:
+
+            def fn(base, *args):
+                index = torch.arange(base.shape[0], device=base.device)
+                base.index_put_((index,), src(*args))
+                return base
+
+        device = "cuda"
+        torch.manual_seed(0)
+        base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
+        base = torch.rand(base_size, dtype=torch.float32, device=device)
+        args = [
+            torch.rand((32, 32, 26), dtype=torch.float32, device=device)
+            for _ in range(5)
+        ]
+        expected = fn(base.clone(), *args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with DeterministicGuard(False), fresh_inductor_cache():
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            actual = compiled(base.clone(), *args)
+
+        self.assertEqual(expected, actual)
+        # src must not be inlined into the scatter loop, which would recompute it
+        # once per element of the broadcast dim.
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
 
 
 class TestScoreFusionMemory(TestCase):

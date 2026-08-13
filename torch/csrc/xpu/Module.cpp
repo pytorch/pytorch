@@ -348,9 +348,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
-#if SYCL_COMPILER_VERSION >= 20260000
       .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
-#endif
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       // TODO: Expose cache size by level when available from SYCL
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
@@ -387,10 +385,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
                    << ", has_atomic64=" << prop.has_atomic64
-#if SYCL_COMPILER_VERSION >= 20260000
-                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
-#endif
-                   << ')';
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu << ")";
             return std::move(stream).str();
           });
 }

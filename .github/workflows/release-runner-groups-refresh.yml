@@ -1,0 +1,30 @@
+name: Refresh release runner groups
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.repository_owner == 'pytorch'
+    environment: pytorchbot-env
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch test-infra reconcile
+        env:
+          GH_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run release-manage-runner-groups.yml \
+            --repo pytorch/test-infra \
+            --ref main \
+            --field apply=true
+          echo "Dispatched runner-group reconcile for ${GITHUB_REF}." \
+            >> "${GITHUB_STEP_SUMMARY}"
+          echo "Runs: https://github.com/pytorch/test-infra/actions/workflows/release-manage-runner-groups.yml" \
+            >> "${GITHUB_STEP_SUMMARY}"
