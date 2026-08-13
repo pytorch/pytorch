@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import inspect
 import logging
 from typing import Any, Protocol
 
@@ -45,6 +46,37 @@ class FakeScriptObject:
         try:
             return super().__getattribute__(name)
         except AttributeError as e:
+            from torch._library.opaque_object import (
+                get_opaque_obj_info,
+                MemberType,
+            )
+
+            real_obj = object.__getattribute__(self, "real_obj")
+            opaque_info = get_opaque_obj_info(type(real_obj))
+            if opaque_info is not None and name in opaque_info.members:
+                member_type = opaque_info.members[name]
+                if member_type == MemberType.INLINED:
+                    try:
+                        member = inspect.getattr_static(type(real_obj), name)
+                    except AttributeError as member_error:
+                        raise TypeError(
+                            f"Opaque object member '{name}' was registered as INLINED, "
+                            "but it is not defined on the object's type."
+                        ) from member_error
+                    if hasattr(member, "__get__"):
+                        return member.__get__(self, type(real_obj))
+                    return member
+
+                with _disable_current_modes():
+                    try:
+                        return getattr(real_obj, name)
+                    except AttributeError as member_error:
+                        raise TypeError(
+                            f"Opaque object of type '{self.script_class_name}' was "
+                            f"specified to have member '{name}', but this doesn't "
+                            "actually exist in the object."
+                        ) from member_error
+
             raise AttributeError(
                 f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
                 "implying that you are calling this inside of a fake kernel. "
@@ -241,7 +273,6 @@ def maybe_to_fake_obj(
 
     from torch._library.opaque_object import (
         FakeOpaqueObject,
-        get_opaque_obj_info,
         get_opaque_type_name,
         is_custom_class,
         OpaqueTypeStr,
@@ -251,20 +282,6 @@ def maybe_to_fake_obj(
     if is_custom_class(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
-
-        # Set specified members onto the fake object
-        opaque_info = get_opaque_obj_info(x_type)
-        if opaque_info is None:
-            raise AssertionError(f"opaque_info for type {x_type} must not be None")
-        for attr_name in opaque_info.members:
-            with _disable_current_modes():
-                if not hasattr(x, attr_name):
-                    raise TypeError(
-                        f"Opaque object of type '{type_name}' was specified to have member "
-                        f"'{attr_name}', but this doesn't actually exist in the object."
-                    )
-                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
-
         return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't

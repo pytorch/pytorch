@@ -1,7 +1,7 @@
 # Owner(s): ["module: fx"]
 
 import torch
-from torch._library.opaque_object import register_custom_class
+from torch._library.opaque_object import MemberType, register_custom_class
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
@@ -20,6 +20,40 @@ class OpaqueCounter(torch._custom_class_base.CustomClassBase):
 
 # Register it as an opaque type (reference semantics for identity/mutation tracking)
 register_custom_class(OpaqueCounter, typ="symbolic")
+
+
+class OpaqueMemberBox(torch._custom_class_base.CustomClassBase):
+    def __init__(self, value: int):
+        self.value = value
+        self.property_reads = 0
+        self.dynamic_reads = 0
+
+    @property
+    def bumping_property(self):
+        self.property_reads += 1
+        return self.value
+
+    def __getattr__(self, name):
+        if name == "dynamic":
+            self.dynamic_reads += 1
+            return self.value
+        raise AttributeError(name)
+
+    def mutates_and_returns_tensor(self, x):
+        self.value += 1
+        return x + self.value
+
+
+register_custom_class(
+    OpaqueMemberBox,
+    typ="symbolic",
+    members={
+        "value": MemberType.USE_REAL,
+        "bumping_property": MemberType.USE_REAL,
+        "dynamic": MemberType.USE_REAL,
+        "mutates_and_returns_tensor": MemberType.INLINED,
+    },
+)
 
 
 # Define a wrapper class that holds an opaque object as an attribute
@@ -68,6 +102,38 @@ class TestOpaqueInfrastructure(TestCase):
         # The second placeholder should be for the opaque object
         opaque_placeholder = placeholders[1]
         self.assertTrue(opaque_placeholder.name.startswith("opaque_obj"))
+
+    def test_registered_members_are_resolved_lazily(self):
+        for tracing_mode in ("fake", "symbolic"):
+            with self.subTest(tracing_mode=tracing_mode):
+                box = OpaqueMemberBox(2)
+                x = torch.ones(1)
+
+                make_fx(lambda x, box: x + 1, tracing_mode=tracing_mode)(x, box)
+
+                self.assertEqual(box.property_reads, 0)
+                self.assertEqual(box.dynamic_reads, 0)
+
+                make_fx(
+                    lambda x, box: x + box.bumping_property + box.dynamic,
+                    tracing_mode=tracing_mode,
+                )(x, box)
+
+                self.assertEqual(box.property_reads, 1)
+                self.assertEqual(box.dynamic_reads, 1)
+
+    def test_inlined_method_uses_fake_receiver(self):
+        for tracing_mode in ("fake", "symbolic"):
+            with self.subTest(tracing_mode=tracing_mode):
+                box = OpaqueMemberBox(2)
+
+                with self.assertRaisesRegex(AttributeError, "__setattr__"):
+                    make_fx(
+                        lambda x, box: box.mutates_and_returns_tensor(x),
+                        tracing_mode=tracing_mode,
+                    )(torch.ones(1), box)
+
+                self.assertEqual(box.value, 2)
 
 
 if __name__ == "__main__":
