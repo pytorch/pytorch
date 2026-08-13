@@ -3051,9 +3051,16 @@ def get_gpu_dram_gbps() -> float:
     if ds_bw is not None:
         return ds_bw
 
-    from triton.testing import get_dram_gbps
-
-    return get_dram_gbps()
+    try:
+        from triton.testing import get_dram_gbps
+        return get_dram_gbps()
+    except Exception:
+        log.warning(
+            "get_gpu_dram_gbps: Triton DRAM bandwidth query failed on the "
+            "current device. Returning a conservative default; roofline "
+            "estimates will be inaccurate but will not crash."
+        )
+        return 1.0
 
 
 def get_gpu_shared_memory() -> int:
