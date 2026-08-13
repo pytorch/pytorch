@@ -82,9 +82,6 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // If work is not supposed to have result, we return empty list.
   virtual std::vector<at::Tensor> result();
 
-  // Releases result tensors for internal callers that consume them separately.
-  virtual void releaseResultTensors();
-
   // Ensures that operations on the output tensors that are invoked
   // after this function returns are correctly sequenced after the
   // asynchronous completion of this work.
@@ -138,6 +135,10 @@ class TORCH_API Work : public torch::CustomClassHolder {
   virtual uint64_t getSequencenumber() const;
 
   virtual std::chrono::milliseconds getTimeout() const;
+
+  // Opaque identity used to correlate a caller-facing Work with a backend's
+  // tensor-free tracking copy. Valid while either Work is alive.
+  virtual const void* getCompletionKey() const;
 
   OpType retrieveOpType() const;
 
