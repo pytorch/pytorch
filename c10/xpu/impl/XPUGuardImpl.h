@@ -276,6 +276,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
     if (!xpu_event) {
       createEvent(&xpu_event, flag);
+      *event = reinterpret_cast<void*>(xpu_event);
     }
     auto handle_data =
         sycl::ext::oneapi::experimental::ipc::event::get(*xpu_event).data();
@@ -304,8 +305,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     sycl::ext::oneapi::experimental::ipc::handle_data_t handle_data(
         data, data + handle_string.size());
 
-    sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
-    xpu_event =
+    sycl::event* xpu_event =
         new sycl::event(sycl::ext::oneapi::experimental::ipc::event::open(
             handle_data, c10::xpu::get_device_context()));
     *event = reinterpret_cast<void*>(xpu_event);
