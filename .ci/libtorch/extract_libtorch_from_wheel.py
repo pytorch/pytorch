@@ -139,8 +139,18 @@ def _is_cuda_variant(desired_cuda: str) -> bool:
     return desired_cuda.startswith("cu")
 
 
-def _is_rocm_variant(desired_cuda: str) -> bool:
-    return desired_cuda.startswith("rocm")
+def _is_rocm_sdk_wheel_variant(desired_cuda: str) -> bool:
+    """True for TheRock pip-SDK ROCm; legacy /opt/rocm bundles deps in-wheel."""
+    if not desired_cuda.startswith("rocm"):
+        return False
+    return (
+        subprocess.run(
+            [sys.executable, "-m", "pip", "show", "rocm"],
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
 
 
 def _needed(patchelf: str, so: Path) -> list[str]:
@@ -188,6 +198,7 @@ def _resolve_needed_lib(search: list[Path], needed: str) -> Path | None:
     for lib_dir in search:
         for hit in sorted(lib_dir.glob(f"{base}*")):
             if hit.is_file():
+                # copy2 follows devel symlinks and names the copy by NEEDED soname.
                 return hit
     return None
 
@@ -484,8 +495,9 @@ def main() -> None:
             with_deps = "with-deps" in args.libtorch_variant
             if with_deps and _is_cuda_variant(args.desired_cuda):
                 bundle_cuda_deps(libtorch_dir / "lib")
-            elif with_deps and _is_rocm_variant(args.desired_cuda):
+            elif with_deps and _is_rocm_sdk_wheel_variant(args.desired_cuda):
                 bundle_rocm_deps(libtorch_dir / "lib")
+            # XPU also uses sibling pip packages, but has no libtorch extract job.
             fix_rpath(libtorch_dir / "lib")
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
