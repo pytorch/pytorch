@@ -13,7 +13,9 @@ The approach: the user writes a "1-to-many" op that decomposes into two autograd
 nodes (a matmul node and an epilogue marker node), plus a fusion rule. Before
 backward, apply_epilogue_fusion() walks the graph and arms the matmul node to
 defer its activation gradient into the previous epilogue's backward (no graph
-rewriting; deferral rides a placeholder grad along the existing edge).
+rewriting; deferral rides a placeholder grad along the existing edge). It can
+also fuse a main-backward output with a leaf AccumulateGrad, so the GEMM writes
+or adds directly into the leaf's .grad instead of materializing a separate grad.
 
 The user's forward receives TWO ctxs and saves into each explicitly:
 
@@ -25,10 +27,10 @@ The user's forward receives TWO ctxs and saves into each explicitly:
 
 The framework saves each set on the corresponding autograd node, so:
   * `main_backward(main_ctx, grad)` reads `main_ctx.saved_tensors`, honors
-    `main_ctx.needs_input_grad`, and returns a grad per forward input. When this
-    node defers, the framework sets needs_input_grad[activation] = False, so the
-    user simply returns None for that slot (as for any not-needed grad) and the
-    fused kernel produces it instead;
+    `main_ctx.needs_input_grad`, and returns a grad per forward input. When an
+    output is deferred, the framework sets needs_input_grad[input] = False, so
+    the user simply returns None for that slot (as for any not-needed grad) and
+    the fused kernel produces it instead;
   * `epilogue_backward(epilogue_ctx, ...)` reads `epilogue_ctx.saved_tensors`;
   * saved sets are partitioned per node (the epilogue tensor `a` lives only on the
     epilogue node), and the deferred producer's placeholder carries only its main
@@ -41,11 +43,27 @@ and the consumer ctx, each exposing only its own subset:
         main_saved_tensors          # the producer op's main set (e.g. x, w)
         consumer_ctx.saved_tensors  # the consumer op's epilogue set (e.g. a)
 
+A fused accumulation kernel instead receives the destination leaf and updates
+its grad directly:
+
+    fused_accumulate(grad_producer_out, main_saved_tensors, variable) -> None
+        variable.grad = ...                         # first backward
+        addmm(variable.grad, ..., out=variable.grad) # subsequent accumulation
+
 Fusion rules are passed explicitly (no global registry) as a list of
 (producer.main_backward, consumer.epilogue_backward, fused_impl) and applied in
-a single step:
+a single step. AccumulateGrad rules separately identify the main-backward output
+by forward input index:
 
-    apply_epilogue_fusion(loss.grad_fn, rules, expect_num_fusions=2)
+    accumulate_grad_rules = [
+        (producer.main_backward, input_idx, fused_accumulate),
+    ]
+    apply_epilogue_fusion(
+        loss.grad_fn,
+        rules,
+        accumulate_grad_rules=accumulate_grad_rules,
+        expect_num_fusions=2,
+    )
     loss.backward()
 
 Each op below is self-contained with its own backwards.
@@ -66,7 +84,15 @@ class _Log:
         self.reset()
 
     def reset(self):
-        self.c = dict(main_full=0, main_params_only=0, fused_impl=0, epilogue_unfused=0)
+        self.c = dict(
+            main_full=0,
+            main_params_only=0,
+            main_partial=0,
+            main_fully_deferred=0,
+            fused_impl=0,
+            accumulate_fused=0,
+            epilogue_unfused=0,
+        )
 
     def hit(self, k):
         self.c[k] += 1
@@ -126,9 +152,9 @@ class _WrappedCtx:
 
 
 class _MainBackwardCtx(_WrappedCtx):
-    """The ctx handed to main_backward: overrides needs_input_grad (deferred
-    activation slot forced to False) and saved_tensors (served from a set read once
-    in _MainNode.backward, since a checkpoint region errors on a second unpack)."""
+    """The ctx handed to main_backward: overrides needs_input_grad (deferred input
+    slots forced to False) and saved_tensors (served from a set read once in
+    _MainNode.backward, since a checkpoint region errors on a second unpack)."""
 
     _reserved = ("_needs", "_saved", *_WrappedCtx._reserved)
 
@@ -162,6 +188,7 @@ class _StagingCtx:
 
 _MAIN_BACKWARD = "_MainNodeBackward"
 _EPILOGUE_BACKWARD = "_EpilogueNodeBackward"
+_ACCUMULATE_GRAD = "AccumulateGrad"
 
 
 def _is_main(node):
@@ -172,6 +199,10 @@ def _is_epilogue(node):
     return type(node).__name__ == _EPILOGUE_BACKWARD
 
 
+def _is_accumulate_grad(node):
+    return type(node).__name__ == _ACCUMULATE_GRAD
+
+
 class _MainNode(Function):
     @staticmethod
     def forward(ctx, cls, meta, main_saved, *inps):
@@ -179,6 +210,7 @@ class _MainNode(Function):
         ctx.in_metas = tuple((t.shape, t.dtype, t.device) for t in inps)
         ctx.save_for_backward(*main_saved)
         ctx.defer_input_idx = None  # set by the plan; None means do not defer
+        ctx.defer_accumulate_input_idxs = ()
         shape, dtype, device = meta
         return torch.empty(shape, dtype=dtype, device=device)
 
@@ -188,14 +220,22 @@ class _MainNode(Function):
         saved = ctx.saved_tensors
         needs_input_grad = list(ctx.needs_input_grad[3:])
         k = ctx.defer_input_idx
+        deferred_input_idxs = set(ctx.defer_accumulate_input_idxs)
         if k is not None:
-            needs_input_grad[k] = False
+            deferred_input_idxs.add(k)
+        for input_idx in deferred_input_idxs:
+            needs_input_grad[input_idx] = False
         bw_ctx = _MainBackwardCtx(ctx, tuple(needs_input_grad), saved)
-        LOG.hit("main_params_only" if k is not None else "main_full")
+        if ctx.defer_accumulate_input_idxs:
+            LOG.hit("main_partial" if any(needs_input_grad) else "main_fully_deferred")
+        else:
+            LOG.hit("main_params_only" if k is not None else "main_full")
         grads = list(cls.main_backward(bw_ctx, grad_main_out))
-        if k is not None:
-            shape, dtype, device = ctx.in_metas[k]
-            grads[k] = DeferredGradTensor(shape, dtype, device, grad_main_out, saved)
+        for input_idx in deferred_input_idxs:
+            shape, dtype, device = ctx.in_metas[input_idx]
+            grads[input_idx] = DeferredGradTensor(
+                shape, dtype, device, grad_main_out, saved
+            )
         return (None, None, None) + tuple(grads)
 
 
@@ -222,6 +262,26 @@ class _EpilogueNode(Function):
         return (None, None, None, grad_main_out)
 
 
+def _make_fused_accumulate_grad_prehook(impl, variable):
+    def prehook(grads):
+        (grad,) = grads
+        if not isinstance(grad, DeferredGradTensor):
+            raise RuntimeError(
+                "A fused AccumulateGrad expected a DeferredGradTensor from its "
+                f"producer, but got {type(grad).__name__}"
+            )
+        LOG.hit("accumulate_fused")
+        result = impl(grad._main_grad_out, grad._main_saved_tensors, variable)
+        if result is not None:
+            raise RuntimeError(
+                "An AccumulateGrad fused implementation must update variable.grad "
+                "and return None"
+            )
+        return (None,)
+
+    return prehook
+
+
 class FusibleFunction:
     r"""A fusible op: one forward that decomposes into two autograd nodes -- a "main"
     node (the matmul) and an "epilogue" node (the pointwise tail) -- so the epilogue's
@@ -243,11 +303,11 @@ class FusibleFunction:
     ``main_backward(main_ctx, grad_main_out) -> grads``
         The matmul backward; reads ``main_ctx.saved_tensors`` and returns one grad per
         forward input, honoring ``main_ctx.needs_input_grad``. Compute the weight grad
-        (dW) unconditionally first and guard the activation grad (dx) with
-        ``needs_input_grad``. When this op's activation grad is deferred into a fused
-        kernel, the framework sets ``needs_input_grad`` to ``False`` at the activation
-        slot, so ``main_backward`` returns ``None`` there and the fused kernel produces
-        it instead.
+        (dW) and activation grad (dx) only when their corresponding
+        ``needs_input_grad`` entries are true. The framework sets an entry to ``False``
+        when that output is deferred into either an epilogue or AccumulateGrad fused
+        kernel, so ``main_backward`` returns ``None`` there and the fused kernel
+        produces it instead.
 
     ``epilogue_backward(epilogue_ctx, grad_out) -> grad_main_out``
         The pointwise backward; reads ``epilogue_ctx.saved_tensors``.
@@ -266,8 +326,7 @@ class FusibleFunction:
         ...     @staticmethod
         ...     def main_backward(main_ctx, grad_a):   # the matmul backward
         ...         x, w = main_ctx.saved_tensors
-        ...         # dW first (always local); dx (input 0) is guarded by needs_input_grad
-        ...         # and skipped when deferred into the fused kernel.
+        ...         # Both outputs honor needs_input_grad and may be deferred.
         ...         gw = x.T @ grad_a if main_ctx.needs_input_grad[1] else None
         ...         gx = grad_a @ w.T if main_ctx.needs_input_grad[0] else None
         ...         return gx, gw
@@ -348,10 +407,24 @@ class _PlannedPair:
         )
 
 
+@dataclass
+class _PlannedAccumulateGrad:
+    producer: object
+    input_idx: int
+    accumulator: object
+
+    def _label(self):
+        return (
+            f"{self.producer.cls.__name__}.main_backward input {self.input_idx} -> "
+            "AccumulateGrad"
+        )
+
+
 class _InternalDebugFusionPlan:
-    def __init__(self, fused, missing_rules):
+    def __init__(self, fused, missing_rules, accumulate_grad_fused):
         self._pairs_fused = fused
         self._pairs_missing_rules = missing_rules
+        self._accumulate_grad_fused = accumulate_grad_fused
 
     def assert_num_fusions(self, expected):
         got = len(self._pairs_fused)
@@ -370,25 +443,37 @@ class _InternalDebugFusionPlan:
             raise AssertionError("\n".join(lines))
         return self
 
+    def assert_num_accumulate_grad_fusions(self, expected):
+        got = len(self._accumulate_grad_fused)
+        if got != expected:
+            raise AssertionError(
+                f"expected {expected} AccumulateGrad fusions, planned {got}"
+            )
+        return self
+
     def __repr__(self):
         all_pairs = self._pairs_fused + self._pairs_missing_rules
         name = type(self).__name__
-        if not all_pairs:
+        if not all_pairs and not self._accumulate_grad_fused:
             return f"{name}(no candidates)"
-        return (
-            f"{name}(\n  "
-            + "\n  ".join(
-                f"{p.producer.cls.__name__}.main -> "
-                f"{p.consumer.cls.__name__}.epilogue: "
-                f"{'FUSE' if p.fused else 'bail:' + p.unfused_reason}"
-                for p in all_pairs
-            )
-            + "\n)"
-        )
+        lines = [
+            f"{p.producer.cls.__name__}.main -> "
+            f"{p.consumer.cls.__name__}.epilogue: "
+            f"{'FUSE' if p.fused else 'bail:' + p.unfused_reason}"
+            for p in all_pairs
+        ]
+        lines += [f"{p._label()}: FUSE" for p in self._accumulate_grad_fused]
+        return f"{name}(\n  " + "\n  ".join(lines) + "\n)"
 
 
 def apply_epilogue_fusion(
-    root, rules, *, expect_num_fusions=None, _internal_debug=False
+    root,
+    rules,
+    *,
+    accumulate_grad_rules=(),
+    expect_num_fusions=None,
+    expect_num_accumulate_grad_fusions=None,
+    _internal_debug=False,
 ):
     r"""Applies epilogue fusion rules to :class:`FusibleFunction` nodes in the autograd graph.
 
@@ -400,6 +485,12 @@ def apply_epilogue_fusion(
 
     This function should be called after the forward pass and before :meth:`backward`,
     on every iteration.
+
+    AccumulateGrad fusion requires the matched leaf to have exactly one incoming edge
+    in the traversed graph. It is intended for ``backward()`` calls that execute leaf
+    accumulators, not ``autograd.grad()`` calls that return gradients directly. Leaf
+    Tensor backward hooks are rejected because they run before the accumulator's
+    prehooks and would observe the placeholder; post-accumulate hooks remain supported.
 
     It only operates on :class:`FusibleFunction` subclasses; see that class for more
     details.
@@ -413,9 +504,18 @@ def apply_epilogue_fusion(
             the grad of the consumer's main output, computing the producer's deferred
             ``grad_input`` GEMM with the consumer's epilogue fused on. Only registered
             pairs fuse.
+        accumulate_grad_rules (list): fusion rules, each a tuple
+            ``(producer_cls.main_backward, input_idx, fused_impl)``. When that main
+            backward input feeds a unique leaf ``AccumulateGrad``, the normal gradient
+            is deferred and ``fused_impl(grad_producer_out, main_saved_tensors,
+            variable)`` must accumulate directly into ``variable.grad`` and return
+            ``None``. Default: ``()``.
         expect_num_fusions (int, optional): if given, assert exactly this many
             fusions were planned, raising a diagnostic that names any fusible
             adjacency lacking a rule. This is the supported way to check coverage.
+            Default: ``None``.
+        expect_num_accumulate_grad_fusions (int, optional): if given, assert exactly
+            this many main-backward to ``AccumulateGrad`` fusions were planned.
             Default: ``None``.
 
     Returns:
@@ -463,6 +563,10 @@ def apply_epilogue_fusion(
         root = root.grad_fn
 
     rule_map = {(p, c): impl for p, c, impl in rules}
+    accumulate_grad_rule_map = {
+        (producer, input_idx): impl
+        for producer, input_idx, impl in accumulate_grad_rules
+    }
 
     nodes, in_degree, seen = [], {}, set()
     q = deque()
@@ -480,10 +584,42 @@ def apply_epilogue_fusion(
                 seen.add(fn)
                 q.append(fn)
 
-    fused, missing_rules = [], []
+    fused, missing_rules, accumulate_grad_fused = [], [], []
     for n in nodes:
         if not _is_main(n):
             continue
+        for input_idx, (accumulator, _) in enumerate(n.next_functions):
+            impl = accumulate_grad_rule_map.get((n.cls.main_backward, input_idx))
+            if (
+                impl is None
+                or accumulator is None
+                or not _is_accumulate_grad(accumulator)
+            ):
+                continue
+            num_producers = in_degree.get(accumulator, 0)
+            if num_producers > 1:
+                raise RuntimeError(
+                    f"Cannot fuse {n.cls.__name__}.main_backward input {input_idx} "
+                    f"into AccumulateGrad: the leaf receives gradients from "
+                    f"{num_producers} backward edges. Deferred accumulation requires "
+                    f"exactly one producer."
+                )
+            if accumulator.variable._backward_hooks:
+                raise RuntimeError(
+                    f"Cannot fuse {n.cls.__name__}.main_backward input {input_idx} "
+                    "into AccumulateGrad: leaf Tensor backward hooks would observe "
+                    "the deferred gradient placeholder"
+                )
+            n.defer_accumulate_input_idxs = (
+                *n.defer_accumulate_input_idxs,
+                input_idx,
+            )
+            accumulator.register_prehook(
+                _make_fused_accumulate_grad_prehook(impl, accumulator.variable)
+            )
+            accumulate_grad_fused.append(
+                _PlannedAccumulateGrad(n, input_idx, accumulator)
+            )
         candidates = [
             (i, c)
             for i, (c, _) in enumerate(n.next_functions)
@@ -516,9 +652,11 @@ def apply_epilogue_fusion(
         consumer.fused_impl = impl
         fused.append(_PlannedPair(n, consumer, None))  # None == fusion armed
 
-    plan = _InternalDebugFusionPlan(fused, missing_rules)
+    plan = _InternalDebugFusionPlan(fused, missing_rules, accumulate_grad_fused)
     if expect_num_fusions is not None:
         plan.assert_num_fusions(expect_num_fusions)
+    if expect_num_accumulate_grad_fusions is not None:
+        plan.assert_num_accumulate_grad_fusions(expect_num_accumulate_grad_fusions)
     if _internal_debug:
         return plan
     return None
@@ -539,7 +677,7 @@ class MMRelu(FusibleFunction):
     @staticmethod
     def main_backward(main_ctx, grad_main_out):
         x, w = main_ctx.saved_tensors
-        # dW first (always local); dx (input 0) is guarded and skipped when deferred.
+        # Both outputs honor needs_input_grad and may be deferred.
         grad_w = (
             x.transpose(-1, -2) @ grad_main_out
             if main_ctx.needs_input_grad[1]
@@ -570,7 +708,7 @@ class MMTanh(FusibleFunction):
     @staticmethod
     def main_backward(main_ctx, grad_main_out):
         x, w = main_ctx.saved_tensors
-        # dW first (always local); dx is guarded and skipped when deferred.
+        # Both outputs honor needs_input_grad and may be deferred.
         grad_w = (
             x.transpose(-1, -2) @ grad_main_out
             if main_ctx.needs_input_grad[1]
@@ -603,6 +741,25 @@ def mm_tanh_fused_backward(grad_producer_out, main_saved_tensors, consumer_ctx):
     return grad_main_input * (1 - torch.tanh(a_c) ** 2)
 
 
+def _mm_accumulate_grad(variable, mat1, mat2):
+    if variable.grad is None:
+        variable.grad = mat1 @ mat2
+    else:
+        torch.addmm(variable.grad, mat1, mat2, out=variable.grad)
+
+
+def mm_input_accumulate_fused_backward(grad_producer_out, main_saved_tensors, variable):
+    _x, w = main_saved_tensors
+    _mm_accumulate_grad(variable, grad_producer_out, w.transpose(-1, -2))
+
+
+def mm_weight_accumulate_fused_backward(
+    grad_producer_out, main_saved_tensors, variable
+):
+    x, _w = main_saved_tensors
+    _mm_accumulate_grad(variable, x.transpose(-1, -2), grad_producer_out)
+
+
 # One rule per (producer.main_backward, consumer.epilogue_backward) pair, passed
 # explicitly to apply_epilogue_fusion. The fused impl depends only on the
 # consumer's epilogue, so both producers reuse the same impl.
@@ -611,6 +768,15 @@ RULES = [
     (MMTanh.main_backward, MMRelu.epilogue_backward, mm_relu_fused_backward),
     (MMRelu.main_backward, MMTanh.epilogue_backward, mm_tanh_fused_backward),
     (MMTanh.main_backward, MMTanh.epilogue_backward, mm_tanh_fused_backward),
+]
+
+# These rules identify a main-backward output by its forward input index. They
+# apply only when that edge leads directly to a unique leaf AccumulateGrad.
+ACCUMULATE_GRAD_RULES = [
+    (MMRelu.main_backward, 0, mm_input_accumulate_fused_backward),
+    (MMRelu.main_backward, 1, mm_weight_accumulate_fused_backward),
+    (MMTanh.main_backward, 0, mm_input_accumulate_fused_backward),
+    (MMTanh.main_backward, 1, mm_weight_accumulate_fused_backward),
 ]
 
 
@@ -626,7 +792,7 @@ def _check(name, ins, refs, atol=1e-9):
         good = torch.allclose(t.grad, r, atol=atol)
         ok &= good
         print(f"  grad_{nm}: max_abs_err={err:.2e} ok={good}")
-    assert ok, f"{name}: gradients do not match reference"
+    assert ok, f"{name}: gradients do not match reference"  # noqa: S101
 
 
 def scenario_mixed_chain():
@@ -635,6 +801,7 @@ def scenario_mixed_chain():
     Fusions:
       ep1 (MMTanh) <- main2 (MMRelu): key (MMRelu.main, MMTanh.epilogue) -> tanh rule
       ep2 (MMRelu) <- main3 (MMTanh): key (MMTanh.main, MMRelu.epilogue) -> relu rule
+      each leaf edge (x, w1, w2, w3) fuses its GEMM with AccumulateGrad
     """
     print("\n########## scenario: mixed chain ##########")
     torch.manual_seed(0)
@@ -659,18 +826,23 @@ def scenario_mixed_chain():
     LOG.reset()
     loss = MMTanh.apply(MMRelu.apply(MMTanh.apply(x, w1), w2), w3).sum()
     plan = apply_epilogue_fusion(
-        loss.grad_fn, RULES, expect_num_fusions=2, _internal_debug=True
+        loss.grad_fn,
+        RULES,
+        accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+        expect_num_fusions=2,
+        expect_num_accumulate_grad_fusions=4,
+        _internal_debug=True,
     )
     print(plan)
     loss.backward()
 
     _check("mixed", ins, refs)
     print("kernel paths:", LOG)
-    assert LOG.c["fused_impl"] == 2
-    assert LOG.c["epilogue_unfused"] == 1
-    assert LOG.c["main_params_only"] == 2
-    assert LOG.c["main_full"] == 1
-    print("PASS: both epilogues fused across the mixed chain.")
+    assert LOG.c["fused_impl"] == 2  # noqa: S101
+    assert LOG.c["accumulate_fused"] == 4  # noqa: S101
+    assert LOG.c["epilogue_unfused"] == 1  # noqa: S101
+    assert LOG.c["main_fully_deferred"] == 3  # noqa: S101
+    print("PASS: epilogues and leaf gradient accumulation fused across the chain.")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import coda_backward_epilogue_fusion as coda
 from coda_backward_epilogue_fusion import (
+    ACCUMULATE_GRAD_RULES,
     apply_epilogue_fusion,
     DeferredGradTensor,
     FusibleFunction,
@@ -207,6 +208,52 @@ class TestCodaBwdFusionNumerics(TestCase):
         for w, nw in zip(ws, nws):
             self.assertEqual(w.grad, nw.grad)
 
+    @parametrize("preexisting_grad", [False, True])
+    def test_accumulate_grad_fusion(self, device, preexisting_grad):
+        ops = CHAINS["mixed"]
+        base_x, base_ws = _fresh_inputs(ops, device)
+
+        x = base_x.clone().requires_grad_()
+        ws = [w.clone().requires_grad_() for w in base_ws]
+        ex = base_x.clone().requires_grad_()
+        ews = [w.clone().requires_grad_() for w in base_ws]
+        tensors = [x, *ws]
+        eager_tensors = [ex, *ews]
+
+        grad_ptrs = None
+        if preexisting_grad:
+            torch.manual_seed(1)
+            initial_grads = [torch.randn_like(t) for t in tensors]
+            for tensor, eager_tensor, grad in zip(
+                tensors, eager_tensors, initial_grads
+            ):
+                tensor.grad = grad.clone()
+                eager_tensor.grad = grad.clone()
+            grad_ptrs = [t.grad.data_ptr() for t in tensors]
+
+        LOG.reset()
+        out = x
+        for op, w in zip(ops, ws):
+            out = op.apply(out, w)
+        loss = out.sum()
+        plan = apply_epilogue_fusion(
+            loss,
+            RULES,
+            accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+            expect_num_fusions=2,
+            expect_num_accumulate_grad_fusions=4,
+            _internal_debug=True,
+        )
+        loss.backward()
+        _run_eager(ops, ex, ews)
+
+        self.assertEqual(_grads(tensors), _grads(eager_tensors))
+        self.assertEqual(len(plan._accumulate_grad_fused), 4)
+        self.assertEqual(LOG.c["accumulate_fused"], 4)
+        self.assertEqual(LOG.c["main_fully_deferred"], 3)
+        if grad_ptrs is not None:
+            self.assertEqual([t.grad.data_ptr() for t in tensors], grad_ptrs)
+
 
 class TestCodaBwdFusionPlanning(TestCase):
     """Structural behavior of the fusion planner and kernel-path accounting."""
@@ -297,6 +344,54 @@ class TestCodaBwdFusionPlanning(TestCase):
         loss = MMRelu.apply(b, wa).sum() + MMRelu.apply(b, wb).sum()
         with self.assertRaisesRegex(RuntimeError, "exactly one consumer"):
             apply_epilogue_fusion(loss, RULES)
+
+    def test_accumulate_grad_multiple_producers_raises(self):
+        torch.manual_seed(0)
+        x1 = torch.randn(4, 6, dtype=torch.double, requires_grad=True)
+        x2 = torch.randn(4, 6, dtype=torch.double, requires_grad=True)
+        w = torch.randn(6, 6, dtype=torch.double, requires_grad=True)
+        loss = MMRelu.apply(x1, w).sum() + MMRelu.apply(x2, w).sum()
+
+        with self.assertRaisesRegex(RuntimeError, "exactly one producer"):
+            apply_epilogue_fusion(
+                loss,
+                RULES,
+                accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+            )
+
+    def test_accumulate_grad_post_hook_runs(self):
+        x, (w,) = self._inputs(1)
+        observed_grads = []
+        handle = w.register_post_accumulate_grad_hook(
+            lambda variable: observed_grads.append(variable.grad.clone())
+        )
+        try:
+            loss = MMRelu.apply(x, w).sum()
+            apply_epilogue_fusion(
+                loss,
+                RULES,
+                accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+                expect_num_accumulate_grad_fusions=2,
+            )
+            loss.backward()
+        finally:
+            handle.remove()
+
+        self.assertEqual(observed_grads, [w.grad])
+
+    def test_accumulate_grad_tensor_hook_raises(self):
+        x, (w,) = self._inputs(1)
+        handle = x.register_hook(lambda grad: grad)
+        try:
+            loss = MMRelu.apply(x, w).sum()
+            with self.assertRaisesRegex(RuntimeError, "backward hooks"):
+                apply_epilogue_fusion(
+                    loss,
+                    RULES,
+                    accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+                )
+        finally:
+            handle.remove()
 
     def test_unregistered_pair_not_fused(self):
         self.assertNotIn(
