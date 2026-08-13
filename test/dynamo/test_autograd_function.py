@@ -682,11 +682,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_weird_b: "f32[]", L_weird_c: "f32[]", L_x_: "f32[]", L_z_: "f32[]"):
-        l_weird_b = L_weird_b
-        l_weird_c = L_weird_c
+    def forward(self, L_x_: "f32[]", L_z_: "f32[]", L_weird_b: "f32[]", L_weird_c: "f32[]"):
         l_x_ = L_x_
         l_z_ = L_z_
+        l_weird_b = L_weird_b
+        l_weird_c = L_weird_c
 
         bwd_body_0 = self.bwd_body_0
         fwd_body_0 = self.fwd_body_0
@@ -1203,9 +1203,9 @@ class GraphModule(torch.nn.Module):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_weight_: "f32[4, 3]", L_x_: "f32[5, 3]"):
-        l_weight_ = L_weight_
+    def forward(self, L_x_: "f32[5, 3]", L_weight_: "f32[4, 3]"):
         l_x_ = L_x_
+        l_weight_ = L_weight_
 
         bwd_body_0 = self.bwd_body_0
         fwd_body_0 = self.fwd_body_0
@@ -1895,7 +1895,7 @@ class GraphModule(torch.nn.Module):
             ),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[s17, 8]", s77: "Sym(s17)", L_y_: "f32[s17, 8]", s17: "Sym(s17)"):
+    def forward(self, s77: "Sym(s17)", L_x_: "f32[s17, 8]", s17: "Sym(s17)", L_y_: "f32[s17, 8]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
@@ -2187,10 +2187,10 @@ class GraphModule(torch.nn.Module):
             ),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_input_data_values: "f32[4, 4]", L_module_b: "f32[4, 4]", L_x_: "f32[4, 4]"):
-        l_input_data_values = L_input_data_values
-        l_module_b = L_module_b
+    def forward(self, L_x_: "f32[4, 4]", L_module_b: "f32[4, 4]", L_input_data_values: "f32[4, 4]"):
         l_x_ = L_x_
+        l_module_b = L_module_b
+        l_input_data_values = L_input_data_values
 
         bwd_body_0 = self.bwd_body_0
         fwd_body_0 = self.fwd_body_0
