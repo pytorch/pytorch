@@ -13,7 +13,9 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification, IS_CI, IS_WINDOWS, run_tests, TestCase
+)
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write("torch.compile not supported on windows")
@@ -32,6 +34,8 @@ def count_philox_rand(gm, args, freq):
 
 
 class TestFunctionalizationRngOps(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_rand_like(self, dtype, device):
@@ -372,6 +376,8 @@ instantiate_device_type_tests(TestFunctionalizationRngOps, globals(), only_for=o
 
 
 class NegativeTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_on_cpu(self, dtype, device):
