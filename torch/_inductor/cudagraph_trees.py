@@ -2436,7 +2436,7 @@ class CUDAGraphTreeManager:
             return
 
         is_cuda_graph_recorded_tensor = self._get_cuda_graph_recorded_tensor_checker()
-        user_visible_storage_ptrs: set[int] = set()
+        user_visible_storage_ptrs: OrderedSet[int] = OrderedSet()
         if self.has_live_user_visible_output_cloning:
             for entries in self.current_node.path_user_visible_storage_groups:
                 for output_weakrefs, _tensor_weakrefs, _cached_tensors, idx in entries:

@@ -702,6 +702,8 @@ if HAS_CUDA_AND_TRITON:
                     out, state = compiled(inp, state)
                     self.assertEqual(out, expected_out)
                     self.assertEqual(state, expected_state)
+            self.assertTrue("cudagraph_skips" not in counters["inductor"])
+            self.assertEqual(self.get_manager().path_state, ExecutionState.EXECUTION)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
