@@ -73,7 +73,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_SANDCASTLE,
     parametrize,
-    requires_cuda_p2p_access,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
@@ -7646,7 +7645,6 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
-@requires_cuda_p2p_access()
 @unittest.skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
 class SymmMemCftHandleTest(MultiProcessTestCase):
     """Host-side NCCL CFT logical-endpoint handles exposed on _SymmetricMemory.
@@ -7677,6 +7675,17 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
         return torch.device("cuda", self.rank)
 
     def _init_process(self):
+        # Checked here rather than with a class decorator: the p2p probe calls
+        # into torch.cuda, and at class-definition time that would initialize a
+        # CUDA context on the main process, which this file asserts against.
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        for peer in range(self.world_size):
+            if peer == self.rank:
+                continue
+            if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
+                raise SkipTest("Test requires p2p access")
+
         torch.cuda.set_device(self.device)
         pg_opts = dist.ProcessGroupNCCL.Options()
         # ncclHostCftFallback: create the CFT logical endpoints if the hardware
