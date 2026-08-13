@@ -1744,6 +1744,7 @@ def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
             return self._test_comprehensive(device, dtype, op)
 
     # TrackedInputIter hashes the test qualname to seed OpInfo sample inputs.
+    # Keep the seed stable after moving this class into a factory.
     TestInductorOpInfo.test_comprehensive.__qualname__ = (
         "TestInductorOpInfo.test_comprehensive"
     )
