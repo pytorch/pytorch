@@ -147,6 +147,45 @@ def get_device(args, kwargs):
     return None
 
 
+def _is_privateuse1_device(device: str) -> bool:
+    """Check if *device* is the single registered PrivateUse1 backend.
+
+    Returns True when *device* matches the PrivateUse1 backend name (e.g.
+    ``"npu"``) that ``torch_npu`` registered via
+    ``torch._C._register_privateuse1_backend()``.  This is the portable way
+    to detect an out-of-tree backend: it relies on PyTorch's own registration
+    mechanism rather than hardcoding any backend name or guessing from the
+    device interface table.
+    """
+    privateuse1_name = torch._C._get_privateuse1_backend_name()
+    return privateuse1_name != "" and device == privateuse1_name
+
+
+def _privateuse1_save_rng_state(op, *args, **kwargs):
+    """run_and_save semantics for a PrivateUse1 backend.
+
+    The backend device module (e.g. ``torch.npu``) is resolved through the
+    same ``torch._C._get_privateuse1_backend_name()`` mechanism that the
+    rest of PyTorch uses for PrivateUse1 dispatch, so no backend name is
+    hardcoded.  The caller must verify that ``get_device(args, kwargs)``
+    matches this backend name beforehand.
+    """
+    device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
+    return device_mod.get_rng_state(), op(*args, **kwargs)
+
+
+def _privateuse1_run_with_rng_state(rng_state, op, *args, **kwargs):
+    """run_with semantics for a PrivateUse1 backend: set/restore RNG state."""
+    device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
+    current_state = device_mod.get_rng_state()
+    device_mod.set_rng_state(rng_state)
+    try:
+        out = op(*args, **kwargs)
+    finally:
+        device_mod.set_rng_state(current_state)
+    return out
+
+
 def register_run_and_save_rng_state_op():
     class RunAndSaveRngState(HigherOrderOperator):
         def __init__(self):
@@ -189,10 +228,13 @@ def register_run_and_save_rng_state_op():
             "xpu": impl_xpu,
         }
         device = get_device(args, kwargs)
-        if device not in impl_map:
-            raise AssertionError(f"Backend not supported for {device}")
-        impl = impl_map[device]
-        return impl(op, *args, **kwargs)
+        if device in impl_map:
+            return impl_map[device](op, *args, **kwargs)
+        # PrivateUse1 backends (e.g. "npu") are detected via PyTorch's own
+        # registration mechanism rather than hardcoded.
+        if _is_privateuse1_device(device):
+            return _privateuse1_save_rng_state(op, *args, **kwargs)
+        raise AssertionError(f"Backend not supported for {device}")
 
     @register_fake(run_and_save_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(op, *args, **kwargs):
@@ -283,10 +325,11 @@ def register_run_with_rng_state_op():
             "xpu": impl_xpu,
         }
         device = get_device(args, kwargs)
-        if device not in impl_map:
-            raise AssertionError(f"Backend not supported for {device}")
-        impl = impl_map[device]
-        return impl(rng_state, op, *args, **kwargs)
+        if device in impl_map:
+            return impl_map[device](rng_state, op, *args, **kwargs)
+        if _is_privateuse1_device(device):
+            return _privateuse1_run_with_rng_state(rng_state, op, *args, **kwargs)
+        raise AssertionError(f"Backend not supported for {device}")
 
     @register_fake(run_with_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
