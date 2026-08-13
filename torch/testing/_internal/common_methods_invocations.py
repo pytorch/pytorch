@@ -18201,7 +18201,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+           decorators=[onlyCPU, skipCPUIfNoLapack],
            ),
 
     UnaryUfuncInfo('rad2deg',
