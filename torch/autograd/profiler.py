@@ -57,6 +57,10 @@ __all__ = [
     "MemRecordsAcc",
 ]
 
+# libkineto's name for ActivityType::OVERHEAD, as returned by
+# KinetoEvent.activity_type().
+_OVERHEAD_ACTIVITY_TYPE = "overhead"
+
 try:
     # Available in Python >= 3.2
     from contextlib import ContextDecorator as _ContextDecorator
@@ -764,7 +768,18 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                frontend_function_events.append(fe)
+                # Profiler OVERHEAD activities (e.g. CUPTI "Buffer Flush" /
+                # "Lazy Function Loading", XPU "Instrumentation") account for the
+                # profiler's own host-side cost. They are reported with no device
+                # (deviceId is hardcoded to -1 by both the CUPTI and XPU handlers),
+                # so they never own device time. They do carry no correlation id of
+                # their own though, so they inherit the enclosing op's id, and
+                # associating them below would hand each of them that op's kernels,
+                # multiplying the reported device time by the number of overhead
+                # records. Reported at
+                # https://github.com/intel/torch-xpu-ops/issues/4824
+                if fe.activity_type != _OVERHEAD_ACTIVITY_TYPE:
+                    frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"

@@ -3019,6 +3019,47 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 "Error: No kernel events in trace contained grid/block metadata",
             )
 
+    @onlyAccelerator
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_overhead_activities_own_no_device_time(self, device):
+        """OVERHEAD rows account for host-side profiler cost, never device time.
+
+        Overhead activities (CUPTI "Lazy Function Loading" / "Activity Buffer
+        Request", XPU "Instrumentation") carry no correlation id of their own, so
+        they inherit the enclosing op's. They must stay out of the kernel
+        association, otherwise each overhead record claims that op's kernels and
+        the reported device time is multiplied by the number of records.
+        """
+        device_type = device.split(":")[0]
+        # No warm-up iteration: the first traced launches are the ones that emit
+        # overhead records.
+        with profile(activities=get_profiler_activities(device_type)) as prof:
+            self.payload(device=device)
+
+        events = prof.events()
+        device_time_total = sum(
+            e.self_device_time_total for e in events if e.device_type != DeviceType.CPU
+        )
+        for e in events:
+            if e.activity_type == "overhead":
+                self.assertEqual(
+                    e.self_device_time_total,
+                    0,
+                    lambda msg: f"{msg}\noverhead row '{e.name}' claims self device time",
+                )
+                self.assertEqual(
+                    e.device_time_total,
+                    0,
+                    lambda msg: f"{msg}\noverhead row '{e.name}' claims device time",
+                )
+            # A single row can never own more device time than the whole trace
+            # spent on device.
+            self.assertLessEqual(
+                e.self_device_time_total,
+                device_time_total,
+                lambda msg: f"{msg}\nrow '{e.name}' over-reports device time",
+            )
+
 
 instantiate_device_type_tests(TestProfilerDevice, globals())
 
