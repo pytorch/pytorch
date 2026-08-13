@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
-    TEST_CUDA
+    TEST_CUDA, skipIfNoFlyDSL
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -23064,6 +23064,7 @@ if "flydsl" in dsl_ops_by_dsl:
             sample_inputs_func=sample_inputs_rms_norm_flydsl,
             decorators=[
                 onlyCUDA,
+                skipIfNoFlyDSL,
                 skipCUDAIf(
                     not (
                         TEST_CUDA
