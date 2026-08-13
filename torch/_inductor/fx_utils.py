@@ -92,6 +92,15 @@ def _is_fake_tensor_same(
     be supplied by users of this function."""
 
     def is_intlist_same(new, old):
+        # sym_eq builds a symbolic conjunction and statically_known_true then
+        # evaluates it, which is a lot of work for the common case where the
+        # two sizes/strides are the very same objects. Identity, or equality
+        # between concrete ints, already implies equality.
+        if len(new) == len(old) and all(
+            a is b or (type(a) is int and type(b) is int and a == b)
+            for a, b in zip(new, old)
+        ):
+            return True
         return statically_known_true(sym_eq(new, old))
 
     if type(new) is not type(old):
@@ -251,8 +260,11 @@ def _extract_subgraphs_and_args(
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
         # Use the same slice twice to account for cases where only a single slice is
-        # input.
-        yield args[0], (*(a[0] for a in args[1]), *(a[0] for a in args[1]), *args[2])
+        # input. first_slice_copy tolerates a zero-length scan dim.
+        from torch._higher_order_ops.utils import first_slice_copy
+
+        sliced = [first_slice_copy(a) for a in args[1]]
+        yield args[0], (*sliced, *sliced, *args[2])
     elif node.target is torch.ops.higher_order.cond:
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
@@ -342,7 +354,10 @@ def _extract_subgraphs_and_args(
     elif node.target is torch.ops.higher_order.scan:
         # Scans accept a dim keyword, but the dimensions will be reordered so that at
         # this point we always scan over dim 0.
-        yield args[0], (*args[1], *(a[0] for a in args[2]), *args[3])
+        # first_slice_copy tolerates a zero-length scan dim.
+        from torch._higher_order_ops.utils import first_slice_copy
+
+        yield args[0], (*args[1], *(first_slice_copy(a) for a in args[2]), *args[3])
     elif node.target in (
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,
@@ -350,6 +365,11 @@ def _extract_subgraphs_and_args(
         subgraph_args = (*args[2], *args[3])
         yield args[0], subgraph_args
         yield args[1], subgraph_args
+    elif node.target is torch.ops.higher_order.switch:
+        # args: (index, [branch_gm_0, ...], operands)
+        subgraph_args = tuple(args[2])
+        for branch_gm in args[1]:
+            yield branch_gm, subgraph_args
     elif node.target is control_deps:
         if kwargs:
             raise AssertionError(

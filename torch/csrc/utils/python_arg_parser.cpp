@@ -119,7 +119,7 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "floor_divide_",
       "floor_divide_out",
       "_conj"}; // _conj needed because mul.Tensor backward calls it
-  return allowed.find(name) != allowed.end();
+  return allowed.contains(name);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -1545,7 +1545,7 @@ std::string FunctionSignature::toString() const {
     i++;
   }
   ss << ')';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 [[noreturn]] static void extra_args(

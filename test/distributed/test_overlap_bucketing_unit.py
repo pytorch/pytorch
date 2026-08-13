@@ -1300,7 +1300,7 @@ class TestCrossPGOverlap(InductorTestCase):
         last_mm = max(mm_positions)
         self.assertTrue(
             any(p < last_mm for p in rs_starts),
-            f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
+            lambda msg: f"{msg}\nOff-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
         )
 
     @torch._inductor.config.patch(
