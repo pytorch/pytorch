@@ -110,6 +110,7 @@ def read_resource_file(resource_file: str) -> str:
 
 class ApiTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
