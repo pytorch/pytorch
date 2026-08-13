@@ -795,7 +795,7 @@ namespace {
   // === No-pivot LU (compute_pivots=false) ===
   // Based on benchmarks across A100, H100, GB200 (~540 points).
   //
-  // batch <= 4: cusolver always (100-800x faster than cublas)
+  // batch <= 4: cuSOLVER
   // batch 5-16: threshold = 4096 * batch (all dtypes)
   // batch > 16:
   //   float32/complex64: threshold = 4096 * batch
@@ -817,22 +817,16 @@ namespace {
       return SolverBackend::CUSOLVER;
     }
 
-    const bool nopiv = !compute_pivots;
-
-    if (batch <= (nopiv ? 4 : 1)) {
-      // cuBLAS is optimized for batched inputs; at batch=1 it has no advantage.
-      // For nopiv, cuSOLVER's algorithm dominates cuBLAS batched
-      // by 100-800x for batch <= 4 across all sizes and dtypes.
-      return SolverBackend::CUSOLVER;
-    }
-
     int64_t threshold = 0;
-    if (nopiv) {
-      // No-pivot LU: cuSOLVER uses an algorithm that
-      // outperforms cuBLAS batched at moderate-to-large n. Two batch regimes:
+    if (!compute_pivots) {
+      // Batch regimes:
+      // batch <= 4 - cuSOLVER
       // batch 5-16 (cuBLAS batching advantage is modest) and batch > 16
       // (cuBLAS batching advantage is substantial, dtype-dependent).
-      if (batch <= 16) {
+      if (batch <= 4) {
+        return SolverBackend::CUSOLVER;
+      }
+      else if (batch <= 16) {
         threshold = 4096 * batch;
       } else {
         switch (dtype) {
@@ -848,35 +842,41 @@ namespace {
             threshold = 16384 * batch;
         }
       }
-    } else if (batch == 2) {
-      // Pivoted LU, batch <= 2: cuBLAS has minimal batching advantage - kernel
-      // launch overhead dominates. cuSOLVER is competitive at much smaller N,
-      // so lower thresholds suffice.
-      switch (dtype) {
-        case ScalarType::Float:
-        case ScalarType::ComplexFloat:
-          threshold = 8400 * batch;
-          break;
-        default:
-          // i.e. Double, ComplexDouble
-          threshold = 2200 * batch;
+    } else { // pivoted LU
+      if (batch == 1) {
+        // cuBLAS is optimized for batched inputs; at batch=1 it has no advantage.
+        return SolverBackend::CUSOLVER;
       }
-    } else {
-      // Pivoted LU, batch > 2: cuBLAS's batching advantage kicks in.
-      // For float64/complex128 this advantage grows super-linearly (cuBLAS
-      // stays flat while cuSOLVER scales linearly), captured by the
-      // batch * isqrt(batch) term.
-      switch (dtype) {
-        case ScalarType::Float:
-        case ScalarType::ComplexFloat:
-          threshold = 18600 * batch;
-          break;
-        case ScalarType::Double:
-          threshold = 16600 * batch * static_cast<int64_t>(std::sqrt(batch));
-          break;
-        default:
-          // i.e. ComplexDouble
-          threshold = 5200 * batch * static_cast<int64_t>(std::sqrt(batch));
+      if (batch == 2) {
+        // Pivoted LU, batch <= 2: cuBLAS has minimal batching advantage - kernel
+        // launch overhead dominates. cuSOLVER is competitive at much smaller N,
+        // so lower thresholds suffice.
+        switch (dtype) {
+          case ScalarType::Float:
+          case ScalarType::ComplexFloat:
+            threshold = 8400 * batch;
+            break;
+          default:
+            // i.e. Double, ComplexDouble
+            threshold = 2200 * batch;
+        }
+      } else {
+        // Pivoted LU, batch > 2: cuBLAS's batching advantage kicks in.
+        // For float64/complex128 this advantage grows super-linearly (cuBLAS
+        // stays flat while cuSOLVER scales linearly), captured by the
+        // batch * isqrt(batch) term.
+        switch (dtype) {
+          case ScalarType::Float:
+          case ScalarType::ComplexFloat:
+            threshold = 18600 * batch;
+            break;
+          case ScalarType::Double:
+            threshold = 16600 * batch * static_cast<int64_t>(std::sqrt(batch));
+            break;
+          default:
+            // i.e. ComplexDouble
+            threshold = 5200 * batch * static_cast<int64_t>(std::sqrt(batch));
+        }
       }
     }
 
