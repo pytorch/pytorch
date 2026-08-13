@@ -62,6 +62,7 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
+from torch.utils._triton import has_triton_reduction_ordering
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1416,7 +1417,7 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes, *, implicit=False):
+def expand(x, sizes, *, implicit=False, graph_fanout=False):
     # `implicit` is autograd-internal metadata (see aten::expand schema); it
     # does not affect the produced tensor, so the lowering ignores it. Without
     # this kwarg the lowering rejects graphs produced by dynamo autograd where
@@ -1443,12 +1444,17 @@ def expand(x, sizes, *, implicit=False):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # Broadcast loop reuse is not graph fanout; keep the graph-fanout
             # read-count heuristic from materializing cheap expanded producers.
+            # graph_fanout=True is for consumers that cannot hoist the broadcast
+            # load out of their loop: a reduction over the broadcast dim can, but
+            # a pointwise or scatter loop over the expanded size folds that dim
+            # into its own index space and so reloads x at every position.
             # In deterministic modes, preserve the old materialization boundary
             # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product,
-                graph_reuse=config.deterministic
+                graph_reuse=graph_fanout
+                or config.deterministic
                 or torch.are_deterministic_algorithms_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -4117,7 +4123,8 @@ def select_scatter(x, src, dim: int, index: int):
 
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
-    src = expand(unsqueeze(src, dim), x.get_size())
+    # inner_fn below loads src at every position of `dim`; see expand()
+    src = expand(unsqueeze(src, dim), x.get_size(), graph_fanout=True)
     src_loader = src.make_loader()
 
     def inner_fn(idx):
@@ -5033,7 +5040,9 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         None,
         check=check,
     )
-    values = expand(values, expected_vals_size)
+    # the Scatter below loads values at every position of expected_vals_size;
+    # see expand()
+    values = expand(values, expected_vals_size, graph_fanout=True)
     # all guards are set above during broadcast_tensors and expand
 
     device = self.get_device()
@@ -6340,9 +6349,12 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     window_size = h_kernel_max * w_kernel_max
-    if window_size > 25:
+    if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_avg_pool2d(x, output_size)
+
+    h_kernel_max = V.graph.sizevars.guard_int(h_kernel_max)
+    w_kernel_max = V.graph.sizevars.guard_int(w_kernel_max)
 
     def start_index(index, out_dim, inp_dim):
         return FloorDiv((index * inp_dim), out_dim)
@@ -7340,7 +7352,10 @@ def _make_reduction_inner(
 
 
 def make_reduction(
-    reduction_type: ReductionType, override_return_dtype=None
+    reduction_type: ReductionType,
+    override_return_dtype=None,
+    *,
+    strict_reduction: bool = False,
 ) -> Callable[..., TensorBox]:
     def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
@@ -7358,7 +7373,12 @@ def make_reduction(
             override_return_dtype=override_return_dtype,
             reduction_type=reduction_type,
         )
-        result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
+        result = Reduction.create(
+            reduction_type=reduction_type,
+            input_node=x,
+            strict_reduction=strict_reduction,
+            **kwargs,
+        )
         if isinstance(
             result.data.data,  # type: ignore[attr-defined, attr-type, union-attr]
             Reduction,
@@ -7883,14 +7903,82 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
+def _strict_reduction_layout_eligible(axis, dtype) -> bool:
+    current_node = V.graph.current_node
+    if (
+        current_node is None
+        or config.numerics != "strict"
+        or current_node.target not in (aten.sum.dim_IntList, aten.prod.dim_int)
+        or dtype is not None
+        or axis is None
+        or not has_triton_reduction_ordering()
+    ):
+        return False
+    dims = [axis] if isinstance(axis, int) else list(axis)
+    if len(dims) != 1:
+        return False
+
+    fx_input = current_node.args[0]
+    if not isinstance(fx_input, torch.fx.Node):
+        return False
+    value = fx_input.meta.get("val")
+    if not isinstance(value, torch.Tensor) or value.dtype not in {
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    }:
+        return False
+    if (
+        not value.is_cuda
+        or torch.version.hip is not None
+        or not is_triton(value.device)
+    ):
+        return False
+
+    dim = dims[0] + value.ndim if dims[0] < 0 else dims[0]
+    if not 0 <= dim < value.ndim:
+        return False
+    sizes = [convert_symint_to_expr(size) for size in value.shape]
+    strides = [convert_symint_to_expr(stride) for stride in value.stride()]
+    sizevars = V.graph.sizevars
+    outer = [
+        (size, stride)
+        for i, (size, stride) in enumerate(zip(sizes, strides))
+        if i != dim and not sizevars.statically_known_equals(size, 1)
+    ]
+    collapsible = all(
+        sizevars.statically_known_equals(slow_stride, fast_stride * fast_size)
+        for (_, slow_stride), (fast_size, fast_stride) in itertools.pairwise(outer)
+    )
+    if sizevars.statically_known_equals(sizes[dim], 1):
+        if not outer:
+            return sizevars.statically_known_equals(strides[0], 1) and all(
+                sizevars.statically_known_equals(stride, 0)
+                or sizevars.statically_known_equals(stride, 1)
+                for stride in strides[1:]
+            )
+        return collapsible and sizevars.statically_known_equals(outer[-1][1], 1)
+    if not sizevars.statically_known_equals(strides[dim], 1):
+        return False
+    if any(
+        not sizevars.statically_known_true(sympy.Gt(stride, 1)) for _, stride in outer
+    ):
+        return False
+    return collapsible
+
+
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("sum", override_return_dtype=dtype)
+    fn = make_reduction(
+        "sum", override_return_dtype=dtype, strict_reduction=strict_reduction
+    )
     return fn(x, axis, keepdims, dtype=dtype)
 
 
@@ -8024,12 +8112,15 @@ def cummin(x, axis=None):
 
 @register_lowering(aten.prod)
 def prod(x, axis=None, keepdims=False, *, dtype=None):
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("prod", override_return_dtype=dtype)
+    fn = make_reduction(
+        "prod", override_return_dtype=dtype, strict_reduction=strict_reduction
+    )
     return fn(x, axis, keepdims, dtype=dtype)
 
 

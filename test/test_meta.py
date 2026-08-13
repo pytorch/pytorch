@@ -2202,6 +2202,32 @@ class TestMeta(TestCase):
         self.assertEqual(cpu_output_dtype, meta_output_dtype)
         self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
 
+    def test_flash_attention_mixed_head_dim_metadata(self):
+        q_bshd = torch.empty(1, 128, 2, 192, device="meta", dtype=torch.float16)
+        k_bshd = torch.empty_like(q_bshd)
+        v_bshd = torch.empty(1, 128, 2, 128, device="meta", dtype=torch.float16)
+        q, k, v = (tensor.transpose(1, 2) for tensor in (q_bshd, k_bshd, v_bshd))
+
+        output = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
+        self.assertEqual(output.shape, v.shape)
+        self.assertEqual(output.stride(), v.stride())
+
+        expanded_q = q[:1, :1].expand(2, 4, -1, -1)
+        expanded_k = k[:1, :1].expand(2, 4, -1, -1)
+        expanded_v = v[:1, :1].expand(2, 4, -1, -1)
+        output = torch.ops.aten._scaled_dot_product_flash_attention(
+            expanded_q, expanded_k, expanded_v
+        )[0]
+        self.assertEqual(output.shape, expanded_v.shape)
+        self.assertEqual(output.stride(), (16384, 32768, 128, 1))
+
+        output = torch.ops.aten._flash_attention_forward(
+            q_bshd, k_bshd, v_bshd, None, None, 128, 128, 0.0, False, False
+        )[0]
+        self.assertEqual(output.shape, v_bshd.shape)
+        self.assertEqual(output.stride(), v_bshd.stride())
+
+
 class TestMetaKernelConv(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_convolution_backward_meta_kernel_channels_last(self):
