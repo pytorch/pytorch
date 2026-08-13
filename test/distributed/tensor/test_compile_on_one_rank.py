@@ -15,6 +15,7 @@ from torch.distributed.tensor.parallel import parallelize_module, RowwiseParalle
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_ACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
@@ -45,6 +46,8 @@ def extract_graph(fx_g, _, graph_cell):
 
 
 class TestCompileOnOneRank(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _assert_graphs_identical_across_ranks(self, local_graph_code):
         """Gather compiled graph code from all ranks and assert they are identical."""
         self.assertIsNotNone(local_graph_code, "Graph was not captured")
@@ -283,6 +286,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     accelerator, is refused (it could not run SPMD).
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dist_config.patch(compile_on_one_rank=True)
     def test_factory_device_replaced_with_current_device(self):
         gm = make_fx(_factory_from_input_device, tracing_mode="fake")(
@@ -466,6 +471,8 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         group as an op argument.
     Single process with a fake PG -- this is the failing precompile CI step.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()

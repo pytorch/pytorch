@@ -39,6 +39,7 @@ from torch.distributed.tensor.parallel import (
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     run_tests,
     skipIfHpu,
@@ -75,6 +76,8 @@ class DummyMLP(torch.nn.Module):
 
 
 class DTensorTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = self.build_device_mesh()
@@ -1008,6 +1011,8 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 
 
 class DTensorSubclassTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _make_dtensor(self, cls, mesh):
         base = DTensor.from_local(
             torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
@@ -1075,6 +1080,8 @@ class DTensorSubclassTest(DTensorTestBase):
 
 
 class DTensorMeshTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1519,6 +1526,8 @@ DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
 
 
 class TestDTensorPlacementTypes(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1588,6 +1597,8 @@ TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
 
 
 class TestDTensorSpec(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -1840,6 +1851,8 @@ TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
 
 class TestMixedPartialTypes(TestCase):
     """Test that mixed Partial reduce types are rejected by all DTensor APIs."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
