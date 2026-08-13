@@ -331,6 +331,53 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    @skip_if_lt_x_gpu(3)
+    @skip_if_rocm_multiprocess
+    def test_cuda_symmem_signal_pads_are_process_group_local(self) -> None:
+        self._init_process()
+
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        subgroup = dist.new_group([0, 2])
+        tensor = symm_mem.empty(64, device=self.device)
+        world_handle = symm_mem.rendezvous(tensor, group=dist.group.WORLD)
+        subgroup_handle = None
+        if self.rank in (0, 2):
+            subgroup_handle = symm_mem.rendezvous(tensor, group=subgroup)
+
+        dist.barrier()
+        if self.rank == 2:
+            subgroup_handle.put_signal(dst_rank=0)
+            torch.cuda.synchronize()
+        dist.barrier()
+
+        if self.rank == 0:
+            # Subgroup-local rank 1 and WORLD rank 1 both use slot 1. Verify the
+            # subgroup signal arrived without modifying WORLD's physical pad.
+            subgroup_slot = subgroup_handle.get_signal_pad(
+                0, (1,), torch.uint32, storage_offset=1
+            )
+            world_slot = world_handle.get_signal_pad(
+                0, (1,), torch.uint32, storage_offset=1
+            )
+            self.assertEqual(subgroup_slot.item(), 1)
+            self.assertEqual(world_slot.item(), 0)
+            subgroup_handle.wait_signal(src_rank=1, timeout_ms=60000)
+            torch.cuda.synchronize()
+
+        dist.barrier()
+        if self.rank == 1:
+            world_handle.put_signal(dst_rank=0)
+            torch.cuda.synchronize()
+        elif self.rank == 0:
+            world_handle.wait_signal(src_rank=1, timeout_ms=60000)
+            torch.cuda.synchronize()
+        dist.barrier()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @requires_cuda
     def test_allow_overlapping_devices(self) -> None:
         os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "1"
