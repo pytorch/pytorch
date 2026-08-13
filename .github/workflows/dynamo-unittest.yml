@@ -75,4 +75,5 @@ jobs:
       python-version: ${{ matrix.python-version }}
       compiler: clang21
       cuda-version: cpu
+      timeout-minutes: 360
     secrets: inherit
