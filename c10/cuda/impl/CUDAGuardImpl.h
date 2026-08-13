@@ -326,6 +326,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const DeviceIndex device_index,
       const std::string& handle_string) const override {
     TORCH_CHECK(
+        *event == nullptr,
+        "Event must be nullptr to reconstruct from IPC handle.");
+    TORCH_CHECK(
         handle_string.size() == CUDA_IPC_HANDLE_SIZE,
         "handle_string must match size CUDA_IPC_HANDLE_SIZE");
     cudaIpcEventHandle_t ipc_handle;
