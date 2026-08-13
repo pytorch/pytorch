@@ -1,11 +1,16 @@
 # mypy: allow-untyped-defs
 
 import torch
-from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
+from torch._C import (
+    _get_privateuse1_backend_name,
+    _register_privateuse_backend,
+    _rename_privateuse1_backend,
+)
 from torch.overrides import handle_torch_function, has_torch_function_unary
 
 
 __all__ = [
+    "register_backend",
     "rename_privateuse1_backend",
     "generate_methods_for_privateuse1_backend",
 ]
@@ -15,6 +20,7 @@ __all__ = [
 # error with torch.jit.script, so we use the global variable named
 # `_privateuse1_backend_name`.
 _privateuse1_backend_name = "privateuseone"
+_privateuse1_profiler_activity_name: str | None = None
 
 
 def _rename_profiler_activity(backend_name: str) -> None:
@@ -23,6 +29,11 @@ def _rename_profiler_activity(backend_name: str) -> None:
     from torch._C._profiler import ProfilerActivity
 
     alias = backend_name.upper()
+    global _privateuse1_profiler_activity_name
+    if _privateuse1_profiler_activity_name == alias:
+        return
+    _privateuse1_profiler_activity_name = alias
+
     setattr(ProfilerActivity, alias, ProfilerActivity.PrivateUse1)
 
     pu1 = ProfilerActivity.PrivateUse1
@@ -137,6 +148,39 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
     _rename_profiler_activity(backend_name)
     _rename_device_type(backend_name)
+
+
+def register_backend(backend_name: str, module=None) -> torch.device:
+    r"""
+    Register a private-use backend device name.
+
+    PyTorch exposes three private-use device slots for out-of-tree backends.
+    This API assigns ``backend_name`` to the first available slot and returns
+    the corresponding ``torch.device``. Calling it again with the same name is
+    idempotent and returns the same device.
+
+    Registering a backend does not select it as the current accelerator. Use
+    ``torch.accelerator.set_current_accelerator`` to opt in explicitly.
+
+    If ``module`` is provided, it is registered as the runtime module for the
+    backend with ``torch._register_device_module``.
+
+    Example::
+
+        >>> torch.utils.register_backend("foo")
+        device(type='foo')
+        >>> torch.device("foo")
+        device(type='foo')
+
+    """
+    device = _register_privateuse_backend(backend_name)
+    if _get_privateuse1_backend_name() == backend_name:
+        global _privateuse1_backend_name
+        _privateuse1_backend_name = backend_name
+        _rename_profiler_activity(backend_name)
+    if module is not None:
+        torch._register_device_module(backend_name, module)
+    return device
 
 
 def _check_register_once(module, attr) -> None:
