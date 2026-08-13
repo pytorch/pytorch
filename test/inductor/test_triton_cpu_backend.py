@@ -68,7 +68,6 @@ if HAS_CPU and TRITON_HAS_CPU:
             unittest.skip("Triton CPU: slow test")(getattr(CpuTritonTests, name)),
         )
 
-
     # TODO: support generating inductor backend subclasses in instantiate_device_type_tests
     def make_inductor_opinfo_triton_cpu_cls():
         OPINFO__INCLUDE_OPS = {"index_add"}
