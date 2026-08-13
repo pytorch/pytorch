@@ -19,7 +19,11 @@ from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -73,6 +77,8 @@ def mul_forward(X, scalar):  # no device mesh needed since we don't do collectiv
 
 
 class TestLocalMap(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -441,6 +447,8 @@ class TestLocalMap(DTensorTestBase):
 class TestLocalMapSpmdTypes(TestCase):
     """Single-process tests for local_map with spmd_types type checking."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     WORLD_SIZE = 2
 
     @classmethod
@@ -761,6 +769,8 @@ If the forward and backward layouts intentionally diverge in a way not represent
 class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
     """Multi-GPU tests for local_map with spmd_types type checking."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -1010,6 +1020,8 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestLocalMapSpmdTypesMesh(TestCase):
     """Tests for local_map spmd_types with multi-dimensional meshes."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     WORLD_SIZE = 4
 

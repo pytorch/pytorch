@@ -30,6 +30,7 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -65,6 +66,8 @@ def _fp8_all_gather(
 
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
@@ -651,6 +654,8 @@ class MicroPipelineTPTest(TestCase):
 
 @instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._inductor.config._micro_pipeline_tp = True

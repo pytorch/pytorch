@@ -57,7 +57,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfRocm,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -100,6 +105,8 @@ class SDPAWrapper(torch.nn.Module):
 
 
 class RingAttentionTest(DTensorTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return torch.cuda.device_count()
@@ -333,36 +340,6 @@ class RingAttentionTest(DTensorTestBase):
         torch.testing.assert_close(k.grad, cp_dk, atol=atol, rtol=rtol)
         torch.testing.assert_close(v.grad, cp_dv, atol=atol, rtol=rtol)
 
-    def test_is_causal_behavior(self) -> None:
-        _cp_options.enable_load_balance = False
-        self.assertEqual(
-            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
-            _CausalBehavior.NOT_IS_CAUSAL,
-        )
-
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
-
-        _cp_options.enable_load_balance = True
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
-
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
     @unittest.skipIf(
@@ -413,6 +390,40 @@ class RingAttentionTest(DTensorTestBase):
                     )
         finally:
             _cp_options.enable_load_balance = old_load_balance
+
+
+class TestRingAttentionUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_is_causal_behavior(self) -> None:
+        _cp_options.enable_load_balance = False
+        self.assertEqual(
+            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
+            _CausalBehavior.NOT_IS_CAUSAL,
+        )
+
+        ranks = [
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+        ]
+        for rank, iters in enumerate(ranks):
+            for i, behavior in enumerate(iters):
+                self.assertEqual(
+                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
+                    behavior,
+                )
+
+        _cp_options.enable_load_balance = True
+        ranks = [
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+        ]
+        for rank, iters in enumerate(ranks):
+            for i, behavior in enumerate(iters):
+                self.assertEqual(
+                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
+                    behavior,
+                )
 
 
 # Compile the flex_attention function
@@ -537,6 +548,8 @@ class FlexAttentionWrapper(torch.nn.Module):
 
 
 class CPFlexAttentionTest(DTensorTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -816,6 +829,8 @@ class CPFlexAttentionTest(DTensorTestBase):
 
 
 class TestCPCustomOps(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -847,6 +862,8 @@ class TestCPCustomOps(DTensorTestBase):
 
 
 class TestSharding(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1033,6 +1050,8 @@ class TestSharding(DTensorTestBase):
 class TestContextParallelStyle(DTensorTestBase):
     """Test suite for _ContextParallel.flex_input_fn argument handling"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1202,6 +1221,8 @@ class TestContextParallelStyle(DTensorTestBase):
 class TestContextParallelStyleSDPA(DTensorTestBase):
     """Test suite for _ContextParallel.sdpa_input_fn argument handling"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1349,6 +1370,8 @@ class PerDocumentHeadTailLoadBalancerTest(TestCase):
     sequence into contiguous, equal, per-rank chunks, so the balancer must lay out
     its indices rank-major (each rank's head+tail chunks of *every* document
     grouped together) for the contiguous cut to land on rank boundaries."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _causal_cost(doc_lengths: list[int]) -> list[int]:
