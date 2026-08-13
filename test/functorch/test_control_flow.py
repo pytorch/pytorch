@@ -6597,6 +6597,30 @@ class GraphModule(torch.nn.Module):
             ):
                 associative_scan(fct, x, 0)
 
+    def test_diff_tensor_meta_size_one_stride(self):
+        from torch._higher_order_ops.utils import (
+            check_meta_consistency,
+            diff_tensor_meta,
+        )
+        from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
+        # Same shape (3, 1, 4); strides differ only on the size-1 dim.
+        a = torch.empty_strided((3, 1, 4), (4, 4, 1))
+        b = torch.empty_strided((3, 1, 4), (4, 99, 1))
+        check_meta_consistency([a], [b], "lhs", "rhs", include_contiguity=False)
+
+        # Strides differ on non-unit dims -> must be reported, with real strides.
+        c = torch.empty_strided((3, 1, 4), (4, 1, 1))
+        d = torch.empty_strided((3, 1, 4), (1, 7, 3))
+        diffs = diff_tensor_meta(
+            _extract_tensor_metadata(c),
+            _extract_tensor_metadata(d),
+            check_grad=False,
+        )
+        stride_diffs = [s for s in diffs if s.startswith("'stride:")]
+        self.assertEqual(len(stride_diffs), 1)
+        self.assertEqual(stride_diffs[0], "'stride: (4, 1, 1) vs (1, 7, 3)'")
+
     @unittest.skipIf(not SM70OrLater, "triton")
     def test_associative_scan_wrong_pytree(self):
         def fct_wrong_pytree(x, y):
@@ -6656,6 +6680,66 @@ class GraphModule(torch.nn.Module):
         grads = torch.autograd.grad(result.sum(), xs)
         grads_ref = torch.autograd.grad(result_ref.sum(), xs)
         self.assertEqual(grads, grads_ref)
+
+    def test_associative_scan_autograd_differently_shaped_leaves(self):
+        # combine_fn is applied leaf-wise, so leaves are gradient-independent and
+        # may differ in their non-scan dims (only the scan dim must agree). The
+        # backward groups same-shaped leaves for its vmap; this exercises the case
+        # where the groups are non-trivial (two distinct shapes).
+        def combine_fn(a, b):
+            xa1, xb1 = a
+            xa2, xb2 = b
+            return (xa1 * xa2, xb1 * xb2)
+
+        xa = torch.randn(4, 3, dtype=torch.float64, requires_grad=True)
+        xb = torch.randn(4, 5, dtype=torch.float64, requires_grad=True)
+        result = associative_scan(combine_fn, (xa, xb), 0)
+        result_ref = _fake_associative_scan(combine_fn, (xa, xb), 0)
+        self.assertEqual(result, result_ref)
+
+        loss = (result[0] ** 2).sum() + (result[1] ** 2).sum()
+        loss_ref = (result_ref[0] ** 2).sum() + (result_ref[1] ** 2).sum()
+        grads = torch.autograd.grad(loss, (xa, xb))
+        grads_ref = torch.autograd.grad(loss_ref, (xa, xb))
+        self.assertEqual(grads, grads_ref)
+
+        # Each grad must own its storage (unbind returns views into the stacked
+        # buffer, so backward calls contiguous()); grads must not share storage.
+        for g in grads:
+            self.assertTrue(g.is_contiguous())
+        self.assertNotEqual(
+            grads[0].untyped_storage().data_ptr(),
+            grads[1].untyped_storage().data_ptr(),
+        )
+
+    def test_associative_scan_unequal_scan_length_raises(self):
+        # The scan advances all leaves in lockstep along the scan dim, so leaves
+        # with differing sizes along that dim are rejected up-front. Non-scan dims
+        # may still differ (covered by the test above).
+        def combine_fn(a, b):
+            xa1, xb1 = a
+            xa2, xb2 = b
+            return (xa1 * xa2, xb1 * xb2)
+
+        xa = torch.randn(4, 3)
+        xb = torch.randn(6, 3)
+        with self.assertRaisesRegex(ValueError, "same size along the scan dim"):
+            associative_scan(combine_fn, (xa, xb), 0)
+
+    def test_associative_scan_autograd_traced(self):
+        # The traced/compiled backward must not freeze a fixed-rank permute into
+        # the combine subgraph: replaying the make_fx graph feeds leaves with an
+        # extra leading scan-batch dim, so a frozen permute would fail with a rank
+        # mismatch. Guards the _PointwiseVmapCombineFnWrapper fast path.
+        def f(x):
+            o = associative_scan(lambda a, b: a * b, x, 0)
+            return torch.autograd.grad((o**2).sum(), (x,))
+
+        x = torch.randn(5, 3, dtype=torch.float64, requires_grad=True)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        traced = gm(x)
+        eager = f(x)
+        self.assertEqual(traced, eager)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
