@@ -1496,7 +1496,7 @@ jobs:
 
   manywheel-cpu-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1580,7 +1580,7 @@ jobs:
 
   manywheel-cuda-cu126-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1664,7 +1664,7 @@ jobs:
 
   manywheel-cuda-cu130-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1748,7 +1748,7 @@ jobs:
 
   manywheel-cuda-cu132-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1832,7 +1832,7 @@ jobs:
 
   manywheel-cuda-cu134-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1916,7 +1916,7 @@ jobs:
 
   manywheel-rocm-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -2056,7 +2056,7 @@ jobs:
 
   manywheel-xpu-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -2257,7 +2257,7 @@ jobs:
 
   libtorch-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read

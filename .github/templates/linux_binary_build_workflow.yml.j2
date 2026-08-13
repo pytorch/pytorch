@@ -561,7 +561,7 @@ jobs:
 
   !{{ job['name'] }}:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     permissions:
       id-token: write
       contents: read
@@ -671,7 +671,7 @@ jobs:
 
   libtorch-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     permissions:
       id-token: write
       contents: read

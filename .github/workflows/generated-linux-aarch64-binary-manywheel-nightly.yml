@@ -1046,7 +1046,7 @@ jobs:
 
   manywheel-cpu-aarch64-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1130,7 +1130,7 @@ jobs:
 
   manywheel-cuda-aarch64-cu126-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1214,7 +1214,7 @@ jobs:
 
   manywheel-cuda-aarch64-cu130-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1298,7 +1298,7 @@ jobs:
 
   manywheel-cuda-aarch64-cu132-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -1382,7 +1382,7 @@ jobs:
 
   manywheel-cuda-aarch64-cu134-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
