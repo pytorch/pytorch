@@ -67,6 +67,12 @@ def import_async_collective_tensor_type() -> type["AsyncCollectiveTensor"]:
     return AsyncCollectiveTensor
 
 
+def is_async_collective_tensor_type(pytype: type) -> bool:
+    """Whether pytype is the AsyncCollectiveTensor type (False if not loaded)."""
+    act = get_loaded_async_collective_tensor_type()
+    return act is not None and pytype is act
+
+
 def partial_flatten_asdict(obj: object) -> Any:
     if dataclasses.is_dataclass(obj):
         return {

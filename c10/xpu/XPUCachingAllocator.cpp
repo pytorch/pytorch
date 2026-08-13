@@ -505,6 +505,9 @@ class RingBuffer {
   std::vector<T>* alloc_trace;
 };
 
+static char SHAREABLE_HANDLE_VERSION = 1;
+enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
+
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -526,13 +529,29 @@ class DeviceCachingAllocator {
   RecordContext record_context_ = RecordContext::NEVER;
   RingBuffer<TraceEntry> alloc_buffer;
   std::unordered_set<TraceEntry::Action> skip_actions_list;
+
+  // Active pool-diversion scopes.
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
-      captures_underway;
+      allocation_scopes_;
+
+  // Count of in-progress XPU graph captures on this device.
+  int num_active_captures_ = 0;
+
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
       graph_pools;
   // Pools no longer referenced by any graph.
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
+
+  // Blocks freed during XPU graph capture whose stream_uses are non-empty.
+  // Deferred because querying event status are illegal during graph recording.
+  // The owning graph pool is handled in endAllocateToPool; any remaining
+  // deferred blocks are drained once allocator maintenance runs outside
+  // capture.
+  ska::flat_hash_set<Block*> deferred_blocks;
+
+  // Tracks which stream uses on a block were recorded during capture.
+  std::unordered_map<Block*, stream_set> block_to_xpugraph_stream_uses;
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
@@ -650,6 +669,7 @@ class DeviceCachingAllocator {
   }
 
   void process_events(const std::shared_ptr<GatheredContext>& context) {
+    insert_events_deferred_until_no_capture(context);
     using namespace sycl::info;
     for (auto it = xpu_events.begin(); it != xpu_events.end();) {
       while (!it->second.empty()) {
@@ -694,8 +714,8 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, sycl::queue* queue) {
-    if (C10_UNLIKELY(!captures_underway.empty())) {
-      for (auto& entry : captures_underway) {
+    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+      for (auto& entry : allocation_scopes_) {
         // lookup for mempool id matching current capture graph
         if (entry.second(queue)) {
           auto it1 = graph_pools.find(entry.first);
@@ -975,6 +995,10 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context,
       PrivatePool* pool = nullptr) {
+    // This function syncs (event.wait()), so graph capture must not be
+    // underway.
+    TORCH_INTERNAL_ASSERT(!is_capture_context());
+    insert_events_deferred_until_no_capture(context);
     for (auto& xe : xpu_events) {
       for (auto& e : xe.second) {
         auto event = e.first;
@@ -1155,7 +1179,7 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id) {
     bool streams_synced = false;
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
-        captures_underway.empty()) {
+        !is_capture_context()) {
       synchronize_and_free_events(context);
       // See Note [Safe to Free Blocks on BlockPool]
       c10::xpu::syncStreamsOnDevice(device_index);
@@ -1316,6 +1340,48 @@ class DeviceCachingAllocator {
     }
   }
 
+  // Returns true iff the calling thread's current stream is actively recording
+  // into a XPU graph.
+  bool is_capture_context() const {
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      return false;
+    }
+    return xpu::getCurrentXPUStream(device_index).is_capturing();
+  }
+
+  // Removes stream uses that were recorded onto `block` during capture.
+  void remove_xpugraph_stream_uses(Block* block) {
+    auto it = block_to_xpugraph_stream_uses.find(block);
+    if (it == block_to_xpugraph_stream_uses.end()) {
+      return;
+    }
+    for (const auto& s : it->second) {
+      block->stream_uses.erase(s);
+    }
+    block_to_xpugraph_stream_uses.erase(it);
+  }
+
+  // handle deferred event which is not used by xpugraph
+  void insert_events_deferred_until_no_capture(
+      const std::shared_ptr<GatheredContext>& context) {
+    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+      for (auto* block : deferred_blocks) {
+        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        // Strip stream uses added during capture;
+        remove_xpugraph_stream_uses(block);
+        if (block->stream_uses.empty()) {
+          free_block(block, context);
+        } else {
+          insert_events(block);
+          if (block->event_count == 0) {
+            free_block(block, context);
+          }
+        }
+      }
+      deferred_blocks.clear();
+    }
+  }
+
   std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
     std::vector<Block*> blocks;
     for (Block* b : active_blocks) {
@@ -1384,7 +1450,7 @@ class DeviceCachingAllocator {
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(captures_underway.empty())) {
+    if (C10_LIKELY(!is_capture_context())) {
       process_events(context);
     }
     size_t size = round_size(orig_size);
@@ -1494,7 +1560,11 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_allocated);
 
     if (!block->stream_uses.empty()) {
-      insert_events(block);
+      if (C10_UNLIKELY(is_capture_context())) {
+        deferred_blocks.insert(block);
+      } else {
+        insert_events(block);
+      }
     } else {
       free_block(block, context);
     }
@@ -1512,7 +1582,12 @@ class DeviceCachingAllocator {
     if (stream.queue() == *block->queue) {
       return;
     }
-    block->stream_uses.insert(stream);
+    const bool inserted = block->stream_uses.insert(stream).second;
+    if (C10_UNLIKELY(is_capture_context())) {
+      if (inserted) {
+        block_to_xpugraph_stream_uses[block].insert(stream);
+      }
+    }
   }
 
   void emptyCache(MempoolId_t mempool_id) {
@@ -1767,6 +1842,38 @@ class DeviceCachingAllocator {
     return it->second->use_count;
   }
 
+  ShareableHandle shareIpcHandle(Block* block) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+#ifdef _WIN32
+    TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
+#endif
+    std::ostringstream ss;
+    ss.put(SHAREABLE_HANDLE_VERSION);
+    ptrdiff_t offset = 0;
+    TORCH_CHECK(
+        !block->expandable_segment,
+        "expandable segments are not supported for IPC sharing.");
+    ss.put(SHAREABLE_XPU_MALLOC);
+    Block* base_block = block;
+    while (base_block->prev) {
+      base_block = base_block->prev;
+    }
+    offset = static_cast<const char*>(block->ptr) -
+        static_cast<const char*>(base_block->ptr);
+    sycl::ext::oneapi::experimental::ipc_memory::handle handle =
+        sycl::ext::oneapi::experimental::ipc_memory::get(
+            base_block->ptr, c10::xpu::get_device_context());
+    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
+        handle.data();
+    TORCH_INTERNAL_ASSERT(
+        handle_data.size() <= std::numeric_limits<char>::max(),
+        "IPC handle size exceeds maximum allowed size.");
+    ss.put(static_cast<char>(handle_data.size()));
+    ss.write(
+        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+    return ShareableHandle{.offset = offset, .handle = ss.str()};
+  }
+
   // Called by XPUGraph::capture_begin
   void beginAllocateToPool(
       MempoolId_t mempool_id,
@@ -1774,26 +1881,76 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
     auto not_found = std::all_of(
-        captures_underway.begin(),
-        captures_underway.end(),
+        allocation_scopes_.begin(),
+        allocation_scopes_.end(),
         [&](const auto& entry) { return entry.first != mempool_id; });
     TORCH_CHECK(
         not_found, "beginAllocateToPool: already recording to mempool_id");
-    captures_underway.emplace_back(mempool_id, std::move(filter));
+    allocation_scopes_.emplace_back(mempool_id, std::move(filter));
   }
 
   // Called by XPUGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
+    // Outside mutex to avoid deadlocks.
+    auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (!deferred_blocks.empty()) {
+      auto pool_it = graph_pools.find(mempool_id);
+      if (pool_it != graph_pools.end()) {
+        auto* private_pool = pool_it->second.get();
+        std::vector<Block*> blocks_to_erase;
+        for (auto* block : deferred_blocks) {
+          if (block->pool->owner_PrivatePool == private_pool) {
+            // handle deferred blocks belonging to the pool when capture ends
+            remove_xpugraph_stream_uses(block);
+            if (block->stream_uses.empty()) {
+              // free if only stream uses are from capture; otherwise insert
+              // events to track pre-capture stream uses and free when events
+              // complete.
+              free_block(block, context);
+            } else {
+              insert_events(block);
+              if (block->event_count == 0) {
+                free_block(block, context);
+              }
+            }
+            blocks_to_erase.push_back(block);
+          }
+        }
+        for (auto* b : blocks_to_erase) {
+          deferred_blocks.erase(b);
+        }
+      }
+    }
 
     auto it = std::find_if(
-        captures_underway.begin(),
-        captures_underway.end(),
+        allocation_scopes_.begin(),
+        allocation_scopes_.end(),
         [&](const auto& entry) { return entry.first == mempool_id; });
     TORCH_INTERNAL_ASSERT(
-        it != captures_underway.end(),
+        it != allocation_scopes_.end(),
         "endAllocatePool: not currently recording to mempool_id");
-    captures_underway.erase(it);
+    allocation_scopes_.erase(it);
+  }
+
+  // Called by XPUGraph::capture_begin after begin_recording succeeds. Tracks
+  // real captures separately from the pool-routing list allocation_scopes_, so
+  // that allocator paths gated on "is a capture in progress" can distinguish a
+  // real capture (where event queries are illegal) from a private mempool
+  // diversion (where they are fine). Assumes begin/end for one capture are not
+  // racing each other.
+  void markCaptureBegin() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    num_active_captures_++;
+  }
+
+  // Called by XPUGraph::capture_end after end_recording.
+  void markCaptureEnd() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(
+        num_active_captures_ > 0,
+        "markCaptureEnd called with no captures in progress");
+    num_active_captures_--;
   }
 
   // Called by XPUGraph::reset and MemPool::~MemPool()
@@ -1816,6 +1973,58 @@ class NativeCachingAllocator : public XPUAllocator {
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
   c10::ApproximateClockToUnixTimeConverter clock_converter;
+
+  // IPC handle cache: maps a shareable handle string to its opened device
+  // pointer, ensuring each handle is opened at most once per process.
+  struct MemHandleCacheEntry {
+    MemHandleCacheEntry(c10::DeviceIndex device, std::string& handle) {
+#ifdef _WIN32
+      TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
+#endif
+      std::istringstream ss(handle);
+      auto version = ss.get();
+      TORCH_CHECK(
+          version <= SHAREABLE_HANDLE_VERSION,
+          "received sharable handle from a future version of torch that this version does not know how to handle.");
+      int type = ss.get();
+      TORCH_CHECK(
+          type == SHAREABLE_XPU_MALLOC,
+          "unexpected or illformed shareable handle type.");
+      auto handle_size = static_cast<size_t>(ss.get());
+      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
+          handle_size);
+      ss.read(
+          reinterpret_cast<char*>(handle_data.data()),
+          static_cast<std::streamsize>(handle_size));
+
+      xpu_ipc_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
+          handle_data,
+          c10::xpu::get_device_context(),
+          c10::xpu::get_raw_device(device));
+    }
+
+    // clear() must be called explicitly to release IPC resources. Using a
+    // destructor would risk calling ipc_memory::close after the SYCL runtime
+    // has already shut down during process exit.
+    void clear() {
+      if (xpu_ipc_ptr) {
+        sycl::ext::oneapi::experimental::ipc_memory::close(
+            xpu_ipc_ptr, c10::xpu::get_device_context());
+        xpu_ipc_ptr = nullptr;
+      }
+    }
+
+    void* ptr() {
+      return xpu_ipc_ptr;
+    }
+
+    std::weak_ptr<void> wp;
+
+   private:
+    void* xpu_ipc_ptr{nullptr};
+  };
+  alignas(hardware_destructive_interference_size) std::mutex ipc_mutex;
+  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipc_handle_cache;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -2046,6 +2255,44 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
+  ShareableHandle shareIpcHandle(void* ptr) {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(block, "invalid device pointer: ", ptr);
+    return device_allocators[block->device]->shareIpcHandle(block);
+  }
+
+  std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+    std::lock_guard<std::mutex> lock(ipc_mutex);
+
+    auto iter = ipc_handle_cache.find(handle);
+    if (iter != ipc_handle_cache.end()) {
+      auto devptr = iter->second.wp.lock();
+      TORCH_INTERNAL_ASSERT(
+          devptr,
+          "ipc_handle_cache entry found but shared_ptr already expired.");
+      return devptr;
+    }
+    c10::DeviceIndex curr_device = c10::xpu::current_device();
+    auto inserted = ipc_handle_cache.insert(
+        iter, {handle, MemHandleCacheEntry(curr_device, handle)});
+    auto sp = std::shared_ptr<void>(
+        inserted->second.ptr(), [handle, this](void* ptr) {
+          std::unique_lock<std::mutex> deleter_lock(ipc_mutex);
+
+          auto it = ipc_handle_cache.find(handle);
+          TORCH_INTERNAL_ASSERT(
+              it != ipc_handle_cache.end(),
+              "ipc_handle_cache entry not found in deleter.");
+          auto entry = std::move(it->second);
+          ipc_handle_cache.erase(it);
+
+          deleter_lock.unlock();
+          entry.clear();
+        });
+    inserted->second.wp = sp;
+    return sp;
+  }
+
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -2067,6 +2314,16 @@ class NativeCachingAllocator : public XPUAllocator {
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     device_allocators[device]->endAllocateToPool(mempool_id);
+  }
+
+  void markCaptureBegin(c10::DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->markCaptureBegin();
+  }
+
+  void markCaptureEnd(c10::DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->markCaptureEnd();
   }
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2133,6 +2390,14 @@ SnapshotInfo snapshot(MempoolId_t mempool_id) {
   return native_allocator.snapshot(mempool_id);
 }
 
+ShareableHandle shareIpcHandle(void* ptr) {
+  return native_allocator.shareIpcHandle(ptr);
+}
+
+std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+  return native_allocator.getIpcDevPtr(std::move(handle));
+}
+
 void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
@@ -2152,6 +2417,14 @@ void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.endAllocateToPool(device, mempool_id);
 }
 
+void markCaptureBegin(c10::DeviceIndex device) {
+  return native_allocator.markCaptureBegin(device);
+}
+
+void markCaptureEnd(c10::DeviceIndex device) {
+  return native_allocator.markCaptureEnd(device);
+}
+
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.releasePool(device, mempool_id);
 }
@@ -2161,63 +2434,3 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
-
-namespace c10::xpu {
-
-// uid_ is incremented when a user creates a MemPool,
-//
-// uuid_ is incremented when XPUGraph creates a MemPool
-// as a result of a user not providing a pool.
-
-std::atomic<CaptureId_t> MemPool::uid_{1};
-std::atomic<CaptureId_t> MemPool::uuid_{1};
-
-MemPool::MemPool(
-    XPUCachingAllocator::XPUAllocator* allocator,
-    bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
-  device_ = c10::xpu::current_device();
-  XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
-  if (use_on_oom) {
-    // XPU doesn't support use_on_oom yet
-    TORCH_WARN(
-        "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
-  }
-}
-
-MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
-  XPUCachingAllocator::releasePool(device_, id_);
-  c10::xpu::XPUCachingAllocator::emptyCache(id_); // release cached blocks
-}
-
-MempoolId_t MemPool::id() {
-  return id_;
-}
-
-XPUCachingAllocator::XPUAllocator* MemPool::allocator() {
-  return allocator_;
-}
-
-int MemPool::use_count() {
-  return XPUCachingAllocator::getPoolUseCount(device_, id_);
-}
-
-c10::DeviceIndex MemPool::device() {
-  return device_;
-}
-
-MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
-}
-
-} // namespace c10::xpu
