@@ -6726,6 +6726,7 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(ValueError, "same size along the scan dim"):
             associative_scan(combine_fn, (xa, xb), 0)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     def test_associative_scan_autograd_traced(self):
         # The traced/compiled backward must not freeze a fixed-rank permute into
         # the combine subgraph: replaying the make_fx graph feeds leaves with an
