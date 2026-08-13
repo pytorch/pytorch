@@ -36,7 +36,10 @@ import torch.random
 from torch import sym_float, sym_int
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo import compiled_autograd
-from torch._library.opaque_object import is_opaque_symbolic_type
+from torch._library.opaque_object import (
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -478,8 +481,11 @@ class TensorVariable(VariableTracker):
             ):
                 return CustomClassObjectVariable.create(proxy, example_value, tx=tx)
             # any other attributes on the subclass (that are not methods)
-            # are assumed to be constant metadata.
-            elif not callable(example_value):
+            # are assumed to be constant metadata. Opaque constant types are also
+            # constant metadata even if they are callable.
+            elif not callable(example_value) or is_opaque_constant_type(
+                type(example_value)
+            ):
                 return VariableTracker.build(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
@@ -2196,35 +2202,6 @@ class TensorVariable(VariableTracker):
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
-    def hoist_requires_grad_to_pregraph(self, tx: "InstructionTranslatorBase") -> None:
-        """Run ``x.requires_grad_(True)`` before the compiled graph is called.
-
-        The graph then takes the input as already requiring grad, which is what
-        AOTAutograd needs in order to build a backward for it.
-        """
-        from ..codegen import PyCodegen
-
-        cg = PyCodegen(tx.output.root_tx)
-        cg(self.source)
-        cg.load_method("requires_grad_")
-        cg(variables.ConstantVariable.create(True))
-        cg.call_method(1)
-        cg.pop_top()
-        tx.output.pregraph_bytecode.extend(cg.get_instructions())
-
-        # The rest of the trace, and the backend, must see a differentiable
-        # input. The real tensor is left alone; the bytecode above mutates it at
-        # runtime, before the graph runs.
-        node = self.as_proxy().node
-        example_value = node.meta["example_value"]
-        with torch.no_grad():
-            example_value.requires_grad_(True)
-        self.requires_grad = True
-
-        grapharg = node.meta.get("grapharg", None)
-        if grapharg is not None:
-            tx.output.hoisted_requires_grad_args.add(id(grapharg))
-
     def method_requires_grad_(
         self,
         tx: "InstructionTranslatorBase",
@@ -2236,23 +2213,9 @@ class TensorVariable(VariableTracker):
         node = self.as_proxy().node
         example_value = node.meta["example_value"]
         if example_value.requires_grad != requires_grad:
+            # For graph inputs (tensors with source), requires_grad_() is a
+            # metadata mutation that we can't trace — graph break as before.
             if self.source:
-                # A graph input cannot have its requires_grad flipped inside the
-                # graph: AOTAutograd fixes an input's differentiability from the
-                # metadata it was traced with, so an in-graph toggle leaves the
-                # runtime forward non-differentiable. Hoist the call in front of
-                # the graph instead, and trace the rest of the frame with the
-                # input already requiring grad. Only sound while nothing has
-                # consumed the input yet, otherwise ops traced before the call
-                # would wrongly become differentiable.
-                if (
-                    requires_grad
-                    and torch._dynamo.config.hoist_requires_grad_on_inputs
-                    and node.op == "placeholder"
-                    and len(node.users) == 0
-                ):
-                    self.hoist_requires_grad_to_pregraph(tx)
-                    return self
                 unimplemented(
                     gb_type="Unsupported Tensor.requires_grad_() call",
                     context=f"call_method {self} requires_grad_",
