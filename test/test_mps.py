@@ -10555,6 +10555,48 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/96225
+    def _check_conv_grad(self, op, input_shape, weight_shape, atol=1e-3):
+        x_cpu = torch.ones(*input_shape, requires_grad=True)
+        w_cpu = torch.ones(*weight_shape, requires_grad=True)
+        x_mps = x_cpu.detach().to("mps").requires_grad_(True)
+        w_mps = w_cpu.detach().to("mps").requires_grad_(True)
+
+        out_cpu = op(x_cpu, w_cpu).sum()
+        out_mps = op(x_mps, w_mps).sum()
+
+        out_cpu.backward()
+        out_mps.backward()
+
+        self.assertEqual(w_cpu.grad, w_mps.grad.cpu(), atol=atol, rtol=1e-3,
+                         msg=f"weight grad mismatch for {op.__name__} with input {input_shape}")
+        self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=atol, rtol=1e-3,
+                         msg=f"input grad mismatch for {op.__name__} with input {input_shape}")
+
+    def test_conv1d_large_batch(self):
+        self._check_conv_grad(F.conv1d, (65536, 1, 1), (1, 1, 1))
+
+    def test_conv2d_large_batch(self):
+        self._check_conv_grad(F.conv2d, (65536, 1, 1, 1), (1, 1, 1, 1))
+
+    def test_conv1d_just_below_limit(self):
+        self._check_conv_grad(F.conv1d, (65535, 1, 1), (1, 1, 1))
+
+    def test_conv2d_just_below_limit(self):
+        self._check_conv_grad(F.conv2d, (65535, 1, 1, 1), (1, 1, 1, 1))
+
+    def test_conv1d_multi_channel_large_batch(self):
+        # More realistic multi-channel case
+        self._check_conv_grad(F.conv1d, (65537, 4, 8), (8, 4, 3), atol=5e-2)
+
+    def test_conv2d_multi_channel_large_batch(self):
+        self._check_conv_grad(F.conv2d, (65537, 4, 4, 4), (8, 4, 3, 3), atol=5e-2)
+
+    def test_conv3d_large_batch_unaffected(self):
+        # conv3d was already correct; make sure it still works
+        self._check_conv_grad(F.conv3d, (65536, 1, 1, 1, 1), (1, 1, 1, 1, 1))
+
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
