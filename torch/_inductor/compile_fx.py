@@ -64,7 +64,6 @@ from torch._functorch.aot_autograd import (
 )
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
-    _graph_capture_device_type,
     BoxedDeviceIndex,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
@@ -2215,6 +2214,7 @@ def cudagraphify(
     else:
         cudagraphify_fn = functools.partial(
             cudagraphify_impl,
+            device_type=device_type,
             kernel_free_cudagraph=kernel_free_cudagraph,
         )
 
@@ -2260,6 +2260,7 @@ def cudagraphify_impl(
     inputs: list[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
     *,
+    device_type: str = "cuda",
     kernel_free_cudagraph: bool = False,
 ) -> Callable[[list[InputType]], Any]:
     """
@@ -2302,7 +2303,6 @@ def cudagraphify_impl(
 
     from torch._dynamo.device_interface import get_interface_for_device
 
-    device_type = _graph_capture_device_type()
     device_interface = get_interface_for_device(device_type)
 
     # warmup

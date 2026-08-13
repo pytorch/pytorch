@@ -429,8 +429,8 @@ def get_container(device_index: int, device_type: str = "cuda") -> TreeManagerCo
 def get_manager(
     device_index: int | None = None, create_if_none_exists: bool = True
 ) -> CUDAGraphTreeManager | None:
+    device_type = _graph_capture_device_type()
     if device_index is None:
-        device_type = _graph_capture_device_type()
         if device_type == "cuda":
             if not torch.cuda.is_initialized():
                 return None
@@ -442,9 +442,7 @@ def get_manager(
             device_index = di.current_device()
 
     if create_if_none_exists:
-        return get_container(
-            device_index, _graph_capture_device_type()
-        ).get_tree_manager()
+        return get_container(device_index, device_type).get_tree_manager()
 
     container = get_obj(local, "tree_manager_containers").get(device_index)
     return None if container is None else container.tree_manager

@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -1247,6 +1248,8 @@ class TestHasTriton(TestCase):
 
 
 class TestGraphOpsContract(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_base_graph_ops_defaults(self):
         ops = DeviceInterface.GraphOps
         # Safe defaults for backends that have not been adapted.
