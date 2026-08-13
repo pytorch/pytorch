@@ -9,6 +9,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@
 namespace c10 {
 struct IValue;
 class OperatorHandle;
+struct SafePyObject;
 struct TensorImpl;
 namespace impl {
 struct PyObjectSlot;
@@ -250,6 +252,10 @@ struct C10_API PyInterpreterVTable {
   // whether the active fake mode permits non-fake (real) tensor inputs, reading
   // the live Python value (mode attr + fake_tensor_tls override)
   virtual bool allow_non_fake_inputs() const = 0;
+  // promote a Python weak reference to a strong reference to its referent, or
+  // nullptr if the referent has already been collected
+  virtual std::shared_ptr<SafePyObject> strong_ref_from_weakref(
+      const SafePyObject& weakref) const = 0;
 };
 
 struct C10_API PyInterpreter {
