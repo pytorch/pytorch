@@ -2589,6 +2589,11 @@ class _InternalsBase:
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(2, 1),
             min_rblock=16,
+            extra_checks=(
+                FileCheck().check("\n    nested_R0_LOCAL_REDUCTION_SIZE")
+                if self.force_persistent_outer_reduction is False
+                else None
+            ),
         )
 
     def test_weighted_rmsnorm_reduce_k_kernel_form(self):
