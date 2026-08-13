@@ -91,6 +91,14 @@ if(CUDA_VERSION VERSION_GREATER "12.6")
 endif()
 
 
+if(CUDA_VERSION VERSION_GREATER_EQUAL "13.4")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Rubin")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "10.7")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "10.7a")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "10.7")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "10.7a")
+endif()
+
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
 # Usage:
@@ -240,6 +248,9 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
       elseif(${arch_name} STREQUAL "Blackwell")
         set(arch_bin 10.0 12.0)
         set(arch_ptx 10.0 12.0)
+      elseif(${arch_name} STREQUAL "Rubin")
+        set(arch_bin 10.7)
+        set(arch_ptx 10.7)
       else()
         message(SEND_ERROR "Found Unknown CUDA Architecture Name in CUDA_SELECT_NVCC_ARCH_FLAGS: ${arch_name} ")
       endif()
