@@ -91,13 +91,6 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
-  pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11)
-    CUDA_VERSION=12.4
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
@@ -116,6 +109,30 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
     CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
+  pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.4.0
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
@@ -164,14 +181,17 @@ case "$tag" in
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=21
+    TVM=yes
     ;;
   pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
     CLANG_VERSION=21
+    TVM=yes
     ;;
   pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
     CLANG_VERSION=21
+    TVM=yes
     ;;
   pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
@@ -184,7 +204,8 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.2
+    ROCM_VERSION=7.14
+    THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -192,13 +213,14 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-nightly-py3)
+  pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=nightly
+    ROCM_VERSION=7.15.0a20260712
+    THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
+    USE_MSLK=0
     TRITON=yes
     KATEX=yes
-    # rocm-nightly only runs on MI350 (gfx950) runners.
     PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
@@ -228,12 +250,6 @@ case "$tag" in
     KATEX=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
-    ANACONDA_PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
-    CLANG_VERSION=18
-    TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
@@ -393,11 +409,14 @@ build_image() {
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
+       --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
+       --build-arg "USE_MSLK=${USE_MSLK:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "TVM=${TVM}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
