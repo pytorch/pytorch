@@ -429,34 +429,34 @@ static_assert(
     conv1d_dw_outputs_per_thread == 8,
     "CONV1D_DW_OUTPUTS_PER_THREAD_STR must match conv1d_dw_outputs_per_thread");
 
-#define INSTANTIATE_CONV1D_DW(DT)                                              \
-  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>(          \
-      device const DT*,                                                        \
-      device const DT*,                                                        \
-      device DT*,                                                              \
-      constant Conv1dDwParams&,                                                \
-      device const DT*,                                                        \
-      uint3);                                                                  \
-  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR        \
-                       "_" #DT)]] kernel void                                  \
-  conv1d_dw_vec<DT, true>(                                                     \
-      device const DT*,                                                        \
-      device const DT*,                                                        \
-      device DT*,                                                              \
-      constant Conv1dDwParams&,                                                \
-      device const DT*,                                                        \
-      uint3);                                                                  \
-  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR        \
-                       "_valid_" #DT)]] kernel void                            \
-  conv1d_dw_vec<DT, false>(                                                    \
-      device const DT*,                                                        \
-      device const DT*,                                                        \
-      device DT*,                                                              \
-      constant Conv1dDwParams&,                                                \
-      device const DT*,                                                        \
-      uint3);                                                                  \
-  template [[host_name("conv_weight_to_koc_" #DT)]] kernel void                \
-  conv_weight_to_koc<DT>(                                                      \
+#define INSTANTIATE_CONV1D_DW(DT)                                       \
+  template [[host_name("conv1d_dw_" #DT)]] kernel void conv1d_dw<DT>(   \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
+                       "_" #DT)]] kernel void                           \
+  conv1d_dw_vec<DT, true>(                                              \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv1d_dw_vec" CONV1D_DW_OUTPUTS_PER_THREAD_STR \
+                       "_valid_" #DT)]] kernel void                     \
+  conv1d_dw_vec<DT, false>(                                             \
+      device const DT*,                                                 \
+      device const DT*,                                                 \
+      device DT*,                                                       \
+      constant Conv1dDwParams&,                                         \
+      device const DT*,                                                 \
+      uint3);                                                           \
+  template [[host_name("conv_weight_to_koc_" #DT)]] kernel void         \
+  conv_weight_to_koc<DT>(                                               \
       device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);
 
 INSTANTIATE_CONV1D_DW(float)
