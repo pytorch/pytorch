@@ -5,6 +5,7 @@ Utils for caching the outputs of AOTAutograd
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -92,6 +93,10 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 
+
+_CanonicalSetMetadata = collections.namedtuple(
+    "_CanonicalSetMetadata", ["container_type", "elements"]
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
@@ -735,6 +740,16 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             return {
                 k: self._stabilize_tensor_subclass_metadata(v) for k, v in obj.items()
             }
+        if isinstance(obj, (set, frozenset)):
+            return _CanonicalSetMetadata(
+                container_type=type(obj),
+                elements=tuple(
+                    sorted(
+                        pickle.dumps(self._stabilize_tensor_subclass_metadata(x))
+                        for x in obj
+                    )
+                ),
+            )
         return obj
 
     def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
