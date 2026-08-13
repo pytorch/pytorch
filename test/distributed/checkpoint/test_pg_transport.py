@@ -218,12 +218,19 @@ class PgTransportCPU(MultiProcContinuousTest):
         return "gloo"
 
     @classmethod
-    def device_type(cls) -> str:
+    def _device_type_str(cls) -> str:
+        # Do NOT name this `device_type`: `instantiate_device_type_tests` looks
+        # up `cls.device_type` on the generated subclass expecting the plain
+        # string set by its device-specific base (e.g. CPUTestBase). A
+        # same-named classmethod defined directly on this class wins that MRO
+        # lookup instead, crashing with "can only concatenate str (not
+        # 'method')" during collection -- the same conflict `PgTransportGPU`
+        # below already works around.
         return "cpu"
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self.device_type())
+        return torch.device(self._device_type_str())
 
     def test_pg_transport(self, device) -> None:
         _test_pg_transport(self, self.device)
