@@ -931,7 +931,31 @@ invalidate_compile_context_weakrefs: bool | None = None
 # Reorder and rename output graph nodes into a canonical topological order so
 # that structurally equivalent graphs (e.g., same model traced with different
 # dict iteration orders across distributed ranks) produce identical FX graphs.
-canonicalize_output_graph_node_order: bool = False
+#
+# Scope: this covers INTERIOR nodes only. Placeholders keep their trace-order
+# position and names, because that layout is the graph's positional calling
+# convention (see `_canonicalize_graph` in output_graph.py). So two graphs that
+# differ only in the order their inputs were traced still canonicalize to the
+# same interior nodes but keep different placeholder layouts - do not rely on
+# whole-graph identity (e.g. graph hashing) across ranks.
+#
+# Nodes whose order is load-bearing are also left in place (in-place ops,
+# functional collectives, unbacked-symbol binders); see `_is_safe_to_reorder` in
+# torch/fx/passes/canonicalize.py.
+#
+# Enabled in OSS; gated by the justknob in fbcode so internal tests that depend
+# on the old node names can be migrated first. Tests force it on regardless (a
+# `config.patch` user override outranks the justknob) so the feature is
+# exercised on both - see `torch/_dynamo/test_case.py` and
+# `torch.testing._internal.common_utils.TestCase.setUp`.
+# The justknob only gates fbcode; the env var is the OSS off-switch, so a user
+# who hits a node-name or fusion-ordering assumption can disable this without
+# patching or pinning.
+canonicalize_output_graph_node_order: bool = Config(
+    default=True,
+    justknob="pytorch/compiler:canonicalize_output_graph_node_order",
+    env_name_default="TORCH_DYNAMO_CANONICALIZE_GRAPH_NODE_ORDER",
+)
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
