@@ -93,6 +93,9 @@ SIDECAR_VERSION = 1
 # CUDA, and forked workers inherit a dead context that fails silently).
 # forkserver forks from a pre-CUDA server process, so it is as safe as
 # spawn while paying the torch import once instead of per worker.
+# TODO(native-aot): forkserver does not exist on Windows. Nothing calls
+# this from the build there yet (stage 2 targets libtorch_cuda.so only),
+# so fall back to "spawn" when Windows CUDA builds start exporting.
 POOL_START_METHOD = "forkserver"
 
 # Preloaded in the forkserver's server process, so every worker inherits
@@ -126,18 +129,22 @@ def _file_hash(path: str) -> str:
 _CLOSURE_PREFIXES = ("torch._native", "torchgen.native_aot")
 
 
-def source_closure() -> dict[str, str]:
+def source_closure(decl_path: str | None = None) -> dict[str, str]:
     """{repo-relative path: content hash} for every loaded source file
     that can change what an artifact MEANS: the builder's import closure,
-    the shared declaration machinery (_CLOSURE_PREFIXES), and this tool's
-    own sources (a launcher-template edit in toolchains.py counts).
+    the shared declaration machinery (_CLOSURE_PREFIXES), this tool's own
+    sources (a launcher-template edit in toolchains.py counts), and the
+    op's own aot.py.
 
     Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to
     pair edited sources with stale artifacts. Deliberately
     over-approximates -- staleness must err toward re-export.
 
     Only IMPORTED modules appear in sys.modules, which is why the tools/
-    sources are globbed from disk instead."""
+    sources are globbed from disk instead -- and why decl_path is passed
+    explicitly: declarations are loaded by file path and never enter
+    sys.modules, so KERNEL_MODULE or kernel_precompile_grid() edits would
+    otherwise reuse artifacts built from the old grid."""
     import glob
     import sys
 
@@ -157,6 +164,8 @@ def source_closure() -> dict[str, str]:
         if os.path.basename(f) == "gen_aot_lib.py":
             continue
         out[os.path.relpath(f, REPO)] = _file_hash(f)
+    if decl_path and os.path.exists(decl_path):
+        out[os.path.relpath(decl_path, REPO)] = _file_hash(decl_path)
     return dict(sorted(out.items()))
 
 
@@ -215,7 +224,9 @@ def export_point(
         "kind": tc.kind,
         "spec": point,
         "arch": arch,
-        "sources": source_closure(),
+        # The declaration lives at a path fixed by construction, so it needs
+        # no threading through the job tuple.
+        "sources": source_closure(os.path.join(OPS_DIR, op_pkg, "aot.py")),
         **extra,
     }
     with open(os.path.join(out_dir, prefix + ".json"), "w") as f:
@@ -223,7 +234,7 @@ def export_point(
     return prefix
 
 
-def _collect_jobs(ops_filter, out_root: str, force: bool, archs):
+def _collect_jobs(ops_filter, out_root: str, archs):
     """(op_pkg, kernel_module, point, out_dir, arch) per spec point per
     arch across every declaration; grids expand here (cheap,
     torch-light), skip detection is _job_needed's sidecar scan. A
@@ -246,7 +257,7 @@ def _collect_jobs(ops_filter, out_root: str, force: bool, archs):
                 # arch) pairs the op's kernels are not valid on. An
                 # on-device export (arch None) is not filtered -- the
                 # builder machine is the target by construction.
-                if arch is not None and arch not in d.ARCHS:
+                if arch is not None and arch not in decl.archs_of(d):
                     continue
                 # `multi` implies explicit sm strings (a [None] arch
                 # list is always length 1); the arch check narrows for
@@ -254,8 +265,9 @@ def _collect_jobs(ops_filter, out_root: str, force: bool, archs):
                 root = os.path.join(out_root, arch) if multi and arch else out_root
                 out_dir = os.path.join(root, did)
                 os.makedirs(out_dir, exist_ok=True)
-                _check_no_orphan_artifacts(out_dir)
-                for point in expand_specs(d.kernel_precompile_grid()):
+                points = expand_specs(d.kernel_precompile_grid())
+                _check_no_orphan_artifacts(out_dir, points)
+                for point in points:
                     jobs.append((entry, d.KERNEL_MODULE, point, out_dir, arch))
     return jobs
 
@@ -281,26 +293,49 @@ def _read_sidecar(path: str) -> dict:
         ) from e
 
 
-def _check_no_orphan_artifacts(out_dir: str) -> None:
-    """Fail if a directory holds kernel artifacts but no sidecar at all.
+def _check_no_orphan_artifacts(out_dir: str, specs=None) -> None:
+    """Fail if a directory holds kernel artifacts no current grid point
+    claims.
 
-    The sidecar is the commit marker, so artifacts without one mean an
-    interrupted or hand-edited export. The CMake globs link *.o / *.c by
-    pattern, so such an orphan would be linked despite no sidecar
-    describing it and no launcher referencing it. An EMPTY directory is
-    fine -- that is a clean build or a new spec point.
+    Two ways that happens. Artifacts with NO sidecar at all: the sidecar is
+    the commit marker, so they mean an interrupted or hand-edited export.
+    Artifacts whose sidecar records a spec that is no longer in the grid:
+    dropping a point from kernel_precompile_grid() generates no job for it
+    and nothing prunes it. Either way the CMake globs link *.o by pattern,
+    so the object ships with no launcher referencing it -- exactly what this
+    check exists to prevent. An EMPTY directory is fine (clean build, or a
+    new spec point).
+
+    ``specs`` is the expanded grid for this (declaration, arch); None skips
+    the stale-point half, for callers that do not have the grid in hand.
     """
     exts = {e for tc in toolchains.TOOLCHAINS.values() for e in tc.artifact_exts}
     names = os.listdir(out_dir)
-    if any(n.endswith(".json") for n in names):
+    if not any(n.endswith(".json") for n in names):
+        orphans = sorted(n for n in names if os.path.splitext(n)[1] in exts)
+        if orphans:
+            raise RuntimeError(
+                f"{out_dir}: kernel artifacts with no sidecar "
+                f"({', '.join(orphans[:4])}{', ...' if len(orphans) > 4 else ''}). "
+                f"The sidecar is written last, so this is an interrupted or "
+                f"hand-edited export; delete the directory and re-run."
+            )
         return
-    orphans = sorted(n for n in names if os.path.splitext(n)[1] in exts)
-    if orphans:
+    if specs is None:
+        return
+    live = [_json_normal(p) for p in specs]
+    stale = sorted(
+        fn
+        for fn in names
+        if fn.endswith(".json")
+        and _read_sidecar(os.path.join(out_dir, fn)).get("spec") not in live
+    )
+    if stale:
         raise RuntimeError(
-            f"{out_dir}: kernel artifacts with no sidecar "
-            f"({', '.join(orphans[:4])}{', ...' if len(orphans) > 4 else ''}). "
-            f"The sidecar is written last, so this is an interrupted or "
-            f"hand-edited export; delete the directory and re-run."
+            f"{out_dir}: sidecars for spec points no longer in the grid "
+            f"({', '.join(stale[:4])}{', ...' if len(stale) > 4 else ''}). "
+            f"Their kernel objects would still be linked with no launcher "
+            f"referencing them; delete the directory and re-run."
         )
 
 
@@ -343,6 +378,18 @@ def _job_needed(job, force: bool) -> bool:
             continue
         sc = _read_sidecar(os.path.join(out_dir, fn))
         if sc.get("spec") == spec and sc.get("arch") == arch:
+            # The sidecar is the skip marker, but it is not proof the
+            # artifacts it describes are still on disk: anything that
+            # removes a .o/.h without its .json (a partial clean, an
+            # over-eager prune) would otherwise be skipped here and fail
+            # much later as a missing include at compile time.
+            tc = toolchains.get_toolchain(sc.get("kind", "cutedsl"))
+            prefix = sc.get("prefix", "")
+            if any(
+                not os.path.exists(os.path.join(out_dir, prefix + e))
+                for e in tc.artifact_exts
+            ):
+                return True
             return not sources_current(sc)
     return True
 
@@ -447,7 +494,7 @@ def main() -> None:
             )
             return
     archs = args.arch if args.arch else [None]
-    jobs = _collect_jobs(args.ops, args.out_dir, args.force, archs)
+    jobs = _collect_jobs(args.ops, args.out_dir, archs)
     todo = [j for j in jobs if _job_needed(j, args.force)]
     if len(todo) < len(jobs):
         print(f"{len(jobs) - len(todo)} points already exported, skipped")

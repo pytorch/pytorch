@@ -31,9 +31,12 @@ Usage:
     python tools/native_aot/gen_aot_lib.py [--artifacts-dir build/native_aot]
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
+import re
 import sys
 
 
@@ -58,28 +61,24 @@ FILE_TMPL = """\
 // all of them -- exactly what AT_PER_OPERATOR_HEADERS exists to avoid.
 // Declaration bodies that call an at:: FACTORY need its op header added
 // here (empty is pre-added for the reduction family's accumulator).
+//
+// torch/library.h is emitted only for ops with cpp_covers: the covers
+// registration at the end of this file is its only consumer, and it pulls the
+// dispatcher in with it (~110 transitive headers, measured), so declarations
+// without a covers fast path should not pay for it.
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ops/empty.h>
 #include <c10/cuda/CUDAStream.h>
-#include <torch/library.h>
-
-#include <algorithm>
+{covers_include}#include <algorithm>
 #include <limits>
 
 {kernel_includes}
 
 namespace {{
-
-// The DSL's exported ABI carries int32_t shape slots while aten sizes are
-// int64_t; the generated gates decline rather than truncate. See
-// _int32_size_gate in tools/native_aot/gen_aot_lib.py.
-inline bool _naot_dim_too_big(int64_t d) {{
-  return d > std::numeric_limits<int32_t>::max();
-}}
-
+{size_gate_helper}
 {launchers}
 bool {op}_{key_lc}_aot_kernel({params}) {{
 {cond}
@@ -95,6 +94,19 @@ namespace at::native {{
 REGISTER_{key_uc}_DISPATCH({op}_aot_stub, &::{op}_{key_lc}_aot_kernel)
 }} // namespace at::native
 {covers_reg}"""
+
+# Emitted only into files whose kind narrows shapes (see
+# Toolchain.NARROWS_SHAPES_TO_INT32); an unused inline function would
+# otherwise sit in every generated file's anonymous namespace.
+SIZE_GATE_HELPER = """
+// This kind's exported ABI carries int32_t shape slots while aten sizes are
+// int64_t; the generated gates decline rather than truncate. See
+// _int32_size_gate in tools/native_aot/gen_aot_lib.py.
+inline bool _naot_dim_too_big(int64_t d) {
+  return d > std::numeric_limits<int32_t>::max();
+}
+"""
+
 
 # Fast coverage predicate: the declaration's cpp_covers() body over the
 # op's FUNCTIONAL schema arguments (plus a trailing optional `out` so
@@ -130,24 +142,24 @@ def gen_launcher(sidecar: dict) -> str:
 def _arch_gate(d, sidecars: list[dict]) -> str:
     """Runtime device gate: decline (fall through to the JIT/aten
     routes) on any device outside the intersection of the arches the
-    DECLARATION supports (d.ARCHS -- op intent) and the arches the
+    DECLARATION supports (archs_of(d) -- op intent) and the arches the
     artifacts were actually COMPILED for (sidecar 'arch' -- build
     fact). Without it, a wheel whose artifacts target Blackwell would
     attempt a wrong-arch cubin load on Hopper and fail at launch
     instead of falling back. Emitted ahead of the declaration's own
     prelude AND into cpp_covers, so declarations never hand-write arch
     checks. Sidecars with no recorded arch (exported on-device) gate on
-    d.ARCHS alone -- the artifact matches the builder by construction.
+    archs_of(d) alone -- the artifact matches the builder by construction.
     Shipped arches outside d.ARCHS are a packaging bug: error here
     rather than gate on kernels the op disowns."""
     shipped = {a for sc in sidecars if isinstance(a := sc.get("arch"), str)}
-    if shipped - set(d.ARCHS):
+    if shipped - set(decl.archs_of(d)):
         raise RuntimeError(
             f"{d.ATEN_OP}: artifacts exported for {sorted(shipped)} "
-            f"but the declaration supports only {d.ARCHS}; re-export "
+            f"but the declaration supports only {decl.archs_of(d)}; re-export "
             f"(export.py skips unsupported arches)"
         )
-    gate = sorted(shipped) or sorted(d.ARCHS)
+    gate = sorted(shipped) or sorted(decl.archs_of(d))
     majors = sorted({int(a.removeprefix("sm_").rstrip("a")) // 10 for a in gate})
     accept = " || ".join(
         f"at::cuda::getCurrentDeviceProperties()->major == {m}" for m in majors
@@ -156,6 +168,14 @@ def _arch_gate(d, sidecars: list[dict]) -> str:
         f"  // Device gate: declaration ARCHS x shipped artifacts = {' '.join(gate)}\n"
         f"  if (!({accept})) return false;\n"
     )
+
+
+# Tensor-shaped C++ types the gate must recognize or refuse. torchgen renders
+# Tensor? as at::OptionalTensorRef and Tensor[] as at::ITensorListRef in
+# structured impl signatures (api/structured.py), and index.Tensor's covers
+# signature carries c10::List<::std::optional<at::Tensor>> -- none of which
+# the two accessors below fit.
+_TENSOR_ISH = re.compile(r"\bat::\w*Tensor\w*|\bc10::List<")
 
 
 def _int32_size_gate(params: str) -> str:
@@ -203,10 +223,24 @@ def _int32_size_gate(params: str) -> str:
         if not p:
             continue
         name = p.split()[-1].lstrip("&*")
-        if "std::optional<at::Tensor>" in p:
+        ctype = p[: -len(name)].strip().removeprefix("const ").rstrip("& ")
+        if ctype in ("std::optional<at::Tensor>", "::std::optional<at::Tensor>"):
             optional.append(name)
-        elif "at::Tensor" in p:
+        elif ctype == "at::Tensor":
             plain.append(name)
+        elif _TENSOR_ISH.search(ctype):
+            # Anything else tensor-shaped would need its own accessor
+            # (at::OptionalTensorRef has no has_value(); at::ITensorListRef
+            # and c10::List<optional<Tensor>> are sequences), so a substring
+            # guess emits either an ungated dim or uncompilable C++. Refuse
+            # instead: the next op to use one gets this message, not a
+            # silent truncation.
+            raise RuntimeError(
+                f"_int32_size_gate: unhandled tensor-like parameter type "
+                f"{ctype!r} (arg {name!r}). Teach the gate this type -- gating "
+                f"it wrongly would let a >=2^31 dim through the launcher's "
+                f"static_cast<int32_t>, or emit C++ that does not compile."
+            )
     if not plain and not optional:
         return ""
     checks = [
@@ -246,6 +280,14 @@ def gen_op(
     helpers_fn = getattr(d, "cpp_helpers", None)
     prelude = (prelude_fn() or "") if prelude_fn else ""
     helpers = (helpers_fn() or "") if helpers_fn else ""
+    # Only kinds whose exported ABI takes i32 extents need the size gate;
+    # Triton takes its scalar widths from the kernel's own signature. Any
+    # narrowing kind among this op's points is enough, since any point may
+    # be the one selected at runtime.
+    narrows = any(
+        toolchains.get_toolchain(sc.get("kind", "cutedsl")).NARROWS_SHAPES_TO_INT32
+        for sc in sidecars
+    )
     covers_fn = covers_reg = ""
     if covers is not None:
         covers_params, covers_schema, covers_body = covers
@@ -257,7 +299,7 @@ def gen_op(
             key_lc=key.lower(),
             params=covers_params,
             body=_arch_gate(d, sidecars)
-            + _int32_size_gate(covers_params)
+            + (_int32_size_gate(covers_params) if narrows else "")
             + indent(covers_body, "  "),
         )
         covers_reg = COVERS_REG_TMPL.format(
@@ -284,6 +326,9 @@ def gen_op(
         precompute_note=note,
         covers_fn=covers_fn,
         covers_reg=covers_reg,
+        covers_include=(
+            "#include <torch/library.h>\n\n" if covers is not None else "\n"
+        ),
         kernel_includes="\n".join(
             dict.fromkeys(  # ordered dedup across sidecars
                 line
@@ -296,8 +341,9 @@ def gen_op(
             ([helpers] if helpers else []) + [gen_launcher(s) for s in sidecars]
         ),
         params=impl_params,
+        size_gate_helper=SIZE_GATE_HELPER if narrows else "",
         cond=_arch_gate(d, sidecars)
-        + _int32_size_gate(impl_params)
+        + (_int32_size_gate(impl_params) if narrows else "")
         + indent(prelude, "  "),
         guards="\n".join(branches),
     )
@@ -385,7 +431,56 @@ def covers_signature(op: str) -> tuple[str, str]:
     )
 
 
-def main() -> None:
+VERSION_SCRIPT = "native_aot_local.ver"
+
+VER_TMPL = """\
+/* @generated by tools/native_aot/gen_aot_lib.py -- do not edit
+ *
+ * Localize the exported kernel objects' entry points. CuTeDSL's
+ * export_to_c gives them default visibility and they link straight into
+ * torch_cuda (caffe2/CMakeLists.txt), so without this they would join
+ * torch_cuda's public ABI: hundreds of names with no stability guarantee,
+ * tied to the DSL's codegen. The generated launchers are the only callers
+ * and share the link, so localizing costs nothing.
+ *
+ * Generated rather than hand-written so every pattern is anchored on a
+ * kernel prefix: a bare `*_cuda_init` would also localize any unrelated
+ * extern "C" symbol in torch_cuda ending that way, and a symbol silently
+ * leaving the ABI is painful to debug.
+ *
+ * `local:` alone restricts nothing else -- with no `global:` pattern the
+ * linker keeps its default of exporting everything not named here.
+ */
+{{
+  local:
+{patterns}
+}};
+"""
+
+
+def write_version_script(artifacts_dir: str, prefixes: list[str]) -> str:
+    """Emit the linker version script localizing every exported kernel's
+    symbols. Two spellings per prefix: the DSL emits a bare _mlir_<...>
+    form and a prefix-first <prefix>__mlir_ciface_* form; the module
+    loader adds the four _cuda_* entry points."""
+    lines = []
+    for prefix in sorted(prefixes):
+        # Two patterns cover every global symbol the DSL emits for a kernel
+        # (verified with nm over the exported objects): everything is either
+        # named <prefix>_... or is an MLIR entry point carrying the prefix.
+        # Enumerating known suffixes instead missed _args_spec, _kernel_info,
+        # _function_name, _version and the mangled cutlass call symbol -- 270
+        # of 864 symbols, which stayed in torch_cuda's ABI.
+        lines.append(f"    /* {prefix} */")
+        lines.append(f"    {prefix}_*;")
+        lines.append(f"    _mlir_*{prefix}*;")
+    out = os.path.join(artifacts_dir, VERSION_SCRIPT)
+    with open(out, "w") as f:
+        f.write(VER_TMPL.format(patterns="\n".join(lines)))
+    return out
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--artifacts-dir", default=os.path.join(REPO, "build", "native_aot")
@@ -395,7 +490,7 @@ def main() -> None:
         action="store_true",
         help="generate even when artifact source hashes mismatch the tree",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     from tools.native_aot import export as export_mod
 
@@ -419,6 +514,7 @@ def main() -> None:
         print(f"{args.artifacts_dir}: no artifacts, nothing to generate")
         return
 
+    all_prefixes: list[str] = []
     for entry in sorted(os.listdir(args.artifacts_dir)):
         art_dir = os.path.join(args.artifacts_dir, entry)
         if not os.path.isdir(art_dir):
@@ -426,14 +522,21 @@ def main() -> None:
         d, decl_path = by_id.get(entry, (None, ""))
         if d is None:
             # Orphaned artifact dir (declaration renamed/removed): its
-            # previously generated .cpp would still be globbed by the
-            # build and reference a stub that no longer exists -- a link
-            # error far from the cause. Remove the generated source and
-            # tell the user; the kernel artifacts stay (cheap, inert).
+            # previously generated .cpp would still be globbed by the build
+            # and reference a stub that no longer exists -- a link error far
+            # from the cause. Delete that (regenerating is free) but NEVER
+            # the kernel artifacts, which cost a full export to rebuild.
+            # They must not silently link either, so leaving them behind is
+            # an error the user resolves by removing the directory.
+            #
+            # An empty by_id means this tree declares nothing at all (an
+            # earlier commit of a stack, or a bisect) -- NOT that every
+            # artifact is orphaned. Deleting there would destroy a whole
+            # export for a checkout that simply predates the declarations.
             # Only dirs holding files are op dirs: dirs of dirs are
             # grouping levels (e.g. a per-arch fan-out), not orphans.
             entries = [os.path.join(art_dir, fn) for fn in os.listdir(art_dir)]
-            if not any(os.path.isfile(p) for p in entries):
+            if not by_id or not any(os.path.isfile(p) for p in entries):
                 continue
             removed = []
             for p in entries:
@@ -445,6 +548,22 @@ def main() -> None:
                 f"{entry}: no declaration (renamed or removed?); "
                 + (f"deleted stale {', '.join(removed)}" if removed else "skipped")
             )
+            leftover_exts = {
+                e for tc in toolchains.TOOLCHAINS.values() for e in tc.artifact_exts
+            }
+            leftover = sorted(
+                os.path.basename(p)
+                for p in entries
+                if os.path.splitext(p)[1] in leftover_exts
+            )
+            if leftover:
+                raise RuntimeError(
+                    f"{art_dir}: kernel artifacts with no declaration "
+                    f"({', '.join(leftover[:4])}"
+                    f"{', ...' if len(leftover) > 4 else ''}). The embedded-link "
+                    f"glob would compile them into torch_cuda with no launcher "
+                    f"referencing them. Delete the directory and re-export."
+                )
             continue
         sidecars = []
         stale = []
@@ -491,6 +610,10 @@ def main() -> None:
         with open(out, "w") as f:
             f.write(src)
         print(f"wrote {out} ({len(sidecars)} kernels)")
+        all_prefixes.extend(sc["prefix"] for sc in sidecars)
+
+    if all_prefixes:
+        print(f"wrote {write_version_script(args.artifacts_dir, all_prefixes)}")
 
 
 if __name__ == "__main__":
