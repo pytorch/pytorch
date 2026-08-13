@@ -42,6 +42,8 @@ Properties consumed by the driver scripts:
   * ``launcher_includes``: per-kind includes for the generated .cpp.
   * ``kernel_includes(sidecar)``: per-kernel includes for that same file,
     for toolchains whose export writes a header (CuTeDSL's ABI struct).
+  * ``NARROWS_SHAPES_TO_INT32``: the exported ABI takes i32 extents, so
+    gen_aot_lib emits a stub gate declining dims past INT32_MAX.
 
 Export runs as stage 2 of the two-stage build (build torch -> build
 the AOT lib), so torch is always importable during export.
@@ -66,13 +68,21 @@ class Toolchain:
     # is a new class with BACKENDS = ("rocm",) and no gate to rewrite.
     BACKENDS: tuple[str, ...] = ("cuda",)
 
-    # Importable modules this kind needs to COMPILE a kernel. An env that
-    # lacks one cannot export this kind, and export.py skips those points
-    # rather than failing the build: the DSL runtimes are optional
-    # dependencies, so a partial toolchain set must still produce a working
-    # (smaller) artifact set. Nothing at RUNTIME needs these -- the
-    # exported artifacts are self-contained.
+    # Importable modules this kind needs to COMPILE a kernel. Absence is
+    # FATAL once a declaration targeting this build's backend reaches
+    # export: its kernels were asked for, and exporting only some of them
+    # ships a wheel that silently underperforms. Build without the DSL
+    # wheels via TORCH_NATIVE_AOT=0 instead (see build_stage2.should_run
+    # and test_missing_runtime_is_fatal_not_skipped). Nothing at RUNTIME
+    # needs these -- the exported artifacts are self-contained.
     REQUIRED_RUNTIMES: tuple[str, ...] = ()
+
+    # True when this kind's exported ABI carries int32_t shape slots, so a
+    # dim past INT32_MAX cannot be passed and the generated stub must
+    # decline the call (gen_aot_lib's _int32_size_gate). A property of the
+    # exported ABI, not of aten, so it lives per-kind: Triton takes its
+    # scalar widths from the kernel's own signature and needs no such gate.
+    NARROWS_SHAPES_TO_INT32: bool = False
 
     REQUIRED_BUILD_KEYS: tuple[str, ...] = ()
 
@@ -125,6 +135,10 @@ class CuteDslToolchain(Toolchain):
     artifact_exts = (".o", ".h")
     link_source_globs = ("*/*.o",)
     launcher_includes = ()  # per-kernel header, included by prefix below
+
+    # export_to_c emits `int32_t dynamic_shapes[]`, so the generated stub
+    # must decline dims that do not fit (see gen_aot_lib._int32_size_gate).
+    NARROWS_SHAPES_TO_INT32 = True
 
     # tvm_ffi: the JIT wrappers pass --enable-tvm-ffi, and cutlass imports
     # it during compile even though the exported ABI does not use it.
