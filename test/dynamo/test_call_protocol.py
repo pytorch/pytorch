@@ -8,7 +8,10 @@ import types
 import torch
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 _NOT_CALLABLE_OBJECT = object()
@@ -36,6 +39,8 @@ class _WithUntraceableCall:
 
 
 class TpCallTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_dynamo_test
     def test_callable_builtin(self):
         assert callable(len)  # noqa: S101
