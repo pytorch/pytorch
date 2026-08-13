@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
@@ -177,6 +178,38 @@ class TestSkippedWholeTestClass(TestCase):
         self.fail("This class should not be instantiated for openreg")
 
 
+class TestDtypeAwareExclusions(TestCase):
+    executed_dtypes: dict = defaultdict(list)
+
+    @classmethod
+    def tearDownClass(cls):
+        expected = {
+            "test_dtype_filter": [torch.float64],
+            "test_dtype_tuple_filter": [(torch.float64, torch.int64)],
+        }
+        if cls.executed_dtypes != expected:
+            raise AssertionError(
+                f"Dtype-aware exclusions failed: expected {expected}, "
+                f"got {cls.executed_dtypes}"
+            )
+        super().tearDownClass()
+
+    @dtypes(torch.float32, torch.float64)
+    def test_dtype_filter(self, device, dtype):
+        self.assertEqual(torch.device(device).type, "openreg")
+        type(self).executed_dtypes["test_dtype_filter"].append(dtype)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_all_dtypes_excluded(self, device, dtype):
+        self.assertEqual(torch.device(device).type, "openreg")
+        self.fail("This method should not have any dtype variants for openreg")
+
+    @dtypes((torch.float64, torch.int32), (torch.float64, torch.int64))
+    def test_dtype_tuple_filter(self, device, dtypes):
+        self.assertEqual(torch.device(device).type, "openreg")
+        type(self).executed_dtypes["test_dtype_tuple_filter"].append(dtypes)
+
+
 class TestSupportedOpsWithOverrides(TestCase):
     """Verify that op_allowlist filtering works together with op_overrides.
 
@@ -234,6 +267,26 @@ with _temp_test_configs(PrivateUse1TestBase, test_exclusions=OPENREG_TEST_EXCLUS
     )
     instantiate_device_type_tests(
         TestSkippedWholeTestClass, globals(), only_for="openreg"
+    )
+
+OPENREG_DTYPE_TEST_EXCLUSIONS = {
+    "TestDtypeAwareExclusions": {
+        "test_dtype_filter": {
+            "dtypes": [torch.float32],
+        },
+        "test_all_dtypes_excluded": {
+            "dtypes": [torch.float32, torch.float64],
+        },
+        "test_dtype_tuple_filter": {
+            "dtypes": [torch.int32],
+        },
+    },
+}
+with _temp_test_configs(
+    PrivateUse1TestBase, test_exclusions=OPENREG_DTYPE_TEST_EXCLUSIONS
+):
+    instantiate_device_type_tests(
+        TestDtypeAwareExclusions, globals(), only_for="openreg"
     )
 
 with _temp_test_configs(

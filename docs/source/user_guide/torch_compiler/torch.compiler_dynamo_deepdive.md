@@ -200,7 +200,7 @@ program is compiled into
 executed by this interpreter. To learn more about these bytecodes, see
 the [dis module](https://docs.python.org/3/library/dis.html) from the
 standard library. See also [the developer
-docs](https://devguide.python.org/internals/interpreter/) for an
+docs](https://devguide.python.org/internals/) for an
 introduction to CPython’s interpreter. We will assume that the reader is
 familiar with the notion of a stack machine.
 
@@ -351,7 +351,7 @@ discuss how Dynamo addresses a rather important correctness issue.
 At this point, we have a way to trace programs completely disregarding control flow.
 And for that, we have reimplemented all of CPython… If this sounds like a bit of an
 overkill, that is because it is.
-[torch.jit.trace](https://pytorch.org/docs/main/generated/torch.jit.trace.html)
+[torch.jit.trace](https://docs.pytorch.org/docs/2.9/generated/torch.jit.trace.html)
 already implements this without all this machinery, so what gives?
 
 The issue with `torch.jit.trace`, as it is warned in its docs, is that

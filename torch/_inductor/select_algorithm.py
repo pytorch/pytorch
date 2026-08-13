@@ -17,6 +17,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -77,7 +78,7 @@ from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.hints import DeviceProperties
+from .runtime.hints import DeviceProperties, TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -503,6 +504,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
 
     def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
+        index = sympy.sympify(index)
         index_str = self._process_indexing(index)
         index_shape = TritonSymbols.get_block_shape(index)
         if (
@@ -514,6 +516,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             )
         ):
             return f"tl.broadcast_to(tl.reshape({index_str}, []), {shape})"
+        if not index_shape and len(index.free_symbols) == 0:
+            return f"tl.full({shape}, {index_str}, INDEX_DTYPE)"
         return f"tl.broadcast_to({index_str}, {shape})"
 
 
@@ -555,7 +559,7 @@ class TritonTemplateKernel(TritonKernel):
         workspace_arg: WorkspaceArg | None = None,
         prologue_loads_all_inputs=False,
         hint_override: int | None = None,
-        triton_meta: dict[str, object] | None = None,
+        triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
@@ -630,7 +634,7 @@ class TritonTemplateKernel(TritonKernel):
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: dict[str, object] | None = triton_meta
+        self.triton_meta: TritonMeta | None = triton_meta
         self._index_dtype_override = index_dtype_override
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: list[ir.ComputedBuffer] | None = subgraphs
@@ -829,9 +833,17 @@ class TritonTemplateKernel(TritonKernel):
         )
         contiguous_index = self.rename_indexing(contiguous_index)
         self.body.writeline(f"{xindex_name} = " + texpr(contiguous_index))
-        self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
-            xindex_name
-        )
+        xindex_entry = self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths))
+        old_symbol = xindex_entry.symbol()
+        xindex_entry.set_name(xindex_name)
+        # Re-key only range_tree_nodes: get_block_shape resolves the renamed symbol
+        # via this dict. Unlike the TMA re-key, var_list/var_ranges are left alone --
+        # in the single-dim case old_symbol is the construct_entries-renamed name,
+        # not the auto symbol var_list holds, so a var_list.index() re-key would raise;
+        # the stale entries only cost codegen quality, not correctness.
+        if self.range_tree_nodes.get(old_symbol) is xindex_entry:
+            del self.range_tree_nodes[old_symbol]
+        self.range_tree_nodes[xindex_entry.symbol()] = xindex_entry
         self.template_mask = mask
         self.template_indices = indices
         return contiguous_index
@@ -883,11 +895,12 @@ class TritonTemplateKernel(TritonKernel):
         return 0
 
     def jit_lines(self):
+        """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta: dict[str, Any] = {
+        triton_meta: TritonMeta = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=self.index_dtype,
@@ -910,9 +923,11 @@ class TritonTemplateKernel(TritonKernel):
         if kpack:
             triton_meta["kpack"] = kpack
 
+        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        triton_meta_extra = cast(dict[str, Any], triton_meta)
         for k in tlx_only_cuda_options():
             if v := self.meta.get(k, None):
-                triton_meta[k] = v
+                triton_meta_extra[k] = v
 
         if self.triton_meta is None:
             self.triton_meta = triton_meta
@@ -946,12 +961,14 @@ class TritonTemplateKernel(TritonKernel):
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
 
+        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        triton_meta_extra = cast(dict[str, Any], self.triton_meta)
         for k in tlx_only_cuda_options():
             if v := self.meta.get(k, None):
                 template_args += f"""
                     {k}={v},
                 """
-                self.triton_meta[k] = v
+                triton_meta_extra[k] = v
 
         return f"""
             @triton_heuristics.template(
@@ -2576,7 +2593,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
         hint_override: int | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
     ) -> str | None:
         def layout_key(layout: ir.Layout) -> str:
             if isinstance(layout, ir.FlexibleLayout):
@@ -2684,7 +2701,12 @@ class TritonTemplate(KernelTemplate):
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
         self.template = self._template_from_string(source)
-        if name in self.all_templates:
+        # A module that registers templates can be initialized more than once in
+        # a single process (e.g. a double-import path). Tolerate re-registration
+        # under an existing name as long as the template source matches, but
+        # reject a genuine name collision between different templates.
+        existing = self.all_templates.get(name)
+        if existing is not None and existing.src_hash != self.src_hash:
             raise AssertionError("duplicate template name")
         TritonTemplate.all_templates[name] = self
         self.debug = debug
@@ -2755,7 +2777,7 @@ class TritonTemplate(KernelTemplate):
         tma_store: bool = False,
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
     ) -> GenerateAndLoadResult | None:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -2976,7 +2998,7 @@ class TritonTemplate(KernelTemplate):
         tma_store: bool = False,
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -3215,20 +3237,25 @@ class ExternKernelChoice:
 
     def __init__(
         self,
-        kernel,
-        cpp_kernel=None,
+        kernel: Callable[..., Any],
+        cpp_kernel: str | None = None,
         *,
-        name=None,
-        has_out_variant=True,
-        op_overload=None,
-        use_fallback_kernel=False,
-        kernel_creator=None,
+        name: str | None = None,
+        has_out_variant: bool = True,
+        op_overload: torch._ops.OpOverload | None = None,
+        use_fallback_kernel: bool = False,
+        kernel_creator: Callable[..., ir.ExternKernel] | None = None,
     ) -> None:
         super().__init__()
         name = name or kernel.__name__
         if not callable(kernel):
             raise AssertionError("kernel must be callable")
-        if hasattr(extern_kernels, name):
+        # A module that registers an extern kernel can be initialized more than
+        # once in a single process (e.g. a double-import path). Tolerate
+        # re-registration under an existing name as long as it wraps the same
+        # callable, but reject a genuine name collision between different kernels.
+        existing = getattr(extern_kernels, name, None)
+        if existing is not None and existing is not kernel:
             raise AssertionError(f"duplicate extern kernel: {name}")
         self.name = name
         self.cpp_kernel_name = cpp_kernel
@@ -3249,7 +3276,7 @@ class ExternKernelChoice:
     def lookup(cls, name: str) -> Optional["ExternKernelChoice"]:
         return cls._registry.get(name)
 
-    def to_callable(self):
+    def to_callable(self) -> Callable[..., Any]:
         return getattr(extern_kernels, self.name)
 
     def call_name(self):
@@ -4113,6 +4140,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
                     results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    if not any(math.isfinite(timing) for timing in results.values()):
+                        raise self.create_no_valid_choices(
+                            name, "All choices failed to benchmark for backend."
+                        )
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
@@ -4663,6 +4694,13 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Precompile function found in cache, returning it")
             return precompile_func
 
+        try:
+            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+                NVUniversalGemmCaller,
+            )
+        except ImportError:
+            NVUniversalGemmCaller = None  # type: ignore[assignment, misc]
+
         log.info(
             "Multithreaded precompilation for %d choices using %d worker threads",
             len(choices),
@@ -4708,6 +4746,30 @@ class AlgorithmSelectorCache(PersistentCache):
         # Some choices only differ in runtime arguments, so we
         # skip a choice if it has the same hash as a previously seen choice
         seen_choices: OrderedSet[str] = OrderedSet()
+
+        # Count NVGEMM choices to decide whether subprocess precompile is worth
+        # the pool-warmup/IPC overhead. Measured break-even is ~8: below ~4
+        # serial wins (~1.4s), from 8 up subprocess wins and the gap grows with
+        # count (e.g. 32 configs: 12.5s vs 22.0s serial). The break-even used to
+        # be ~20 because each worker rebuilt the ~14s kernel manifest; that
+        # overhead is gone now (workers reconstruct the one operator from
+        # metadata), so the threshold drops accordingly.
+        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 8
+        nvgemm_count = sum(
+            1
+            for c in choices
+            if NVUniversalGemmCaller is not None
+            and isinstance(c, NVUniversalGemmCaller)
+        )
+        # Block for pool warmup when there are enough NVGEMM choices to justify
+        # it: the serial fallback (lazy compile at benchmark time) is ~15x
+        # slower, and the non-blocking use_process_pool() check can otherwise
+        # race the pool warmup when little other compilation precedes this point.
+        use_nvgemm_subprocess = (
+            nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            and async_compile.wait_process_pool_ready()
+        )
+
         for c in choices:
             # Skip choices which we have already issued a precompile
             if c.kernel_hash_key() in seen_choices:
@@ -4720,6 +4782,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
                     c.bmreq, TritonGPUBenchmarkRequest
                 )
+                nvgemm_choice = (
+                    isinstance(c, NVUniversalGemmCaller)
+                    if NVUniversalGemmCaller is not None
+                    else False
+                )
                 if triton_cuda_choice and async_compile.use_process_pool():
                     with open(c.bmreq.module_path) as file:
                         source_code = file.read()
@@ -4727,6 +4794,51 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
+                elif nvgemm_choice and use_nvgemm_subprocess:
+                    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+                        CUDAContextMetadata,
+                    )
+
+                    cuda_ctx = CUDAContextMetadata.from_kernel(
+                        c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
+                    )
+                    try:
+                        future = async_compile.nvgemm_precompile(
+                            kernel_name=c.bmreq.kernel.metadata.operator_name,
+                            variant_name=c.bmreq.variant.name,
+                            accumulator_type=c.bmreq.accumulator_type,
+                            input_tensor_meta=c.bmreq.input_tensor_meta,
+                            output_tensor_meta=c.bmreq.output_tensor_meta,
+                            cuda_ctx=cuda_ctx,
+                            scale_type_a=c.bmreq.scale_type_a,
+                            scale_type_b=c.bmreq.scale_type_b,
+                            swizzle_type_a=c.bmreq.swizzle_type_a,
+                            swizzle_type_b=c.bmreq.swizzle_type_b,
+                            has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            swap_ab=c.bmreq.swap_ab,
+                            metadata=c.bmreq.kernel.metadata,
+                        )
+                    except (BrokenProcessPool, RuntimeError) as e:
+                        # A precompile worker crashed and closed the pool. Stop
+                        # using the subprocess pool and compile the remaining
+                        # choices lazily in-process rather than aborting the
+                        # whole compilation with a closed-pool error.
+                        log.warning(
+                            "NVGEMM subprocess precompile pool unusable (%s); "
+                            "falling back to lazy in-process compile",
+                            e,
+                        )
+                        use_nvgemm_subprocess = False
+                        continue
+                    log.debug(
+                        "Submitted nvgemm subprocess precompile for choice: %s", c
+                    )
+                elif nvgemm_choice:
+                    # CuTeDSL compilation is not thread-safe; below the
+                    # subprocess threshold or without the process pool,
+                    # skip precompile and compile lazily at benchmark time.
+                    log.debug("Skipping nvgemm precompile: %s", c)
+                    continue
                 else:
                     future = executor.submit(precompile_with_captured_stdout, c)
                     log.debug("Submitted precompile for choice: %s", c)
@@ -4850,8 +4962,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+                if global_tensor.shape[0] == 0:
+                    # No row to copy, and the 1D bias does not depend on M.
+                    bias = cls.benchmark_example_value(extern_node, hint_override)
+                else:
+                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                    bias = global_tensor[0].contiguous()
+                additional_example_inputs[extern_name] = bias
 
             return {
                 **unique_example_inputs,
@@ -4947,7 +5064,8 @@ class AlgorithmSelectorCache(PersistentCache):
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
-        current_out_size = out_base.storage().size()
+        # untyped_storage() counts bytes, unlike the deprecated TypedStorage.size().
+        current_out_size = out_base.untyped_storage().size() // out_base.element_size()
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage

@@ -3,6 +3,7 @@ import contextlib
 import math
 import sys
 import warnings
+from collections.abc import Callable, Sequence
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -31,8 +32,6 @@ except Exception:
     )
 
     def is_torchdynamo_compiling():  # type: ignore[misc]
-        return False
-        # pyrefly: ignore [unreachable]
         return False
 
 
@@ -216,7 +215,7 @@ def all_gather_single(
         # If not, it will use torch.cat which needs the data anyway, so
         # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
+            shape = res.shape
             numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
             can_use_view = shape[0] == group_size and numel_between == 1
             if not can_use_view:
@@ -658,9 +657,13 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
 
-    if reduce_op != "sum":
+    # Only linear reductions have a well-defined all_reduce backward: for both
+    # 'sum' and 'avg' the gradient is an all_reduce of grad_output with the same
+    # op (grad wrt each rank's input is the same reduction of the per-rank
+    # grad_outputs). Nonlinear ops (min/max/product/premul_sum) do not.
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"all_reduce backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"all_reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
 
     # Backward does all_reduce with the same reduce_op
@@ -1812,6 +1815,34 @@ def all_gather_inplace(
     return tensor_list
 
 
+def reduce_scatter_inplace(
+    output: torch.Tensor,
+    input_list: list[torch.Tensor],
+    op: str = "sum",
+    group: dist.ProcessGroup | None = None,
+    async_op: bool = False,
+    tag: str = "",
+):
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
+    if not all(t.size() == output.size() for t in input_list):
+        raise AssertionError(
+            "reduce_scatter requires every input_list element to have the same size as output"
+        )
+
+    group = group or dist.group.WORLD
+    if group is None:
+        raise AssertionError("group cannot be None")
+
+    if output.dim() == 0:
+        # scalars have no dim to scatter along; stack into 1-D then reshape back
+        result = reduce_scatter_single(torch.stack(input_list), op, 0, group, tag)
+        return output.copy_(result.reshape(output.shape))
+    return output.copy_(reduce_scatter_single(torch.cat(input_list), op, 0, group, tag))
+
+
 def isend_inplace(
     tensor: torch.Tensor,
     dst: int | None = None,
@@ -1913,6 +1944,7 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
     batch_isend_irecv as legacy_batch_p2p_ops,
     irecv as legacy_irecv,
     isend as legacy_isend,
+    reduce_scatter as legacy_reduce_scatter,
     reduce_scatter_single as legacy_reducescatter_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
@@ -1962,6 +1994,14 @@ def _remapped_all_gather(*args, **kwargs):
     all_gather_inplace(*args, **kwargs)
 
 
+def _remapped_reduce_scatter(*args, **kwargs):
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_reduce_scatter should only be called during tracing"
+        )
+    reduce_scatter_inplace(*args, **kwargs)
+
+
 def _remapped_isend(*args, **kwargs):
     if not _are_we_tracing():
         raise AssertionError("_remapped_isend should only be called during tracing")
@@ -1992,9 +2032,65 @@ traceable_collective_remaps = {
     legacy_allreduce: _remapped_allreduce,
     legacy_all_to_all_single: _remapped_all_to_all_single,
     legacy_all_gather: _remapped_all_gather,
+    legacy_reduce_scatter: _remapped_reduce_scatter,
     legacy_reduce_scatter_base: _remapped_reducescatter,
     legacy_all_gather_base: _remapped_allgather,
     legacy_isend: _remapped_isend,
     legacy_irecv: _remapped_irecv,
     legacy_batch_p2p_ops: _remapped_batch_p2p_ops,
 }
+
+
+def _remap_traceable_collective(
+    func: Callable[..., Any],
+    args: Sequence[Any],
+    kwargs: dict[str, Any] | None,
+) -> tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]] | None:
+    """Redirect a legacy ``torch.distributed`` collective to its functional
+    equivalent, following Dynamo's CollectiveFunctionRewriteVariable.
+
+    Returns ``(mapped_func, (), kwargs)`` if ``func`` is a remappable collective,
+    else None. Shared by the make_fx compile_on_one_rank mode below and
+    non-strict export's _NonStrictTorchFunctionHandler.
+    """
+    if func not in traceable_collective_remaps:
+        return None
+    import inspect
+
+    mapped_func = traceable_collective_remaps[func]
+    bound = dict(inspect.signature(func).bind(*args, **(kwargs or {})).arguments)
+    if func in (
+        torch.distributed.all_reduce,
+        torch.distributed.reduce_scatter,
+        torch.distributed.reduce_scatter_single,
+        torch.distributed.reduce_scatter_tensor,
+        torch.distributed._reduce_scatter_base,
+    ):
+        if "op" in bound:
+            bound["op"] = REDUCE_OP_TO_STR[bound["op"]]
+    return mapped_func, (), bound
+
+
+class _LegacyToFunctionalCollectiveMode(torch.overrides.TorchFunctionMode):
+    """Redirect legacy ``torch.distributed`` collectives to functional collectives
+    while tracing, mirroring Dynamo and non-strict export.
+
+    Used by ``make_fx`` under ``compile_on_one_rank``: the in-place ``c10d.*`` ops
+    bind the ProcessGroup as a torchbind constant that cannot be serialized,
+    whereas the functional collectives take the group as an op argument, so the
+    group (e.g. a ``DeviceMesh.get_group()`` -> ``mesh_get_process_group`` output)
+    flows into the graph instead of being baked in.
+    """
+
+    def __torch_function__(
+        self,
+        func: Callable[..., Any],
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        remapped = _remap_traceable_collective(func, args, kwargs)
+        if remapped is not None:
+            mapped_func, mapped_args, mapped_kwargs = remapped
+            return mapped_func(*mapped_args, **mapped_kwargs)
+        return func(*args, **(kwargs or {}))
