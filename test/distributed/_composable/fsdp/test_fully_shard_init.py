@@ -36,6 +36,9 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -45,7 +48,11 @@ from torch.testing._internal.common_fsdp import (
     patch_all_gather,
     patch_reduce_scatter,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -58,6 +65,8 @@ device_type = torch.device(get_devtype())
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
     """Tests that tensor parameters are moved to the expected device."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self) -> int:
@@ -93,6 +102,8 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
 
 class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
     """Tests that DTensor parameters are moved to the expected device."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self) -> int:
@@ -167,6 +178,8 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
 class TestFullyShardContainerSubclasses(FSDPTestMultiThread):
     """Tests that fully_shard accepts ModuleDict/ModuleList subclasses that implement forward()."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     class DictWithForward(nn.ModuleDict):
         def __init__(self, in_features=8, out_features=8):
             super().__init__({"lin": nn.Linear(in_features, out_features)})
@@ -209,6 +222,8 @@ class TestFullyShardContainerSubclasses(FSDPTestMultiThread):
 class TestFullyShardMeshArg(FSDPTestMultiThread):
     """Tests the ``mesh`` argument."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
@@ -230,6 +245,8 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
 
 class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
     """Tests getting the managed modules/states for a ``fully_shard`` module."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @property
     def world_size(self) -> int:
@@ -344,6 +361,8 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
 
 
 class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -416,6 +435,8 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
 
 
 class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -450,6 +471,10 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             chunks = torch.chunk(orig_param, self.world_size, dim=0)
             self.assertEqual(sharded_param._local_tensor, chunks[self.rank])
 
+
+class TestFullyShardShardedParameterValidation(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_raise_scalar_parameter(self):
         """Tests raising an exception when the model has scalar parameters."""
         model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
@@ -474,6 +499,8 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
 
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
@@ -519,6 +546,8 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
 
 
 class TestFullyShardLazyInit(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -667,6 +696,8 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
 
 
 class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
@@ -882,6 +913,8 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
 
 
 class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
@@ -1044,6 +1077,8 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
 
 
 class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
@@ -1113,6 +1148,8 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
 
 
 class TestHSDPWithCustomHook(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
@@ -1218,6 +1255,8 @@ class TestHSDPWithCustomHook(FSDPTestMultiThread):
 
 
 class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 8
@@ -1358,6 +1397,10 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         ):
             fully_shard(model, shard_placement_fn=shard_placement_fn)
 
+
+class TestFullyShardShardPlacementValidation(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_invalid_shard_dim(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
 
@@ -1374,6 +1417,8 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
 # TODO: Remove this test class once we remove the old import path:
 # torch/distributed/_composable/fsdp
 class TestFullyShardOldImport(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1394,6 +1439,8 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
 
 
 class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1422,6 +1469,14 @@ class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
 
 
 class TestFullyShardNonFloatParam(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # `DeviceTypeTestBase.precision`/`rel_tol` are thread-local, but some
+    # asserts run in autograd worker threads (the all-gather/reduce-scatter
+    # callbacks); override with the plain `TestCase` defaults.
+    precision = TestCase._precision
+    rel_tol = TestCase._rel_tol
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1518,6 +1573,80 @@ class TestFullyShardNonFloatParam(FSDPTest):
         ):
             loss = model(x).sum()
             loss.backward()
+
+
+instantiate_device_type_tests(
+    TestFullyShardDeviceTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardDeviceDTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardContainerSubclasses,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardShardedParameterTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardShardedParameterDTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardMetaDeviceInit,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardProcessGroupInit,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardHSDPBroadcast,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestHSDPWithCustomHook,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardShardPlacementFn,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardMixedDtypeParam,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardNonFloatParam,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
