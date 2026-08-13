@@ -6525,6 +6525,20 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same nbytes"):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/193288")
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32)
+    def test_clamp_integral_out_of_range_bounds(self, device, dtype):
+        info = torch.iinfo(dtype)
+        x = torch.tensor([info.min, 0, info.max], device=device, dtype=dtype)
+
+        self.assertEqual(torch.clamp(x, min=info.min - 1), x)
+        self.assertEqual(torch.clamp_min(x, info.min - 1), x)
+        self.assertEqual(torch.clamp(x, max=info.max + 1), x)
+        self.assertEqual(torch.clamp_max(x, info.max + 1), x)
+        self.assertEqual(
+            torch.nn.functional.hardtanh(x, info.min - 1, info.max + 1), x
+        )
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):

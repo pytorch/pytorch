@@ -301,6 +301,45 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)
 
 namespace at::native {
 
+template <typename scalar_t>
+static Scalar saturate_integral_bound(const Scalar& bound) {
+  constexpr auto lowest = std::numeric_limits<scalar_t>::lowest();
+  constexpr auto highest = std::numeric_limits<scalar_t>::max();
+  if (bound.isFloatingPoint()) {
+    const auto value = bound.toDouble();
+    if (value <= static_cast<double>(lowest)) {
+      return Scalar(lowest);
+    }
+    if (value >= static_cast<double>(highest)) {
+      return Scalar(highest);
+    }
+  } else if (bound.type() == ScalarType::UInt64) {
+    const auto value = bound.toUInt64();
+    if (value >= static_cast<uint64_t>(highest)) {
+      return Scalar(highest);
+    }
+  } else {
+    const auto value = bound.toLong();
+    if (value <= static_cast<int64_t>(lowest)) {
+      return Scalar(lowest);
+    }
+    if constexpr (std::is_signed_v<scalar_t>) {
+      if (value >= static_cast<int64_t>(highest)) {
+        return Scalar(highest);
+      }
+    } else if (value >= static_cast<int64_t>(highest)) {
+      return Scalar(highest);
+    }
+  }
+  return bound;
+}
+
+static Scalar saturate_integral_bound(const Scalar& bound, ScalarType dtype) {
+  return AT_DISPATCH_INTEGRAL_TYPES(dtype, "saturate_integral_bound", [&] {
+    return saturate_integral_bound<scalar_t>(bound);
+  });
+}
+
 DEFINE_DISPATCH(
     where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
@@ -838,11 +877,27 @@ TORCH_IMPL_FUNC(clamp_out)
     at::fill_(
         const_cast<Tensor&>(result), std::numeric_limits<double>::quiet_NaN());
   } else if (min && max) {
-    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    if (isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
+      clamp_scalar_stub(
+          device_type(),
+          *this,
+          saturate_integral_bound(min.get(), result.scalar_type()),
+          saturate_integral_bound(max.get(), result.scalar_type()));
+    } else {
+      clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    }
   } else if (max) {
-    clamp_max_scalar_stub(device_type(), *this, max.get());
+    const auto bound =
+        isIntegralType(result.scalar_type(), /*includeBool=*/false)
+        ? saturate_integral_bound(max.get(), result.scalar_type())
+        : max.get();
+    clamp_max_scalar_stub(device_type(), *this, bound);
   } else if (min) {
-    clamp_min_scalar_stub(device_type(), *this, min.get());
+    const auto bound =
+        isIntegralType(result.scalar_type(), /*includeBool=*/false)
+        ? saturate_integral_bound(min.get(), result.scalar_type())
+        : min.get();
+    clamp_min_scalar_stub(device_type(), *this, bound);
   }
 }
 
@@ -868,7 +923,11 @@ TORCH_IMPL_FUNC(clamp_max_out)
     // this is a corner case anyway
     at::fill_(const_cast<Tensor&>(result), wrapped_scalar_tensor(max));
   } else {
-    clamp_max_scalar_stub(device_type(), *this, max);
+    const auto bound =
+        isIntegralType(result.scalar_type(), /*includeBool=*/false)
+        ? saturate_integral_bound(max, result.scalar_type())
+        : max;
+    clamp_max_scalar_stub(device_type(), *this, bound);
   }
 }
 
@@ -882,7 +941,11 @@ TORCH_IMPL_FUNC(clamp_min_out)
   if (min.toDouble() != min.toDouble()) {
     at::fill_(const_cast<Tensor&>(result), min);
   } else {
-    clamp_min_scalar_stub(device_type(), *this, min);
+    const auto bound =
+        isIntegralType(result.scalar_type(), /*includeBool=*/false)
+        ? saturate_integral_bound(min, result.scalar_type())
+        : min;
+    clamp_min_scalar_stub(device_type(), *this, bound);
   }
 }
 
