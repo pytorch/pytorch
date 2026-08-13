@@ -11,15 +11,23 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 
 
 device_type = torch.device(get_devtype())
 
 
 class TestFullyShardGradientScaler(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(4)
     def test_gradient_scaler(self):
         self.run_subtests(
@@ -107,6 +115,14 @@ class TestFullyShardGradientScaler(FSDPTest):
         else:
             # scale is not updated
             self.assertEqual(updated_scale, initial_scale)
+
+
+instantiate_device_type_tests(
+    TestFullyShardGradientScaler,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
