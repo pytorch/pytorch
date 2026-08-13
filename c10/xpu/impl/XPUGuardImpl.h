@@ -268,7 +268,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         !(flag & EventFlag::TIMING),
         "Cannot create IPC handle for event with timing enabled.");
 #if SYCL_COMPILER_VERSION >= 20260200
-    bool reusable = c10::xpu::get_raw_device(device_index)
+    DeviceIndex current_device =
+        device_index == -1 ? c10::xpu::current_device() : device_index;
+    bool reusable = c10::xpu::get_raw_device(current_device)
                         .has(sycl::aspect::ext_oneapi_per_event_profiling);
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
     sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
