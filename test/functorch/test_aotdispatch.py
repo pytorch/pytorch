@@ -246,6 +246,21 @@ class AOTTestCase(TestCase):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
 
 
+# Module-level `@torch.fx.wrap`ed helper used by
+# `test_saved_tensors_hooks_gm_data_dependent_probe`. Must live at module
+# scope because `torch.fx.wrap` requires that. See the test's docstring for
+# the regression it exercises.
+@torch.fx.wrap
+def _il_log_tensor_stats_for_regression(t, name):
+    try:
+        non_nan_infs = torch.isfinite(t)
+        if torch.all(non_nan_infs):
+            pass
+    except Exception:
+        pass
+    return t
+
+
 class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
         def f(x):
@@ -4920,6 +4935,47 @@ def forward(self, tangents_1):
                     y.sum().backward()
             except torch._dynamo.exc.BackendCompilerFailed as e:
                 raise e.inner_exception from e
+
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
+    def test_saved_tensors_hooks_gm_data_dependent_probe(self):
+        # Regression: `maybe_inline_graph_saved_tensors_hooks` used to run the
+        # user-supplied pack GraphModule twice — once as a subclass-detection
+        # probe (with NO ProxyTorchDispatchMode on the stack) and again as a
+        # fake execution to grab an example output value. Any data-dependent
+        # op inside the pack body (e.g. `bool(<fake_tensor>)` from user-side
+        # instrumentation like intermediate logging) would take the C++
+        # `Tensor.__bool__` shortcut, allocate a fresh unbacked SymInt via
+        # `_local_scalar_dense`, and — because no proxy tracer was active —
+        # never get bound. The symbol leaked into
+        # `pending_fresh_unbacked_symbols` and a later trace boundary raised
+        # `PendingUnbackedSymbolNotFound`.
+        #
+        # Reproduction shape (mirrors MAST job
+        # aps-aps_omnifmv5_1k_0517_0523_gb200_il_58_logging-fc1fad3f10):
+        # the pack GraphModule is built from `torch.fx.symbolic_trace` and
+        # contains an `@torch.fx.wrap`ed function whose body does
+        # `if torch.all(torch.isfinite(t)): ...`.  Under fake tracing, the
+        # `if` invokes `Tensor.__bool__` -> `.item()` and leaks.
+
+        def pack(x):
+            x = _il_log_tensor_stats_for_regression(x, "in")
+            return _il_log_tensor_stats_for_regression(x, "out")
+
+        def unpack(x):
+            return x
+
+        def fn(x, w):
+            return torch.matmul(x, w).sin()
+
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        x = torch.randn(8, 16, requires_grad=True)
+        w = torch.randn(16, 16, requires_grad=True)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = compiled(x, w)
+            out.sum().backward()
 
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
