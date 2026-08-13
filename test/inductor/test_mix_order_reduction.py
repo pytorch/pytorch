@@ -861,9 +861,15 @@ class MixOrderReductionTest(TestBase):
                 "split_reductions": split_reductions,
             },
         )(x, table)
-        (act_grad,) = torch.autograd.grad(act, table)
+        (act_grad,), (wrapper,) = utils.run_and_get_code(
+            lambda: torch.autograd.grad(act, table)
+        )
 
-        self.assertTrue(metrics.codegen_mix_order_reduction > 0)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        # the slice grads alias the shared cat buffer: the final reduction
+        # must be written through the view, never bound to a fresh tensor
+        FileCheck().check(".copy_(workspace_").run(wrapper)
+        self.assertNotIn("= workspace_", wrapper)
         torch.testing.assert_close(ref_grad, act_grad, atol=1e-4, rtol=1e-4)
 
     @inductor_config.patch(split_reductions=False)
