@@ -136,6 +136,463 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(inner(x), x + 1)
             self.assertEqual(inner(x), x + 1)
 
+    def test_disable_public_api_returns_disable_wrapper(self):
+        # Both public spellings of the recursive disable return the C-level
+        # DisableWrapper, produce correct results, and are not traced into under
+        # torch.compile (graph break around the disabled callee -> two frames).
+        from torch._C._dynamo.eval_frame import DisableWrapper
+
+        for disable in (torch._dynamo.disable, torch.compiler.disable):
+            torch._dynamo.reset()
+
+            @disable
+            def inner(x):
+                return x + 1
+
+            self.assertIsInstance(inner, DisableWrapper)
+
+            def fn(x, inner=inner):
+                return torch.cos(inner(torch.sin(x)))
+
+            x = torch.randn(4)
+            ref = fn(x)
+            cnts = torch._dynamo.testing.CompileCounter()
+            self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
+            self.assertEqual(cnts.frame_count, 2)
+
+        # recursive=False goes through skip (not DisableWrapper); it must still
+        # work standalone and under torch.compile.
+        torch._dynamo.reset()
+
+        @torch._dynamo.disable(recursive=False)
+        def inner_nr(x):
+            return x + 1
+
+        self.assertNotIsInstance(inner_nr, DisableWrapper)
+        x = torch.randn(4)
+        self.assertEqual(inner_nr(x), x + 1)
+
+        def fn_nr(x):
+            return torch.cos(inner_nr(torch.sin(x)))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn_nr, backend=cnts)(x), fn_nr(x))
+
+    def test_disable_dynamo_under_export(self):
+        # Export takes the DisableWrapper export fallback (guarded by
+        # is_exporting). The C export path rebuilds the argument vector,
+        # prepending fn and forwarding kwnames, so a disabled callee invoked
+        # with both positional AND keyword args must still receive them
+        # correctly. (The fx_traceback disable annotation itself is covered by
+        # test_export.py's test_uplift_common_custom_meta_with_multiple_calls.)
+        @torch._dynamo.disable
+        def helper(a, b, *, scale):
+            return (a + b) * scale
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return helper(x, y, scale=2.0) + 1
+
+        x, y = torch.randn(3), torch.randn(3)
+        ep = torch.export.export(M(), (x, y))
+        self.assertEqual(ep.module()(x, y), (x + y) * 2.0 + 1)
+
+    def test_disable_under_export_torch_dispatch_skips_annotation(self):
+        # The export fallback (_disable_wrapper_export_call) skips the
+        # fx_traceback annotation when the disabled callable is named
+        # __torch_dispatch__ (an internal detail). Drive that branch by forcing
+        # the export flag and calling a disabled __torch_dispatch__-named
+        # callable through the C export path; it must still run correctly.
+        import torch.compiler
+
+        @torch._dynamo.disable
+        def __torch_dispatch__(a, b):
+            return a + b
+
+        a, b = torch.randn(3), torch.randn(3)
+        prev = torch.compiler._is_exporting_flag
+        torch.compiler._is_exporting_flag = True
+        try:
+            self.assertEqual(__torch_dispatch__(a, b), a + b)
+        finally:
+            torch.compiler._is_exporting_flag = prev
+
+    def test_disable_method_reconstruction(self):
+        # A @torch._dynamo.disable instance method must bind self via the
+        # DisableWrapper descriptor (tp_descr_get); regression for the
+        # "missing 1 required positional argument" failure. Cover both a plain
+        # class and an nn.Module; both graph break around the disabled method.
+        x = torch.randn(4)
+
+        class Plain:
+            def __init__(self, v):
+                self.v = v
+
+            @torch._dynamo.disable
+            def helper(self, x):
+                return x + self.v
+
+        obj = Plain(3)
+
+        def fn(x):
+            return torch.cos(obj.helper(torch.sin(x)))
+
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
+        self.assertEqual(cnts.frame_count, 2)
+
+        class Mod(torch.nn.Module):
+            @torch._dynamo.disable
+            def helper(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return torch.cos(self.helper(torch.sin(x)))
+
+        m = Mod()
+        ref = m(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(m, backend=cnts)(x), ref)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_special_methods(self):
+        # A @torch._dynamo.disable-d dunder/special method dispatched through the
+        # various VariableTracker slot protocols (call_method, sq_contains,
+        # tp_iter, mp_subscript, descriptor __get__/__set__, ...) must route to
+        # the disable graph-break path (SkipFunctionVariable) with correct
+        # results, NOT the generic "unsupported method call" break. Each case
+        # asserts (a) the compiled result matches eager and (b) fullgraph=True
+        # raises the disable graph break naming the wrapped function.
+        def assert_disable_break(fn, arg):
+            torch._dynamo.reset()
+            ref = fn(arg)
+            self.assertEqual(torch.compile(fn, backend="eager")(arg), ref)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Unsupported, "disable\\(\\)`d function"):
+                torch.compile(fn, backend="eager", fullgraph=True)(arg)
+
+        x = torch.ones(3)
+
+        class Setattr:
+            @torch._dynamo.disable
+            def __setattr__(self, k, v):
+                object.__setattr__(self, k, v)
+
+        def f_setattr(x):
+            o = Setattr()
+            o.attr = x
+            return x + 1
+
+        assert_disable_break(f_setattr, x)
+
+        class Delattr:
+            def __init__(self):
+                object.__setattr__(self, "attr", 1)
+
+            @torch._dynamo.disable
+            def __delattr__(self, k):
+                object.__delattr__(self, k)
+
+        def f_delattr(x):
+            o = Delattr()
+            del o.attr
+            return x + 1
+
+        assert_disable_break(f_delattr, x)
+
+        class Call:
+            @torch._dynamo.disable
+            def __call__(self, x):
+                return x + 5
+
+        def f_call(x):
+            return Call()(x)
+
+        assert_disable_break(f_call, x)
+
+        class Contains:
+            @torch._dynamo.disable
+            def __contains__(self, item):
+                return True
+
+        def f_contains(x):
+            return x + 1 if 3 in Contains() else x - 1
+
+        assert_disable_break(f_contains, x)
+
+        class GetItem:
+            @torch._dynamo.disable
+            def __getitem__(self, k):
+                return k + 10
+
+        def f_getitem(x):
+            return x + GetItem()[5]
+
+        assert_disable_break(f_getitem, x)
+
+        class Add:
+            @torch._dynamo.disable
+            def __add__(self, other):
+                return 42
+
+        def f_add(x):
+            return x + (Add() + 1)
+
+        assert_disable_break(f_add, x)
+
+        class Desc:
+            @torch._dynamo.disable
+            def __get__(self, obj, objtype=None):
+                return 7
+
+        class HasDesc:
+            d = Desc()
+
+        def f_descriptor_get(x):
+            return x + HasDesc().d
+
+        assert_disable_break(f_descriptor_get, x)
+
+        # Data descriptor (defines __set__) whose __get__ is disabled: reading it
+        # routes through resolve_data_descriptor, a distinct path from the
+        # non-data Desc above (which goes through resolve_type_attr).
+        class DataDescGet:
+            @torch._dynamo.disable
+            def __get__(self, obj, objtype=None):
+                return 7
+
+            def __set__(self, obj, value):
+                obj.__dict__["_v"] = value
+
+        class HasDataDesc:
+            d = DataDescGet()
+
+        def f_data_descriptor_get(x):
+            return x + HasDataDesc().d
+
+        assert_disable_break(f_data_descriptor_get, x)
+
+        # Regression for the already-fixed plain instance-method path.
+        class Method:
+            @torch._dynamo.disable
+            def meth(self, x):
+                return x + 3
+
+        def f_method(x):
+            return Method().meth(x)
+
+        assert_disable_break(f_method, x)
+
+        # Metaclass dunder: `3 in C` calls type(C).__contains__(C, 3), routed
+        # through UserDefinedClassVariable.call_method. Regression guard: the
+        # pre-fix code fell through to super().call_method, which re-dispatched
+        # the `in` operator and recursed infinitely (RecursionError). It must
+        # instead graph-break, not recurse.
+        class MetaContains(type):
+            @torch._dynamo.disable
+            def __contains__(cls, item):
+                return True
+
+        class ClassContains(metaclass=MetaContains):
+            pass
+
+        def f_meta_contains(x):
+            return x + 1 if 3 in ClassContains else x - 1
+
+        torch._dynamo.reset()
+        ref = f_meta_contains(x)
+        try:
+            got = torch.compile(f_meta_contains, backend="eager")(x)
+        except RecursionError:
+            self.fail("disabled metaclass __contains__ recursed infinitely")
+        self.assertEqual(got, ref)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "disable\\(\\)`d function"):
+            torch.compile(f_meta_contains, backend="eager", fullgraph=True)(x)
+
+        # Instance __iter__ (tp_iter_impl).
+        class Iter:
+            @torch._dynamo.disable
+            def __iter__(self):
+                return iter([1, 2, 3])
+
+        def f_iter(x):
+            return x + sum(Iter())
+
+        assert_disable_break(f_iter, x)
+
+        # Instance __next__ (tp_iternext_impl).
+        class Nxt:
+            def __init__(self):
+                self.i = 0
+
+            def __iter__(self):
+                return self
+
+            @torch._dynamo.disable
+            def __next__(self):
+                self.i += 1
+                if self.i > 3:
+                    raise StopIteration
+                return self.i
+
+        def f_next(x):
+            total = 0
+            for v in Nxt():
+                total += v
+            return x + total
+
+        assert_disable_break(f_next, x)
+
+        # Instance __setitem__ (mp_ass_subscript_impl, write side).
+        class SetItem:
+            def __init__(self):
+                object.__setattr__(self, "d", {})
+
+            @torch._dynamo.disable
+            def __setitem__(self, k, v):
+                self.d[k] = v
+
+        def f_setitem(x):
+            o = SetItem()
+            o[0] = 5
+            return x + 1
+
+        assert_disable_break(f_setitem, x)
+
+        # Instance __delitem__ (mp_ass_subscript_impl, delete side).
+        class DelItem:
+            def __init__(self):
+                object.__setattr__(self, "d", {0: 1})
+
+            @torch._dynamo.disable
+            def __delitem__(self, k):
+                del self.d[k]
+
+        def f_delitem(x):
+            o = DelItem()
+            del o[0]
+            return x + 1
+
+        assert_disable_break(f_delitem, x)
+
+        # Data-descriptor __set__.
+        class DescSet:
+            @torch._dynamo.disable
+            def __set__(self, obj, value):
+                obj.__dict__["_v"] = value
+
+            def __get__(self, obj, objtype=None):
+                return obj.__dict__.get("_v", 0)
+
+        class HasDescSet:
+            d = DescSet()
+
+        def f_descset(x):
+            o = HasDescSet()
+            o.d = 9
+            return x + 1
+
+        assert_disable_break(f_descset, x)
+
+        # Data-descriptor __delete__.
+        class DescDel:
+            @torch._dynamo.disable
+            def __delete__(self, obj):
+                obj.__dict__.pop("_v", None)
+
+            def __set__(self, obj, value):
+                obj.__dict__["_v"] = value
+
+            def __get__(self, obj, objtype=None):
+                return obj.__dict__.get("_v", 0)
+
+        class HasDescDel:
+            d = DescDel()
+
+        def f_descdel(x):
+            o = HasDescDel()
+            o.d = 9
+            del o.d
+            return x + 1
+
+        assert_disable_break(f_descdel, x)
+
+    def test_disable_metaclass_getattr(self):
+        # A torch._dynamo.disable-d metaclass __getattr__ resolves a missing
+        # class attribute via type(cls).__getattr__(cls, name). It graph-breaks
+        # in SkipFunctionVariable, but since the class is a python constant
+        # _load_attr catches the break and constant-folds the access, so the
+        # result matches eager (and no user-visible break under fullgraph).
+        # Without the DisableWrapper branch in getattro_impl this would fall
+        # through to a spurious AttributeError.
+        class Meta(type):
+            @torch._dynamo.disable
+            def __getattr__(cls, name):
+                return 123
+
+        class WithMeta(metaclass=Meta):
+            pass
+
+        def f(x):
+            return x + WithMeta.some_missing_attr
+
+        x = torch.ones(3)
+        ref = f(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(f, backend="eager")(x), ref)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), ref)
+
+    def test_disable_wrapper_integrity(self):
+        # DisableWrapper carries functools.wraps metadata and the _torchdynamo_*
+        # attributes on its instance __dict__, and unwraps correctly.
+        import inspect
+
+        from torch._dynamo.eval_frame import innermost_fn
+
+        def orig(x, y):
+            "orig doc"
+            return x + y
+
+        wrapped = torch._dynamo.disable(orig)
+
+        self.assertEqual(wrapped.__name__, "orig")
+        self.assertEqual(wrapped.__doc__, "orig doc")
+        self.assertIs(wrapped.__wrapped__, orig)
+        # inspect.signature resolves through __wrapped__.
+        self.assertEqual(list(inspect.signature(wrapped).parameters), ["x", "y"])
+
+        self.assertTrue(wrapped._torchdynamo_disable)
+        self.assertIs(wrapped._torchdynamo_orig_callable, orig)
+
+        # innermost_fn unwraps to the original; re-disabling an already-disabled
+        # fn still unwraps to the original callable.
+        self.assertIs(innermost_fn(wrapped), orig)
+        rewrapped = torch._dynamo.disable(wrapped)
+        self.assertIs(innermost_fn(rewrapped), orig)
+        self.assertIs(rewrapped._torchdynamo_orig_callable, orig)
+
+    def test_disable_dynamo_internal_fast_path(self):
+        # torch._compile._disable_dynamo (torch-internal) still disables the
+        # callee and inherits the DisableWrapper fast path: results are correct
+        # and Dynamo graph breaks around it (two compiled frames).
+        from torch._compile import _disable_dynamo
+
+        @_disable_dynamo
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(3)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnts)(x), ref)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass

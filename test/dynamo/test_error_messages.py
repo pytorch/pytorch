@@ -387,13 +387,13 @@ from user code:
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
             """\
-Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
   Developer debug context: <function ErrorMessagesTest.test_skipfile_dynamo_disable_wrapped_method.<locals>.Scheduler.index_for_timestep at 0xmem_addr>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -2079,13 +2079,13 @@ from user code:
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
-Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
   Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 
 User code traceback:
   File "test_error_messages.py", line N, in test_store_attr_graph_break
@@ -2102,13 +2102,13 @@ User code traceback:
                 Unsupported,
                 lambda: fn(torch.ones(3)),
                 """\
-Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
   Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
