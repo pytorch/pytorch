@@ -53,7 +53,7 @@ class TestDeviceGuardWithInterface(torch._dynamo.test_case.TestCase):
     Unit tests for the DeviceGuard class using a real DeviceInterface.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_device_guard_no_index(self, device):
         device_interface = get_interface_for_device(torch.device(device).type)
