@@ -10555,6 +10555,68 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/125844
+    def test_mps_weights_cast_to_float32_with_warning(self):
+        from torch.utils.data import WeightedRandomSampler
+        weights = torch.tensor([0.1, 0.2, 0.3, 0.4], device="mps")
+        with self.assertWarnsRegex(UserWarning, "does not support float64"):
+            sampler = WeightedRandomSampler(weights, num_samples=8, replacement=True)
+        self.assertEqual(sampler.weights.dtype, torch.float32)
+        self.assertEqual(sampler.weights.device.type, "mps")
+        indices = list(sampler)
+        self.assertEqual(len(indices), 8)
+        self.assertTrue(all(0 <= i < 4 for i in indices))
+
+    def test_mps_float16_weights(self):
+        from torch.utils.data import WeightedRandomSampler
+        weights = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16, device="mps")
+        sampler = WeightedRandomSampler(weights, num_samples=6, replacement=True)
+        indices = list(sampler)
+        self.assertEqual(len(indices), 6)
+
+    def test_cpu_weights_unchanged(self):
+        from torch.utils.data import WeightedRandomSampler
+        # CPU path must still use float64 (existing behaviour)
+        weights_cpu = torch.tensor([0.1, 0.9])
+        sampler = WeightedRandomSampler(weights_cpu, num_samples=4, replacement=True)
+        self.assertEqual(sampler.weights.dtype, torch.float64)
+
+    def test_python_list_weights_unchanged(self):
+        from torch.utils.data import WeightedRandomSampler
+        sampler = WeightedRandomSampler([0.3, 0.7], num_samples=4, replacement=True)
+        self.assertEqual(sampler.weights.dtype, torch.float64)
+
+    def test_mps_without_replacement(self):
+        from torch.utils.data import WeightedRandomSampler
+        weights = torch.ones(10, device="mps")
+        sampler = WeightedRandomSampler(weights, num_samples=5, replacement=False)
+        indices = list(sampler)
+        self.assertEqual(len(indices), 5)
+        self.assertEqual(len(set(indices)), 5)  # no duplicates
+
+    def test_mps_weights_sampling_distribution_matches_cpu(self):
+        # MPS now samples on-device in float32 (not moved to CPU at float64), so
+        # MPS and CPU use different RNG engines and won't draw identical indices
+        # even from the same seed. Compare empirical frequency against the
+        # expected weight distribution on each backend independently instead.
+        from torch.utils.data import WeightedRandomSampler
+        weights_list = [0.1, 0.2, 0.3, 0.4, 5.0]
+        expected = torch.tensor(weights_list) / sum(weights_list)
+        num_samples = 20000
+
+        weights_mps = torch.tensor(weights_list, device="mps")
+        with self.assertWarnsRegex(UserWarning, "does not support float64"):
+            sampler_mps = WeightedRandomSampler(weights_mps, num_samples, replacement=True)
+        counts_mps = torch.bincount(torch.tensor(list(sampler_mps)), minlength=len(weights_list))
+        freq_mps = counts_mps.float() / num_samples
+
+        sampler_cpu = WeightedRandomSampler(weights_list, num_samples, replacement=True)
+        counts_cpu = torch.bincount(torch.tensor(list(sampler_cpu)), minlength=len(weights_list))
+        freq_cpu = counts_cpu.float() / num_samples
+
+        self.assertEqual(freq_mps, expected, atol=0.02, rtol=0)
+        self.assertEqual(freq_cpu, expected, atol=0.02, rtol=0)
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)

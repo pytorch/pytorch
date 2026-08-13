@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
+import warnings
 from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Generic, TypeVar
 
@@ -261,7 +262,15 @@ class WeightedRandomSampler(Sampler[int]):
                 f"replacement should be a boolean value, but got replacement={replacement}"
             )
 
-        weights_tensor = torch.as_tensor(weights, dtype=torch.double)
+        if isinstance(weights, torch.Tensor) and weights.device.type == "mps":
+            warnings.warn(
+                "weights is an MPS tensor, but MPS does not support float64. "
+                "Using float32 instead, which may reduce precision.",
+                stacklevel=2,
+            )
+            weights_tensor = weights.to(dtype=torch.float32)
+        else:
+            weights_tensor = torch.as_tensor(weights, dtype=torch.double)
         if len(weights_tensor.shape) != 1:
             raise ValueError(
                 "weights should be a 1d sequence but given "
