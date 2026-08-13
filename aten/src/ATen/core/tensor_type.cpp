@@ -461,9 +461,9 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
 }
 
 bool TensorType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
-  if (auto rhs_p = rhs.cast<TensorType>()) {
+  if (auto* rhs_p = rhs.castRaw<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
-    if (this == rhs_p.get()) {
+    if (this == rhs_p) {
       return true;
     }
     return *merge(*rhs_p) == *rhs_p;
