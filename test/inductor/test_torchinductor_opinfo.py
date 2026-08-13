@@ -1319,8 +1319,8 @@ def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
         @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
         @skipIfTorchDynamo("Test uses dynamo already")
         @skipIfCrossRef
-        @skip_ops_decorator
         @ops_decorator
+        @skip_ops_decorator
         @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
         @torch._inductor.config.patch(
             {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
