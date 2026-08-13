@@ -503,10 +503,22 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
     def run_with_interpreter(*args):
         return Interpreter(gmod).run(*args)
 
-    with fx_traceback.preserve_node_meta():
-        from torch.utils.checkpoint import checkpoint
+    # Disable autocast's weight-cast cache for this checkpoint region. The
+    # cache is process-wide and keyed only by (tensor, dtype), so a sibling
+    # checkpoint call sharing a weight can warm it, skewing dtype-cast counts
+    # between this region's forward and its independently-scoped recompute
+    # and tripping the SAC invocation-count consistency check. checkpoint()
+    # snapshots this flag and replays it for recompute, so disabling it here
+    # keeps both consistent. See GH #193194.
+    prev_cache_enabled = torch.is_autocast_cache_enabled()
+    torch.set_autocast_cache_enabled(False)
+    try:
+        with fx_traceback.preserve_node_meta():
+            from torch.utils.checkpoint import checkpoint
 
-        return checkpoint(run_with_interpreter, *args, **kwargs)
+            return checkpoint(run_with_interpreter, *args, **kwargs)
+    finally:
+        torch.set_autocast_cache_enabled(prev_cache_enabled)
 
 
 @tag_activation_checkpoint.py_impl(ProxyTorchDispatchMode)

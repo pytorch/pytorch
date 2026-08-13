@@ -2684,6 +2684,128 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x).backward()
 
 
+class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
+    def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
+        """Regression test for GH #193194.
+
+        A single nn.Module (with a plain-float attribute, e.g. RMSNorm's
+        eps) gets checkpointed at two different call sites within one
+        compiled region -- once via a code path that skips a branch, once
+        via a path that takes it -- under dynamic shapes. This used to hard
+        crash Dynamo tracing with `AssertionError: lift_tracked_freevar_to_
+        input should not be called on root SubgraphTracer`, because Dynamo's
+        per-source unspecialized-float cache (populated by wrap_symfloat)
+        created its item() proxy on whichever SubgraphTracer happened to be
+        active the first time the source was seen -- e.g. inside the first
+        checkpoint call's HOP body subgraph -- and reused that same cached
+        proxy for the second, sibling checkpoint call's subgraph, which
+        isn't an ancestor of the first and so could never legally lift it.
+
+        Once that's fixed, a second, unrelated bug surfaces: under autocast,
+        the weight-cast cache (also process-wide, keyed only by
+        tensor+dtype) can be warmed by the first checkpoint call and hit by
+        the second sibling call sharing the same module, so fewer dtype-cast
+        ops run during that second call's forward than during its
+        independently-scoped recompute in backward, tripping the checkpoint
+        SAC invocation-count consistency check.
+        """
+
+        class Block(nn.Module):
+            def __init__(self, dim, heads, xattn=False):
+                super().__init__()
+                self.heads = heads
+                self.head_dim = dim // heads
+                self.norm1 = nn.RMSNorm(dim, eps=1e-6)
+                self.qkv = nn.Linear(dim, dim * 3, bias=False)
+                self.proj = nn.Linear(dim, dim, bias=False)
+                if xattn:
+                    self.norm_x = nn.RMSNorm(dim, eps=1e-6)
+                    self.xq = nn.Linear(dim, dim, bias=False)
+                    self.xkv = nn.Linear(dim, dim * 2, bias=False)
+                    self.xproj = nn.Linear(dim, dim, bias=False)
+                else:
+                    self.norm_x = None
+
+            def forward(self, x, context=None):
+                b, l, c = x.shape
+                h = self.norm1(x)
+                qkv = (
+                    self.qkv(h)
+                    .reshape(b, l, 3, self.heads, self.head_dim)
+                    .permute(2, 0, 3, 1, 4)
+                )
+                q, k, v = qkv.unbind(0)
+                attn = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                x = x + self.proj(attn.transpose(1, 2).reshape(b, l, c))
+                if self.norm_x is not None and context is not None:
+                    h = self.norm_x(x)
+                    xq = (
+                        self.xq(h)
+                        .reshape(b, l, self.heads, self.head_dim)
+                        .transpose(1, 2)
+                    )
+                    kv = (
+                        self.xkv(context)
+                        .reshape(b, -1, 2, self.heads, self.head_dim)
+                        .permute(2, 0, 3, 1, 4)
+                    )
+                    xk, xv = kv.unbind(0)
+                    xa = F.scaled_dot_product_attention(xq, xk, xv)
+                    x = x + self.xproj(xa.transpose(1, 2).reshape(b, l, c))
+                return x
+
+        class Model(nn.Module):
+            def __init__(self, dim, depth):
+                super().__init__()
+                self.blocks = nn.ModuleList(
+                    Block(dim, heads=4, xattn=(i % 2 == 1)) for i in range(depth)
+                )
+
+            def _pass(self, x, context=None):
+                for blk in self.blocks:
+                    x = torch.utils.checkpoint.checkpoint(
+                        blk, x, context, use_reentrant=False
+                    )
+                return x
+
+            def forward(self, x, context):
+                # Same self.blocks checkpointed twice: once with context=None
+                # (skips the cross-attn branch), once with a real context
+                # (takes it). This is what makes the two checkpoint call
+                # sites for a given block "siblings" sharing one nn.Module.
+                out1 = self._pass(x)
+                out2 = self._pass(x, context)
+                return out1 + out2
+
+        def run(m, x, ctx):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                out = m(x, ctx)
+            loss = out.float().sum()
+            loss.backward()
+            return out
+
+        dim, depth = 32, 4
+        torch.manual_seed(0)
+        model = Model(dim, depth)
+        compiled_model = torch.compile(
+            copy.deepcopy(model), backend="eager", dynamic=True
+        )
+
+        for seq_len in (32, 48):
+            torch.manual_seed(0)
+            x_eager = torch.randn(2, seq_len, dim, requires_grad=True)
+            ctx_eager = torch.randn(2, 20, dim)
+            out_eager = run(model, x_eager, ctx_eager)
+
+            torch.manual_seed(0)
+            x_compiled = x_eager.detach().clone().requires_grad_(True)
+            ctx_compiled = ctx_eager.detach().clone()
+            out_compiled = run(compiled_model, x_compiled, ctx_compiled)
+
+            self.assertEqual(out_eager, out_compiled, atol=1e-3, rtol=1e-3)
+            self.assertEqual(x_eager.grad, x_compiled.grad, atol=1e-3, rtol=1e-3)
+
+
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
