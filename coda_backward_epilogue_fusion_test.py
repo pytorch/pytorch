@@ -255,7 +255,54 @@ class TestCodaBwdFusionNumerics(TestCase):
         if grad_ptrs is not None:
             self.assertEqual([t.grad.data_ptr() for t in tensors], grad_ptrs)
 
-    def test_multi_use_splitter_fusion(self, device):
+    def test_splitter_activation_grad_accumulation(self, device):
+        torch.manual_seed(0)
+        base_x = torch.randn(4, 6, dtype=torch.double, device=device)
+        base_wa = torch.randn(6, 6, dtype=torch.double, device=device)
+        base_wb = torch.randn(6, 6, dtype=torch.double, device=device)
+
+        x = base_x.clone().requires_grad_()
+        wa = base_wa.clone().requires_grad_()
+        wb = base_wb.clone().requires_grad_()
+        h = torch.sigmoid(x)
+        self.assertIsNotNone(h.grad_fn)
+        ha, hb = split_multi_use(h, 2)
+        loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
+
+        pattern = (
+            (MMRelu.main_backward, MMRelu.main_backward),
+            split_multi_use,
+        )
+        replacement = coda.mm_multiuse_accumulate_backward
+        rules = [(pattern, replacement)]
+
+        LOG.reset()
+        plan = apply_epilogue_fusion(
+            loss,
+            rules,
+            expect_num_fusions=1,
+            _internal_debug=True,
+        )
+        loss.backward()
+
+        ex = base_x.clone().requires_grad_()
+        ewa = base_wa.clone().requires_grad_()
+        ewb = base_wb.clone().requires_grad_()
+        eh = torch.sigmoid(ex)
+        (torch.relu(eh @ ewa).sum() + torch.relu(eh @ ewb).sum()).backward()
+
+        self.assertEqual(_grads([x, wa, wb]), _grads([ex, ewa, ewb]))
+        self.assertEqual(len(plan._multiuse_pairs_fused), 1)
+        self.assertFalse(plan._multiuse_pairs_fused[0].includes_epilogue)
+        self.assertEqual(LOG.c["splitter_fused"], 1)
+        self.assertEqual(LOG.c["splitter_deferred"], 1)
+        self.assertEqual(LOG.c["multiuse_fused"], 0)
+        self.assertEqual(LOG.c["fused_impl"], 0)
+        self.assertEqual(LOG.c["accumulate_fused"], 0)
+        self.assertEqual(LOG.c["main_params_only"], 2)
+        self.assertEqual(LOG.c["epilogue_unfused"], 2)
+
+    def test_multi_use_splitter_end_to_end(self, device):
         torch.manual_seed(0)
         base_x = torch.randn(4, 6, dtype=torch.double, device=device)
         base_ws = [
@@ -270,6 +317,7 @@ class TestCodaBwdFusionNumerics(TestCase):
 
         pattern = (
             (MMRelu.main_backward, MMRelu.main_backward),
+            split_multi_use,
             MMRelu.epilogue_backward,
         )
         replacement = coda.mm_relu_multiuse_fused_backward
@@ -305,6 +353,7 @@ class TestCodaBwdFusionNumerics(TestCase):
         self.assertEqual(len(plan._multiuse_pairs_fused), 1)
         self.assertEqual(LOG.c["multiuse_fused"], 1)
         self.assertEqual(LOG.c["splitter_deferred"], 1)
+        self.assertEqual(LOG.c["splitter_fused"], 0)
         self.assertEqual(LOG.c["accumulate_fused"], 4)
         self.assertEqual(LOG.c["main_fully_deferred"], 3)
 
