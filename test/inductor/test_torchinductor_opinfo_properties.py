@@ -710,27 +710,32 @@ class TestOpInfoProperties(TestCase):
         # Disable split-k accumulation in GEMM to ensure batch-invariant results.
         # Split-k can produce different rounding based on how work is partitioned.
         # Disabling split-k requires the cuBLASLt backend, so we set it first.
-        prev_blas_library = torch.backends.cuda.preferred_blas_library()
-        torch.backends.cuda.preferred_blas_library("cublaslt")
+        prev_blas_library = None
+        prev_fp16 = None
+        prev_bf16 = None
 
-        # We need to save both the reduced precision and split_k settings.
-        prev_fp16 = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
-        )
-        prev_bf16 = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
-        )
-        # Disable both reduced precision and split-k
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            False,
-            False,
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            False,
-            False,
-        )
+        if device_type == "cuda":
+            prev_blas_library = torch.backends.cuda.preferred_blas_library()
+            torch.backends.cuda.preferred_blas_library("cublaslt")
+
+            # We need to save both the reduced precision and split_k settings.
+            prev_fp16 = (
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
+            )
+            prev_bf16 = (
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
+            )
+            # Disable both reduced precision and split-k
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                False,
+                False,
+            )
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                False,
+                False,
+            )
 
         def run_test():
             tested_any = False
@@ -804,13 +809,14 @@ class TestOpInfoProperties(TestCase):
                 device_type, op.name, backend, "batch_invariance", dtype, run_test
             )
         finally:
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-                prev_fp16
-            )
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-                prev_bf16
-            )
-            torch.backends.cuda.preferred_blas_library(prev_blas_library)
+            if device_type == "cuda":
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                    prev_fp16
+                )
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                    prev_bf16
+                )
+                torch.backends.cuda.preferred_blas_library(prev_blas_library)
 
     # =========================================================================
     # Run-to-Run Determinism Tests

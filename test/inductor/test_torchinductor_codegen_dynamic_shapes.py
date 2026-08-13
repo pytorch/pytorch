@@ -661,6 +661,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
     class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
         maxDiff = None
         device = GPU_TYPE
+        hw_classification = HardwareClassification.ACCELERATOR
 
         def common(
             self: TestCase,
