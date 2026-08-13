@@ -42,6 +42,7 @@ L1:
   - NVIDIA/pytorch-windows-ci
   - google-pytorch/torch_tpu
   - Isalia20/pytorch-mps-ci
+  - RBLN-SW/torch-rbln
 
 L2:
   - TorchedHat/pytorch-redhat-ci
