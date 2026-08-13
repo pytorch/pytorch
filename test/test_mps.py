@@ -10436,6 +10436,45 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/162872
+    def test_synchronize_then_elapsed_time(self):
+        start = torch.mps.Event(enable_timing=True)
+        end = torch.mps.Event(enable_timing=True)
+        start.record()
+        # Run a small op so start/end don't land on the same GPU timestamp
+        _ = torch.zeros(1024, device="mps") + 1
+        end.record()
+        end.synchronize()
+        t = start.elapsed_time(end)
+        self.assertGreaterEqual(t, 0.0)
+
+    def test_elapsed_time_without_synchronize(self):
+        start = torch.mps.Event(enable_timing=True)
+        end = torch.mps.Event(enable_timing=True)
+        start.record()
+        # Run a small op to give the GPU something to time
+        _ = torch.zeros(1024, device="mps") + 1
+        end.record()
+        t = start.elapsed_time(end)
+        self.assertGreaterEqual(t, 0.0)
+
+    def test_multiple_synchronize_then_elapsed_time(self):
+        start = torch.mps.Event(enable_timing=True)
+        end = torch.mps.Event(enable_timing=True)
+        start.record()
+        # Run a small op so start/end don't land on the same GPU timestamp
+        _ = torch.zeros(1024, device="mps") + 1
+        end.record()
+        start.synchronize()
+        end.synchronize()
+        t = start.elapsed_time(end)
+        self.assertGreaterEqual(t, 0.0)
+
+    def test_synchronize_idempotent(self):
+        e = torch.mps.Event(enable_timing=True)
+        e.record()
+        e.synchronize()
+        e.synchronize()
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
