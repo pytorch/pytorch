@@ -492,11 +492,7 @@ ROCM_UNARY_NUMERICAL_XFAILS = {
         "tanh": {fp32},
     },
     "inductor_numerics": {
-        **(
-            {}
-            if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
-            else {"log10": {fp16, fp32}}
-        ),
+        "log10": {fp16, fp32},
         "sigmoid": {fp32},
     },
 }
@@ -569,17 +565,20 @@ ROCM_RELAXED_PROPERTY_CASES = {
             "cos": {fp32},
             "exp": {fp32},
             "log1p": {fp16, fp32},
-            **(
-                {"log10": {fp16, fp32}}
-                if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
-                else {}
-            ),
         },
         "inductor_numerics": {
             "rsqrt": {bf16},
         },
     },
 }
+
+if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
+    # ROCm 7.14 fixes log10 strict numerics but still needs default-mode tolerance.
+    del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
+    ROCM_RELAXED_PROPERTY_CASES["unary_numerical"]["inductor_default"]["log10"] = {
+        fp16,
+        fp32,
+    }
 
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):

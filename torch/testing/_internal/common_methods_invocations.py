@@ -13818,8 +13818,7 @@ op_db: list[OpInfo] = [
            # ROCm 7.14.
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(
-               *([torch.half] if not TEST_WITH_ROCM else []),
-               *([torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [])),
+               torch.half, *([torch.bfloat16] if SM80OrLater else [])),
            backward_dtypesIfROCM=(
                floating_and_complex_types_and(torch.half, torch.bfloat16)
                if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
