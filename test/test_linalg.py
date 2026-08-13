@@ -5862,8 +5862,8 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-    @skipIfRocm
     @slowTest
+    @skipIfRocm
     @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
@@ -5892,8 +5892,15 @@ class TestLinalg(TestCase):
 
         shapes = itertools.chain(itertools.product(bsl, nsl), itertools.product(bsh, nsh))
 
+        def make_well_conditioned_system(*shape):
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            u, _ = torch.linalg.qr(t)
+            v, _ = torch.linalg.qr(t.mT)
+            s = torch.rand(*shape[:-2], min(shape[-1], shape[-2]), device=device, dtype=dtype).add_(0.5)
+            return (u * s.unsqueeze(-2)) @ v.mH
+
         if pivot:
-            make_well_conditioned = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
+            make_well_conditioned = make_well_conditioned_system
             make_ill_conditioned = partial(torch.randn, device=device, dtype=dtype)
         else:
             def make_diagonally_dominant(t):
@@ -5906,7 +5913,7 @@ class TestLinalg(TestCase):
             def make_well_conditioned(*shape):
                 # Diagonal dominance limits the growth factor to be no larger than 2,
                 # so that nopiv Gaussian elimination becomes stable.
-                t = make_fullrank_matrices_with_distinct_singular_values(*shape, device=device, dtype=dtype)
+                t = make_well_conditioned_system(*shape)
                 return make_diagonally_dominant(t)
 
             def make_ill_conditioned(*shape):
