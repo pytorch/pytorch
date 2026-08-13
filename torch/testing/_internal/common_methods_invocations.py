@@ -23066,13 +23066,12 @@ if "flydsl" in dsl_ops_by_dsl:
                 ),
             ],
             skips=(
-                # test_dtypes probes every dtype and expects the listed set
-                # to exactly match what the op accepts. The override falls
-                # through to aten for fp64/complex, so those "work" from the
-                # probe's perspective -- but this variant is specifically for
-                # the override's supported dtypes only.
+                # Unsupported FlyDSL dtypes fall through to aten and appear supported,
+                # so the probe's dtype set never matches the one listed here. xfail
+                # rather than skip: the failure is a plain deterministic assertion, and
+                # an XPASS is the signal to reconcile the set and restore coverage.
                 DecorateInfo(
-                    unittest.skip("override intentionally narrower than aten"),
+                    unittest.expectedFailure,
                     "TestCommon", "test_dtypes",
                 ),
             ),
