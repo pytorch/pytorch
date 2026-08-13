@@ -462,6 +462,37 @@ class TestGroupBatchFusion(TestCase):
             counters.clear()
 
     @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_linear_lhs": {"min_fuse_set_size": 2}},
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_outputs_contiguous(self):
+        # The fusion merges both linears into one mm of width 192 + 16, so the
+        # first output would come back strided (208, 1) instead of (192, 1).
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_small = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return self.proj_large(x), self.proj_small(x)
+
+        counters.clear()
+        module = M().to(GPU_TYPE)
+        x = torch.randn(32, 64, device=GPU_TYPE)
+        compiled = torch.compile(module)
+        with torch.no_grad():
+            out_large, out_small = compiled(x)
+        self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
+        self.assertTrue(
+            out_large.is_contiguous(), "proj_large output must be contiguous"
+        )
+        self.assertTrue(
+            out_small.is_contiguous(), "proj_small output must be contiguous"
+        )
+
+    @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
         """
         Post-grad batch linear fusion rewrites parallel mm nodes into a
