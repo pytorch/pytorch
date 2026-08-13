@@ -36,22 +36,6 @@ C10_METAL_CONSTEXPR int32_t conv1d_mpp_src_width_hint = 1 << 22;
 
 // A region is an interval along the output length, not a 3D tensor subregion.
 // Direct SGEMM supports both NCL and NLC activation storage.
-//
-// Example (groups=1): input [N, C_in, L] = [1, 2, 5] and weights
-// [C_out, C_in, K] = [3, 2, 3], with stride=1, padding=1, dilation=1,
-// produce output [N, C_out, outW] = [1, 3, 5].
-// Logically, each zero-padded [C_in, K] patch flattens to C_in*K=6:
-// W[3, 6] @ patch[6, 1] -> output column [3, 1], one value per weight row.
-// This is only the GEMM view; the direct kernel does not materialize im2col.
-// It accumulates valid W_j[3, 2] @ X_j[2, out_cols] products while indexing
-// the NCL or NLC activation directly.
-//
-// Along the output length:
-//   output 0 reads input [0, 2) with weight taps [1, 3);
-//   outputs [1, 4) read inputs [0, 3), [1, 4), [2, 5) with taps [0, 3);
-//   output 4 reads input [3, 5) with weight taps [0, 2).
-// The middle region is {out_col0=1, out_cols=3, in_col0=0, taps=3,
-// w_tap0=0, tile0=1}; the left-edge region occupies grid-y tile 0.
 struct Conv1dSgemmRegion {
   // Index of the region's first output position.
   int32_t out_col0;
