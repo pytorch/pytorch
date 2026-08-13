@@ -5862,6 +5862,142 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
+    @skipIfRocm
+    @slowTest
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @setLinalgBackendsToDefaultFinally
+    @parametrize("pivot", [True, False])
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_batched_lu_stability_large_inputs(self, device, dtype, pivot):
+        # Check whether LU factorization is stable.
+        # We use the criterion from Netlib/MAGMA:
+        # scaled_residul < K, where
+        # scaled_residual = ||PLU - A|| / (||A|| * n * eps)
+        # Netlib uses 1-norm, while MAGMA uses Frobenius norm.
+        # NOTE: n <= 1024 decides between two panel factorization kernels
+        if not dtype.is_complex:
+            compute_dtype = torch.double
+        else:
+            compute_dtype = torch.cdouble
+        eps = torch.finfo(dtype).eps
+
+        # low batch regime shapes
+        bsl = (4, 8)
+        nsl = (259, 1027, 2033)
+
+        # high batch regime shapes
+        bsh = (150, 550)
+        nsh = (257,)
+
+        shapes = itertools.chain(itertools.product(bsl, nsl), itertools.product(bsh, nsh))
+
+        if pivot:
+            make_well_conditioned = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
+            make_ill_conditioned = partial(torch.randn, device=device, dtype=dtype)
+        else:
+            def make_diagonally_dominant(t):
+                # This bounds the growth factor by 2
+                t_diag = t.diagonal(dim1=-2, dim2=-1)
+                col_abs_sum = t.abs().sum(-1)
+                t_diag.copy_(t_diag.sgn() * col_abs_sum)
+                return t
+
+            def make_well_conditioned(*shape):
+                # Diagonal dominance limits the growth factor to be no larger than 2,
+                # so that nopiv Gaussian elimination becomes stable.
+                t = make_fullrank_matrices_with_distinct_singular_values(*shape, device=device, dtype=dtype)
+                return make_diagonally_dominant(t)
+
+            def make_ill_conditioned(*shape):
+                t = make_well_conditioned(*shape)
+                t[..., :2, :].zero_()
+                # This makes the input ill-conditioned (the condition number is at least 1e8),
+                # but the growth factor is still limited by 2 (diagonal dominance), so
+                # nopiv Gaussian elimination should be stable.
+                t[..., 0, 0] = 1
+                t[..., 1, 1] = 1e-8
+                return t
+
+        make_input_methods = (make_well_conditioned, make_ill_conditioned)
+        matrix_norm = partial(torch.linalg.norm, dim=(-2, -1))
+
+        torch.backends.cuda.preferred_linalg_library("cusolver")
+        for (b, n), make_input in product(shapes, make_input_methods):
+            A = make_input(b, n, n)
+            P, L, U = torch.linalg.lu(A, pivot=pivot)
+            A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
+            residual = P @ L @ U - A if pivot else L @ U - A
+
+            # Netlib uses 1-norm, MAGMA uses Frobenius
+            for norm in (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro')):
+                # Compute scaled residual
+                # ||PLU - A|| / (||A|| * n * eps)
+                scale = norm(A).mul_(n * eps)
+                scaled_residual = norm(residual).div_(scale)
+
+                # Very conservative - Netlib uses 30, and so is MAGMA, see:
+                #
+                # Netlib:
+                # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/LIN/dget01.f
+                # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/LIN/dchkge.f
+                # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/dtest.in
+                #
+                # MAGMA:
+                # https://github.com/icl-utk-edu/magma/blob/master/testing/testing_zgetrf.cpp
+                # https://github.com/icl-utk-edu/magma/blob/master/testing/magma_util.cpp
+                K = 1.0
+                self.assertTrue((scaled_residual < K).all())
+
+        # Check info vector. Note, it is 1-based
+        for n in (300, 1030):
+            A = make_well_conditioned(5, n, n)
+            A[0, :, 150:] = 0
+            A[2, :, :150] = 0
+            A[4, :, 17] = 0
+            _, _, info = torch.linalg.lu_factor_ex(A, pivot=pivot)
+            self.assertEqual(info[0], 151)
+            self.assertEqual(info[2], 1)
+            self.assertEqual(info[4], 18)
+            self.assertTrue(info[1] == info[3] == 0)
+
+    @skipIfRocm
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @setLinalgBackendsToDefaultFinally
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_batched_lu_edge_cases(self, device, dtype):
+        # Test the register-resident kernel for shapes n == i (mod 32)
+        if not dtype.is_complex:
+            compute_dtype = torch.double
+        else:
+            compute_dtype = torch.cdouble
+        eps = torch.finfo(dtype).eps
+
+        make_input = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
+        norm = partial(torch.linalg.norm, dim=(-2, -1), ord='fro')
+
+        # shape that dispatches to the register-resident kernel
+        b = 4  # batch
+        n = 256  # shape
+        r = 32  # testing shapes n + i such that n == i (mod r)
+        buffer = make_input(b, n + r, n + r)
+
+        for i in range(1, r):
+            A = buffer[..., :n + i, :n + i]
+            P, L, U = torch.linalg.lu(A)
+            A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
+
+            residual = P @ L @ U - A
+            # Compute scaled residual
+            # ||PLU - A|| / (||A|| * n * eps)
+            scale = norm(A).mul_(n * eps)
+            scaled_residual = norm(residual).div_(scale)
+
+            # see test_linalg_batched_lu_stability_large_inputs
+            K = 1.0
+            self.assertTrue((scaled_residual < K).all())
+
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
