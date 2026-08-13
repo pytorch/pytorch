@@ -497,10 +497,32 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
+    @staticmethod
+    def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+        for user in node.users:
+            if user.op == "output":
+                return True
+            if user.op == "call_method" and user.target in (
+                "is_contiguous",
+                "storage_offset",
+                "stride",
+            ):
+                return True
+            if (
+                isinstance(user.target, torch._ops.OpOverload)
+                and user.target.namespace != "aten"
+            ):
+                return True
+        return False
+
     def match(self, node: torch.fx.Node) -> tuple[str, int | None, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
+            # Splitting a wide GEMM returns non-contiguous views. Avoid changing
+            # observable layout or passing those views to opaque custom operators.
+            if self._has_layout_sensitive_user(node):
+                return None
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
