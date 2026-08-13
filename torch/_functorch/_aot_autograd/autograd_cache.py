@@ -13,10 +13,10 @@ import json
 import logging
 import os
 import pickle
-import random
 import shutil
 import time
 import traceback
+import uuid
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -962,7 +962,9 @@ def autograd_cache_key(
                 "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
                 exc_info=True,
             )
-            return str(random.random()), []
+            # Use UUID rather than random.random() so fallback keys are independent of
+            # application RNG state and remain unique across processes with the same seed.
+            return uuid.uuid4().hex, []
         else:
             raise
 
