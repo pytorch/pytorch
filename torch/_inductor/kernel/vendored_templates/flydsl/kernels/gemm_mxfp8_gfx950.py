@@ -41,6 +41,7 @@ MXFP8_MFMA_K = 128
 GFX950_WAVE_SIZE = 64
 GFX950_DMA_BYTES = 16
 GFX950_LDS_CAPACITY = 163840
+GFX950_NUM_XCD = 8
 GFX950_MAX_BLOCK_THREADS = 1024
 # The pre-Layout v2 kernel benefited from 8x8 register blocking. Keep that
 # search bound while v3 resource use is re-measured.
@@ -65,7 +66,7 @@ class MXFP8GemmParams:
 
     def __cache_signature__(self):
         return (
-            "mxfp8_gfx950_v4",
+            "mxfp8_gfx950_v6",
             self.m,
             self.n,
             self.k,
@@ -309,6 +310,8 @@ def make_mxfp8_scaled_mm_gfx950(
     # tiles stay hot in L2. Only exact groupings are used, which keeps the
     # index math free of a runtime min.
     use_group_m = group_m > 0 and tiles_m % group_m == 0 and tiles_m > group_m
+    # The remap only helps when the swizzle is there to compact the result.
+    use_xcd_remap = use_group_m
     # One dword feeds exactly four repeats through the 4x4 lane-group transpose,
     # so shallower register blocking keeps the per-byte scale loads.
     packed_scale = d.mma_m_repeat % 4 == 0 and d.mma_n_repeat % 4 == 0
@@ -324,6 +327,31 @@ def make_mxfp8_scaled_mm_gfx950(
         tid = fx.thread_idx.x
 
         pid = fx.Int32(fx.block_idx.x)
+        if const_expr(use_xcd_remap):
+            # Workgroups are handed to the 8 XCDs round-robin by id, so an id
+            # written straight into the GROUP_M swizzle spreads each XCD's
+            # tiles over the whole output and defeats its private L2 slice.
+            # Inverting the round-robin gives every XCD a contiguous id range;
+            # the swizzle below then folds that range into a compact 2-D block.
+            # Both halves are needed -- without the swizzle the contiguous
+            # range is a full row band, which is worse than not remapping at
+            # all, so this is tied to group_m rather than enabled on its own.
+            # tiles_m and tiles_n are trace-time constants, so the division and
+            # remainder fold away.
+            xcd_q, xcd_r = divmod(tiles_m * tiles_n, GFX950_NUM_XCD)
+            xcd = pid % fx.Int32(GFX950_NUM_XCD)
+            in_xcd = pid // fx.Int32(GFX950_NUM_XCD)
+            if const_expr(xcd_r == 0):
+                pid = xcd * fx.Int32(xcd_q) + in_xcd
+            else:
+                # branchless min(xcd, xcd_r) from the sign mask of xcd - xcd_r
+                diff = xcd - fx.Int32(xcd_r)
+                pid = (
+                    xcd * fx.Int32(xcd_q)
+                    + fx.Int32(xcd_r)
+                    + (diff & (diff >> fx.Int32(31)))
+                    + in_xcd
+                )
         if const_expr(use_group_m):
             group_tiles = group_m * tiles_n
             group_id = pid // fx.Int32(group_tiles)
