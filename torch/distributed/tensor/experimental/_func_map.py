@@ -207,7 +207,8 @@ def _out_spmd_types_to_grad_placements(
                 grad_placement = _dtensor_placement_if_compatible(
                     actual_type[axis].backward_type(), placement
                 )
-            assert grad_placement is not None  # noqa: S101
+            if grad_placement is None:
+                raise AssertionError("expected grad_placement to be not None")
             grad_spec.append(grad_placement)
         grad_out_placements.append(tuple(grad_spec))
 
@@ -458,7 +459,8 @@ def _local_map_wrapped(
             raise RuntimeError(
                 "spmd_types=True requires the spmd_types package to be installed"
             )
-        assert device_mesh is not None  # noqa: S101
+        if device_mesh is None:
+            raise AssertionError("expected device_mesh to be not None")
         _annotate_spmd_types(
             flat_local_args, in_placements, in_grad_placements, device_mesh
         )
@@ -489,7 +491,8 @@ def _local_map_wrapped(
 
         grad_out_placements = None
         if enable_spmd_types:
-            assert device_mesh is not None  # noqa: S101
+            if device_mesh is None:
+                raise AssertionError("expected device_mesh to be not None")
             grad_out_placements = _out_spmd_types_to_grad_placements(
                 flat_out,
                 out_placements_tuple,  # pyrefly: ignore [bad-argument-type]
