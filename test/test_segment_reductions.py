@@ -8,6 +8,7 @@ import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
+    onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -568,6 +569,36 @@ class TestSegmentReductions(TestCase):
         nd_data = torch.arange(12, dtype=torch.float, device=device).reshape(2, 6)
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
+
+    @onlyCUDA
+    def test_backward_rejects_mutated_lengths(self, device):
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+class TestSegmentReduceBackwardBounds(TestCase):
+    def test_mutated_lengths(self):
+        data = torch.ones(5, dtype=torch.float64, device='{device}', requires_grad=True)
+        lengths = torch.tensor([1, 1, 1, 2], dtype=torch.int64, device='{device}')
+        lengths_alias = torch.from_dlpack(lengths)
+        output = torch.segment_reduce(data, "max", lengths=lengths, initial=1.0)
+        lengths_alias.fill_(torch.iinfo(torch.int64).min)
+        output.sum().backward()
+        torch.cuda.synchronize()
+
+if __name__ == "__main__":
+    run_tests()
+""")
+        has_cuda_assert = "device-side assert triggered" in stderr
+        has_hip_assert = (
+            "launch failure" in stderr or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
 
 
 
