@@ -5394,7 +5394,10 @@ class SourcelessBuilder:
                 obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
                 if obj_vt is not None:
                     return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
+                        torch._dynamo.variables.functions.build_function_vt(
+                            tx, value.__func__, None
+                        ),
+                        obj_vt,
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)

@@ -38,7 +38,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
-from torch._dynamo.variables.functions import UserFunctionVariable
+from torch._dynamo.variables.functions import UserFunctionVariable, UserMethodVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
@@ -1988,7 +1988,8 @@ def speculate_subgraph_with_auto_output_flattening(
             )
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2188,7 +2189,8 @@ def speculate_subgraph(
 
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2360,8 +2362,14 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     ) -> VariableTracker:
         if self.source is None:
             raise AssertionError("source must not be None")
+        call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            self.value.__call__.__func__,
+            VariableTracker.build(
+                tx,
+                self.value.__call__.__func__,
+                AttrSource(call_source, "__func__"),
+                realize=True,
+            ),
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
@@ -5539,7 +5547,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
-                        autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                        VariableTracker.build(
+                            tx,
+                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                            realize=True,
+                        ),
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -5969,7 +5981,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                fn.__func__,
+                VariableTracker.build(
+                    tx,
+                    fn.__func__,
+                    source and AttrSource(source, "__func__"),
+                    realize=True,
+                ),
                 cls_vt,
                 source=source,
             )
