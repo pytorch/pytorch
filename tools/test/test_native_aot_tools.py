@@ -30,6 +30,7 @@ def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
         with open(os.path.join(out_dir, prefix + e), "w") as f:
             f.write("")
 
+
 class TestExportJobs(unittest.TestCase):
     def test_job_skip_matches_on_spec(self):
         # Skip detection matches the sidecar's recorded spec AND a
@@ -460,9 +461,7 @@ class TestLauncherCodegen(unittest.TestCase):
 
     def test_shape_slots_narrow_and_strides_stay_64bit(self):
         src = self._launcher()
-        self.assertIn(
-            "mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));", src
-        )
+        self.assertIn("mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));", src)
         self.assertIn("mX_s.dynamic_strides[0] = mX.stride(0);", src)
 
     def test_module_load_is_once_per_process(self):
