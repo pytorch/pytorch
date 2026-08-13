@@ -172,6 +172,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   bool allow_non_fake_inputs() const override {
     PANIC(allow_non_fake_inputs);
   }
+  std::shared_ptr<SafePyObject> strong_ref_from_weakref(
+      const SafePyObject& /*weakref*/) const override {
+    PANIC(strong_ref_from_weakref);
+  }
 };
 
 // Construct this in Global scope instead of within `disarm`
