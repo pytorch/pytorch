@@ -545,6 +545,22 @@ print(t.is_pinned())
             torch.cuda.memory._set_memory_metadata("metadata test")
         self.assertEqual(torch.cuda.memory._get_memory_metadata(), "")
 
+    def test_memory_metadata_dict(self):
+        if not torch._C._cuda_memoryMetadataSupported():
+            self.skipTest("backend does not support user metadata")
+        try:
+            # dicts are serialized to compact JSON; get returns the string form
+            torch.cuda.memory._set_memory_metadata({"step": 3, "phase": "fwd"})
+            got = torch.cuda.memory._get_memory_metadata()
+            self.assertEqual(json.loads(got), {"step": 3, "phase": "fwd"})
+            # get/set round-trips the string form unchanged
+            torch.cuda.memory._set_memory_metadata(got)
+            self.assertEqual(torch.cuda.memory._get_memory_metadata(), got)
+            with self.assertRaises(TypeError):
+                torch.cuda.memory._set_memory_metadata({"bad": object()})
+        finally:
+            torch.cuda.memory._set_memory_metadata("")
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -5808,6 +5824,39 @@ class TestResizeStorageWithAddr(TestCase):
         self.assertEqual(t.untyped_storage().nbytes(), original_size)
         self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
         self.assertNotEqual(other.untyped_storage().data_ptr(), original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_metadata_tag(self):
+        # mallocWithAddress tags its trace entries via internal_metadata,
+        # leaving the user-set metadata (possibly JSON) verbatim
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            other = torch.empty(294, dtype=torch.uint8, device="cuda")
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+        other.untyped_storage().resize_(0)
+        try:
+            torch.cuda.memory._record_memory_history(context=None)
+            torch.cuda.memory._set_memory_metadata({"phase": "resize"})
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+            device = torch.cuda.current_device()
+            trace = torch.cuda.memory._snapshot()["device_traces"][device]
+            tag = "mallocWithAddress"
+            tagged = [e for e in trace if e.get("internal_metadata") == tag]
+            self.assertTrue(tagged)
+            for e in tagged:
+                self.assertEqual(json.loads(e["user_metadata"]), {"phase": "resize"})
+            for e in trace:
+                self.assertNotIn("mallocWithAddress", e["user_metadata"])
+        finally:
+            torch.cuda.memory._set_memory_metadata("")
+            torch.cuda.memory._record_memory_history(None)
 
     def test_resize_storage_negative_size_raises(self):
         # A negative requested storage size must be rejected, not silently
