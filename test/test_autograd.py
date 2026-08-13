@@ -15882,10 +15882,9 @@ class TestAutogradStreamSynchronization(TestCase):
         # and consumer to be delayed until right before the accumulation.
         # Note that this doesn't address N=3, but the side-stream N=2 case is
         # the common case.
-        events = {
-            "main_backward_start": None,
-            "side_backward_start": None,
-            "side_backward_end": None,
+        ordering = {
+            "side_backward_complete": None,
+            "main_observed_side_complete": None,
         }
 
         class Main(torch.autograd.Function):
@@ -15895,10 +15894,9 @@ class TestAutogradStreamSynchronization(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                # Record when main backward starts
-                evt = torch.Event(enable_timing=True)
-                evt.record()
-                events["main_backward_start"] = evt
+                ordering["main_observed_side_complete"] = ordering[
+                    "side_backward_complete"
+                ].clone()
                 return gO
 
         class Side(torch.autograd.Function):
@@ -15908,16 +15906,9 @@ class TestAutogradStreamSynchronization(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                evt = torch.Event(enable_timing=True)
-                evt.record()
-                events["side_backward_start"] = evt
-
                 _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 result = gO.clone()
-
-                evt = torch.Event(enable_timing=True)
-                evt.record()
-                events["side_backward_end"] = evt
+                ordering["side_backward_complete"].fill_(True)
                 return result
 
         def populate_events():
@@ -15928,6 +15919,9 @@ class TestAutogradStreamSynchronization(TestCase):
 
             a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
             b = a.clone()  # not a leaf, does it matter?
+            ordering["side_backward_complete"] = torch.zeros(
+                (), dtype=torch.bool, device=a.device
+            )
 
             evt = torch.Event()
             evt.record()
@@ -15947,25 +15941,13 @@ class TestAutogradStreamSynchronization(TestCase):
             self.synchronize_all_devices()
 
         def check_ordering():
-            # Sanity check: side backward's end happens after start
-            self.assertTrue(
-                events["side_backward_start"].elapsed_time(events["side_backward_end"])
-                > 0
-            )
-            # Overlap check: side's backward starts before side backward ends
-            self.assertTrue(
-                events["main_backward_start"].elapsed_time(events["side_backward_end"])
-                > 0
-            )
+            self.assertTrue(ordering["side_backward_complete"].item())
+            # Main backward should run before the delayed side backward completes.
+            self.assertFalse(ordering["main_observed_side_complete"].item())
 
         # Warmup
         for _ in range(2):
             populate_events()
-
-        # Reset events (not really necessary but OK)
-        events["side_backward_start"] = None
-        events["side_backward_end"] = None
-        events["main_backward_start"] = None
 
         # Test
         populate_events()
