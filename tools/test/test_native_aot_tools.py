@@ -13,8 +13,6 @@ import unittest
 from tools.native_aot import export, toolchains
 
 
-_TOOLS_FILE = os.path.abspath(toolchains.__file__)
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 
 SIDECAR = {
@@ -26,6 +24,14 @@ SIDECAR = {
     ],
 }
 
+
+
+def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
+    """Create the files a sidecar claims. _job_needed verifies they exist,
+    so a fixture that writes only the .json would always re-export."""
+    for e in exts:
+        with open(os.path.join(out_dir, prefix + e), "w") as f:
+            f.write("")
 
 class TestExportJobs(unittest.TestCase):
     def test_job_skip_matches_on_spec(self):
@@ -44,6 +50,7 @@ class TestExportJobs(unittest.TestCase):
             point = {"dtype": "float32", "N": 4096}
             job = ("fakeop", "aot_kernel.py", point, d, None)
             self.assertTrue(export._job_needed(job, force=False))
+            _touch_artifacts(d, "x")
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(
                     {
@@ -81,6 +88,8 @@ class TestExportJobs(unittest.TestCase):
                 "spec": export._json_normal(point),
                 "sources": current,
             }
+            _touch_artifacts(d, "x")
+            _touch_artifacts(d, "x")
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(sidecar, f)
             self.assertFalse(export._job_needed(job, force=False))
@@ -256,9 +265,9 @@ class TestArch(unittest.TestCase):
             with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
                 f.write(decl_body)
             with mock.patch.object(export, "OPS_DIR", ops):
-                blackwell = export._collect_jobs(None, out, False, ["sm_100a"])
-                hopper = export._collect_jobs(None, out, False, ["sm_90a"])
-                on_device = export._collect_jobs(None, out, False, [None])
+                blackwell = export._collect_jobs(None, out, ["sm_100a"])
+                hopper = export._collect_jobs(None, out, ["sm_90a"])
+                on_device = export._collect_jobs(None, out, [None])
         self.assertEqual(len(blackwell), 1)
         self.assertEqual(len(hopper), 0)
         self.assertEqual(len(on_device), 1)
@@ -281,8 +290,8 @@ class TestArch(unittest.TestCase):
                     "def cpp_launch(spec, launch_fn):\n    return launch_fn\n"
                 )
             with mock.patch.object(export, "OPS_DIR", ops):
-                multi = export._collect_jobs(None, out, False, ["sm_90a", "sm_100a"])
-                single = export._collect_jobs(None, out, False, [None])
+                multi = export._collect_jobs(None, out, ["sm_90a", "sm_100a"])
+                single = export._collect_jobs(None, out, [None])
         self.assertEqual(len(multi), 2)
         dirs = sorted(os.path.basename(os.path.dirname(j[3])) for j in multi)
         self.assertEqual(dirs, ["sm_100a", "sm_90a"])
@@ -406,6 +415,7 @@ class TestSourceStaleness(unittest.TestCase):
                 export.REPO,
             )
             current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
+            _touch_artifacts(d, "x")
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(
                     {
@@ -417,8 +427,143 @@ class TestSourceStaleness(unittest.TestCase):
                     f,
                 )
             self.assertFalse(export._job_needed(job, force=False))
+            _touch_artifacts(d, "x")
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(
                     {"prefix": "x", "spec": point, "sources": {rel: "0" * 16}}, f
                 )
             self.assertTrue(export._job_needed(job, force=False))
+
+
+class TestLauncherCodegen(unittest.TestCase):
+    """CuteDslToolchain.gen_launcher is what puts C++ into the build; these
+    pin the properties that were argued over in review."""
+
+    def _launcher(self, **over):
+        sc = dict(SIDECAR, **over)
+        return toolchains.CuteDslToolchain().gen_launcher(sc)
+
+    def test_read_only_arg_uses_const_data_ptr(self):
+        # A mutable data_ptr() would materialize a copy-on-write input.
+        targs = [dict(SIDECAR["tensor_args"][0], read_only=True)]
+        src = self._launcher(tensor_args=targs)
+        self.assertIn("const_cast<void*>(mX.const_data_ptr())", src)
+        self.assertNotIn("mX.mutable_data_ptr()", src)
+
+    def test_written_arg_uses_mutable_data_ptr(self):
+        src = self._launcher()
+        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
+
+    def test_arg_order_is_tensors_then_scalars_then_stream(self):
+        # Must match the exported wrapper's signature exactly.
+        src = self._launcher(scalar_args=[{"name": "k", "ctype": "int64_t"}])
+        self.assertIn("const at::Tensor& mX, const at::Tensor& mOut, int64_t k", src)
+        self.assertIn("&mX_s, &mOut_s, k", src)
+        self.assertIn("c10::cuda::CUDAStream(stream).stream()", src)
+
+    def test_shape_slots_narrow_and_strides_stay_64bit(self):
+        src = self._launcher()
+        self.assertIn(
+            "mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));", src
+        )
+        self.assertIn("mX_s.dynamic_strides[0] = mX.stride(0);", src)
+
+    def test_module_load_is_once_per_process(self):
+        src = self._launcher()
+        self.assertIn("c10::call_once", src)
+
+
+class TestDeclarationStaleness(unittest.TestCase):
+    def test_source_closure_includes_the_declaration(self):
+        # Declarations load by file path and never enter sys.modules, so
+        # without this a kernel_precompile_grid() edit reuses artifacts
+        # built from the old grid.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decl_path = os.path.join(tmpdir, "aot.py")
+            with open(decl_path, "w") as f:
+                f.write("ATEN_OP = 'fake'\n")
+            closure = export.source_closure(decl_path)
+            rel = os.path.relpath(decl_path, export.REPO)
+            self.assertIn(rel, closure)
+            self.assertEqual(closure[rel], export._file_hash(decl_path))
+
+    def test_source_closure_without_declaration_is_unchanged(self):
+        self.assertNotIn("aot.py", " ".join(export.source_closure()))
+
+
+class TestStaleGridPointArtifacts(unittest.TestCase):
+    def test_sidecar_for_dropped_grid_point_is_fatal(self):
+        # Its .o is still matched by the CMake glob and would link with no
+        # launcher referencing it.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "gone.json"), "w") as f:
+                json.dump({"prefix": "gone", "spec": {"N": 4096}}, f)
+            with self.assertRaisesRegex(RuntimeError, "no longer in the grid"):
+                export._check_no_orphan_artifacts(tmpdir, [{"N": 1024}])
+
+    def test_sidecar_still_in_grid_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "live.json"), "w") as f:
+                json.dump({"prefix": "live", "spec": {"N": 1024}}, f)
+            export._check_no_orphan_artifacts(tmpdir, [{"N": 1024}])
+
+    def test_grid_unknown_skips_the_stale_check(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "live.json"), "w") as f:
+                json.dump({"prefix": "live", "spec": {"N": 1024}}, f)
+            export._check_no_orphan_artifacts(tmpdir)
+
+
+class TestMissingArtifacts(unittest.TestCase):
+    def test_missing_artifacts_reexport_despite_current_sidecar(self):
+        # Sidecar matches spec/arch/sources, but its .o is gone: skipping
+        # here surfaces as a missing include when torch_cuda compiles.
+        rel = os.path.relpath(
+            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
+            export.REPO,
+        )
+        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
+        point = {"dtype": "float32", "N": 4096}
+        sidecar = {
+            "version": export.SIDECAR_VERSION,
+            "prefix": "x",
+            "spec": point,
+            "sources": current,
+            "kind": "cutedsl",
+        }
+        with tempfile.TemporaryDirectory() as d:
+            job = ("fakeop", "aot_kernel.py", point, d, None)
+            with open(os.path.join(d, "x.json"), "w") as f:
+                json.dump(sidecar, f)
+            _touch_artifacts(d, "x")
+            self.assertFalse(export._job_needed(job, force=False))
+
+            os.remove(os.path.join(d, "x.o"))
+            self.assertTrue(export._job_needed(job, force=False))
+
+    def test_missing_header_also_reexports(self):
+        rel = os.path.relpath(
+            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
+            export.REPO,
+        )
+        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
+        point = {"dtype": "float32", "N": 4096}
+        with tempfile.TemporaryDirectory() as d:
+            job = ("fakeop", "aot_kernel.py", point, d, None)
+            with open(os.path.join(d, "x.json"), "w") as f:
+                json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "spec": point,
+                        "sources": current,
+                        "kind": "cutedsl",
+                    },
+                    f,
+                )
+            _touch_artifacts(d, "x", exts=(".o",))  # .h missing
+            self.assertTrue(export._job_needed(job, force=False))
+
+
+if __name__ == "__main__":
+    unittest.main()
