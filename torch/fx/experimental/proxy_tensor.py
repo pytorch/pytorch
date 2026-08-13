@@ -1184,7 +1184,11 @@ def _coor_enabled() -> bool:
 def _coor_current_accelerator() -> torch.device | None:
     """The current accelerator as an indexed device (e.g. cuda:0), or None if there is no
     accelerator. Used to classify device operands under compile-on-one-rank."""
-    acc = torch.accelerator.current_accelerator()
+    # check_available matters: current_accelerator() reports the accelerator the build
+    # supports, so on a CUDA-enabled build with no visible GPUs it returns cuda and the
+    # index lookup below then raises "No CUDA GPUs are available". Such a machine has no
+    # accelerator for our purposes, and a cpu-only graph must still compile there.
+    acc = torch.accelerator.current_accelerator(check_available=True)
     if acc is None:
         return None
     return torch.device(acc.type, torch.accelerator.current_device_index())
