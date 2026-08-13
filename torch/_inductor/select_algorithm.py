@@ -67,6 +67,8 @@ from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
     get_triton_reduction_function,
+    TemplateLocalReduction,
+    TemplateLocalReductionPlan,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -127,15 +129,6 @@ class KernelNamespace:
 extern_kernels = KernelNamespace()
 
 WORKSPACE_ARG_PLACEHOLDER = "ws_placeholder"
-
-
-@dataclasses.dataclass(frozen=True)
-class TemplateLocalReduction:
-    output_name: str
-    block_m: int
-    block_n: int
-    reduction_type: str
-    source_type: str
 
 
 @dataclasses.dataclass
@@ -572,7 +565,7 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
-        supports_template_local_reduction: bool = False,
+        template_local_reduction_block: tuple[int, int] | None = None,
     ) -> None:
         tma_2d = tma_store or tma_load_for_template_epilogue
         if tma_store:
@@ -683,7 +676,7 @@ class TritonTemplateKernel(TritonKernel):
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
         self.root_var_renames: dict[str, str] = {}
         self.template_local_reductions: tuple[TemplateLocalReduction, ...] = ()
-        self.supports_template_local_reduction = supports_template_local_reduction
+        self.template_local_reduction_block = template_local_reduction_block
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -715,30 +708,12 @@ class TritonTemplateKernel(TritonKernel):
 
     def _match_template_local_reduction(
         self, epilogue_nodes: Sequence[Any]
-    ) -> tuple[TemplateLocalReduction, ...] | None:
-        if not self.supports_template_local_reduction:
+    ) -> TemplateLocalReductionPlan | None:
+        if self.template_local_reduction_block is None:
             return None
 
         nodes = [node for epilogue in epilogue_nodes for node in epilogue.get_nodes()]
-        chains = TritonScheduling._template_local_reduction_chains(
-            self.output_node, nodes
-        )
-        if chains is None:
-            return None
-
-        result = []
-        for reductions, matched in chains:
-            final = reductions[-1]
-            result.append(
-                TemplateLocalReduction(
-                    final.get_name(),
-                    matched.block_m,
-                    matched.block_n,
-                    matched.reduction_type,
-                    matched.source_type,
-                )
-            )
-        return tuple(result)
+        return TritonScheduling._template_local_reduction_plan(self.output_node, nodes)
 
     @property
     def index_dtype(self) -> str:
@@ -2021,19 +1996,17 @@ class TritonTemplateKernel(TritonKernel):
         none unfused, no prologue source tracking.  Override in subclasses
         for per-output routing.
         """
-        local_reductions = self._match_template_local_reduction(epilogue_nodes)
-        if local_reductions is not None:
-            block_m = self.meta.get("BLOCK_M")
-            block_n = self.meta.get("BLOCK_N")
-            required_blocks = OrderedSet(
-                (reduction.block_m, reduction.block_n) for reduction in local_reductions
-            )
-            if required_blocks != OrderedSet(((block_m, block_n),)):
+        local_reduction_plan = self._match_template_local_reduction(epilogue_nodes)
+        if local_reduction_plan is not None:
+            if local_reduction_plan.block != self.template_local_reduction_block:
                 from torch._inductor.codegen.simd import CantSplit
 
-                raise CantSplit((block_m, block_n), required_blocks)
-            self.template_local_reductions = local_reductions
-            for reduction in local_reductions:
+                raise CantSplit(
+                    self.template_local_reduction_block,
+                    OrderedSet((local_reduction_plan.block,)),
+                )
+            self.template_local_reductions = local_reduction_plan.reductions
+            for reduction in local_reduction_plan.reductions:
                 self.args.output(reduction.output_name)
             routed_epilogues: list[Any] = []
         else:
@@ -2924,6 +2897,11 @@ class TritonTemplate(KernelTemplate):
         # Add index dtype to defines so it's available in the template
         defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
         defines = defines.getvalue()
+        template_local_reduction_block = (
+            (kwargs["BLOCK_M"], kwargs["BLOCK_N"])
+            if self.supports_template_local_reduction
+            else None
+        )
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -2940,7 +2918,7 @@ class TritonTemplate(KernelTemplate):
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
-            "supports_template_local_reduction": self.supports_template_local_reduction,
+            "template_local_reduction_block": template_local_reduction_block,
         }
 
         if HAS_WARP_SPEC:
@@ -3312,12 +3290,7 @@ class TritonTemplate(KernelTemplate):
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
             hint_override=hint_override,
-            supports_template_local_reduction=self.supports_template_local_reduction,
-            template_local_reduction_block=(
-                (kwargs["BLOCK_M"], kwargs["BLOCK_N"])
-                if self.supports_template_local_reduction
-                else None
-            ),
+            template_local_reduction_block=options["template_local_reduction_block"],
         )
 
 
@@ -3460,7 +3433,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: WorkspaceArg | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
         hint_override: int | None = None,
-        supports_template_local_reduction: bool = False,
         template_local_reduction_block: tuple[int, int] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -3482,7 +3454,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
         self.hint_override = hint_override
-        self.supports_template_local_reduction = supports_template_local_reduction
         self.template_local_reduction_block = template_local_reduction_block
 
         self.n_regs = None
@@ -3527,7 +3498,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
             allowed_prologue_inps=self.allowed_prologue_inps,
-            supports_template_local_reduction=self.supports_template_local_reduction,
             template_local_reduction_block=self.template_local_reduction_block,
         )
         # Pass KTC annotation to the buffer for encoding

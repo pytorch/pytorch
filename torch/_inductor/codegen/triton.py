@@ -155,6 +155,19 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
 
+@dataclasses.dataclass(frozen=True)
+class TemplateLocalReduction:
+    output_name: str
+    reduction_type: str
+    source_type: str
+
+
+@dataclasses.dataclass(frozen=True)
+class TemplateLocalReductionPlan:
+    reductions: tuple[TemplateLocalReduction, ...]
+    block: tuple[int, int]
+
+
 def get_triton_reduction_function(reduction_type):
     use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
@@ -7981,15 +7994,14 @@ class TritonScheduling(SIMDScheduling):
     ) -> bool:
         return (
             isinstance(choice, ir.TritonTemplateCallerBase)
-            and getattr(choice, "supports_template_local_reduction", False)
             and getattr(choice, "template_local_reduction_block", None) == block
         )
 
     @staticmethod
-    def _template_local_reduction_chains(
+    def _template_local_reduction_plan(
         template: ir.TritonTemplateBuffer,
         nodes: Sequence[BaseSchedulerNode],
-    ) -> list[tuple[list[ir.ComputedBuffer], Any]] | None:
+    ) -> TemplateLocalReductionPlan | None:
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             template_local_reduction_ir,
         )
@@ -8021,7 +8033,8 @@ class TritonScheduling(SIMDScheduling):
             return None
 
         m, n = template.get_size()
-        result = []
+        reductions_out = []
+        block = None
         for reductions in chains:
             if any(reduction._split_size is None for reduction in reductions[:-1]):
                 return None
@@ -8039,6 +8052,12 @@ class TritonScheduling(SIMDScheduling):
             ):
                 return None
 
+            matched_block = (matched.block_m, matched.block_n)
+            if block is None:
+                block = matched_block
+            elif block != matched_block:
+                return None
+
             expected_output = (m // matched.block_m, n // matched.block_n)
             final = reductions[-1]
             expected_stride = ir.FlexibleLayout.contiguous_strides(expected_output)
@@ -8054,20 +8073,14 @@ class TritonScheduling(SIMDScheduling):
                 )
             ):
                 return None
-            result.append((reductions, matched))
-        return result
-
-    @classmethod
-    def _template_local_reduction_block(
-        cls,
-        template: ir.TritonTemplateBuffer,
-        nodes: Sequence[BaseSchedulerNode],
-    ) -> tuple[int, int] | None:
-        chains = cls._template_local_reduction_chains(template, nodes)
-        if chains is None:
-            return None
-        blocks = OrderedSet((matched.block_m, matched.block_n) for _, matched in chains)
-        return next(iter(blocks)) if len(blocks) == 1 else None
+            reductions_out.append(
+                TemplateLocalReduction(
+                    final.get_name(), matched.reduction_type, matched.source_type
+                )
+            )
+        if block is None:
+            raise AssertionError("expected a template-local reduction block")
+        return TemplateLocalReductionPlan(tuple(reductions_out), block)
 
     @classmethod
     def _template_supports_local_reduction_block(
@@ -8076,10 +8089,7 @@ class TritonScheduling(SIMDScheduling):
         if isinstance(template, ir.MultiTemplateBuffer):
             choice, _ = template.get_min_choice()
             return cls._choice_supports_template_local_reduction(choice, block)
-        return (
-            template.supports_template_local_reduction
-            and template.template_local_reduction_block == block
-        )
+        return template.template_local_reduction_block == block
 
     @classmethod
     def _is_template_local_reduction(
@@ -8093,10 +8103,10 @@ class TritonScheduling(SIMDScheduling):
             return False
         if len(template.get_size()) != 2 or node2.has_aliasing_or_mutation():
             return False
-        block = cls._template_local_reduction_block(template, node2.get_nodes())
-        if block is None:
+        plan = cls._template_local_reduction_plan(template, node2.get_nodes())
+        if plan is None:
             return False
-        return cls._template_supports_local_reduction_block(template, block)
+        return cls._template_supports_local_reduction_block(template, plan.block)
 
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -8112,9 +8122,9 @@ class TritonScheduling(SIMDScheduling):
         template = node1.get_template_node()
         if not isinstance(template, ir.MultiTemplateBuffer):
             return False
-        block = self._template_local_reduction_block(template, node2.get_nodes())
-        return block is not None and self._choice_supports_template_local_reduction(
-            choice, block
+        plan = self._template_local_reduction_plan(template, node2.get_nodes())
+        return plan is not None and self._choice_supports_template_local_reduction(
+            choice, plan.block
         )
 
     def can_fuse_reduction_chain(
@@ -8131,10 +8141,10 @@ class TritonScheduling(SIMDScheduling):
         template = V.graph.get_buffer(next(iter(reads)))
         if not isinstance(template, ir.TritonTemplateBuffer):
             return False
-        block = self._template_local_reduction_block(template, nodes)
+        plan = self._template_local_reduction_plan(template, nodes)
         return (
-            block is not None
-            and self._template_supports_local_reduction_block(template, block)
+            plan is not None
+            and self._template_supports_local_reduction_block(template, plan.block)
             and bool(node1.get_operation_names() & node2.ancestors)
         )
 
