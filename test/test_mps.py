@@ -12746,6 +12746,19 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_no_mask_causal_fp16_L7_S17_NH23_HS121(self):
         self._test_sdpa_no_mask(True, torch.float16, 7, 17, 23, 121)
 
+    def test_sdpa_no_mask_causal_shape_reuse_hs121(self):
+        # Regression test for the shape-agnostic causal-mask cache-key rewrite:
+        # HS=121 is not in the vector/prefill/MPP fast-kernel supported head-dim
+        # lists, so this is the only combination that reaches sdpa_general_mps's
+        # MPSGraph causal-mask path, which the rewrite modifies. Call it three
+        # times at three different (qSize, maxSeqLength) pairs, including a
+        # rectangular decode-style shape (qSize=1), to verify the same cached
+        # graph produces correct results across shapes rather than only being
+        # exercised once at a single fixed shape.
+        self._test_sdpa_no_mask(True, torch.float16, 7, 17, 23, 121)
+        self._test_sdpa_no_mask(True, torch.float16, 3, 31, 23, 121)
+        self._test_sdpa_no_mask(True, torch.float16, 1, 64, 23, 121)
+
     def test_sdpa_no_mask_no_causal_fp32_grad(self):
         self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
 
