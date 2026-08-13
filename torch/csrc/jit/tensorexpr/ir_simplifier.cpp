@@ -104,10 +104,10 @@ void Term::sort() {
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -131,10 +131,10 @@ void Polynomial::sort() {
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -162,10 +162,10 @@ void MaxTerm::uniquefy() {
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -193,10 +193,10 @@ void MinTerm::uniquefy() {
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -2193,10 +2193,10 @@ ExprPtr TermExpander::mutate(const PolynomialPtr& v) {
   auto vars = v->variables();
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(vars.begin(), vars.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    if (!str_repr_cache.count(a)) {
+    if (!str_repr_cache.contains(a)) {
       str_repr_cache[a] = std::to_string(a);
     }
-    if (!str_repr_cache.count(b)) {
+    if (!str_repr_cache.contains(b)) {
       str_repr_cache[b] = std::to_string(b);
     }
     return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -2382,7 +2382,7 @@ StmtPtr TermExpander::mutate(const FreePtr& v) {
       buf_new,
       buildErrorMessage("TermExpander mutation produced null for Buf."));
 
-  if (eliminated_allocations_.count(buf_new->base_handle())) {
+  if (eliminated_allocations_.contains(buf_new->base_handle())) {
     eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
