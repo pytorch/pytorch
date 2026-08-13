@@ -26,6 +26,7 @@ from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -125,6 +126,8 @@ class BlobState:
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -154,6 +157,8 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
 
 class TestDistributedStateDictSaveLoadRot13(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_tensor_and_blob(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -190,6 +195,8 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
 
 
 class TestDistributedStateDictSaveLoadZStandard(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -223,6 +230,8 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CPU
+
     world_size = 2
 
     @classmethod
@@ -277,6 +286,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
 
 
 class TestDistributedReshardOnLoad(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CPU
+
     world_size = 2
 
     @classmethod
@@ -426,10 +437,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
             ],
         )
 
-        device_type = (
-            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-        )
-        device = f"{device_type}:{dist.get_rank()}"
+        device = f"cpu:{dist.get_rank()}"
         model_to_save = MyShardedModel3(src_spec).to(device)
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
