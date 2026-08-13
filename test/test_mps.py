@@ -10447,6 +10447,36 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/170175
+    def test_nonzero_strides_match_cpu(self):
+        x = torch.tensor([[0, 1, 0], [2, 0, 3], [0, 4, 0]], device="mps")
+        self.assertEqual(x.nonzero().stride(), x.cpu().nonzero().stride())
+
+    def test_nonzero_view_raises_like_cpu(self):
+        x = torch.tensor([[0, 1, 0], [2, 0, 3], [0, 4, 0]], device="mps")
+        with self.assertRaisesRegex(RuntimeError, "view size is not compatible"):
+            x.nonzero().view(-1)
+
+    def test_nonzero_values_correct(self):
+        x = torch.tensor([[0, 1, 0], [2, 0, 3], [0, 4, 0]], device="mps")
+        self.assertEqual(x.nonzero(), x.cpu().nonzero())
+
+    def test_nonzero_2d_strides(self):
+        x = (torch.randn(8, 8, device="mps") > 0).to(torch.int)
+        self.assertEqual(x.nonzero().stride(), x.cpu().nonzero().stride())
+
+    def test_nonzero_empty_input(self):
+        x = torch.zeros(0, 3, device="mps")
+        out = x.nonzero()
+        self.assertEqual(out.size(), (0, 2))
+        self.assertEqual(out.stride(), x.cpu().nonzero().stride())
+
+    def test_nonzero_all_zero(self):
+        x = torch.zeros(4, 4, dtype=torch.int, device="mps")
+        out = x.nonzero()
+        self.assertEqual(out.size(), (0, 2))
+        self.assertEqual(out.stride(), x.cpu().nonzero().stride())
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)

@@ -431,7 +431,10 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
     // Dynamic path: sync to learn output size. total_nonzero is int64, so the
     // count reads back directly even when it exceeds INT_MAX.
     const int64_t total_nonzero = total_nonzero_buf.item<int64_t>();
-    at::native::resize_output(out_, {total_nonzero, nDim});
+    if (at::native::resize_output(out_, {total_nonzero, nDim})) {
+      // Match CPU behavior: default to Fortran-contiguous output (see gh-46224)
+      out_.as_strided_({total_nonzero, nDim}, {1, total_nonzero});
+    }
     max_elements = total_nonzero;
   }
 
@@ -439,6 +442,17 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
     return;
   }
 
+  // Fortran-contiguous out_ (the common nDim > 1, n > 1 case) is not
+  // out_.is_contiguous(), so this falls back to a scratch contiguous buffer
+  // plus a full strided copy_ below. CUDA's Nonzero.cu avoids that copy by
+  // scattering into a contiguous {ndim, n} buffer (transposed layout) and
+  // finishing with out.set_(out_temp.t()), a metadata-only transpose. Doing
+  // the same here would require the scatter_nonzero_indices Metal kernel to
+  // write transposed output (output[d * n + pos] instead of
+  // output[pos * ndim + d]) and reworking this function's branching, since
+  // nonzero_static shares this code path with a different output-layout
+  // contract (pre-sized, pre-filled, no resize/as_strided_). Left as a
+  // possible future optimization; not applied here to keep this fix minimal.
   bool contiguous_output = out_.is_contiguous();
   Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
@@ -481,7 +495,9 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   int64_t nDim = self.dim();
   if (self.numel() == 0) {
-    at::native::resize_output(out_, {0, nDim});
+    if (at::native::resize_output(out_, {0, nDim})) {
+      out_.as_strided_({0, nDim}, {1, 0});
+    }
     return out_;
   }
 
