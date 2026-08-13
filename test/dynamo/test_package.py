@@ -2812,30 +2812,126 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     any("TENSOR_MATCH" in fact.render() for fact in frame.invariant)
                 )
 
-    def test_invariants_normalize_saved_tensor_hook_ids(self):
-        # AUTOGRAD_SAVED_TENSORS_HOOKS renders a raw tuple(map(id, hooks)) into
-        # code_list, with none of the punctuation the obj-id pattern anchors on.
-        # Left alone it puts addresses in a file meant to be committed.
-        def noop(x):
-            return x
+    def test_invariants_report_saved_tensor_hooks_by_content(self):
+        # AUTOGRAD_SAVED_TENSORS_HOOKS renders a raw tuple(map(id, hooks)), so
+        # the ids must be normalized or the file churns -- but erasing them
+        # alone merges two variants that differ ONLY in their hooks, and the
+        # guard that split them gets printed as an invariant of both. Both
+        # directions at once: stable text, still discriminating.
+        #
+        # The hooks must be fx GraphModules or are_inline_hooks() rejects them,
+        # the guard renders "ids == None", and this passes without exercising
+        # anything. That is how an earlier version of this test was vacuous.
+        def pack_a(x):
+            return x + 1
+
+        def unpack_a(x):
+            return x - 1
+
+        def pack_b(x):
+            return x * 2
+
+        def unpack_b(x):
+            return x / 2
+
+        first = (torch.fx.symbolic_trace(pack_a), torch.fx.symbolic_trace(unpack_a))
+        second = (torch.fx.symbolic_trace(pack_b), torch.fx.symbolic_trace(unpack_b))
+
+        def f(x):
+            return (x * 2).sum()
+
+        def capture(path):
+            torch._dynamo.reset()
+            session = precompile_capture(f, backend="eager", dynamic=False)
+            with session as compiled:
+                for hooks in (first, second):
+                    with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                        compiled(torch.ones(4, 8, requires_grad=True)).backward()
+            session.write_invariants(path)
+            return session
+
+        path = self.path("hooks.invariants")
+        session = capture(path)
+
+        frame = session.invariants()[0]
+        self.assertEqual(frame.variants, 2)
+        hook_facts = [
+            fact.render()
+            for fact in frame.varying
+            if "top_saved_tensors_hooks" in fact.render()
+        ]
+        # The guard really did split the two compilations, so it must be here
+        # and not in the invariant set.
+        self.assertEqual(len(hook_facts), 2, frame.varying)
+        self.assertFalse(
+            any("top_saved_tensors_hooks" in f.render() for f in frame.invariant)
+        )
+
+        with open(path) as handle:
+            text = handle.read()
+        self.assertNotRegex(text, r"\b\d{9,}\b")
+
+        # ...and the discriminator is content-derived, so it survives a second
+        # process where the addresses are different.
+        other = self.path("hooks_again.invariants")
+        capture(other)
+        with open(other) as handle:
+            self.assertEqual(text, handle.read())
+
+    # Every shape found to split a compilation while the report called it an
+    # invariant. The fingerprint has failed open three times -- shapes, then
+    # python type and conj/neg, then the dispatch key set -- each fix revealing
+    # the next, so the shapes are asserted here rather than described. A new
+    # one is one line. See _value_fingerprint.
+    _SPLIT_CORPUS = {
+        "shape": lambda: (torch.ones(4, 8), torch.ones(5, 8)),
+        "dtype": lambda: (torch.ones(4, 8), torch.ones(4, 8, dtype=torch.float64)),
+        "requires_grad": lambda: (
+            torch.ones(4, 8),
+            torch.ones(4, 8, requires_grad=True),
+        ),
+        "python_type": lambda: (
+            torch.nn.Parameter(torch.ones(4, 8)),
+            torch.ones(4, 8),
+        ),
+        "conjugate_key": lambda: (
+            torch.ones(4, dtype=torch.complex64),
+            torch.ones(4, dtype=torch.complex64).conj(),
+        ),
+        "negative_key": lambda: (torch.ones(4), torch.ones(4)._neg_view()),
+        "memory_format": lambda: (
+            torch.ones(2, 3, 4, 5),
+            torch.ones(2, 3, 4, 5).to(memory_format=torch.channels_last),
+        ),
+    }
+
+    @parametrize("shape", sorted(_SPLIT_CORPUS))
+    def test_a_tensor_property_that_splits_a_compilation_is_reported_varying(
+        self, shape
+    ):
+        first, second = self._SPLIT_CORPUS[shape]()
 
         def f(x):
             return x * 2
 
-        path = self.path("hooks.invariants")
-        with torch.autograd.graph.saved_tensors_hooks(noop, noop):
-            with precompile_capture(
-                f,
-                backend="eager",
-                dynamic=False,
-                example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
-                invariants=path,
-            ):
-                pass
-        with open(path) as handle:
-            text = handle.read()
-        self.assertIn("top_saved_tensors_hooks", text)
-        self.assertNotRegex(text, r"\b\d{9,}\b")
+        torch._dynamo.reset()
+        session = precompile_capture(f, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(first)
+            compiled(second)
+        frame = session.invariants()[0]
+        # If Dynamo did not actually split, the case is not exercising anything
+        # and the corpus entry is wrong -- say so rather than passing quietly.
+        self.assertEqual(frame.variants, 2, f"{shape}: dynamo did not recompile")
+        varying = [fact.render() for fact in frame.varying]
+        self.assertTrue(
+            any("TENSOR_MATCH" in r for r in varying),
+            f"{shape}: the guard that split the compilations is reported as an "
+            f"invariant of both. varying={varying}",
+        )
+        self.assertFalse(
+            any("TENSOR_MATCH" in fact.render() for fact in frame.invariant)
+        )
 
     def test_invariants_marks_unenforced_preconditions(self):
         # An invariant whose guard could not be serialized is a precondition

@@ -162,6 +162,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import logging
 import os
 import pickle
@@ -672,7 +673,7 @@ _DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 
 
 def _normalize(text: str) -> str:
-    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)  # see _saved_hooks_fingerprint
     text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
     return _DYNAMO_COUNTER.sub(r"\1_<n>", text)
 
@@ -753,6 +754,30 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
+def _saved_hooks_fingerprint() -> str:
+    """Name the installed saved-tensors hooks by content, never by address."""
+    try:
+        from torch._functorch._aot_autograd.utils import top_saved_tensors_hooks
+
+        hooks = top_saved_tensors_hooks()
+    except Exception:
+        return ""
+    if not hooks:
+        return "hooks=None"
+    names = []
+    for hook in hooks:
+        code = getattr(hook, "code", None)  # fx GraphModule renders its graph
+        if isinstance(code, str):
+            names.append(_hash_text(code))
+        else:
+            names.append(_object_identity(hook))
+    return "hooks=(" + ", ".join(names) + ")"
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
 def _value_fingerprint(entry: GuardFilterEntry) -> str:
     """
     What the guard checks, when the rendered code does not say.
@@ -761,9 +786,10 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     _dynamo_*_indices hasattr checks, while everything it really compares lives
     in the C++ leaf. Without those two specializations of one frame look
     identical and wrongly land in the intersection, so this mirrors TensorCheck
-    -- python type and the conj/neg bits included, since a Parameter against a
-    Tensor, or a conjugated view against a plain one, splits a compilation
-    exactly as dtype does. KNOWN GAP: that leaf checks
+    -- python type and the full dispatch key set included, since a Parameter
+    against a Tensor, a conjugated view against a plain one, or an
+    inference-mode tensor against a no_grad one, splits a compilation exactly
+    as dtype does. KNOWN GAP: that leaf checks
     nothing for a dim the compile made dynamic, so under ``dynamic=True`` the
     concrete shape here is narrower than the guard and a shape-generic
     TENSOR_MATCH is reported as varying rather than invariant.
@@ -779,6 +805,14 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     variant and 2 on the next demotes a real invariant into two identical
     'varies' lines.
     """
+    if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
+        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
+        # or the file churns -- but erasing it alone would merge two variants
+        # that differ ONLY in their hooks and report the guard that split them
+        # as an invariant. Put back a discriminator derived from what the hooks
+        # ARE rather than where they live, which is both stable across
+        # processes and still telling.
+        return _saved_hooks_fingerprint()
     if entry.guard_type == "GRAD_MODE":
         # Global-state guards carry no name, code or value, so two variants of
         # one frame that differ only in grad mode render identically and land
@@ -793,14 +827,24 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
         except Exception:
             stride = ()
         # Mirror what TensorCheck actually compares (guards.cpp): the python
-        # type and the dispatch-key-ish bits split compilations just as dtype
-        # does, so leaving them out reports the very guard that split two
-        # variants as an invariant of both.
+        # type and the whole DISPATCH KEY SET, not a hand-picked couple of its
+        # bits. Conjugate and Negative are two keys in that set; the autograd
+        # keys are others, and those are exactly what an inference tensor
+        # lacks -- so capturing under no_grad in one variant and
+        # inference_mode in the next, which the module docstring tells users
+        # to do, splits the guard while every field here matched. Leaving any
+        # of it out reports the guard that split two variants as an invariant
+        # of both. The repr is a stable list of key names, so it neither
+        # churns nor over-splits: it compares what the guard compares.
+        try:
+            keys = str(torch._C._dispatch_keys(value))
+        except Exception:
+            keys = "<unavailable>"
         return (
             f"type={type(value).__name__}, dtype={value.dtype}, "
             f"shape={tuple(value.shape)}, stride={stride}, "
             f"device={value.device}, requires_grad={value.requires_grad}, "
-            f"is_conj={value.is_conj()}, is_neg={value.is_neg()}"
+            f"keys={keys}"
         )
     if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
         d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
