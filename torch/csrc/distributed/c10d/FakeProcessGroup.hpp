@@ -17,6 +17,14 @@ class FakeWork : public Work {
     return true;
   }
 
+  // A fake collective is done the moment it is "issued". Work's default reads
+  // completed_, which nothing here ever sets, so without this a fake op would
+  // report as permanently in flight to anyone polling it even though wait()
+  // returns immediately.
+  bool isCompleted() override {
+    return true;
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
     auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted();
@@ -28,6 +36,10 @@ class FakeProcessGroup : public Backend {
  public:
   struct Options : Backend::Options {
     explicit Options() : Backend::Options("fake") {}
+
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
 
     int fake_option = 0;
     bool error_on_collective = false;

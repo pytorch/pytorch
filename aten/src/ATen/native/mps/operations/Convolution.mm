@@ -139,11 +139,49 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source});
+      getMPSProfiler().beginProfileKernel(pipeline, "nchw_to_nhwc", {source}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, source, output, dimensions);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
+    }
+  });
+  return output;
+}
+
+// DHWIO weight copy; ATen's strided permute copy runs well below memory
+// bandwidth for this permutation, 2-4x slower than the flat kernel.
+static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
+  using namespace mps;
+  const auto output_channels = weight.size(0);
+  const auto input_channels_per_group = weight.size(1);
+  const auto kernel_depth = weight.size(2);
+  const auto kernel_height = weight.size(3);
+  const auto kernel_width = weight.size(4);
+  auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
+                          weight.options());
+  const ConvWeightPermuteParams params{
+      .output_channels = static_cast<uint32_t>(output_channels),
+      .input_channels_per_group = static_cast<uint32_t>(input_channels_per_group),
+      .kernel_height = static_cast<uint32_t>(kernel_height),
+      .kernel_width = static_cast<uint32_t>(kernel_width),
+      .output_channel_stride = static_cast<uint32_t>(weight.stride(0)),
+      .input_channel_stride = static_cast<uint32_t>(weight.stride(1)),
+      .depth_stride = static_cast<uint32_t>(weight.stride(2)),
+      .height_stride = static_cast<uint32_t>(weight.stride(3)),
+      .width_stride = static_cast<uint32_t>(weight.stride(4)),
+  };
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(weight)));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_dhwio", {weight}, stream);
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, weight, output, params);
+      [encoder dispatchThreads:MTLSizeMake(output_channels, input_channels_per_group, kernel_depth * kernel_height)
+          threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(output_channels, 256), 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
   return output;
@@ -217,16 +255,16 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights});
+      getMPSProfiler().beginProfileKernel(pipeline, kernel_name, {activation, weights}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output, params, bias ? *bias : activation);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads_per_threadgroup];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
 }
 
-// conv3d forward on the Metal kernels: MPP on macOS 26+, simdgroup otherwise;
+// conv3d forward on the Metal kernels: MPP on macOS 26.2+, simdgroup otherwise;
 // planes past int32 take the long-indexed simdgroup variant on any macOS.
 static void conv3d_metal_forward(const Tensor& input_t,
                                  const Tensor& weight_t,
@@ -267,10 +305,10 @@ static void conv3d_metal_forward(const Tensor& input_t,
   const int64_t input_channels_per_group = input_channels / groups;
   TORCH_CHECK(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group <= kInt32Max,
               "conv3d: kernel volume times channels per group exceeds int32");
-  const bool use_mpp = !use_long_index && is_macos_at_least(MacOSVersion::MACOS_26_0);
+  const bool use_mpp = !use_long_index && has_mpp();
 
   const auto activation = conv3d_to_ndhwc(input_t); // NDHWC
-  const auto weights = weight_t.permute({2, 3, 4, 1, 0}).contiguous(); // DHWIO
+  const auto weights = conv3d_weights_to_dhwio(weight_t); // DHWIO
   std::optional<Tensor> bias;
   if (bias_defined) {
     bias = bias_opt->scalar_type() == dtype ? bias_opt->contiguous() : bias_opt->to(dtype).contiguous();
@@ -719,7 +757,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     auto outputPlaceholder = output_c
         ? Placeholder(cachedGraph->outputTensor_, *output_c)
         : make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, output_c ? weight_t.contiguous() : weight_t);
+    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+    auto weightsPlaceholder =
+        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
     if (bias_defined) {
@@ -905,7 +945,9 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     const auto grad_out_for_graph =
         grad_input_c ? grad_output_t.contiguous() : materialize_for_conv(grad_output_t, desc_layout);
     auto gradOutputPlaceholder = make_conv_placeholder(cachedGraph->gradOutputTensor_, grad_out_for_graph, desc_layout);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, grad_input_c ? weight_t.contiguous() : weight_t);
+    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+    auto weightsPlaceholder =
+        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
     auto outputPlaceholder = grad_input_c
         ? Placeholder(cachedGraph->gradInputTensor_, *grad_input_c)
         : make_conv_placeholder(cachedGraph->gradInputTensor_, grad_input_t, desc_layout);

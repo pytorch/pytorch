@@ -4144,6 +4144,37 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
     def test_graph_module_init_buffer_param_copied_mod_init(self):
         self._test_graph_module_init_buffer_param_copied(use_dict_init=False)
 
+    def test_graph_module_init_preserves_non_persistent_buffers(self):
+        class Child(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("nested", torch.ones(1), persistent=False)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("top_level", torch.ones(1), persistent=False)
+                self.child = Child()
+
+            def forward(self, x):
+                return x + self.top_level + self.child.nested
+
+        module = MyModule()
+        graph_module = GraphModule(module, symbolic_trace(module).graph)
+
+        self.assertEqual(torch.full((1,), 2.0), graph_module(torch.zeros(1)))
+        self.assertEqual(
+            {"top_level", "child.nested"},
+            {name for name, _ in graph_module.named_buffers()},
+        )
+        self.assertEqual(
+            {"top_level"}, graph_module._non_persistent_buffers_set
+        )
+        self.assertEqual(
+            {"nested"}, graph_module.child._non_persistent_buffers_set
+        )
+        self.assertEqual({}, graph_module.state_dict())
+
     def test_annotations_with_no_forward_references(self):
         class A:
             def __call__(self, x: torch.Tensor):

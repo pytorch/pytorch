@@ -434,10 +434,10 @@ def _source_transform(
 
 
 def _flatten_associative(expr: Any, op: str) -> list[Any]:
-    expr = _strip_conversions(expr)
-    if isinstance(expr, GemmEpilogueIRExpression) and expr.op == op:
-        return _flatten_associative(expr.args[0], op) + _flatten_associative(
-            expr.args[1], op
+    stripped = _strip_conversions(expr)
+    if isinstance(stripped, GemmEpilogueIRExpression) and stripped.op == op:
+        return _flatten_associative(stripped.args[0], op) + _flatten_associative(
+            stripped.args[1], op
         )
     return [expr]
 
