@@ -90,7 +90,7 @@ _MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS = 64
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
-    from torch._inductor.codegen.triton import TritonKernel
+    from torch._inductor.codegen.triton import TritonCSEVariable, TritonKernel
     from torch._inductor.tiling_utils import CoalesceVarAnalysis
 
 
@@ -1537,6 +1537,8 @@ class _DerivedIterationFamily:
     # Rewrite body iter-var symbols to derived tree symbols (reduced-output)
     index_subs: dict[sympy.Symbol, sympy.Expr] = dataclasses.field(default_factory=dict)
     # Values readable by name without issuing a load in the derived domain.
+    # TODO: Replace name-keyed forwarding with a #188180-style indexed
+    # projection cache shared by standalone and nested sub-parent stages.
     remapped_values: dict[str, RemappedRangeValue] = dataclasses.field(
         default_factory=dict
     )
@@ -1983,31 +1985,42 @@ class _GroupedReductionLayout:
         name: str,
         value: CSEVariable,
         source_layout: scheduler.NestedReduction.SubParentSourceLayout,
-    ) -> bool:
+    ) -> None:
         """Split a parent-resolution value into per-lane values, in registers.
 
         Registers the lanes on ``family`` so later loads of ``name`` resolve to
-        a lane instead of re-reading memory. Returns whether the value can be
-        represented in the sub-parent domain.
+        a lane instead of re-reading memory.
         """
         assert value.dtype is not None  # noqa: S101
         assert (  # noqa: S101
             source_layout is scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
         )
-        parent_dim = self.parent_dim(value)
-        if parent_dim is None or parent_dim == "1":
+        shape = value.shape
+        if shape is None:
+            raise AssertionError(f"cannot project {name!r} without a known shape")
+        # Scalar loads are lane-invariant and need no split.
+        if shape == ():
             family.remapped_values[name] = value
-            return True
+            return
+        parent_dim = self.parent_dim(value)
+        if parent_dim is None:
+            raise AssertionError(f"cannot project {name!r} with shape {shape}")
+        if parent_dim == "1":
+            family.remapped_values[name] = value
+            return
+        # A value already at child width can be forwarded directly.
         if parent_dim == self.child_block(factor):
             family.remapped_values[name] = value
-            return True
+            return
+        # Only a full parent tile can be projected to child width here.
         if parent_dim != self.parent_block:
-            return False
+            raise AssertionError(
+                f"cannot project {name!r} with parent dimension {parent_dim!r}; "
+                f"expected {self.parent_block!r}"
+            )
         sub_parent_tree = family.sub_parent_tree()
         child_block = sub_parent_tree.block_size_str()
         factor_dim = str(factor)
-        shape = value.shape
-        assert shape is not None  # noqa: S101
         if len(shape) == 2:
             passthrough_dim = str(shape[1 - self.parent_axis])
             reshape_shape = (passthrough_dim, child_block, factor_dim)
@@ -2020,8 +2033,8 @@ class _GroupedReductionLayout:
             for _ in range(factor)
         )
         kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
+        # Derived loads select the appropriate register value from this tuple.
         family.remapped_values[name] = parts
-        return True
 
     def _broadcast_value_to_parent_resolution(
         self,
@@ -2228,11 +2241,11 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
         self._source_layouts = source_layouts
         self._values: dict[
             str,
-            tuple[CSEVariable, scheduler.NestedReduction.SubParentSourceLayout],
+            tuple[TritonCSEVariable, scheduler.NestedReduction.SubParentSourceLayout],
         ] = {}
 
-    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        value = self._inner.load(name, index)
+    def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
+        value = cast("TritonCSEVariable", self._inner.load(name, index))
         source_layout = self._source_layouts.get(name)
         if self._kernel._load_mask is None and source_layout is not None:
             self._values[name] = (value, source_layout)
@@ -2246,7 +2259,7 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
         if not self._kernel.cse.contains_value(value):
             return None
         if name not in self._sub_parent_family.remapped_values:
-            materialized = self._layout.materialize_value_at_sub_parent_resolution(
+            self._layout.materialize_value_at_sub_parent_resolution(
                 self._kernel,
                 self._sub_parent_family,
                 self._sub_parent_factor,
@@ -2254,11 +2267,6 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
                 value,
                 source_layout,
             )
-            if not materialized:
-                raise AssertionError(
-                    "sub-parent planner invariant violated: could not materialize "
-                    f"planned parent-tile load for {name!r}"
-                )
         return self._sub_parent_family.resolve_load(name, index)
 
 
