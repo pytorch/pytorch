@@ -16196,6 +16196,25 @@ fn
         self.assertEqual(opt_fn(t), fn(t))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_escapes_compiled_region(self):
+        # The mutated container itself (not just a value derived from it)
+        # is returned, so it must still be live on tx.stack when
+        # SideEffects finalizes -- exercises reconstruction of a sourceless
+        # class attribute that survives past the read/mutate call sites
+        # above, unlike the other tests here which only return derived
+        # values (len(), sums, etc).
+        def fn(t):
+            class Holder:
+                items = []
+
+            Holder.items.append(1)
+            return Holder.items
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class___mutable_attr_mutation_with_hop_in_frame(self):
         # register_hook triggers restore_side_effects=True on the HOP path,
         # which walks SideEffects.keepalive and indexes id_to_variable for
