@@ -421,7 +421,7 @@ test_python_shard() {
   fi
 
   # Sleep for 8 hours when running shard 0
-  if [[ "$1" == "0" ]]; then
+  if [[ "$1" == "1" ]]; then
     echo "Shard 0 detected: sleeping for 8 hours"
     sleep 8h
   fi
