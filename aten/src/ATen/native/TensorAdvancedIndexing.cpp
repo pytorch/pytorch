@@ -746,10 +746,10 @@ Tensor _unsafe_index(
     const Tensor& self,
     const torch::List<std::optional<Tensor>>& indices) {
   // Disallow boolean indexing since it leads to dynamic output shapes
-  for (auto i : c10::irange(indices.size())) {
-    auto index = indices.get(i);
-    if (index.has_value()) {
-      auto dtype = index->scalar_type();
+  for (const auto& element : indices) {
+    const c10::IValue& ivalue = element.get();
+    if (!ivalue.isNone()) {
+      auto dtype = ivalue.toTensor().scalar_type();
       TORCH_CHECK(
           dtype == kLong || dtype == kInt,
           "_unsafe_index found unexpected index type ",
@@ -990,10 +990,10 @@ Tensor& _index_put_impl_(
     value_ = value.to(self.device());
   }
   at::assert_no_overlap(self, value);
-  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const std::optional<Tensor>& index : indices) {
-    if (index.has_value()) {
-      at::assert_no_overlap(self, *index);
+  for (const auto& element : indices) {
+    const c10::IValue& ivalue = element.get();
+    if (!ivalue.isNone()) {
+      at::assert_no_overlap(self, ivalue.toTensor());
     }
   }
   if ((self.device().type() == DeviceType::CUDA ||
@@ -1529,7 +1529,7 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
 // Check that indices fall within dimension array size
 // Avoid redispatch call to min/max
 template <typename IndexType>
-static void check_indexarray_range(
+[[noreturn]] static void report_index_out_of_bounds(
     const IndexType* indices,
     int64_t n,
     IndexType indexing_axis_dim) {
@@ -1541,6 +1541,22 @@ static void check_indexarray_range(
         idx,
         " axis_dim=",
         indexing_axis_dim);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+template <typename IndexType>
+static void check_indexarray_range(
+    const IndexType* indices,
+    int64_t n,
+    IndexType indexing_axis_dim) {
+  // This version of the loop is autovectorized.
+  int oob = 0;
+  for (const auto i : c10::irange(n)) {
+    oob |= !(0 <= indices[i] && indices[i] < indexing_axis_dim);
+  }
+  if (C10_UNLIKELY(oob != 0)) {
+    report_index_out_of_bounds(indices, n, indexing_axis_dim);
   }
 }
 

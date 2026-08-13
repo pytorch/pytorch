@@ -3,6 +3,7 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
+import threading
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
@@ -49,6 +50,21 @@ def _cupti_version():
 
 TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
 
+
+def _cuda_graph_tools_id_available():
+    # cudaGraphNodeGetToolsId needs cuda-bindings >= 13.1 *and* a CUDA driver
+    # >= 13.1 (or cuda-compat), which is independent of the libcupti version:
+    # a CUDA 13.0 runner can ship libcupti >= 13.3 and still lack the API.
+    # is_available() probes the driver and caches the result.
+    try:
+        from torch.cuda.graph_annotations import is_available
+        return is_available()
+    except Exception:
+        return False
+
+
+TEST_CUDA_GRAPH_TOOLS_ID = LazyVal(_cuda_graph_tools_id_available)
+
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
@@ -63,12 +79,19 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is no
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
-IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
-IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
-IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
-IS_SM103 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 3))
-IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
-IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
+# These exact-match SM predicates identify specific NVIDIA architectures and must
+# be False on ROCm, where torch.cuda.get_device_capability() returns the gfx-arch
+# version and collides with NVIDIA capability tuples (e.g. gfx90a reads as (9, 0)).
+IS_SM89 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                  torch.cuda.get_device_capability() == (8, 9))
+IS_SM90 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                  torch.cuda.get_device_capability() == (9, 0))
+IS_SM100 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability() == (10, 0))
+IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability()[0] == 10)
+IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
@@ -262,6 +285,8 @@ def evaluate_platform_supports_mx_gemm():
                 return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
@@ -270,10 +295,23 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def hipsparselt_supported_archs():
+    # Keep in sync with hipSparseLtSupportedArchs() in
+    # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
+    # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
+    if ROCM_VERSION >= (7, 14):
+        return ['gfx942', 'gfx950', 'gfx1250']
+    elif ROCM_VERSION >= (7, 12):
+        return ['gfx942', 'gfx950']
+    return []
+
+def evaluate_platform_supports_hipsparselt():
+    return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+            return evaluate_platform_supports_hipsparselt()
         else:
             return (
                 (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
@@ -315,20 +353,45 @@ def initialize_cuda_context_rng():
         __cuda_ctx_rng_initialized = True
 
 
+_tf32_off_lock = threading.Lock()
+_tf32_off_depth = 0
+_tf32_off_saved_precision = None
+_tf32_off_cudnn_ctx = None
+
+
 @contextlib.contextmanager
 def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    # First-in saves state and disables tf32; last-out restores. Multithreaded
+    # test runners (e.g. MultiThreadedTestCase) enter this context once per
+    # rank thread over the same process-global flags, so per-entry
+    # save/restore can interleave and leak a modified state past the last
+    # exit, which the TestCase fp32 precision leak detector then flags.
+    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    with _tf32_off_lock:
+        if _tf32_off_depth == 0:
+            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
+            # writing allow_tf32 back can't reproduce the "none" default (it
+            # yields "ieee"), which the leak detector would flag on ROCm.
+            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
+            torch.backends.cuda.matmul.allow_tf32 = False
+            _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
+            _tf32_off_cudnn_ctx.__enter__()
+        _tf32_off_depth += 1
     try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield
+        yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        with _tf32_off_lock:
+            _tf32_off_depth -= 1
+            if _tf32_off_depth == 0:
+                _tf32_off_cudnn_ctx.__exit__(None, None, None)
+                _tf32_off_cudnn_ctx = None
+                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
+                _tf32_off_saved_precision = None
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -336,7 +399,7 @@ def tf32_on(self, tf32_precision=1e-5):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
         self.precision = old_precision
 
 
@@ -346,7 +409,7 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
@@ -354,7 +417,7 @@ def tf32_enabled():
         ):
             yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -533,11 +596,6 @@ def xfailIfSM120OrLater(func):
     if TEST_WITH_ROCM:
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
-
-def skipIfSM103(func):
-    if TEST_WITH_ROCM:
-        return func
-    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
 
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
