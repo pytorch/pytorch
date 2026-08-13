@@ -11,9 +11,11 @@ import torch
 from torch import Tensor
 from torch.testing._internal.common_cuda import SM120OrLater
 from torch.testing._internal.common_utils import (
+    IS_FILESYSTEM_UTF8_ENCODING,
     IS_WINDOWS,
     raise_on_run_directly,
     skipIfTorchDynamo,
+    TemporaryDirectoryName,
     TemporaryFileName,
 )
 
@@ -403,6 +405,40 @@ class TestSaveLoad(JitTestCase):
 
         x = torch.tensor([1.0, 2.0, 3.0, 4.0])
         self.assertTrue(torch.equal(m(x), m2(x)))
+
+    @unittest.skipIf(
+        not IS_FILESYSTEM_UTF8_ENCODING,
+        "requires UTF-8 filesystem encoding",
+    )
+    def test_save_load_non_ascii_path(self):
+        payload = b"hello non-ascii world"
+        for suffix in ["用户_流星", "ユーザー", "данные", "données_réseau"]:
+            with self.subTest(suffix=suffix):
+                with TemporaryDirectoryName(suffix=suffix) as dname:
+                    path = os.path.join(dname, "archive.zip")
+                    writer = torch._C.PyTorchFileWriter(path)
+                    writer.write_record("data.pkl", payload, len(payload))
+                    writer.write_end_of_file()
+                    reader = torch._C.PyTorchFileReader(path)
+                    self.assertEqual(reader.get_record("data.pkl"), payload)
+                    del reader
+
+    @unittest.skipIf(
+        not IS_FILESYSTEM_UTF8_ENCODING,
+        "requires UTF-8 filesystem encoding",
+    )
+    def test_save_load_non_ascii_nested_path(self):
+        payload = b"nested non-ascii"
+        with TemporaryDirectoryName(suffix="非ASCII") as dname:
+            nested = os.path.join(dname, "データ", "モデル")
+            os.makedirs(nested)
+            path = os.path.join(nested, "archive.zip")
+            writer = torch._C.PyTorchFileWriter(path)
+            writer.write_record("data.pkl", payload, len(payload))
+            writer.write_end_of_file()
+            reader = torch._C.PyTorchFileReader(path)
+            self.assertEqual(reader.get_record("data.pkl"), payload)
+            del reader
 
     def test_save_nonexit_file(self):
         class Foo(torch.nn.Module):

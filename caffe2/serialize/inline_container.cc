@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <istream>
 #include <ostream>
@@ -722,9 +723,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
   const std::string dir_name = parentdir(file_name);
   if (!dir_name.empty()) {
-    struct stat st;
-    bool dir_exists =
-        (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+    std::error_code ec;
+    bool dir_exists = std::filesystem::is_directory(
+        std::filesystem::path(reinterpret_cast<const char8_t*>(dir_name.c_str())), ec);
     TORCH_CHECK(
         dir_exists, "Parent directory ", dir_name, " does not exist.");
   }
@@ -735,9 +736,8 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     try {
       file_stream_.exceptions(std::ios_base::failbit | std::ios_base::badbit);
       file_stream_.open(
-          file_name,
-          std::ofstream::out | std::ofstream::trunc | std::ofstream::binary
-        );
+          std::filesystem::path(reinterpret_cast<const char8_t*>(file_name.c_str())),
+          std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     } catch (const std::ios_base::failure&) {
 #ifdef _WIN32
       // Windows have verbose error code, we prefer to use it than std errno.

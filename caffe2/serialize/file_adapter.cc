@@ -4,12 +4,19 @@
 #include <cstdio>
 #include <string>
 #include "caffe2/core/common.h"
+#ifdef _WIN32
+#include <c10/util/Unicode.h>
+#endif
 
 namespace caffe2 {
 namespace serialize {
 
 FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
+#ifdef _WIN32
+  fp_ = _wfopen(c10::u8u16(file_name).c_str(), L"rb");
+#else
   fp_ = fopen(file_name.c_str(), "rb");
+#endif
   if (fp_ == nullptr) {
     auto old_errno = errno;
 #if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
