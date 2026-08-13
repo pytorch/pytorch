@@ -16,6 +16,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 )
 from torch.distributed.tensor import init_device_mesh, Shard
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -28,6 +31,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    HardwareClassification,
     IS_LINUX,
     MI200_ARCH,
     run_tests,
@@ -68,6 +72,8 @@ class TestFullyShardOverlap(FSDPTest):
     overlapped times are less than a non-overlapped baseline, but we do not
     test that the overlapped time is less than a precisely calculated time.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self) -> int:
@@ -422,6 +428,8 @@ class LinearWithSleep(nn.Module):
 
 
 class TestFullyShardPerParamMeshOverlap(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -647,6 +655,20 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             lambda msg: f"{msg}\nFSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
             f"per-group RS state may not be preventing cross-group stalls",
         )
+
+
+instantiate_device_type_tests(
+    TestFullyShardOverlap,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardPerParamMeshOverlap,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
