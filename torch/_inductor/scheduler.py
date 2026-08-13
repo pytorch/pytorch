@@ -654,15 +654,12 @@ class NestedReduction:
         nodes: Sequence[BaseSchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
-        *,
-        check_leaves: bool = True,
     ) -> StagedReductionPlan | None:
         """Plan ``nodes`` as a reduction plus a sub-parent pointwise epilogue.
 
         The epilogue runs over the parent's R tile divided into lanes. Returns
-        ``None`` when the candidate cannot be emitted safely. ``check_leaves=False``
-        skips checks for epilogue outputs consumed within the candidate group. See
-        Note [Sub-parent reduction epilogues].
+        ``None`` when the candidate cannot be emitted safely. See Note
+        [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
         # TODO: No fundamental limitation; track aliases and mutation versions here.
@@ -672,6 +669,7 @@ class NestedReduction:
             return None
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
 
+        # TODO: Consider an alternative to rediscovering the reduction here.
         has_reduction = False
         reduction_read_names: OrderedSet[str] = OrderedSet()
         for node in scheduler_nodes:
@@ -737,7 +735,7 @@ class NestedReduction:
         if ordered_parent_nodes is None:
             return None
         parent_nodes, deferred_parent_start = ordered_parent_nodes
-        if check_leaves and not cls._sub_parent_epilogue_outputs_unread(
+        if not cls._sub_parent_epilogue_outputs_unread(
             scheduler_nodes, epilogue_node_set
         ):
             return None
@@ -1015,17 +1013,6 @@ class NestedReduction:
         """
         from .utils import sympy_index_symbol
 
-        fused_buffer_names = OrderedSet.union(
-            *(node.get_buffer_names() for node in (*parent_nodes, *epilogue_nodes))
-        )
-        # Derived-domain reads need an index that can be normalized.
-        if any(
-            not isinstance(dep, MemoryDep) and dep.name not in fused_buffer_names
-            for node in epilogue_nodes
-            for dep in node.read_writes.reads
-        ):
-            return None
-
         extent_subs = (
             cls.try_get_sub_parent_extent_subs(parent_rnumel, sub_parent_factor)
             if known_extent_subs is None
@@ -1034,6 +1021,7 @@ class NestedReduction:
         if extent_subs is None:
             return None
 
+        # Normalize source accesses into a common two-axis domain.
         def normalized_source_indices(
             nodes: Sequence[SchedulerNode],
             source_names: OrderedSet[str],
@@ -1070,6 +1058,7 @@ class NestedReduction:
                         result[dep.name].add(index)
             return result
 
+        # Express epilogue reads in the derived child domain.
         child_rnumel = FloorDiv(parent_rnumel, sub_parent_factor)
         x = sympy_index_symbol("_sub_parent_x")
         parent_r = sympy_index_symbol("_sub_parent_r")
@@ -1082,6 +1071,7 @@ class NestedReduction:
         )
         if child_indices is None:
             return None
+        # Express the corresponding source accesses in the full parent domain.
         parent_indices = normalized_source_indices(
             parent_nodes,
             OrderedSet(child_indices),
@@ -1093,6 +1083,7 @@ class NestedReduction:
             return None
 
         source_layouts: list[tuple[str, NestedReduction.SubParentSourceLayout]] = []
+        # Prove every child read is a lane projection of one parent read.
         for name in parent_source_names:
             source_child_indices = child_indices.get(name)
             if not source_child_indices:
@@ -1132,6 +1123,7 @@ class NestedReduction:
 
         Epilogue outputs only exist at lane resolution, so a non-epilogue node
         reading one would need a parent-resolution view that was never emitted.
+        TODO: Support consumers in a post-sub-parent stage.
         """
         epilogue_output_names = OrderedSet(
             name for node in epilogue_node_set for name in node.get_buffer_names()
