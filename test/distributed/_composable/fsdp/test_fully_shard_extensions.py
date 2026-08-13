@@ -14,6 +14,7 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -22,7 +23,10 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -222,6 +226,8 @@ class TestFullyShardAllGatherExtensionsCommon:
 class TestFullyShardAllGatherExtensionsMultiProcess(
     TestFullyShardAllGatherExtensionsCommon, FSDPTest
 ):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
     def test_all_gather_extensions_train_parity(self):
         with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
@@ -271,6 +277,8 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
 class TestFullyShardAllGatherExtensionsMultiThread(
     TestFullyShardAllGatherExtensionsCommon, FSDPTestMultiThread
 ):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 8
@@ -622,6 +630,20 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(tls.mesh.ndim, 1)
         self.assertEqual(tls.mesh.size(), shard_size)
 
+
+instantiate_device_type_tests(
+    TestFullyShardAllGatherExtensionsMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardAllGatherExtensionsMultiThread,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
