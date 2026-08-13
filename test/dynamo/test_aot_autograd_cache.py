@@ -8,6 +8,7 @@ import multiprocessing
 import operator
 import os
 import pickle
+import random
 import shutil
 import unittest
 from collections.abc import Sequence
@@ -3567,6 +3568,33 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     None,
                     act_input_paths=act_input_paths,
                 )
+
+    @functorch_config.patch({"bypass_autograd_cache_key": True})
+    def test_fallback_nonce_cache_dirs_are_unique(self):
+        def fn(x):
+            return x.sin()
+
+        config = self.default_config()
+        with (
+            fresh_cache(),
+            patch.object(
+                autograd_cache,
+                "check_cacheable",
+                side_effect=BypassAOTAutogradCache("test fallback"),
+            ),
+        ):
+            random.seed(0)
+            key1, _ = self.gen_cache_key(fn, config)
+            random.seed(0)
+            key2, _ = self.gen_cache_key(fn, config)
+
+            AOTAutogradCache._write_to_local_cache(key1, b"first")
+            AOTAutogradCache._write_to_local_cache(key2, b"second")
+
+            self.assertNotEqual(key1, key2)
+            self.assertCountEqual(
+                os.listdir(AOTAutogradCache._get_tmp_dir()), [key1, key2]
+            )
 
     def test_basic_hash_key(self):
         def fn(x):
