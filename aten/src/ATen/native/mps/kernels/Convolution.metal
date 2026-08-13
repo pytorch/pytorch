@@ -273,7 +273,7 @@ INSTANTIATE_NCHW_TO_NHWC_ALL(half)
 INSTANTIATE_NCHW_TO_NHWC_ALL(bfloat)
 
 // Depthwise conv1d directly on NCL: rows are per-channel independent, so the
-// NDHWC transpose the GEMM kernels need would be pure overhead here.
+// NDHWC transpose the matmul kernels need would be pure overhead here.
 template <typename T>
 kernel void conv1d_dw(
     device const T* input [[buffer(0)]],
@@ -402,7 +402,7 @@ INSTANTIATE_CONV_WEIGHT_TO_DHWIO(half)
 INSTANTIATE_CONV_WEIGHT_TO_DHWIO(bfloat)
 
 // (kW, O, I) copy of an OIkW weight view: per-tap slabs with input channels
-// contiguous, the A-operand form of conv1d_sgemm.
+// contiguous, the A-operand form of conv1d_matmul.
 template <typename T>
 kernel void conv_weight_to_koc(
     device const T* source [[buffer(0)]],
@@ -463,15 +463,15 @@ INSTANTIATE_CONV1D_DW(float)
 INSTANTIATE_CONV1D_DW(half)
 INSTANTIATE_CONV1D_DW(bfloat)
 
-// conv1d_sgemm on simdgroup_matrix for hosts without
+// conv1d_matmul on simdgroup_matrix for hosts without
 // MetalPerformancePrimitives: identical dispatch contract (koc weights,
 // region table, NCL/NLC operands), fp32 accumulation.
 template <typename T, int BM, bool NLC, bool HAS_BIAS, bool GROUPED>
-kernel void conv1d_sgemm_simd(
+kernel void conv1d_matmul_simd(
     device const T* src [[buffer(0)]],
     device const T* wts [[buffer(1)]],
     device T* dst [[buffer(2)]],
-    constant Conv1dSgemmParams& p [[buffer(3)]],
+    constant Conv1dMatmulParams& p [[buffer(3)]],
     device const T* bias [[buffer(4)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint sgid [[simdgroup_index_in_threadgroup]],
@@ -509,7 +509,7 @@ kernel void conv1d_sgemm_simd(
       r = i;
     }
   }
-  constant const Conv1dSgemmRegion& reg = p.regions[r];
+  constant const Conv1dMatmulRegion& reg = p.regions[r];
   const int m_off = (zi - reg.tile0) * BN;
   const int nb = int(tgid.z);
   const int tid = int(sgid) * 32 + int(lane);
@@ -598,39 +598,39 @@ kernel void conv1d_sgemm_simd(
   }
 }
 
-#define INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(                           \
-    DT, BM, LNAME, NLC, BNAME, HAS_BIAS, GNAME, GROUPED)             \
-  template [[host_name("conv1d_sgemm_simd_" #DT "_bm" #BM "_" #LNAME \
-                       "_" #BNAME "_" #GNAME)]] kernel void          \
-  conv1d_sgemm_simd<DT, BM, NLC, HAS_BIAS, GROUPED>(                 \
-      device const DT*,                                              \
-      device const DT*,                                              \
-      device DT*,                                                    \
-      constant Conv1dSgemmParams&,                                   \
-      device const DT*,                                              \
-      uint3,                                                         \
-      uint,                                                          \
+#define INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(                           \
+    DT, BM, LNAME, NLC, BNAME, HAS_BIAS, GNAME, GROUPED)              \
+  template [[host_name("conv1d_matmul_simd_" #DT "_bm" #BM "_" #LNAME \
+                       "_" #BNAME "_" #GNAME)]] kernel void           \
+  conv1d_matmul_simd<DT, BM, NLC, HAS_BIAS, GROUPED>(                 \
+      device const DT*,                                               \
+      device const DT*,                                               \
+      device DT*,                                                     \
+      constant Conv1dMatmulParams&,                                   \
+      device const DT*,                                               \
+      uint3,                                                          \
+      uint,                                                           \
       uint);
 
 // clang-format off
-#define INSTANTIATE_CONV1D_SGEMM_SIMD_VARIANTS(DT, BM)                                  \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, bias, true, ungrouped, false)   \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, nobias, false, ungrouped, false) \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, bias, true, ungrouped, false)     \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, nobias, false, ungrouped, false)  \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, bias, true, grouped, true)       \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, ncl, false, nobias, false, grouped, true)    \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, bias, true, grouped, true)        \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_ONE(DT, BM, nlc, true, nobias, false, grouped, true)
+#define INSTANTIATE_CONV1D_MATMUL_SIMD_VARIANTS(DT, BM)                                  \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, ncl, false, bias, true, ungrouped, false)   \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, ncl, false, nobias, false, ungrouped, false) \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, nlc, true, bias, true, ungrouped, false)     \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, nlc, true, nobias, false, ungrouped, false)  \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, ncl, false, bias, true, grouped, true)       \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, ncl, false, nobias, false, grouped, true)    \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, nlc, true, bias, true, grouped, true)        \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_ONE(DT, BM, nlc, true, nobias, false, grouped, true)
 
-#define INSTANTIATE_CONV1D_SGEMM_SIMD(DT)         \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_VARIANTS(DT, 32)  \
-  INSTANTIATE_CONV1D_SGEMM_SIMD_VARIANTS(DT, 64)
+#define INSTANTIATE_CONV1D_MATMUL_SIMD(DT)         \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_VARIANTS(DT, 32)  \
+  INSTANTIATE_CONV1D_MATMUL_SIMD_VARIANTS(DT, 64)
 // clang-format on
 
-INSTANTIATE_CONV1D_SGEMM_SIMD(float)
-INSTANTIATE_CONV1D_SGEMM_SIMD(half)
-INSTANTIATE_CONV1D_SGEMM_SIMD(bfloat)
+INSTANTIATE_CONV1D_MATMUL_SIMD(float)
+INSTANTIATE_CONV1D_MATMUL_SIMD(half)
+INSTANTIATE_CONV1D_MATMUL_SIMD(bfloat)
 
 #if __METAL_VERSION__ >= 400 && \
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
@@ -1158,7 +1158,7 @@ kernel void conv3d_mpp(
   INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, bias, true, ncdhw, true) \
   INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false, ncdhw, true)
 
-// Strided conv1d cannot ride the unit-stride conv1d_sgemm path, so channels-last
+// Strided conv1d cannot ride the unit-stride conv1d_matmul path, so channels-last
 // outputs (inherited from channels-last inputs) need ndhwc twins to stay on the
 // direct kernel; s == 1 geometries never reach it with a channels-last output.
 #define INSTANTIATE_CONV1D_MPP_STRIDED(KW, SX, CNAME, SRCC)                        \
@@ -1223,7 +1223,7 @@ INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 1, 1, 64, 64)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 2, 2, dyn, -1)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 2, 2, 2, dyn, -1)
 
-// Unit-stride conv1d as `taps` accumulated shifted GEMMs: for tap j,
+// Unit-stride conv1d as `taps` accumulated shifted matmuls: for tap j,
 // dst[o, m] += W_j[o, c] * src[c, in_col0 + m + j * dilation]. The activation
 // is read in its native layout (NCL, or NLC via the transposed-B form), so no
 // NHWC staging pass exists on this path, and kernel size and dilation stay
@@ -1238,11 +1238,11 @@ template <
     bool NLC,
     bool HAS_BIAS,
     bool GROUPED>
-kernel void conv1d_sgemm(
+kernel void conv1d_matmul(
     device T* src [[buffer(0)]],
     device T* wts [[buffer(1)]],
     device T* dst [[buffer(2)]],
-    constant Conv1dSgemmParams& p [[buffer(3)]],
+    constant Conv1dMatmulParams& p [[buffer(3)]],
     device const T* bias [[buffer(4)]],
     uint3 tgid [[threadgroup_position_in_grid]]) {
   const int Cg = p.C_in / p.groups;
@@ -1266,7 +1266,7 @@ kernel void conv1d_sgemm(
       r = i;
     }
   }
-  constant const Conv1dSgemmRegion& reg = p.regions[r];
+  constant const Conv1dMatmulRegion& reg = p.regions[r];
   const int m_off = (zi - reg.tile0) * BN;
   const int nb = int(tgid.z);
 
@@ -1358,38 +1358,38 @@ kernel void conv1d_sgemm(
   }
 }
 
-#define INSTANTIATE_CONV1D_SGEMM_ONE(                                    \
-    DT, BM, BN, NSG, LNAME, NLC, BNAME, HAS_BIAS, GNAME, GROUPED)        \
-  template [[host_name("conv1d_sgemm_" #DT "_bm" #BM "_bn" #BN "_s" #NSG \
-                       "_" #LNAME "_" #BNAME "_" #GNAME)]] kernel void   \
-  conv1d_sgemm<DT, BM, BN, NSG, NLC, HAS_BIAS, GROUPED>(                 \
-      device DT*,                                                        \
-      device DT*,                                                        \
-      device DT*,                                                        \
-      constant Conv1dSgemmParams&,                                       \
-      device const DT*,                                                  \
+#define INSTANTIATE_CONV1D_MATMUL_ONE(                                    \
+    DT, BM, BN, NSG, LNAME, NLC, BNAME, HAS_BIAS, GNAME, GROUPED)         \
+  template [[host_name("conv1d_matmul_" #DT "_bm" #BM "_bn" #BN "_s" #NSG \
+                       "_" #LNAME "_" #BNAME "_" #GNAME)]] kernel void    \
+  conv1d_matmul<DT, BM, BN, NSG, NLC, HAS_BIAS, GROUPED>(                 \
+      device DT*,                                                         \
+      device DT*,                                                         \
+      device DT*,                                                         \
+      constant Conv1dMatmulParams&,                                       \
+      device const DT*,                                                   \
       uint3);
 
 // clang-format off
-#define INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, BM, BN, NSG)                            \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, bias, true, ungrouped, false)   \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, nobias, false, ungrouped, false) \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, bias, true, ungrouped, false)     \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, nobias, false, ungrouped, false)  \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, bias, true, grouped, true)       \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, ncl, false, nobias, false, grouped, true)    \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, bias, true, grouped, true)        \
-  INSTANTIATE_CONV1D_SGEMM_ONE(DT, BM, BN, NSG, nlc, true, nobias, false, grouped, true)
+#define INSTANTIATE_CONV1D_MATMUL_VARIANTS(DT, BM, BN, NSG)                            \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, ncl, false, bias, true, ungrouped, false)   \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, ncl, false, nobias, false, ungrouped, false) \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, nlc, true, bias, true, ungrouped, false)     \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, nlc, true, nobias, false, ungrouped, false)  \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, ncl, false, bias, true, grouped, true)       \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, ncl, false, nobias, false, grouped, true)    \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, nlc, true, bias, true, grouped, true)        \
+  INSTANTIATE_CONV1D_MATMUL_ONE(DT, BM, BN, NSG, nlc, true, nobias, false, grouped, true)
 
-#define INSTANTIATE_CONV1D_SGEMM(DT)              \
-  INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, 32, 64, 2) \
-  INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, 64, 64, 2) \
-  INSTANTIATE_CONV1D_SGEMM_VARIANTS(DT, 128, 64, 4)
+#define INSTANTIATE_CONV1D_MATMUL(DT)              \
+  INSTANTIATE_CONV1D_MATMUL_VARIANTS(DT, 32, 64, 2) \
+  INSTANTIATE_CONV1D_MATMUL_VARIANTS(DT, 64, 64, 2) \
+  INSTANTIATE_CONV1D_MATMUL_VARIANTS(DT, 128, 64, 4)
 // clang-format on
 
-INSTANTIATE_CONV1D_SGEMM(float)
-INSTANTIATE_CONV1D_SGEMM(half)
-INSTANTIATE_CONV1D_SGEMM(bfloat)
+INSTANTIATE_CONV1D_MATMUL(float)
+INSTANTIATE_CONV1D_MATMUL(half)
+INSTANTIATE_CONV1D_MATMUL(bfloat)
 
 #endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
 

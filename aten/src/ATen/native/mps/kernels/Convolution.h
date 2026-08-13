@@ -35,8 +35,8 @@ struct Conv1dDwParams {
 C10_METAL_CONSTEXPR int32_t conv1d_mpp_src_width_hint = 1 << 22;
 
 // A region is an interval along the output length, not a 3D tensor subregion.
-// Direct SGEMM supports both NCL and NLC activation storage.
-struct Conv1dSgemmRegion {
+// Direct matmul supports both NCL and NLC activation storage.
+struct Conv1dMatmulRegion {
   // Index of the region's first output position.
   int32_t out_col0;
   // Number of consecutive output positions in the region.
@@ -51,9 +51,9 @@ struct Conv1dSgemmRegion {
   int32_t tile0;
 };
 
-C10_METAL_CONSTEXPR int32_t conv1d_sgemm_max_regions = 16;
+C10_METAL_CONSTEXPR int32_t conv1d_matmul_max_regions = 16;
 
-struct Conv1dSgemmParams {
+struct Conv1dMatmulParams {
   int32_t C_in;
   int32_t C_out;
   int32_t L;
@@ -64,7 +64,7 @@ struct Conv1dSgemmParams {
   int32_t groups;
   int32_t region_count;
   bool has_bias;
-  ::c10::metal::array<Conv1dSgemmRegion, conv1d_sgemm_max_regions> regions;
+  ::c10::metal::array<Conv1dMatmulRegion, conv1d_matmul_max_regions> regions;
 };
 
 // Source element strides of the OIDHW weight view (may be non-contiguous).

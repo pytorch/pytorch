@@ -14584,7 +14584,7 @@ class TestConvolutionMPS(TestCaseMPS):
     )
     @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_conv1d_sgemm_geometries(self, dtype, with_bias, kernel_size, dilation, padding):
+    def test_conv1d_matmul_geometries(self, dtype, with_bias, kernel_size, dilation, padding):
         input_length = max(257, dilation * (kernel_size - 1) + 17)
         x = torch.randn(2, 24, input_length).to(dtype).float()
         weight = torch.randn(40, 24, kernel_size).to(dtype).float()
@@ -14606,7 +14606,7 @@ class TestConvolutionMPS(TestCaseMPS):
         name_fn=lambda groups, channels, output_channels: f"g{groups}_c{channels}_o{output_channels}",
     )
     @parametrize("layout", ["contiguous", "nlc"])
-    def test_conv1d_sgemm_grouped(self, groups, channels, output_channels, layout):
+    def test_conv1d_matmul_grouped(self, groups, channels, output_channels, layout):
         x = torch.randn(2, channels, 999)
         weight = torch.randn(output_channels, channels // groups, 5)
         bias = torch.randn(output_channels)

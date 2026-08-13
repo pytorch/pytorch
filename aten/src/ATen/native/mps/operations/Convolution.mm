@@ -682,7 +682,7 @@ static void conv1d_dw_forward(const Tensor& input_t,
   });
 }
 
-struct Conv1dSgemmRegion {
+struct Conv1dMatmulRegion {
   int64_t out_col0;
   int64_t out_cols;
   int64_t in_col0;
@@ -693,8 +693,12 @@ struct Conv1dSgemmRegion {
 // Unit-stride only: output col m accumulates taps j with 0 <= m - pad + j*d < L.
 // Regions are maximal col ranges whose valid tap window [j0, j1) is constant, so
 // each region dispatch reads activations strictly inside [0, L).
-static std::vector<Conv1dSgemmRegion> conv1d_sgemm_regions(int64_t outW, int64_t L, int64_t pad, int64_t k, int64_t d) {
-  std::vector<Conv1dSgemmRegion> regions;
+static std::vector<Conv1dMatmulRegion> conv1d_matmul_regions(int64_t outW,
+                                                             int64_t L,
+                                                             int64_t pad,
+                                                             int64_t k,
+                                                             int64_t d) {
+  std::vector<Conv1dMatmulRegion> regions;
   int64_t m = 0;
   while (m < outW) {
     const int64_t j0 = pad > m ? (pad - m + d - 1) / d : 0;
@@ -710,7 +714,7 @@ static std::vector<Conv1dSgemmRegion> conv1d_sgemm_regions(int64_t outW, int64_t
     // zero taps: columns read only padding, the kernel writes bias/zero
     const bool has_taps = j1 > j0;
     regions.push_back({m, next - m, has_taps ? m - pad + j0 * d : 0, has_taps ? j1 - j0 : 0, has_taps ? j0 : 0});
-    if (regions.size() > size_t(conv1d_sgemm_max_regions)) {
+    if (regions.size() > size_t(conv1d_matmul_max_regions)) {
       return regions;
     }
     m = next;
@@ -718,12 +722,12 @@ static std::vector<Conv1dSgemmRegion> conv1d_sgemm_regions(int64_t outW, int64_t
   return regions;
 }
 
-static std::pair<int, int> conv1d_sgemm_tile(int64_t og,
-                                             int64_t cg,
-                                             int64_t taps,
-                                             int64_t groups,
-                                             int64_t outW,
-                                             int64_t N) {
+static std::pair<int, int> conv1d_matmul_tile(int64_t og,
+                                              int64_t cg,
+                                              int64_t taps,
+                                              int64_t groups,
+                                              int64_t outW,
+                                              int64_t N) {
   static const int64_t cores = []() {
     const unsigned device_cores = at::mps::MPSDevice::getInstance()->getCoreCount();
     return device_cores > 0 ? static_cast<int64_t>(device_cores) : 16;
@@ -743,7 +747,7 @@ static std::pair<int, int> conv1d_sgemm_tile(int64_t og,
   return {bm, bm >= 128 ? 4 : 2};
 }
 
-// (kW, O, I) weight copy for conv1d_sgemm; per-tap slabs keep the reduction
+// (kW, O, I) weight copy for conv1d_matmul; per-tap slabs keep the reduction
 // dim contiguous. Takes the (O, I, 1, kW) view4d weight.
 static Tensor conv1d_weights_to_koc(const Tensor& weight) {
   using namespace mps;
@@ -780,15 +784,15 @@ static Tensor conv1d_weights_to_koc(const Tensor& weight) {
   return output;
 }
 
-// Unit-stride conv1d as `taps` accumulated shifted GEMMs over the activation in
+// Unit-stride conv1d as `taps` accumulated shifted matmuls over the activation in
 // its native NCL/NLC layout; no NHWC staging pass, geometry stays runtime.
-static void conv1d_sgemm_forward(const Tensor& input_t,
-                                 const Tensor& weight_t,
-                                 const std::optional<Tensor>& bias_opt,
-                                 int64_t padding,
-                                 int64_t dilation,
-                                 int64_t groups,
-                                 const Tensor& output_t) {
+static void conv1d_matmul_forward(const Tensor& input_t,
+                                  const Tensor& weight_t,
+                                  const std::optional<Tensor>& bias_opt,
+                                  int64_t padding,
+                                  int64_t dilation,
+                                  int64_t groups,
+                                  const Tensor& output_t) {
   using namespace mps;
   const auto dtype = input_t.scalar_type();
   const bool out_nlc = conv1d_is_nlc(output_t);
@@ -806,10 +810,10 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   const int64_t L = src.size(3);
   const int64_t outW = output_t.size(3);
   const int64_t k = weight_t.size(3);
-  auto regions = conv1d_sgemm_regions(outW, L, padding, k, dilation);
+  auto regions = conv1d_matmul_regions(outW, L, padding, k, dilation);
   std::optional<Tensor> padded;
   // Each edge region occupies a mostly-padded 64-column destination tile, so
-  // its cost is GEMM work; padding the input instead costs three linear passes
+  // its cost is matmul work; padding the input instead costs three linear passes
   // plus fixed launches. Compare both in microseconds (measured rates: ~12.5e6
   // MACs/us tensor throughput, ~1e5 bytes/us copy) and take the cheaper one.
   const int64_t og = output_t.size(1) / groups;
@@ -817,9 +821,9 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   const double edge_us = double(int64_t(regions.size()) - 1) * 64.0 * double(og * cg) * double(k) / 12.5e6;
   const double pad_us = 45.0 + 3.0 * double(src.size(0) * src.size(1)) * double(L) * src.element_size() / 1e5;
   const bool can_materialize_padding = conv1d_padded_plane_fits_int32(input_t, padding);
-  TORCH_INTERNAL_ASSERT(can_materialize_padding || regions.size() <= size_t(conv1d_sgemm_max_regions));
+  TORCH_INTERNAL_ASSERT(can_materialize_padding || regions.size() <= size_t(conv1d_matmul_max_regions));
   if (can_materialize_padding &&
-      (regions.size() > size_t(conv1d_sgemm_max_regions) || (regions.size() > 3 && pad_us < edge_us))) {
+      (regions.size() > size_t(conv1d_matmul_max_regions) || (regions.size() > 3 && pad_us < edge_us))) {
     padded = at::empty({src.size(0), src.size(1), 1, L + 2 * padding},
                        src.options(),
                        out_nlc ? std::optional<MemoryFormat>(MemoryFormat::ChannelsLast) : std::nullopt);
@@ -832,7 +836,7 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   }
   const auto& activation = padded ? *padded : src;
 
-  Conv1dSgemmParams params{};
+  Conv1dMatmulParams params{};
   params.C_in = c10::checked_convert<int32_t>(src.size(1), "input channels");
   params.C_out = c10::checked_convert<int32_t>(output_t.size(1), "output channels");
   params.L = c10::checked_convert<int32_t>(activation.size(3), "input length");
@@ -857,18 +861,18 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   // the env knob forces it on newer hosts to proxy-validate that fallback
   static const bool force_simd = c10::utils::check_env("PYTORCH_MPS_CONV1D_FORCE_SIMD") == true;
   const bool use_mpp = at::mps::has_mpp() && !force_simd;
-  const auto tile = conv1d_sgemm_tile(og, cg, k, groups, outW, src.size(0));
+  const auto tile = conv1d_matmul_tile(og, cg, k, groups, outW, src.size(0));
   const int bm = use_mpp ? tile.first : std::min(tile.first, 64);
   const int nsg = tile.second;
   const int group_threads = use_mpp ? nsg * 32 : (bm >= 64 ? 128 : 64);
-  const auto pipeline_name = use_mpp ? fmt::format("conv1d_sgemm_{}_bm{}_bn64_s{}_{}_{}_{}",
+  const auto pipeline_name = use_mpp ? fmt::format("conv1d_matmul_{}_bm{}_bn64_s{}_{}_{}_{}",
                                                    scalarToMetalTypeString(src),
                                                    bm,
                                                    nsg,
                                                    out_nlc ? "nlc" : "ncl",
                                                    has_bias ? "bias" : "nobias",
                                                    groups > 1 ? "grouped" : "ungrouped")
-                                     : fmt::format("conv1d_sgemm_simd_{}_bm{}_{}_{}_{}",
+                                     : fmt::format("conv1d_matmul_simd_{}_bm{}_{}_{}_{}",
                                                    scalarToMetalTypeString(src),
                                                    bm,
                                                    out_nlc ? "nlc" : "ncl",
@@ -881,7 +885,7 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_sgemm", {activation, weights}, stream);
+      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_matmul", {activation, weights}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output_t, params, bias ? *bias : weights);
       [encoder dispatchThreadgroups:MTLSizeMake(o_tiles * groups, grid_y, activation.size(0))
@@ -891,17 +895,17 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   });
 }
 
-// Small reductions leave the GEMM tensor units idle tap-by-tap; merge the taps
+// Small reductions leave the matmul tensor units idle tap-by-tap; merge the taps
 // into the K dim by materializing the k-shifted rows. Serves C_in <= 8 and
 // strided low-reduction geometries the direct kernels lose on.
-static void conv1d_im2col_sgemm_forward(const Tensor& input_t,
-                                        const Tensor& weight_t,
-                                        const std::optional<Tensor>& bias_opt,
-                                        int64_t stride,
-                                        int64_t padding,
-                                        int64_t dilation,
-                                        int64_t groups,
-                                        const Tensor& output_t) {
+static void conv1d_im2col_matmul_forward(const Tensor& input_t,
+                                         const Tensor& weight_t,
+                                         const std::optional<Tensor>& bias_opt,
+                                         int64_t stride,
+                                         int64_t padding,
+                                         int64_t dilation,
+                                         int64_t groups,
+                                         const Tensor& output_t) {
   const int64_t N = input_t.size(0);
   const int64_t C = input_t.size(1);
   const int64_t k = weight_t.size(3);
@@ -918,15 +922,15 @@ static void conv1d_im2col_sgemm_forward(const Tensor& input_t,
                            .reshape({N, C * k, outW})
                            .unsqueeze(2);
   const auto merged_weight = weight_t.reshape({weight_t.size(0), (C / groups) * k, 1, 1});
-  conv1d_sgemm_forward(columns, merged_weight, bias_opt, 0, 1, groups, output_t);
+  conv1d_matmul_forward(columns, merged_weight, bias_opt, 0, 1, groups, output_t);
 }
 
 // The tap-merged im2col matmul handles any stride/dilation/groups while its
 // padded activation and merged view fit int32 addressing.
-static bool conv1d_im2col_sgemm_eligible(const Tensor& input_t,
-                                         const Tensor& weight_t,
-                                         int64_t padding,
-                                         const Tensor& output_t) {
+static bool conv1d_im2col_matmul_eligible(const Tensor& input_t,
+                                          const Tensor& weight_t,
+                                          int64_t padding,
+                                          const Tensor& output_t) {
   constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
   const int64_t input_channels = input_t.size(1);
   const int64_t output_length = output_t.size(3);
@@ -938,13 +942,13 @@ static bool conv1d_im2col_sgemm_eligible(const Tensor& input_t,
   return merged_channels <= kInt32Max / (output_length + 2) && output_t.size(1) <= kInt32Max / output_length;
 }
 
-static bool conv1d_sgemm_eligible(const Tensor& input_t,
-                                  const Tensor& weight_t,
-                                  int64_t stride,
-                                  int64_t padding,
-                                  int64_t dilation,
-                                  int64_t groups,
-                                  const Tensor& output_t) {
+static bool conv1d_matmul_eligible(const Tensor& input_t,
+                                   const Tensor& weight_t,
+                                   int64_t stride,
+                                   int64_t padding,
+                                   int64_t dilation,
+                                   int64_t groups,
+                                   const Tensor& output_t) {
   if (stride != 1) {
     return false;
   }
@@ -960,13 +964,13 @@ static bool conv1d_sgemm_eligible(const Tensor& input_t,
   }
   const int64_t og = output_channels / groups;
   const int64_t cg = input_channels / groups;
-  // sub-tile groups underfill the GEMM; dw or the im2col catch-all take them
+  // sub-tile groups underfill the matmul; dw or the im2col catch-all take them
   if (groups > 1 && (og < 8 || cg < 8)) {
     return false;
   }
   if (!conv1d_padded_plane_fits_int32(input_t, padding) &&
-      conv1d_sgemm_regions(output_length, input_length, padding, weight_t.size(3), dilation).size() >
-          conv1d_sgemm_max_regions) {
+      conv1d_matmul_regions(output_length, input_length, padding, weight_t.size(3), dilation).size() >
+          conv1d_matmul_max_regions) {
     return false;
   }
   return true;
@@ -1198,7 +1202,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     const bool is_depthwise = groups > 0 && groups == input_t.size(1) && weight_t.size(0) % groups == 0;
     // A groups == 1, C_in == 1 conv only matches the depthwise pattern
     // degenerately; strided catalog geometries with enough columns to fill a
-    // destination tile run faster as the direct GEMM than as C_out dw passes.
+    // destination tile run faster as the direct matmul than as C_out dw passes.
     const bool c1_direct = groups == 1 && input_t.size(1) == 1 && stride[1] > 1 && output_t.size(3) >= 64 &&
         conv1d_direct_metal_eligible(input_t, weight_t, bias_defined, stride[1], dilation[1], groups, output_t);
     const bool use_depthwise_metal = is_depthwise && !c1_direct &&
@@ -1246,22 +1250,22 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       conv3d_im2col_matmul(input_3d, weight_3d, bias_opt, stride_3d, padding_3d, output_3d);
       return output_t;
     }
-    if (conv1d_sgemm_eligible(input_t, weight_t, stride[1], padding[1], dilation[1], groups, output_t)) {
-      // Tap-by-tap GEMMs underfill the tensor units for tiny channel counts or
+    if (conv1d_matmul_eligible(input_t, weight_t, stride[1], padding[1], dilation[1], groups, output_t)) {
+      // Tap-by-tap matmuls underfill the tensor units for tiny channel counts or
       // near-empty destination tiles; merge the taps into the K dim instead.
       if (groups == 1 && (input_t.size(1) <= 8 || output_t.size(3) <= 8) &&
-          conv1d_im2col_sgemm_eligible(input_t, weight_t, padding[1], output_t)) {
-        conv1d_im2col_sgemm_forward(input_t, weight_t, bias_opt, 1, padding[1], dilation[1], 1, output_t);
+          conv1d_im2col_matmul_eligible(input_t, weight_t, padding[1], output_t)) {
+        conv1d_im2col_matmul_forward(input_t, weight_t, bias_opt, 1, padding[1], dilation[1], 1, output_t);
       } else {
-        conv1d_sgemm_forward(input_t, weight_t, bias_opt, padding[1], dilation[1], groups, output_t);
+        conv1d_matmul_forward(input_t, weight_t, bias_opt, padding[1], dilation[1], groups, output_t);
       }
       return output_t;
     }
     // strided with tiny channel counts: every direct kernel underfills, the
     // tap-merged matmul does not
     if (stride[1] > 1 && groups == 1 && input_t.size(1) <= 8 &&
-        conv1d_im2col_sgemm_eligible(input_t, weight_t, padding[1], output_t)) {
-      conv1d_im2col_sgemm_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], 1, output_t);
+        conv1d_im2col_matmul_eligible(input_t, weight_t, padding[1], output_t)) {
+      conv1d_im2col_matmul_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], 1, output_t);
       return output_t;
     }
     if (conv1d_direct_metal_eligible(input_t, weight_t, bias_defined, stride[1], dilation[1], groups, output_t)) {
@@ -1298,9 +1302,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       }
     }
     // Tap-merged catch-all for remaining shapes whose temporary fits int32;
-    // available on every macOS tier through the SGEMM engines.
-    if (input_t.size(1) % groups == 0 && conv1d_im2col_sgemm_eligible(input_t, weight_t, padding[1], output_t)) {
-      conv1d_im2col_sgemm_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], groups, output_t);
+    // available on every macOS tier through the matmul kernels.
+    if (input_t.size(1) % groups == 0 && conv1d_im2col_matmul_eligible(input_t, weight_t, padding[1], output_t)) {
+      conv1d_im2col_matmul_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], groups, output_t);
       return output_t;
     }
     // The normal convolution caller does not supply input_shape; return here
