@@ -14,6 +14,7 @@
 #include <torch/headeronly/util/complex.h>
 
 #include <cmath>
+#include <concepts>
 #include <type_traits>
 
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
@@ -22,12 +23,12 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 // (uselessly) convert to floating point and then do the test.
 // This function is.
 
-template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
+template <std::integral T>
 inline C10_HOST_DEVICE bool _isnan(T /*val*/) {
   return false;
 }
 
-template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+template <std::floating_point T>
 inline C10_HOST_DEVICE bool _isnan(T val) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return ::isnan(val);
