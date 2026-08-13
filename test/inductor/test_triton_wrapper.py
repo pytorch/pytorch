@@ -5,15 +5,24 @@ import os
 import re
 import subprocess
 import sys
+import unittest
 
 import torch
 import torch._inductor.async_compile
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton
 
 
+@unittest.skipIf(not has_triton(), "requires Triton")
 class TestTritonWrapper(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         PyCodeCache.cache_clear()
@@ -30,7 +39,8 @@ class TestTritonWrapper(TestCase):
         self.assertTrue(compiled_module is not None)
         return compiled_module
 
-    def test_wrapper_using_gpu_seed(self):
+    @onlyAccelerator
+    def test_wrapper_using_gpu_seed(self, device):
         """
         Make sure the subprocess.check_output does not throw.
         """
@@ -42,8 +52,8 @@ class TestTritonWrapper(TestCase):
             return z + y
 
         N = 10
-        x = torch.rand(N).to(device=GPU_TYPE)
-        y = torch.rand(N).to(device=GPU_TYPE)
+        x = torch.rand(N).to(device=device)
+        y = torch.rand(N).to(device=device)
         out = f(x, y)  # noqa: F841
         compiled_module = self.get_compiled_module()
         # to make sure the subprocess runs on the exact same path as the parent process
@@ -60,14 +70,15 @@ class TestTritonWrapper(TestCase):
 
         self.assertTrue(len(bench_out) > 0)
 
-    def test_get_args_and_benchmark_compiled_module(self):
+    @onlyAccelerator
+    def test_get_args_and_benchmark_compiled_module(self, device):
         @torch.compile
         def f(x, y):
             return x * y + x
 
         N = 10
-        x = torch.rand(N).to(device=GPU_TYPE)
-        y = torch.rand(N).to(device=GPU_TYPE)
+        x = torch.rand(N).to(device=device)
+        y = torch.rand(N).to(device=device)
         f(x, y)
 
         compiled_module = self.get_compiled_module()
@@ -95,16 +106,17 @@ class TestTritonWrapper(TestCase):
         ).decode()
         self.assertTrue(len(bench_out) > 0)
 
-    def test_get_args_preserves_aliased_inputs(self):
+    @onlyAccelerator
+    def test_get_args_preserves_aliased_inputs(self, device):
         @torch.compile
         def f(x, y, empty_bool, empty_long):
             return x + y, empty_bool.logical_not(), empty_long + 1
 
-        base = torch.arange(64, device=GPU_TYPE, dtype=torch.long)
+        base = torch.arange(64, device=device, dtype=torch.long)
         x = torch.as_strided(base, (3, 4), (4, 1), 2)
         y = torch.as_strided(base, (3, 4), (4, 1), 10)
-        empty_bool = torch.empty((0, 3), device=GPU_TYPE, dtype=torch.bool)
-        empty_long = torch.empty((0, 2), device=GPU_TYPE, dtype=torch.long)
+        empty_bool = torch.empty((0, 3), device=device, dtype=torch.bool)
+        empty_long = torch.empty((0, 2), device=device, dtype=torch.long)
         f(x, y, empty_bool, empty_long)
 
         compiled_module = self.get_compiled_module()
@@ -133,6 +145,13 @@ class TestTritonWrapper(TestCase):
         self.assertEqual(len(args), 4)
 
 
+instantiate_device_type_tests(
+    TestTritonWrapper,
+    globals(),
+    except_for=("hpu",),
+    allow_xpu=True,
+)
+
+
 if __name__ == "__main__":
-    if HAS_GPU:
-        run_tests()
+    run_tests()
