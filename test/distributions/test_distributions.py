@@ -116,13 +116,13 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     load_tests,
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
-    HardwareClassification,
     TestCase,
 )
 
@@ -3884,8 +3884,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
-
-
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_log_prob_zero(self):
         # Specifically test the special case where x=0 and alpha=1.  The PDF is
@@ -4550,6 +4548,7 @@ class TestDistributions(DistributionsTestCase):
 
                 self.assertFalse(dist.log_prob(sanitized_mode).isnan().any())
 
+
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -4603,8 +4602,7 @@ class TestDistributionsDevice(DistributionsTestCase):
             total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
 
             with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for count.*"
+                ValueError, "binomial only supports floating-point dtypes for count.*"
             ):
                 torch.binomial(total_count, total_prob)
 
@@ -4613,8 +4611,7 @@ class TestDistributionsDevice(DistributionsTestCase):
             total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
 
             with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for prob.*"
+                ValueError, "binomial only supports floating-point dtypes for prob.*"
             ):
                 torch.binomial(total_count, total_prob)
 
@@ -4660,9 +4657,18 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(Gumbel(loc, scale).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
-        self.assertEqual(Gumbel(torch.tensor(1.0, device=device), torch.tensor(1.0, device=device)).sample().size(), ())
-        self.assertEqual(Gumbel(torch.tensor(1.0, device=device), torch.tensor(1.0, device=device)).sample((1,)).size(),
-                         (1,))
+        self.assertEqual(
+            Gumbel(torch.tensor(1.0, device=device), torch.tensor(1.0, device=device))
+            .sample()
+            .size(),
+            (),
+        )
+        self.assertEqual(
+            Gumbel(torch.tensor(1.0, device=device), torch.tensor(1.0, device=device))
+            .sample((1,))
+            .size(),
+            (1,),
+        )
         self.assertEqual(
             Gumbel(
                 torch.tensor(0.0, dtype=torch.float32, device=device),
@@ -4795,6 +4801,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         # TODO: increase precision once imbalance on GPU is fixed.
         self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
         self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
+
 
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
@@ -7346,6 +7353,7 @@ class TestJit(DistributionsTestCase):
                 actual,
                 msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
+
 
 instantiate_device_type_tests(
     TestDistributions,
