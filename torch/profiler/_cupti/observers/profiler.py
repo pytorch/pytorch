@@ -330,9 +330,9 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                     register_graph_destroy_hook(recorder.purge_exec_ids)
                 )
         # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a feature of the CUPTI
-        # monitor: it registers us as a consumer (with our metrics) of the current device's shared
-        # session, delivering decoded frames to on_pm_samples (they render as GPU counter tracks).
-        # Off by default; also a no-op when no metrics are configured (pm_metrics).
+        # monitor. Each open window registers us as a consumer (with our metrics) of the current
+        # device's shared session, delivering decoded frames to on_pm_samples (they render as GPU
+        # counter tracks). Off by default; also a no-op when no metrics are configured (pm_metrics).
         self._pm_metrics = list(pm_metrics or [])
         self._pm_enabled = (
             enable_pm_sampling
@@ -344,8 +344,6 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # records (via _timed_frames); no separate buffer. Per-device max start_ns delivered:
         # a monotonic guard so each sample is enqueued at most once.
         self._pm_last_ns: dict[int, int] = {}
-        if self._pm_enabled and self._monitor is not None:
-            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
@@ -466,12 +464,17 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         self._record_calling_thread()
         with self._lock:
             self._open_start = self._boundary_clock_ns()
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def close_window(self) -> int | None:
         """End the open window and queue it for deferred export; snapshots its annotations +
         thread map now. Pair with :meth:`set_export` for the paths. Returns the window id."""
         if not self.available:
             return None
+        boundary = self._boundary_clock_ns()
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.release_pm_sampling(self.on_pm_samples)
         with self._lock:
             start = self._open_start if self._open_start is not None else 0
             self._open_start = None
@@ -479,7 +482,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             thread_map = {
                 pid: dict(mapping) for pid, mapping in self._thread_resource_map.items()
             }
-        window_id = self.mark_boundary()
+        window_id = self.mark_boundary(boundary_ns=boundary)
         with self._lock:
             self._windows[window_id] = {
                 "start": start,
@@ -515,8 +518,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         (default) sync-flushes the tail, for use on the training thread. ``force=False`` (an
         off-thread finalize) must NOT flush, so it waits up to ``timeout_s`` for the poller to
         cover the windows, force-draining only if it stalls."""
-        # Release PM sampling first: its final tail decode must land in _timed_frames BEFORE the
-        # windows finalize, so those samples can be sliced into the closing window.
+        # Idempotent fallback for callers that join without closing the window first.
         if self._pm_enabled and self._monitor is not None:
             self._monitor.release_pm_sampling(self.on_pm_samples)
         if getattr(self, "_boundaries", None) is not None:
@@ -547,12 +549,13 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             self._monitor.flush(sync=True)
 
     def _window_watermark_ns(self) -> int:
+        # PM samples use a separate ring and cannot prove activity-buffer coverage.
         with self._lock:
             return max(
                 (
                     int(frame["start_ns"].max())
-                    for _, frame in self._timed_frames
-                    if len(frame["start_ns"])
+                    for kind, frame in self._timed_frames
+                    if kind != "pm_sampling" and len(frame["start_ns"])
                 ),
                 default=-1,
             )

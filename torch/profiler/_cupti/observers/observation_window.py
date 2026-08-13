@@ -68,12 +68,13 @@ class WindowFinalizerMixin:
         self._poll_thread: _PollThread | None = None
         self._poll_thread_name = thread_name
 
-    def mark_boundary(self) -> int:
+    def mark_boundary(self, *, boundary_ns: int | None = None) -> int:
         """Stamp the native record clock as a window boundary and queue it for finalization
         once delivered records cover it. Returns the window id. Lazily starts the poller on
         the first call (unless auto_start_poller is False). Does NOT flush -- the caller
-        decides whether to nudge a flush so the poller sees the records."""
-        boundary = self._boundary_clock_ns()
+        decides whether to nudge a flush so the poller sees the records. Pass ``boundary_ns``
+        to enqueue a boundary captured before synchronous close work."""
+        boundary = self._boundary_clock_ns() if boundary_ns is None else boundary_ns
         with self._win_lock:
             window_id = self._next_window_id
             self._next_window_id += 1
