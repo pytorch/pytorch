@@ -24,6 +24,7 @@ from torch.utils._pytree import TreeSpec
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestUnflatten(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def compare_outputs(self, eager, unflattened, args):
         orig_output = eager(*args)
         unflattened_output = unflattened(*args)

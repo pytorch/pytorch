@@ -100,6 +100,7 @@ class SparseActivationCSR(torch.nn.Module):
 @unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
 class TestSparseProp(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
