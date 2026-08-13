@@ -10555,6 +10555,70 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/111374
+    def test_lerp_neg_inf_scalar_weight(self):
+        # Without the two-branch formula, weight >= 0.5 with one operand at -inf
+        # produces NaN on MPS while CPU returns the correct value.
+        x = torch.tensor([float("-inf"), 0.0, 1.0], device="mps")
+        y = torch.tensor([0.0, 1.0, 2.0], device="mps")
+        for w in (0.1, 0.5, 0.7, 0.99):
+            self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w))
+
+    def test_lerp_pos_inf_scalar_weight(self):
+        x = torch.tensor([float("inf"), 0.0, 1.0], device="mps")
+        y = torch.tensor([0.0, 1.0, 2.0], device="mps")
+        for w in (0.1, 0.5, 0.7, 0.99):
+            self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w))
+
+    def test_lerp_tensor_weight(self):
+        x = torch.tensor([float("-inf"), float("inf"), 0.0, 1.0], device="mps")
+        y = torch.tensor([0.0, 0.0, 1.0, 2.0], device="mps")
+        w = torch.tensor([0.7, 0.7, 0.3, 0.8], device="mps")
+        self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w.cpu()))
+
+    def test_lerp_tensor_weight_end_inf(self):
+        # Same as test_lerp_tensor_weight but with the infinity in `end`
+        # instead of `start`, since the two-branch formula is not symmetric
+        # in its operands.
+        x = torch.tensor([0.0, 0.0, 1.0, 2.0], device="mps")
+        y = torch.tensor([float("-inf"), float("inf"), 0.0, 1.0], device="mps")
+        w = torch.tensor([0.7, 0.7, 0.3, 0.8], device="mps")
+        self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w.cpu()))
+
+    def test_lerp_complex_tensor_weight_inf(self):
+        # The tensor-weight path for complex dtypes (lerp_op(float2, ...) in
+        # BinaryKernel.metal) had its own unconditional formula, separate
+        # from lerp_alpha_functor's scalar-weight overload, and reproduced
+        # the same (-inf)+inf = NaN failure mode #111374 was filed for.
+        # complex128 is not exercised: MPS has no float64 support at all.
+        x_vals = [complex(float("-inf"), 3.0), complex(float("inf"), 3.0), 1.0 + 1j]
+        x = torch.tensor(x_vals, dtype=torch.complex64, device="mps")
+        y = torch.tensor([0.0 + 0j, 0.0 + 0j, 2.0 + 2j], dtype=torch.complex64, device="mps")
+        w = torch.tensor([0.7 + 0.1j, 0.7 + 0.1j, 0.3 + 0.05j], dtype=torch.complex64, device="mps")
+        self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w.cpu()))
+
+    def test_lerp_weight_zero(self):
+        x = torch.tensor([float("-inf"), float("inf"), 1.5], device="mps")
+        y = torch.tensor([0.0, 0.0, 2.5], device="mps")
+        self.assertEqual(torch.lerp(x, y, 0.0), torch.lerp(x.cpu(), y.cpu(), 0.0))
+
+    def test_lerp_weight_one(self):
+        x = torch.tensor([float("-inf"), float("inf"), 1.5], device="mps")
+        y = torch.tensor([0.0, 0.0, 2.5], device="mps")
+        self.assertEqual(torch.lerp(x, y, 1.0), torch.lerp(x.cpu(), y.cpu(), 1.0))
+
+    def test_lerp_normal_values_unchanged(self):
+        x = torch.randn(64, device="mps")
+        y = torch.randn(64, device="mps")
+        for w in (0.1, 0.3, 0.5, 0.7, 0.9):
+            self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w))
+
+    def test_lerp_half(self):
+        x = torch.tensor([float("-inf"), float("inf"), 0.0, 1.0], dtype=torch.half, device="mps")
+        y = torch.tensor([0.0, 0.0, 1.0, 2.0], dtype=torch.half, device="mps")
+        for w in (0.1, 0.7):
+            self.assertEqual(torch.lerp(x, y, w), torch.lerp(x.cpu(), y.cpu(), w))
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
