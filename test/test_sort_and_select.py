@@ -288,7 +288,7 @@ class TestSortAndSelectDevice(TestCase):
                     )
 
                     # assert stride is preserved
-                    if self.device_type in ("cuda", "xpu"):
+                    if self.device_type != "cpu":
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
                         self.assertEqual(r1.values.stride(), t.stride())
