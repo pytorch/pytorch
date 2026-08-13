@@ -9,7 +9,11 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import DEVICE_TYPE
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -17,6 +21,8 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 @unittest.skipIf(DEVICE_TYPE == "cpu", "requires accelerator")
 class TestDTensorLogging(TestCase):
     """Test DTensor logging."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def tearDown(self):
         super().tearDown()

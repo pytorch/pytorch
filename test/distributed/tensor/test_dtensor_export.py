@@ -26,6 +26,7 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing._internal.common_device_type import skipPRIVATEUSE1
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -181,6 +182,8 @@ register_pytree_node(
 
 @unittest.skipIf(DEVICE_TYPE == "cpu", "requires accelerator")
 class DTensorExportTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
