@@ -1107,13 +1107,14 @@ def diff_tensor_meta(
             continue
         val1 = getattr(meta1, meta_name)
         val2 = getattr(meta2, meta_name)
+        val1_non_unit_dims, val2_non_unit_dims = val1, val2
         if meta_name == "stride":
             # The stride of a size-1 dimension is unobservable (there is only one
             # element along it), so operations may set it arbitrarily.
-            val1 = _strides_of_non_unit_dims(val1, meta1.shape)
-            val2 = _strides_of_non_unit_dims(val2, meta2.shape)
+            val1_non_unit_dims = _strides_of_non_unit_dims(val1, meta1.shape)
+            val2_non_unit_dims = _strides_of_non_unit_dims(val2, meta2.shape)
         try:
-            if val1 != val2:
+            if val1_non_unit_dims != val2_non_unit_dims:
                 pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
         except GuardOnDataDependentSymNode:
             pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")

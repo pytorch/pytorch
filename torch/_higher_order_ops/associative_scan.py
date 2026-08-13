@@ -238,6 +238,13 @@ def associative_scan(
         if any(x.ndim <= d for x in lxs):
             raise ValueError("All xs leaves must have at least 'dim + 1' dimensions")
 
+        scan_lengths = {x.shape[d] for x in lxs}
+        if len(scan_lengths) > 1:
+            raise ValueError(
+                "All xs leaves must have the same size along the scan dim "
+                f"(dim={d}), but got sizes {sorted(scan_lengths)}"
+            )
+
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
 
@@ -827,10 +834,24 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             return g_xs, g_ys
 
         # Compute the per-leaf gradients in parallel through vmap.
-        g_xs_stacked, g_ys_stacked = torch.vmap(compute_grad, in_dims=-1, out_dims=-1)(
-            torch.stack(bwxs, -1), torch.stack(bwys, -1), torch.stack(gl_ys, -1)
-        )
-        g_xs = torch.unbind(g_xs_stacked, -1)
+        # However, leaves may differ in their non-scan dims; stacking for the vmap needs equal shapes.
+        # Group leaves by shape, vmap within each group, and scatter the results
+        # back to the original leaf order. Indexing the stacked result returns a
+        # view into it, so contiguous() gives each grad its own storage.
+        g_xs: list[torch.Tensor] = [None] * num_xs  # type: ignore[list-item]
+        g_ys: list[torch.Tensor] = [None] * num_xs  # type: ignore[list-item]
+        shape_groups: dict[tuple[int, ...], list[int]] = {}
+        for i in range(num_xs):
+            shape_groups.setdefault(tuple(bwxs[i].shape), []).append(i)
+        for idxs in shape_groups.values():
+            g_xs_group, g_ys_group = torch.vmap(compute_grad, in_dims=-1, out_dims=-1)(
+                torch.stack([bwxs[i] for i in idxs], -1),
+                torch.stack([bwys[i] for i in idxs], -1),
+                torch.stack([gl_ys[i] for i in idxs], -1),
+            )
+            for slot, i in enumerate(idxs):
+                g_xs[i] = g_xs_group[..., slot].contiguous()
+                g_ys[i] = g_ys_group[..., slot].contiguous()
 
         if num_additional_inputs == 0:
             return None, None, None, *g_xs
@@ -849,7 +870,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             additional_out_dims,  # pyrefly: ignore [bad-argument-type]
         )
 
-        g_ys = torch.unbind(g_ys_stacked, -1)
         grads_additional = combine_fn_bw_gm_additional(
             *(o.roll(1, dim) for o in outs), *fw_operands, *g_ys
         )
