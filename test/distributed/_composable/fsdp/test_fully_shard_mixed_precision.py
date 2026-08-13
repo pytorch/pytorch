@@ -16,6 +16,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
 from torch.distributed.tensor import Shard
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -32,12 +35,14 @@ from torch.testing._internal.common_fsdp import (
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     MI300_ARCH,
     run_tests,
     skipIfRocmArch,
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_XPU,
+    TestCase,
 )
 from torch.utils.checkpoint import checkpoint
 
@@ -46,6 +51,14 @@ device_type = torch.device(get_devtype())
 
 
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # `DeviceTypeTestBase.precision`/`rel_tol` are thread-local, but some
+    # asserts run in autograd worker threads (the reduce-scatter callbacks);
+    # override with the plain `TestCase` defaults.
+    precision = TestCase._precision
+    rel_tol = TestCase._rel_tol
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -632,6 +645,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
 
 class TestFullyShardMixedPrecisionJVP(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -704,6 +719,14 @@ class TestFullyShardMixedPrecisionJVP(FSDPTest):
 
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # `DeviceTypeTestBase.precision`/`rel_tol` are thread-local, but some
+    # asserts run in autograd worker threads (the reduce-scatter callbacks);
+    # override with the plain `TestCase` defaults.
+    precision = TestCase._precision
+    rel_tol = TestCase._rel_tol
+
     @property
     def world_size(self) -> int:
         return 2
@@ -995,6 +1018,26 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             inp = torch.randn((4, 32), device=device_type.type)
             loss = model(inp).sum()
             loss.backward()
+
+
+instantiate_device_type_tests(
+    TestFullyShardMixedPrecisionTraining,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardMixedPrecisionJVP,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardMixedPrecisionCasts,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
