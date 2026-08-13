@@ -15,7 +15,6 @@ import glob
 import os
 import re
 import shutil
-import site
 import subprocess
 import sys
 import zipfile
@@ -135,10 +134,6 @@ def fix_rpath(libtorch_lib: Path) -> None:
 # stub (in stubs/, never searched) are left to the runtime environment.
 _CUDA_LIB_DIRS = ("/usr/local/cuda/lib64", "/usr/local/cuda/extras/CUPTI/lib64")
 
-# TheRock wheel-based ROCm SDK pip index used to source runtime libs for libtorch
-# shared-with-deps extraction (pytorch/pytorch#192997).
-_ROCM_PIP_INDEX = "https://repo.amd.com/rocm/whl-multi-arch/"
-
 
 def _is_cuda_variant(desired_cuda: str) -> bool:
     return desired_cuda.startswith("cu")
@@ -146,14 +141,6 @@ def _is_cuda_variant(desired_cuda: str) -> bool:
 
 def _is_rocm_variant(desired_cuda: str) -> bool:
     return desired_cuda.startswith("rocm")
-
-
-def _rocm_pip_version(desired_cuda: str) -> str:
-    # rocm7.14 -> 7.14
-    version = desired_cuda.removeprefix("rocm")
-    if not version:
-        raise ValueError(f"Cannot parse ROCm version from desired_cuda={desired_cuda!r}")
-    return version
 
 
 def _needed(patchelf: str, so: Path) -> list[str]:
@@ -217,21 +204,8 @@ def _rocm_sdk_search_dirs(site_packages: Path) -> list[Path]:
     return [path for path in candidates if path.is_dir()]
 
 
-def _ensure_rocm_pip_packages(rocm_version: str) -> Path:
-    """Install TheRock ROCm SDK wheels and return their site-packages root."""
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-q",
-            "--index-url",
-            _ROCM_PIP_INDEX,
-            f"rocm[libraries,device-all]=={rocm_version}.*",
-        ],
-        check=True,
-    )
+def _installed_rocm_site_packages() -> Path:
+    """Return the site-packages root for the SDK baked into the ROCm image."""
     result = subprocess.run(
         [sys.executable, "-m", "pip", "show", "rocm"],
         capture_output=True,
@@ -241,10 +215,10 @@ def _ensure_rocm_pip_packages(rocm_version: str) -> Path:
     for line in result.stdout.splitlines():
         if line.startswith("Location:"):
             return Path(line.split(":", 1)[1].strip())
-    return Path(site.getsitepackages()[0])
+    raise FileNotFoundError("Cannot locate the ROCm SDK installed in the builder image")
 
 
-def bundle_rocm_deps(libtorch_lib: Path, desired_cuda: str) -> None:
+def bundle_rocm_deps(libtorch_lib: Path) -> None:
     """Copy ROCm runtime deps from TheRock pip packages into lib/ for shared-with-deps.
 
     Wheel-based ROCm manywheels point RPATH at sibling _rocm_sdk_* packages under
@@ -258,20 +232,17 @@ def bundle_rocm_deps(libtorch_lib: Path, desired_cuda: str) -> None:
             "manylinux2_28-builder container that ships patchelf"
         )
 
-    rocm_version = _rocm_pip_version(desired_cuda)
-    site_packages = _ensure_rocm_pip_packages(rocm_version)
+    site_packages = _installed_rocm_site_packages()
     search = _rocm_sdk_search_dirs(site_packages)
     if not search:
         raise FileNotFoundError(
-            f"No _rocm_sdk_* lib dirs found under {site_packages} after "
-            f"pip install rocm=={rocm_version}.*"
+            f"No _rocm_sdk_* lib dirs found under {site_packages}; the extraction "
+            "job must use the matching ROCm builder image"
         )
 
     present = {path.name for path in libtorch_lib.iterdir() if path.is_file()}
     queue = [
-        path
-        for path in libtorch_lib.iterdir()
-        if path.is_file() and ".so" in path.name
+        path for path in libtorch_lib.iterdir() if path.is_file() and ".so" in path.name
     ]
     while queue:
         for needed in _needed(patchelf, queue.pop()):
@@ -514,7 +485,7 @@ def main() -> None:
             if with_deps and _is_cuda_variant(args.desired_cuda):
                 bundle_cuda_deps(libtorch_dir / "lib")
             elif with_deps and _is_rocm_variant(args.desired_cuda):
-                bundle_rocm_deps(libtorch_dir / "lib", args.desired_cuda)
+                bundle_rocm_deps(libtorch_dir / "lib")
             fix_rpath(libtorch_dir / "lib")
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
