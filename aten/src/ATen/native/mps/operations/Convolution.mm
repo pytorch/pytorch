@@ -252,10 +252,8 @@ MTLComputePipelineState_t mps::Conv3dSimdTile::pipeline_state(mps::MetalShaderLi
   return library.getPipelineStateForFunc(name);
 }
 
-// Direct Metal conv1d is only profitable via the flat-tile MPP kernels; a
-// geometry the catalog misses would run the simdgroup fallback well below
-// MPSGraph, so it stays on the graph unless the shape needs 64-bit indexing
-// (which the graph is not trusted with). Takes the (N, C, 1, L) view4d tensors.
+// Prefer direct Metal for oversized planes or a catalogued flat-tile MPP
+// specialization. Takes the (N, C, 1, L) view4d tensors.
 static bool conv1d_direct_metal_eligible(const Tensor& input_t,
                                          const Tensor& weight_t,
                                          bool has_bias,
@@ -591,6 +589,19 @@ static bool conv1d_indexing_fits_int32(int64_t kernel_size,
       max_output_offset - padding + max_kernel_offset <= max_int32;
 }
 
+static bool conv1d_padded_plane_fits_int32(const Tensor& input_t, int64_t padding) {
+  constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();
+  const int64_t input_channels = input_t.size(1);
+  const int64_t input_length = input_t.size(3);
+  if (input_channels == 0) {
+    return true;
+  }
+  if (padding < 0 || input_length > max_int32 / input_channels) {
+    return false;
+  }
+  return padding <= (max_int32 / input_channels - input_length) / 2;
+}
+
 static bool conv1d_dw_indexing_fits_int32(const Tensor& weight_t,
                                           int64_t stride,
                                           int64_t padding,
@@ -661,12 +672,12 @@ static void conv1d_dw_forward(const Tensor& input_t,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_dw", {contiguous_input, contiguous_weight});
+      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_dw", {contiguous_input, contiguous_weight}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, contiguous_input, contiguous_weight, output_t, params, bias ? *bias : contiguous_input);
       [encoder dispatchThreads:MTLSizeMake(x_threads, y_threads, params.batch_size)
           threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
 }
@@ -699,6 +710,9 @@ static std::vector<Conv1dSgemmRegion> conv1d_sgemm_regions(int64_t outW, int64_t
     // zero taps: columns read only padding, the kernel writes bias/zero
     const bool has_taps = j1 > j0;
     regions.push_back({m, next - m, has_taps ? m - pad + j0 * d : 0, has_taps ? j1 - j0 : 0, has_taps ? j0 : 0});
+    if (regions.size() > size_t(conv1d_sgemm_max_regions)) {
+      return regions;
+    }
     m = next;
   }
   return regions;
@@ -755,12 +769,12 @@ static Tensor conv1d_weights_to_koc(const Tensor& weight) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_koc", {weight});
+      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_koc", {weight}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, weight, output, params);
       [encoder dispatchThreads:MTLSizeMake(input_channels_per_group, output_channels, 1)
           threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(input_channels_per_group, 256), 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
   return output;
@@ -802,7 +816,10 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   const int64_t cg = src.size(1) / groups;
   const double edge_us = double(int64_t(regions.size()) - 1) * 64.0 * double(og * cg) * double(k) / 12.5e6;
   const double pad_us = 45.0 + 3.0 * double(src.size(0) * src.size(1)) * double(L) * src.element_size() / 1e5;
-  if (regions.size() > size_t(conv1d_sgemm_max_regions) || (regions.size() > 3 && pad_us < edge_us)) {
+  const bool can_materialize_padding = conv1d_padded_plane_fits_int32(input_t, padding);
+  TORCH_INTERNAL_ASSERT(can_materialize_padding || regions.size() <= size_t(conv1d_sgemm_max_regions));
+  if (can_materialize_padding &&
+      (regions.size() > size_t(conv1d_sgemm_max_regions) || (regions.size() > 3 && pad_us < edge_us))) {
     padded = at::empty({src.size(0), src.size(1), 1, L + 2 * padding},
                        src.options(),
                        out_nlc ? std::optional<MemoryFormat>(MemoryFormat::ChannelsLast) : std::nullopt);
@@ -864,12 +881,12 @@ static void conv1d_sgemm_forward(const Tensor& input_t,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_sgemm", {activation, weights});
+      getMPSProfiler().beginProfileKernel(pipeline, "conv1d_sgemm", {activation, weights}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output_t, params, bias ? *bias : weights);
       [encoder dispatchThreadgroups:MTLSizeMake(o_tiles * groups, grid_y, activation.size(0))
               threadsPerThreadgroup:MTLSizeMake(group_threads, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline);
+      getMPSProfiler().endProfileKernel(pipeline, stream);
     }
   });
 }
@@ -904,19 +921,27 @@ static void conv1d_im2col_sgemm_forward(const Tensor& input_t,
   conv1d_sgemm_forward(columns, merged_weight, bias_opt, 0, 1, groups, output_t);
 }
 
-// The tap-merged im2col matmul handles any stride/dilation/groups, so it is
-// the universal Metal route for shapes no direct kernel serves; the merged
-// view must stay inside int32 addressing.
-static bool conv1d_im2col_sgemm_eligible(const Tensor& input_t, const Tensor& weight_t, const Tensor& output_t) {
+// The tap-merged im2col matmul handles any stride/dilation/groups while its
+// padded activation and merged view fit int32 addressing.
+static bool conv1d_im2col_sgemm_eligible(const Tensor& input_t,
+                                         const Tensor& weight_t,
+                                         int64_t padding,
+                                         const Tensor& output_t) {
   constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-  const int64_t merged_channels = input_t.size(1) * weight_t.size(3);
-  return input_t.size(1) > 0 && merged_channels * (output_t.size(3) + 2) <= kInt32Max &&
-      output_t.size(1) * output_t.size(3) <= kInt32Max;
+  const int64_t input_channels = input_t.size(1);
+  const int64_t output_length = output_t.size(3);
+  if (input_channels == 0 || output_length == 0 || !conv1d_padded_plane_fits_int32(input_t, padding) ||
+      output_length > kInt32Max - 2 || weight_t.size(3) > kInt32Max / input_channels) {
+    return false;
+  }
+  const int64_t merged_channels = input_channels * weight_t.size(3);
+  return merged_channels <= kInt32Max / (output_length + 2) && output_t.size(1) <= kInt32Max / output_length;
 }
 
 static bool conv1d_sgemm_eligible(const Tensor& input_t,
                                   const Tensor& weight_t,
                                   int64_t stride,
+                                  int64_t padding,
                                   int64_t dilation,
                                   int64_t groups,
                                   const Tensor& output_t) {
@@ -928,9 +953,9 @@ static bool conv1d_sgemm_eligible(const Tensor& input_t,
   const int64_t input_length = input_t.size(3);
   const int64_t output_channels = output_t.size(1);
   const int64_t output_length = output_t.size(3);
-  if (input_channels == 0 || output_length == 0 ||
-      input_channels * (input_length + 2 * std::max<int64_t>(dilation, 1)) > kInt32Max ||
-      output_channels * output_length > kInt32Max) {
+  const int64_t padded_length = input_length + 2 * std::max<int64_t>(dilation, 1);
+  if (input_channels == 0 || output_length == 0 || input_channels > kInt32Max / padded_length ||
+      output_channels > kInt32Max / output_length) {
     return false;
   }
   const int64_t og = output_channels / groups;
@@ -939,8 +964,10 @@ static bool conv1d_sgemm_eligible(const Tensor& input_t,
   if (groups > 1 && (og < 8 || cg < 8)) {
     return false;
   }
-  if (groups == 1 && cg <= 8 && input_length * cg * weight_t.size(3) > kInt32Max) {
-    return false; // the tap-merged im2col copy would overflow the int32 view
+  if (!conv1d_padded_plane_fits_int32(input_t, padding) &&
+      conv1d_sgemm_regions(output_length, input_length, padding, weight_t.size(3), dilation).size() >
+          conv1d_sgemm_max_regions) {
+    return false;
   }
   return true;
 }
@@ -1068,8 +1095,12 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     IntArrayRef dilation,
                                     int64_t groups,
                                     std::optional<IntArrayRef> input_shape) {
+  // conv1d arrives as (N, C, 1, L) via view1d_as_2d; any H == 1 window without
+  // H padding is computationally 1D and takes the Metal conv path too.
+  const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
   // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
-  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
+  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256) &&
+      (!is1DConv || input_shape.has_value())) {
     const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
     const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
     // Degenerate shapes fall through to the normal path's shape check.
@@ -1083,9 +1114,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   const bool is3DConv = input_t.dim() == 5;
-  // conv1d arrives as (N, C, 1, L) via view1d_as_2d; any H == 1 window without
-  // H padding is computationally 1D and takes the Metal conv path too.
-  const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
   const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   const bool is_cl_input = is_macos_15_plus && memory_format == kChannelsLast && !is3DConv;
   const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
@@ -1213,14 +1241,16 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       conv3d_pointwise_matmul(sliced.unsqueeze(2), weight_3d, bias_opt, output_3d);
       return output_t;
     }
-    if (conv3d_prefer_im2col(input_3d, weight_3d, stride_3d, padding_3d, dilation_3d, groups, output_3d)) {
+    if (conv1d_padded_plane_fits_int32(input_t, padding[1]) &&
+        conv3d_prefer_im2col(input_3d, weight_3d, stride_3d, padding_3d, dilation_3d, groups, output_3d)) {
       conv3d_im2col_matmul(input_3d, weight_3d, bias_opt, stride_3d, padding_3d, output_3d);
       return output_t;
     }
-    if (conv1d_sgemm_eligible(input_t, weight_t, stride[1], dilation[1], groups, output_t)) {
+    if (conv1d_sgemm_eligible(input_t, weight_t, stride[1], padding[1], dilation[1], groups, output_t)) {
       // Tap-by-tap GEMMs underfill the tensor units for tiny channel counts or
       // near-empty destination tiles; merge the taps into the K dim instead.
-      if (groups == 1 && (input_t.size(1) <= 8 || output_t.size(3) <= 8)) {
+      if (groups == 1 && (input_t.size(1) <= 8 || output_t.size(3) <= 8) &&
+          conv1d_im2col_sgemm_eligible(input_t, weight_t, padding[1], output_t)) {
         conv1d_im2col_sgemm_forward(input_t, weight_t, bias_opt, 1, padding[1], dilation[1], 1, output_t);
       } else {
         conv1d_sgemm_forward(input_t, weight_t, bias_opt, padding[1], dilation[1], groups, output_t);
@@ -1230,7 +1260,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     // strided with tiny channel counts: every direct kernel underfills, the
     // tap-merged matmul does not
     if (stride[1] > 1 && groups == 1 && input_t.size(1) <= 8 &&
-        conv1d_im2col_sgemm_eligible(input_t, weight_t, output_t)) {
+        conv1d_im2col_sgemm_eligible(input_t, weight_t, padding[1], output_t)) {
       conv1d_im2col_sgemm_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], 1, output_t);
       return output_t;
     }
@@ -1267,14 +1297,20 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
         return output_t;
       }
     }
-    // universal Metal catch-all for the remaining strided shapes (works on
-    // every macOS tier through the sgemm engines)
-    if (input_t.size(1) % groups == 0 && conv1d_im2col_sgemm_eligible(input_t, weight_t, output_t)) {
+    // Tap-merged catch-all for remaining shapes whose temporary fits int32;
+    // available on every macOS tier through the SGEMM engines.
+    if (input_t.size(1) % groups == 0 && conv1d_im2col_sgemm_eligible(input_t, weight_t, padding[1], output_t)) {
       conv1d_im2col_sgemm_forward(input_t, weight_t, bias_opt, stride[1], padding[1], dilation[1], groups, output_t);
       return output_t;
     }
-    // int32-overflow escape hatch: fall through to the MPSGraph 2D conv,
-    // restoring the channel-count guard skipped above for the Metal paths
+    // The normal convolution caller does not supply input_shape; return here
+    // instead of reaching the MPSGraph fallback used by ConvTranspose backward-input.
+    if (!input_shape.has_value()) {
+      // Direct indexing handles a logical im2col element count over INT32_MAX
+      // without materializing it.
+      conv3d_metal_forward(input_3d, weight_3d, bias_opt, padding_3d, stride_3d, dilation_3d, groups, output_3d);
+      return output_t;
+    }
     if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
       for (auto elem : output_t.sizes()) {
         TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
