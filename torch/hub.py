@@ -76,7 +76,7 @@ __all__ = [
 ]
 
 # matches bfd8deac from resnet18-bfd8deac.pth
-HASH_REGEX = re.compile(r"-([a-f0-9]*)\.")
+HASH_REGEX = re.compile(r"-([a-f0-9]{8,})\.")
 _PATH_SEP_PATTERN = re.compile(r"[/\\]")
 
 _TRUSTED_REPO_OWNERS = (
@@ -854,7 +854,9 @@ def load_state_dict_from_url(
         check_hash(bool, optional): If True, the filename part of the URL should follow the naming convention
             ``filename-<sha256>.ext`` where ``<sha256>`` is the first eight or more
             digits of the SHA256 hash of the contents of the file. The hash is used to
-            ensure unique names and to verify the contents of the file.
+            ensure unique names and to verify the contents of the file. A ``ValueError``
+            is raised if the filename does not contain a valid hash prefix of at least
+            eight hexadecimal digits.
             Default: False
         file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
         weights_only(bool, optional): If True, only weights will be loaded and no complex pickled objects.
@@ -886,11 +888,18 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
         if check_hash:
-            r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
-            hash_prefix = r.group(1) if r else None
+            r = HASH_REGEX.search(filename)
+            if r is None:
+                raise ValueError(
+                    f'filename "{filename}" does not follow the naming convention '
+                    '"filename-<sha256>.ext" required by check_hash=True, where '
+                    "<sha256> is the first eight or more digits of the SHA256 hash "
+                    "of the file contents"
+                )
+            hash_prefix = r.group(1)
+        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     if _is_legacy_zip_format(cached_file):
