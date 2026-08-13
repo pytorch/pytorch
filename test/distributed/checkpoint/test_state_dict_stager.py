@@ -27,18 +27,22 @@ from torch.distributed.checkpoint.staging import (
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import (
-    HAS_ACCELERATOR,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 def create_cpu_state_dict(state_dict):
@@ -48,7 +52,7 @@ def create_cpu_state_dict(state_dict):
     return cpu_state_dict
 
 
-def compare_state_dicts(gpu_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
+def compare_state_dicts(gpu_state_dict, cpu_state_dict, device_type, rtol=1e-5, atol=1e-8):
     """
     Compare if two state dictionaries (one on GPU, one on CPU) are otherwise the same.
 
@@ -213,8 +217,12 @@ class FrozenDataClass:
 
 
 class TestStateDictStager(TestCase):
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_views(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+    @onlyAccelerator
+    def test_views(self, device):
+        device_type = torch.device(device).type
         test_configs = [
             (False, False),  # pin_memory=False, share_memory=False,
             (True, False),  # pin_memory=True, share_memory=False
@@ -272,7 +280,7 @@ class TestStateDictStager(TestCase):
                         f"Expected {expected_bytes} bytes, got {num_bytes}"
                     )
                 # Verify that the CPU state dict is equivalent to the original GPU state dict
-                result, error = compare_state_dicts(state_dict, cpu_state_dict)
+                result, error = compare_state_dicts(state_dict, cpu_state_dict, device_type)
                 if not result:
                     raise AssertionError(f"State dicts are not equivalent: {error}")
 
@@ -308,11 +316,12 @@ class TestStateDictStager(TestCase):
                         "tensor3 and type.tensor1 should share storage"
                     )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_caching(self):
+    @onlyAccelerator
+    def test_caching(self, device):
         """
         Test that the StateDictStager correctly caches and reuses storages.
         """
+        device_type = torch.device(device).type
         test_configs = [
             (False, False),  # pin_memory=False, share_memory=False,
             (True, False),  # pin_memory=True, share_memory=False
@@ -346,7 +355,7 @@ class TestStateDictStager(TestCase):
                 num_storages1 = len(stager._cached_storage_mapping)
 
                 # Verify the first result is correct
-                result, error = compare_state_dicts(state_dict, cpu_state_dict1)
+                result, error = compare_state_dicts(state_dict, cpu_state_dict1, device_type)
                 if not result:
                     raise AssertionError(
                         f"First state dict is not equivalent to original: {error}"
@@ -363,7 +372,7 @@ class TestStateDictStager(TestCase):
                 num_storages2 = len(stager._cached_storage_mapping)
 
                 # Verify that the second CPU state dict is equivalent to the modified original state dict
-                result, error = compare_state_dicts(state_dict, cpu_state_dict2)
+                result, error = compare_state_dicts(state_dict, cpu_state_dict2, device_type)
                 if not result:
                     raise AssertionError(
                         f"Second state dict is not equivalent to modified original: {error}"
@@ -408,11 +417,12 @@ class TestStateDictStager(TestCase):
                         "Updated values should be reflected in the cached state dict for tensor2"
                     )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_tensor_attrs(self):
+    @onlyAccelerator
+    def test_tensor_attrs(self, device):
         """
         Test that tensor attributes are preserved during stage with StateDictStager.
         """
+        device_type = torch.device(device).type
         tensor1 = torch.randn(4, 4).to(device_type)
         tensor2 = tensor1.view(16)
         tensor3 = torch.randn(4, 4).to(device_type)
@@ -454,11 +464,12 @@ class TestStateDictStager(TestCase):
                 f"Tensor attribute 'c' has incorrect value: {cpu_state_dict['recursive']['tensor3'].c}"
             )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_different_dtypes(self):
+    @onlyAccelerator
+    def test_different_dtypes(self, device):
         """
         Test that StateDictStager works correctly with tensors of different data types.
         """
+        device_type = torch.device(device).type
         # Create tensors with different dtypes
         tensors = {
             "float32": torch.randn(4, 4, dtype=torch.float32).to(device_type),
@@ -496,11 +507,12 @@ class TestStateDictStager(TestCase):
                 lambda msg: f"{msg}\nTensor {dtype_name} has incorrect values",
             )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_empty_tensors(self):
+    @onlyAccelerator
+    def test_empty_tensors(self, device):
         """
         Test that StateDictStager works correctly with empty tensors.
         """
+        device_type = torch.device(device).type
         test_configs = [
             (False, False),  # pin_memory=False, share_memory=False,
             (True, False),  # pin_memory=True, share_memory=False
@@ -551,11 +563,12 @@ class TestStateDictStager(TestCase):
                         lambda msg: f"{msg}\nTensor {tensor_name} has incorrect dtype",
                     )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_complex_storage_sharing(self):
+    @onlyAccelerator
+    def test_complex_storage_sharing(self, device):
         """
         Test that StateDictStager correctly handles complex storage sharing scenarios.
         """
+        device_type = torch.device(device).type
         # Create a base tensor
         base_tensor = torch.randn(10, 10).to(device_type)
 
@@ -578,7 +591,7 @@ class TestStateDictStager(TestCase):
         cpu_state_dict = StateDictStager().stage(state_dict)
 
         # Verify that all tensors have been correctly copied to CPU
-        result, error = compare_state_dicts(state_dict, cpu_state_dict)
+        result, error = compare_state_dicts(state_dict, cpu_state_dict, device_type)
         self.assertTrue(
             result, lambda msg: f"{msg}\nState dicts are not equivalent: {error}"
         )
@@ -635,8 +648,9 @@ class TestStateDictStager(TestCase):
             "slice3 should reflect changes to base",
         )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_dataclasses(self):
+    @onlyAccelerator
+    def test_dataclasses(self, device):
+        device_type = torch.device(device).type
         # Create tensors
         tensor1 = torch.randn(4, 4).to(device_type)
         tensor2 = torch.randn(8, 8).to(device_type)
@@ -693,66 +707,12 @@ class TestStateDictStager(TestCase):
         self.assertFalse(torch.allclose(nested_cpu.tensor, tensor3.cpu()))
         self.assertFalse(torch.allclose(frozen_cpu.tensor, tensor4.cpu()))
 
-    def test_cpu_storage_independence(self):
-        """
-        Test ensures CPU tensors passed to StateDictStager are actually cloned
-        """
-        # Create test tensors
-        tensor1 = torch.randn(4, 4)
-        tensor2 = torch.randn(8, 8)
-
-        # Create a state dict with these tensors
-        state_dict = {
-            "tensor1": tensor1,
-            "tensor2": tensor2,
-        }
-
-        cpu_state_dict = StateDictStager().stage(state_dict)
-        cpu_tensor1 = cpu_state_dict["tensor1"]
-        cpu_tensor2 = cpu_state_dict["tensor2"]
-
-        # Verify that the CPU tensors have different storage pointers than the original tensors
-        self.assertNotEqual(
-            tensor1.storage().data_ptr(),
-            cpu_tensor1.storage().data_ptr(),
-            "CPU tensor should have a different storage pointer than the original tensor",
-        )
-        self.assertNotEqual(
-            tensor2.storage().data_ptr(),
-            cpu_tensor2.storage().data_ptr(),
-            "CPU tensor should have a different storage pointer than the original tensor",
-        )
-
-        self.assertTrue(
-            torch.allclose(tensor1, cpu_tensor1),
-            "CPU tensor should have the same values as the original tensor",
-        )
-        self.assertTrue(
-            torch.allclose(tensor2, cpu_tensor2),
-            "CPU tensor should have the same values as the original tensor",
-        )
-
-        # Modify the original CPU tensors and validate staged tensors are not modified
-        cloned_orginial1 = tensor1.clone()
-        cloned_orginia2 = tensor2.clone()
-        tensor1.fill_(99.0)
-        tensor2.fill_(88.0)
-
-        self.assertFalse(torch.allclose(cloned_orginial1, tensor1))
-        self.assertTrue(
-            torch.allclose(cloned_orginial1, cpu_tensor1),
-            "CPU tensor should have the same values as the original tensor",
-        )
-        self.assertTrue(
-            torch.allclose(cloned_orginia2, cpu_tensor2),
-            "CPU tensor should have the same values as the original tensor",
-        )
-
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_tensor_pinned_and_shared(self):
+    @onlyAccelerator
+    def test_tensor_pinned_and_shared(self, device):
         """
         Test that verifies tensors are actually pinned and shared using tensor.is_pinned() and tensor.is_shared() methods.
         """
+        device_type = torch.device(device).type
         # Create test tensors
         tensor1 = torch.randn(4, 4).to(device_type)
         tensor2 = torch.randn(8, 8).to(device_type)
@@ -847,8 +807,9 @@ class TestStateDictStager(TestCase):
                         "When share_memory=False, tensor storage should not be shared",
                     )
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_async_save_can_reuse_default_stager(self):
+    @onlyAccelerator
+    def test_async_save_can_reuse_default_stager(self, device):
+        device_type = torch.device(device).type
         state_dict = {
             "weight": torch.randn(4, 4, device=device_type),
             "step": 42,
@@ -876,10 +837,12 @@ class TestStateDictStager(TestCase):
 
 
 class TestDTensorStateDictStager(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_dtensor(self):
+    def test_dtensor(self, device):
         """
         Test that StateDictStager works correctly with DTensors.
         """
@@ -910,8 +873,9 @@ class TestDTensorStateDictStager(DTensorTestBase):
         self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
         self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_async_save_no_memory_leak(self):
+    @onlyAccelerator
+    def test_async_save_no_memory_leak(self, device):
+        device_type = torch.device(device).type
         # repeatedly calling async_save should not cause memory to grow by
         # the checkpoint size each iteration
         model_size_mb = 128
@@ -956,9 +920,11 @@ class TestReplicationStager(DTensorTestBase):
     Tests replication of state_dict across training ranks using CPU tensors only.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self) -> str:
-        return "cpu:gloo,cuda:nccl"
+        return f"cpu:gloo,{self.device_type}:{dist.get_default_backend_for_device(self.device_type)}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """
@@ -1267,7 +1233,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_replication_basic(self):
+    def test_replication_basic(self, device):
         """Test basic replication functionality with world_size=16"""
         world_size = dist.get_world_size()
 
@@ -1299,7 +1265,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_replication_dtensors(self):
+    def test_replication_dtensors(self, device):
         """Test replication with DTensor and mixed tensor types"""
         world_size = dist.get_world_size()
 
@@ -1340,7 +1306,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_replication_sharded_tensors(self):
+    def test_replication_sharded_tensors(self, device):
         """Test replication with ShardedTensor and mixed tensor types"""
         world_size = dist.get_world_size()
 
@@ -1380,7 +1346,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_replication_persistence(self):
+    def test_replication_persistence(self, device):
         """Test persistence functionality in _ReplicationStager"""
         world_size = dist.get_world_size()
 
@@ -1478,6 +1444,69 @@ class TestReplicationStager(DTensorTestBase):
             # Clean up
             stager.close()
 
+
+class TestStateDictStagerCPUStorage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_cpu_storage_independence(self):
+        """
+        Test ensures CPU tensors passed to StateDictStager are actually cloned
+        """
+        # Create test tensors
+        tensor1 = torch.randn(4, 4)
+        tensor2 = torch.randn(8, 8)
+
+        # Create a state dict with these tensors
+        state_dict = {
+            "tensor1": tensor1,
+            "tensor2": tensor2,
+        }
+
+        cpu_state_dict = StateDictStager().stage(state_dict)
+        cpu_tensor1 = cpu_state_dict["tensor1"]
+        cpu_tensor2 = cpu_state_dict["tensor2"]
+
+        # Verify that the CPU tensors have different storage pointers than the original tensors
+        self.assertNotEqual(
+            tensor1.storage().data_ptr(),
+            cpu_tensor1.storage().data_ptr(),
+            "CPU tensor should have a different storage pointer than the original tensor",
+        )
+        self.assertNotEqual(
+            tensor2.storage().data_ptr(),
+            cpu_tensor2.storage().data_ptr(),
+            "CPU tensor should have a different storage pointer than the original tensor",
+        )
+
+        self.assertTrue(
+            torch.allclose(tensor1, cpu_tensor1),
+            "CPU tensor should have the same values as the original tensor",
+        )
+        self.assertTrue(
+            torch.allclose(tensor2, cpu_tensor2),
+            "CPU tensor should have the same values as the original tensor",
+        )
+
+        # Modify the original CPU tensors and validate staged tensors are not modified
+        cloned_orginial1 = tensor1.clone()
+        cloned_orginia2 = tensor2.clone()
+        tensor1.fill_(99.0)
+        tensor2.fill_(88.0)
+
+        self.assertFalse(torch.allclose(cloned_orginial1, tensor1))
+        self.assertTrue(
+            torch.allclose(cloned_orginial1, cpu_tensor1),
+            "CPU tensor should have the same values as the original tensor",
+        )
+        self.assertTrue(
+            torch.allclose(cloned_orginia2, cpu_tensor2),
+            "CPU tensor should have the same values as the original tensor",
+        )
+
+
+instantiate_device_type_tests(TestStateDictStager, globals(), except_for="cpu")
+instantiate_device_type_tests(TestDTensorStateDictStager, globals(), except_for="cpu")
+instantiate_device_type_tests(TestReplicationStager, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
