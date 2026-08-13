@@ -13,7 +13,11 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.nn.jit import instantiator
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 @torch.jit.interface
@@ -33,6 +37,8 @@ def create_module():
 
 
 class TestInstantiator(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_arg_return_types_from_interface(self):
         (
             args_str,
