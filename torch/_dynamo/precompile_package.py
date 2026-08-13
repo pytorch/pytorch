@@ -16,9 +16,9 @@ Usage::
                 compiled(*args)
     session.save("snapshots/model.pt")
 
-``example_inputs`` runs the calls for you, so a capture with nothing
-conditional in it is one statement, and ``invariants`` writes a readable
-report of what the capture established::
+``example_inputs`` runs the calls for you, under ``torch.no_grad()``, so an
+inference capture with nothing conditional in it is one statement, and
+``invariants`` writes a readable report of what the capture established::
 
     with precompile_capture(
         model,
@@ -27,6 +27,11 @@ report of what the capture established::
         invariants="model.invariants",
     ) as compiled:
         pass
+
+Calls in the block body run in the caller's grad mode rather than under
+no_grad, so a training capture -- one that calls ``.backward()`` -- goes there
+rather than in ``example_inputs``, and passing one call both ways compiles it
+twice, once per grad mode.
 
 Per frame, that report separates the guards that held in EVERY compiled variant
 from the ones that differed. The first set are the preconditions the artifact is
@@ -248,10 +253,12 @@ class _GuardFact:
     """
     One guard as it appeared in one compilation.
 
-    Identity is (type, source, rendered code). The code carries the concrete
-    value, so the same guard specialized two ways -- ``size=[4,8]`` against
-    ``size=[5,8]`` -- is two facts, which is what makes them fall out of the
-    intersection instead of collapsing into it.
+    Identity is every field: type, source, normalized code, value fingerprint
+    and whether the guard was enforced. The fingerprint carries what the code
+    does not -- a TENSOR_MATCH's shape lives in the C++ leaf, an identity
+    guard's object behind a normalized id -- so the same guard specialized two
+    ways is two facts, which is what makes them fall out of the intersection
+    instead of collapsing into it. See ``_value_fingerprint``.
     """
 
     guard_type: str
@@ -261,14 +268,12 @@ class _GuardFact:
     enforced: bool
 
     def render(self) -> str:
-        # The rendered code already names the value when it has one; the
-        # fingerprint is only needed for guards whose check lives in C++.
-        if self.code:
-            body = " ; ".join(self.code)
-        else:
-            body = f"<{self.guard_type}>"
-            if self.value:
-                body = f"{body} {self.value}"
+        # A fingerprint exists only when the code does not already say what the
+        # guard checks, so print it whenever there is one: an identity guard
+        # does render code, but the id in it has been normalized away.
+        body = " ; ".join(self.code) if self.code else f"<{self.guard_type}>"
+        if self.value:
+            body = f"{body} {self.value}"
         where = f" on {self.source}" if self.source else ""
         return f"[{'enforced' if self.enforced else 'dropped '}] {body}{where}"
 
@@ -639,8 +644,18 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
 
 # Object ids and the per-tensor _dynamo_*_indices probes are noise in a file
 # meant to be read and diffed: the first differs every run, the second is
-# identical on every tensor guard.
-_OBJ_ID = re.compile(r"\b\d{9,}\b")
+# identical on every tensor guard. The id pattern matches the second argument
+# of the ___check_obj_id / ___check_type_id call that emits it, NOT every long
+# integer: a bare \b\d{9,}\b also eats a user constant, and two variants
+# guarding different big values -- dict keys, a slice bound -- then render the
+# same fact and land in the intersection as an invariant neither of them holds.
+# An id inside ___check_obj_id(x, N), type=... and the raw tuple of them that
+# AUTOGRAD_SAVED_TENSORS_HOOKS renders. Both are addresses; both must go, and
+# neither may be widened into "any long integer", which would also erase a
+# large constant that legitimately differs between variants and so invent an
+# invariant. Keep these anchored to the shapes that actually carry addresses.
+_OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
+_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
 _DYNAMO_INDICES = re.compile(r"_dynamo_\w*indices")
 # Dynamo appends a per-process counter to the globals it installs, so the same
 # guard reads __builtins_dict___6 in one compilation and ___8 in the next.
@@ -648,10 +663,18 @@ _DYNAMO_INDICES = re.compile(r"_dynamo_\w*indices")
 _DYNAMO_COUNTER = re.compile(
     r"(__builtins_dict__|__compiled_fn|__resume_at)_*\d+(_\d+)?"
 )
+# OutputGraph.install_global_by_id names a global "<prefix>_<id(value)>_c<n>",
+# so a guard reading one carries BOTH an address and a compile counter inside
+# an identifier, where neither pattern above can see it. Real models reach this
+# -- transformers' Qwen2 installs three -- and the report then differs run to
+# run, which is exactly what the "commit and diff" contract rules out.
+_DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 
 
 def _normalize(text: str) -> str:
-    return _DYNAMO_COUNTER.sub(r"\1_<n>", _OBJ_ID.sub("<id>", text))
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
+    text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
+    return _DYNAMO_COUNTER.sub(r"\1_<n>", text)
 
 
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
@@ -679,9 +702,13 @@ class _SingleFileStore(DynamoStore):
     def write(self, cache_entry: PrecompileCacheEntry, path: str) -> None:
         from torch._inductor.codecache import write_atomic
 
-        parent = os.path.dirname(os.path.abspath(path))
-        os.makedirs(parent, exist_ok=True)
+        if os.path.isdir(path):
+            raise PackageError(
+                f"{path} is a directory. precompile artifacts are single files; "
+                f"pass the path you want the artifact written to."
+            )
         try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             write_atomic(path, pickle.dumps(cache_entry))
         except Exception as e:
             raise PackageError(f"Failed to write artifact to {path}: {e}") from e
@@ -702,16 +729,61 @@ class _SingleFileStore(DynamoStore):
         return entry
 
 
+# Guards whose check IS object identity, directly or through a derived guard,
+# which is the same test default_guard_filter_fn drops on.
+_IDENTITY_GUARD_TYPES = frozenset(
+    CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+)
+
+
+def _object_identity(value: object) -> str:
+    """
+    A stable stand-in for the id ``_normalize`` stripped.
+
+    A name rather than an address, so the file still diffs clean across runs.
+    Two objects of one type still collapse -- two Linear instances are
+    indistinguishable here -- but the case that matters separates: one slot
+    holding a different callable in different variants.
+    """
+    if isinstance(value, types.ModuleType):
+        return f"is module {value.__name__}"
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if isinstance(name, str):
+        return _normalize(f"is {_owning_module(value) or '?'}.{name}")[:160]
+    return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
+
+
 def _value_fingerprint(entry: GuardFilterEntry) -> str:
     """
     What the guard checks, when the rendered code does not say.
 
     TENSOR_MATCH is the case that matters: its code_list carries only the
-    _dynamo_*_indices hasattr checks, while dtype/shape/stride/device live in
-    the C++ leaf. Without them two shape specializations of one frame look
-    identical and wrongly land in the intersection. Objects are deliberately
-    left blank -- their repr is an address, which would make every fact unique.
+    _dynamo_*_indices hasattr checks, while everything it really compares lives
+    in the C++ leaf. Without those two specializations of one frame look
+    identical and wrongly land in the intersection, so this mirrors TensorCheck
+    -- python type and the conj/neg bits included, since a Parameter against a
+    Tensor, or a conjugated view against a plain one, splits a compilation
+    exactly as dtype does. KNOWN GAP: that leaf checks
+    nothing for a dim the compile made dynamic, so under ``dynamic=True`` the
+    concrete shape here is narrower than the guard and a shape-generic
+    TENSOR_MATCH is reported as varying rather than invariant.
+
+    An identity guard needs one too, because ``_normalize`` strips the id its
+    code renders: without a name for the object, two variants holding different
+    callables at one source collapse into one fact and are reported as an
+    invariant neither of them holds.
+
+    Every other guard takes its value from its own rendered code, which names
+    it, so fingerprinting it again SPLITS identical guards: TYPE_MATCH on an
+    unspecialized int checks only that the int is an int, and stamping 1 on one
+    variant and 2 on the next demotes a real invariant into two identical
+    'varies' lines.
     """
+    if entry.guard_type == "GRAD_MODE":
+        # Global-state guards carry no name, code or value, so two variants of
+        # one frame that differ only in grad mode render identically and land
+        # in the intersection. The filter runs in the traced frame's own state.
+        return f"grad_enabled={torch.is_grad_enabled()}"
     if not entry.has_value:
         return ""
     value = entry.value
@@ -720,12 +792,20 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
             stride = tuple(value.stride())
         except Exception:
             stride = ()
+        # Mirror what TensorCheck actually compares (guards.cpp): the python
+        # type and the dispatch-key-ish bits split compilations just as dtype
+        # does, so leaving them out reports the very guard that split two
+        # variants as an invariant of both.
         return (
-            f"dtype={value.dtype}, shape={tuple(value.shape)}, stride={stride}, "
-            f"device={value.device}, requires_grad={value.requires_grad}"
+            f"type={type(value).__name__}, dtype={value.dtype}, "
+            f"shape={tuple(value.shape)}, stride={stride}, "
+            f"device={value.device}, requires_grad={value.requires_grad}, "
+            f"is_conj={value.is_conj()}, is_neg={value.is_neg()}"
         )
-    if value is None or isinstance(value, (int, float, bool, complex, str, bytes)):
-        return f"== {value!r}"[:160]
+    if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
+        d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
+    ):
+        return _object_identity(value)
     return ""
 
 
@@ -839,20 +919,43 @@ class PrecompileSession:
             recompile_limit=self._recompile_limit,
             dynamic=self._dynamic,
         )(self._fn)
-        # Capture is by execution, so example_inputs is just "run these for me".
-        # Done before yielding so the block body can add calls on top.
-        for example in self._example_inputs:
-            args, kwargs = _example_call(example)
-            with torch.no_grad():
-                self._compiled(*args, **kwargs)
+        # Capture is by execution, so example_inputs is just "run these for
+        # me", except that they are forced under no_grad: they are the
+        # inference path, and save() rejects a grad-enabled forward-only
+        # capture. Done before yielding so the body can add calls on top.
+        try:
+            for example in self._example_inputs:
+                args, kwargs = _example_call(example)
+                with torch.no_grad():
+                    self._compiled(*args, **kwargs)
+        except BaseException:
+            # A __enter__ that raises never gets its __exit__, so without this
+            # the config patch above stays on for the life of the process and
+            # the session is wedged: save() reports the block as still open.
+            self._stack = None
+            stack.close()
+            raise
         return self._compiled
 
     def __exit__(self, *exc: object) -> None:
         if self._stack is not None:
             self._stack.close()
             self._stack = None
-        if self._invariants_path is not None and exc[0] is None:
+        if self._invariants_path is None:
+            return
+        if exc[0] is None:
             self.write_invariants(self._invariants_path)
+        else:
+            # A partial capture's report reads exactly like a complete one, so
+            # it is not written; say why rather than leaving the user looking
+            # for a file that never appeared.
+            log.warning(
+                "precompile: the capture block raised %s, so no invariants "
+                "report was written to %s. Call write_invariants() for the "
+                "partial one.",
+                getattr(exc[0], "__name__", exc[0]),
+                self._invariants_path,
+            )
 
     def _recording_filter(
         self,
@@ -864,6 +967,12 @@ class PrecompileSession:
         the set has to be inspectable rather than invisible.
         """
 
+        # One object per distinct fact, shared by every compilation that
+        # produced it. A recompiled frame repeats nearly all of its guards, so
+        # storing a copy per compilation makes the session grow with variants
+        # rather than with facts: 200 variants of resnet18 held 83MB for 1281.
+        pool: dict[_GuardFact, _GuardFact] = {}
+
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
             namespaces = _module_namespaces(entries)
@@ -873,15 +982,14 @@ class PrecompileSession:
                 target.add((entry.guard_type, entry.name))
                 if not keep and _is_risky_drop(entry, namespaces):
                     self._risky_dropped_guards.add((entry.guard_type, entry.name))
-                facts.add(
-                    _GuardFact(
-                        guard_type=entry.guard_type,
-                        source=_normalize(entry.name),
-                        code=_render_code(entry.orig_guard.code_list),
-                        value=_value_fingerprint(entry),
-                        enforced=keep,
-                    )
+                fact = _GuardFact(
+                    guard_type=entry.guard_type,
+                    source=_normalize(entry.name),
+                    code=_render_code(entry.orig_guard.code_list),
+                    value=_value_fingerprint(entry),
+                    enforced=keep,
                 )
+                facts.add(pool.setdefault(fact, fact))
             # One filter call is one compilation, and the package knows which
             # frame is being compiled, which is the only place that mapping is
             # available to us.
@@ -909,6 +1017,12 @@ class PrecompileSession:
         A frame compiled once reports everything as invariant, which is true but
         uninformative -- exercise more than one variant for the diff to mean
         anything.
+
+        GLOBAL_STATE, TORCH_FUNCTION_STATE and DETERMINISTIC_ALGORITHMS carry
+        no value of their own, so two variants that differ only in, say,
+        autocast render identically and report as invariant with nothing
+        varying. GRAD_MODE is fingerprinted because the capture path itself
+        produces that split.
         """
         out = []
         for (name, filename, lineno), sets in sorted(self._guard_sets.items()):
@@ -1162,6 +1276,11 @@ def precompile_capture(
     ``recompile_limit`` defaults well above Dynamo's usual 8 because a
     precompile deliberately wants one compiled variant per condition, whereas
     the normal limit exists to catch runaway recompilation.
+
+    ``example_inputs`` are run on ``__enter__``, under ``torch.no_grad()``, so
+    the ``with`` body is optional for an inference capture; calls you make in
+    the body run in the ambient grad mode instead. ``invariants`` names a file
+    written when the block exits without an exception.
     """
     return PrecompileSession(
         fn,

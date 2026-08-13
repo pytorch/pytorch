@@ -34,6 +34,8 @@ from torch._dynamo.package import (
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import (
     _dynamo_alias_module,
+    _fact_order,
+    _GuardFact,
     _SingleFileStore,
     precompile_capture,
     precompile_load,
@@ -274,6 +276,19 @@ class PrecompileInvariantModel(torch.nn.Module):
         if PRECOMPILE_INV_CONFIG["mode"] == "sum":
             return y.sum()
         return y.mean()
+
+
+class PrecompileBuiltinReadingModel(torch.nn.Module):
+    """Iterates a ModuleList, which reads ``iter`` off Dynamo's builtins dict."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks = torch.nn.ModuleList([torch.nn.Linear(8, 8) for _ in range(2)])
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x.sum()
 
 
 class PrecompileSharedBlock(torch.nn.Module):
@@ -2743,9 +2758,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(text, handle.read())
 
     def test_invariants_path_is_a_file_not_a_directory(self):
-        # save() treats its path as a directory to put the artifact in; this one
-        # is a plain text file written exactly where asked, parent directories
-        # included. The two are easy to confuse, so pin it.
+        # Same contract as save(): the path names a file, written exactly where
+        # asked with its parent directories created, which
+        # test_save_writes_a_single_file pins for save() itself. A path kwarg
+        # that names a directory to fill is the easy confusion, so pin it.
         path = os.path.join(self.dir(), "snapshots", "invariants.txt")
         self.assertFalse(os.path.exists(os.path.dirname(path)))
         with precompile_capture(
@@ -2760,6 +2776,66 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(os.path.isdir(path))
         with open(path) as handle:
             self.assertIn("# precompile invariants for", handle.read())
+
+    def test_invariants_report_tensor_properties_that_split_a_compilation(self):
+        # TensorCheck compares the python type and the conj/neg bits as well as
+        # dtype/shape/stride/device. A fingerprint missing them renders two
+        # compilations as one fact, so the guard that SPLIT them gets printed as
+        # an invariant of both -- the report lying, which is its worst failure.
+        def f(x):
+            return x * 2
+
+        cases = (
+            ("type", torch.nn.Parameter(torch.ones(4)), torch.ones(4)),
+            (
+                "conj",
+                torch.ones(4, dtype=torch.complex64),
+                torch.ones(4, dtype=torch.complex64).conj(),
+            ),
+        )
+        for label, first, second in cases:
+            with self.subTest(label):
+                torch._dynamo.reset()
+                session = precompile_capture(f, backend="eager", dynamic=False)
+                with session as compiled, torch.no_grad():
+                    compiled(first)
+                    compiled(second)
+                frame = session.invariants()[0]
+                self.assertEqual(frame.variants, 2)
+                varying = [fact.render() for fact in frame.varying]
+                self.assertTrue(
+                    any("TENSOR_MATCH" in r for r in varying),
+                    f"{label}: the guard that split the compilations is not "
+                    f"reported as varying: {varying}",
+                )
+                self.assertFalse(
+                    any("TENSOR_MATCH" in fact.render() for fact in frame.invariant)
+                )
+
+    def test_invariants_normalize_saved_tensor_hook_ids(self):
+        # AUTOGRAD_SAVED_TENSORS_HOOKS renders a raw tuple(map(id, hooks)) into
+        # code_list, with none of the punctuation the obj-id pattern anchors on.
+        # Left alone it puts addresses in a file meant to be committed.
+        def noop(x):
+            return x
+
+        def f(x):
+            return x * 2
+
+        path = self.path("hooks.invariants")
+        with torch.autograd.graph.saved_tensors_hooks(noop, noop):
+            with precompile_capture(
+                f,
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+                invariants=path,
+            ):
+                pass
+        with open(path) as handle:
+            text = handle.read()
+        self.assertIn("top_saved_tensors_hooks", text)
+        self.assertNotRegex(text, r"\b\d{9,}\b")
 
     def test_invariants_marks_unenforced_preconditions(self):
         # An invariant whose guard could not be serialized is a precondition
@@ -2777,6 +2853,185 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ]
         self.assertTrue(any(r.startswith("[dropped ]") for r in rendered))
         self.assertTrue(any(r.startswith("[enforced]") for r in rendered))
+
+    def test_invariants_do_not_collapse_a_large_constant(self):
+        # _normalize strips object ids so the file diffs clean. It must not
+        # strip a user constant with it: these two variants pin the dict to
+        # different keys, and collapsing them promotes a condition NEITHER
+        # variant holds into the intersection.
+        def fn(x, d):
+            return x * next(iter(d.values()))
+
+        session = precompile_capture(fn, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(torch.ones(4), {1000000001: 2})
+            compiled(torch.ones(4), {2000000002: 3})
+        (frame,) = session.invariants()
+        self.assertEqual(frame.variants, 2)
+        invariant = [f.render() for f in frame.invariant]
+        varying = [f.render() for f in frame.varying]
+        self.assertFalse(any("dict.keys" in r for r in invariant), invariant)
+        self.assertTrue(any("[1000000001]" in r for r in varying), varying)
+        self.assertTrue(any("[2000000002]" in r for r in varying), varying)
+
+    def test_invariants_keep_a_guard_every_variant_shares(self):
+        # k is unspecialized, so its guard is "k is an int" in both variants and
+        # is a real precondition. Fingerprinting the value it happened to hold
+        # would split one shared guard into two indistinguishable varying facts.
+        def fn(x, flag, k):
+            return x * k if flag else x + k
+
+        session = precompile_capture(fn, backend="eager", dynamic=True)
+        with session as compiled:
+            compiled(torch.ones(4), True, 1)
+            compiled(torch.ones(4), False, 2)
+        (frame,) = session.invariants()
+        self.assertEqual(frame.variants, 2)
+        invariant = [f.render() for f in frame.invariant]
+        varying = [f.render() for f in frame.varying]
+        self.assertTrue(
+            any("___check_type_id(L['k']" in r for r in invariant), invariant
+        )
+        self.assertEqual(len(varying), len(set(varying)), varying)
+
+    def test_invariants_name_the_object_an_identity_guard_pinned(self):
+        # The id in an identity guard's code is normalized away, so the object
+        # has to be named some other way: without it the two variants -- traced
+        # against relu and against sigmoid -- render one fact and self.act is
+        # reported invariant, hiding the only thing that tells them apart.
+        model = PrecompileSelfAct(torch.relu)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(torch.ones(4))
+            model.act = torch.sigmoid
+            compiled(torch.ones(4, dtype=torch.float64))
+        entry = {f.frame: f for f in session.invariants()}["forward"]
+        self.assertEqual(entry.variants, 2)
+        invariant = [f.render() for f in entry.invariant]
+        varying = [f.render() for f in entry.varying]
+        self.assertFalse(any(".act" in r for r in invariant), invariant)
+        self.assertTrue(any(r.endswith("relu on self.act") for r in varying), varying)
+        self.assertTrue(
+            any(r.endswith("sigmoid on self.act") for r in varying), varying
+        )
+
+    def test_invariants_are_stable_across_dynamo_global_counters(self):
+        # The builtins dict Dynamo installs carries a per-process counter, so
+        # the same guard reads __builtins_dict___0 in one capture and ___4 in
+        # the next. Un-normalized, a committed report changes every run and the
+        # guard reports as varying rather than invariant. The model the other
+        # invariants tests use reads no builtin, so nothing covers this today.
+        def capture(path):
+            torch._dynamo.reset()
+            with precompile_capture(
+                PrecompileBuiltinReadingModel(),
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.ones(4, 8),), (torch.ones(5, 8),)],
+                invariants=path,
+            ):
+                pass
+
+        first, second = self.path("first.invariants"), self.path("second.invariants")
+        capture(first)
+        capture(second)
+        with open(first) as handle:
+            text = handle.read()
+        self.assertIn("__builtins_dict___<n>", text)
+        self.assertNotRegex(text, r"__builtins_dict___\d")
+        with open(second) as handle:
+            self.assertEqual(text, handle.read())
+
+    def test_invariants_are_stable_across_globals_named_by_object_id(self):
+        # install_global_by_id names a global "<prefix>_<id(value)>_c<n>", so a
+        # guard reading one carries an address inside an identifier, where
+        # neither the id nor the counter pattern can see it. `type(x) is
+        # torch.Tensor` installs one; transformers' Qwen2 installs three, and
+        # its report differed between processes before this was normalized.
+        def fn(x):
+            return x.sum() if type(x) is torch.Tensor else x
+
+        path = self.path("byid.invariants")
+        with precompile_capture(
+            fn,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4),)],
+            invariants=path,
+        ):
+            pass
+        with open(path) as handle:
+            text = handle.read()
+        self.assertIn("_<id>_c<n>", text)
+        self.assertNotRegex(text, r"_\d{9,}_c\d")
+
+    def test_facts_differing_only_in_value_sort_apart(self):
+        # Once the boilerplate code parts are filtered a TENSOR_MATCH renders no
+        # code at all, so two shape specializations tie on every other component
+        # of the sort key and their order falls to set iteration, which is hash
+        # seeded: the file then differs between PROCESSES, which two captures in
+        # one process cannot show.
+        def fact(shape):
+            return _GuardFact("TENSOR_MATCH", "x", (), f"shape={shape}", True)
+
+        self.assertNotEqual(_fact_order(fact((4, 8))), _fact_order(fact((5, 8))))
+
+    def test_grad_mode_is_reported_when_variants_differ_in_it(self):
+        # example_inputs run under no_grad and body calls do not, so the same
+        # call made both ways compiles twice. Global-state guards carry no value
+        # of their own, so without a fingerprint the report shows two variants
+        # and nothing varying -- the half that is supposed to tell them apart.
+        x = torch.ones(4, 8)
+        session = precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x,)],
+        )
+        with session as compiled:
+            compiled(x)
+        (frame,) = [f for f in session.invariants() if f.frame == "forward"]
+        self.assertEqual(frame.variants, 2)
+        varies = [f.render() for f in frame.varying]
+        self.assertTrue(any("grad_enabled=True" in r for r in varies), varies)
+        self.assertTrue(any("grad_enabled=False" in r for r in varies), varies)
+
+    def test_a_failing_example_input_does_not_wedge_the_session(self):
+        # __enter__ runs example_inputs, and a __enter__ that raises never gets
+        # its __exit__, so the config patch the session holds would stay on for
+        # the life of the process and the session would refuse to save what it
+        # did capture. A bare tensor instead of a 1-tuple is the likely way in.
+        before = functorch_config.bundled_autograd_cache
+        session = precompile_capture(
+            PrecompileInvariantModel(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[torch.ones(4, 8)],
+        )
+        with self.assertRaisesRegex(TypeError, "tuples of positional args"):
+            with session:
+                pass
+        self.assertEqual(functorch_config.bundled_autograd_cache, before)
+        with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+            session.save(self.path())
+
+    def test_repeated_guard_facts_are_stored_once_per_session(self):
+        # A recompiled frame repeats nearly all of its guards, so storing one
+        # object per compilation makes the session grow with the number of
+        # variants instead of with the number of distinct facts. Measured on
+        # resnet18, 200 variants retained 83MB to describe 1281 facts.
+        session = precompile_capture(
+            PrecompileIntArg(),
+            backend="eager",
+            recompile_limit=64,
+            dynamic=False,
+            example_inputs=[(torch.ones(4, 8), k) for k in range(20)],
+        )
+        with session:
+            pass
+        facts = [f for sets in session._guard_sets.values() for s in sets for f in s]
+        self.assertGreater(len(facts), 5 * len(set(facts)))
+        self.assertEqual(len({id(f) for f in facts}), len(set(facts)))
 
     def test_load_rejects_artifact_from_a_different_callable(self):
         x = torch.randn(4, 8)
@@ -3453,6 +3708,40 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ) as loaded:
                 self.assertEqual(loaded(torch.randn(4, 8)).shape, torch.Size([]))
 
+    def test_save_reports_write_failures_as_package_errors(self):
+        # Writing the artifact includes creating its parent, so a parent that
+        # is a file has to arrive as a PackageError naming the path the caller
+        # passed rather than as a bare FileExistsError naming the parent, and a
+        # refused write must leave nothing behind.
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(4, 8))
+        with tempfile.TemporaryDirectory() as tmp:
+            as_dir = os.path.join(tmp, "adir")
+            os.makedirs(as_dir)
+            with self.assertRaisesRegex(PackageError, "single files"):
+                session.save(as_dir)
+            parent = os.path.join(tmp, "plain_file")
+            with open(parent, "w"):
+                pass
+            target = os.path.join(parent, "model.pt")
+            with self.assertRaisesRegex(PackageError, re.escape(target)):
+                session.save(target)
+            self.assertEqual(sorted(os.listdir(tmp)), ["adir", "plain_file"])
+
+    def test_load_rejects_a_directory(self):
+        # An artifact captured before save() became single-file is a directory
+        # holding "entry", so this is what a migration hits. Nothing exercises
+        # the branch today.
+        stale = self.path("stale_layout.pt")
+        os.makedirs(stale, exist_ok=True)
+        with self.assertRaisesRegex(PackageError, "is a directory"):
+            precompile_load(
+                staged_with_graph_breaks, stale, backend="eager", dynamic=False
+            )
+
     def test_resume_names_from_separate_captures_do_not_collide(self):
         # Two artifacts captured in different processes carry the same
         # __resume_at_<offset>_<n> name, and a serving process installs both
@@ -3464,7 +3753,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         expected = [fn(x) for fn in fns]
         self.assertNotEqual(expected[0], expected[1])
 
-        paths = [os.path.join(self.path(), fn.__name__) for fn in fns]
+        paths = [self.path(fn.__name__ + ".pt") for fn in fns]
         for fn, path in zip(fns, paths):
             torch._dynamo.reset()
             session = precompile_capture(fn, backend="eager", dynamic=False)
