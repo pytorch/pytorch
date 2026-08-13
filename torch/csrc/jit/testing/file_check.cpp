@@ -94,14 +94,12 @@ size_t assertFind(
     const std::function<void(std::ostream& out)>& extra_msg = nullptr) {
   auto pos = search_range.source()->text_str().find(sub, search_range.start());
   if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
-    auto found_range =
-        SourceRange(search_range.source(), search_range.start(), sub.size());
     std::stringstream ss;
     ss << "Expected to find ";
     c10::printQuotedString(ss, sub);
     ss << " but did not find it" << '\n';
     ss << "Searched string:" << '\n';
-    found_range.highlight(ss);
+    search_range.highlight(ss);
     if (extra_msg) {
       extra_msg(ss);
     }
