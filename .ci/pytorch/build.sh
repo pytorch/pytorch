@@ -175,6 +175,30 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   if [[ "$BUILD_ENVIRONMENT" == *client* ]]; then
     export TORCH_XPU_ARCH_LIST=bmg
   fi
+
+  # [DEBUG - do not merge] Profile the SYCL device-link bottleneck.
+  # The torch_xpu_ops device link is a single ninja step that dominates the XPU
+  # build (~11 min). -fsycl-max-parallel-link-jobs is already set to the core
+  # count, so this instrumentation tells us whether that link is CPU-bound
+  # (scales with cores -> bigger runner helps) or memory-bound (AOT codegen jobs
+  # thrash RAM -> more RAM / fewer link jobs). Sampled lines are prefixed
+  # [xpu-resmon] so they can be extracted from the job log.
+  echo "[xpu-debug] nproc=$(nproc) MAX_JOBS=${MAX_JOBS:-<unset>}"
+  grep -E 'MemTotal|MemAvailable|SwapTotal' /proc/meminfo | sed 's/^/[xpu-debug] /' || true
+  for f in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes; do
+    [ -r "$f" ] && echo "[xpu-debug] cgroup $(basename "$f")=$(cat "$f")"
+  done
+  (
+    set +x  # avoid xtrace spam from the sampling loop
+    while true; do
+      stats=$(free -m | awk '/^Mem:/{mt=$2; ma=$7} /^Swap:/{su=$3} END{printf "mem_total_mb=%s mem_avail_mb=%s swap_used_mb=%s", mt, ma, su}')
+      load=$(awk '{print $1}' /proc/loadavg)
+      procs=$(pgrep -c -f 'ocloc|sycl-post-link|clang-offload|llvm-foreach|icpx' 2>/dev/null || echo 0)
+      echo "[xpu-resmon] $(date +%H:%M:%S) ${stats} load1=${load} toolchain_procs=${procs}"
+      sleep 10
+    done
+  ) &
+  trap_add "kill $! 2>/dev/null || true" EXIT
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -281,6 +305,16 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     fi
     python -m build --wheel --no-isolation
   fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *xpu* && -d build ]]; then
+    # [DEBUG - do not merge] Confirm the parallel-link job count actually baked
+    # into the generated ninja graph, and show the device-link rule flags.
+    echo "[xpu-debug] fsycl-max-parallel-link-jobs values in build.ninja:"
+    grep -rhoE '\-fsycl-max-parallel-link-jobs=[0-9]+' build/ 2>/dev/null | sort | uniq -c || true
+    echo "[xpu-debug] SYCL device-link flags:"
+    grep -rhoE '\-fsycl[^ "]*|--offload-compress' build/build.ninja 2>/dev/null | sort -u | head -40 || true
+  fi
+
   pip_install_whl "$(echo dist/*.whl)"
 
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
