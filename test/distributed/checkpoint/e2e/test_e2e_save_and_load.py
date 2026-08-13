@@ -40,14 +40,16 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -152,13 +154,12 @@ def _train(model, optim, train_steps=1):
     return loss, train_state
 
 
-class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+class TestE2ESaveAndLoad(DTensorContinuousTestBase, VerifyStateDictMixin):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
-    def backend(self):
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+    def world_size(self) -> int:
+        return NUM_DEVICES
 
     def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().to(self.device_type)
@@ -512,22 +513,24 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             )
 
 
-class TestNoCPU(DTensorTestBase):
+class TestNoCPU(DTensorContinuousTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @property
-    def backend(self):
-        return dist.get_default_backend_for_device(self.device_type)
-
-    @with_comms
-    def test_no_cpu(self):
-        if self.device_type == "cpu":
+    def test_no_cpu(self, device):
+        if device == "cpu":
             self.skipTest("test_no_cpu requires a non-CPU device")
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
             f = saver.async_save({})
             f.result()
+
+
+instantiate_device_type_tests(
+    TestNoCPU,
+    globals(),
+    except_for=("cpu",),
+)
 
 
 class TestInitStateDict(DTensorTestBase):
@@ -574,6 +577,10 @@ class TestInitStateDict(DTensorTestBase):
         self.assertEqual(optim_2.param_groups[0]["lr"], 0.1)
 
 
-instantiate_parametrized_tests(TestE2ESaveAndLoad)
+instantiate_device_type_tests(
+    TestE2ESaveAndLoad,
+    globals(),
+    except_for=("cpu",),
+)
 if __name__ == "__main__":
     run_tests()
