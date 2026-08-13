@@ -75,7 +75,14 @@ def _torch_probe(expr: str) -> bool:
     probe = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
     )
-    return "PROBE_OK" in probe.stdout
+    ok = "PROBE_OK" in probe.stdout
+    if not ok and "PROBE_NO" not in probe.stdout and probe.stderr.strip():
+        # The expression never evaluated, so torch itself failed to import or
+        # crashed. That degrades to a skip by design, but silently swallowing
+        # the reason makes a real import regression look like an absent CUDA.
+        _report(f"probe {expr!r} produced no verdict; stderr follows")
+        print(probe.stderr.rstrip(), flush=True)
+    return ok
 
 
 def should_run() -> bool:
@@ -124,13 +131,26 @@ def should_run() -> bool:
     if arch_list:
         from tools.native_aot import export as export_mod
 
-        if not export_mod.archs_from_cuda_arch_list(arch_list):
+        archs = export_mod.archs_from_cuda_arch_list(arch_list)
+        if not archs:
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "
                 f"exportable arch; exportable: "
                 f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
             )
             return False
+        if len(archs) > 1:
+            # export nests artifacts as <dir>/<arch>/<op>/ for >1 arch, but
+            # gen_aot_lib scans one level and the embedded-link globs are
+            # one level deep, so both would find nothing and the build would
+            # succeed shipping ZERO kernels. Loud beats silently-partial.
+            raise RuntimeError(
+                f"native-AOT stage 2: TORCH_CUDA_ARCH_LIST={arch_list!r} names "
+                f"{len(archs)} exportable arches ({' '.join(archs)}). Multi-arch "
+                f"export nests artifacts per arch, which the generator and the "
+                f"CMake globs do not walk, so no kernels would be linked. Build "
+                f"one exportable arch at a time, or set TORCH_NATIVE_AOT=0."
+            )
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
@@ -245,6 +265,15 @@ def main(argv: list[str] | None = None) -> int:
     # exactly what install would do for this file: verified
     # byte-identical, no RPATH/install-time fixup applies to torch_cuda.
     _report("relinking torch_cuda with embedded kernels")
+    if not os.path.isdir(BUILD_DIR):
+        # BUILD_DIR mirrors pyproject.toml's build-dir; an override there (or
+        # a build run from another directory) lands here as a bare
+        # FileNotFoundError out of subprocess.
+        raise RuntimeError(
+            f"native-AOT stage 2: build directory {BUILD_DIR} does not exist. "
+            f"It must match pyproject.toml's build-dir; re-run the build from "
+            f"the repo root, or set TORCH_NATIVE_AOT=0 to skip stage 2."
+        )
     subprocess.check_call(
         ["cmake", "--build", ".", "--target", "torch_cuda"], cwd=BUILD_DIR
     )
