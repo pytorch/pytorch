@@ -1115,7 +1115,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             enable_fusion_regions=False,
         )
         collective = next(iter(scheduler.collective_info))
-        assert scheduler._prefetch_would_exceed_memory_budget(collective)
+        self.assertTrue(scheduler._prefetch_would_exceed_memory_budget(collective))
 
         schedule_overlap_bucketing(
             gm,
