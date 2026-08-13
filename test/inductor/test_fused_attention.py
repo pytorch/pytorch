@@ -175,12 +175,18 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             if TEST_WITH_ROCM and dtype == torch.float:
                 atol = 3e-3
                 rtol = 1e-2
-            if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.half:
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.half
+                and isRocmArchAnyOf(MI200_ARCH)
+            ):
                 # MI200 fp16 backward GEMMs use the bf16-intermediate alt
                 # implementation (fp16_on_mi200 in numerical_accuracy.md), so
                 # the eager reference grads are the less accurate side here
                 # (grad rmse vs fp64 gold ~2e-3 vs ~1e-4 for the fused
                 # kernel). Measured max grad diff 3.4e-3 on 1/4096 elements.
+                # The device check keeps this off test_sdpa_rewriter_1_cpu,
+                # which also binds this helper.
                 atol = 5e-3
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
