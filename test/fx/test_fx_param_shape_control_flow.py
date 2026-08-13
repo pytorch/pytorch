@@ -2,7 +2,11 @@
 
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase
+)
 
 
 class MyModuleBase(torch.nn.Module):
@@ -81,6 +85,8 @@ class MyModuleParamNElement(MyModuleBase):
 
 
 class TestConstParamShapeInControlFlow(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def verify_mm_relu_mods(self, mm_only_mod, relu_mod):
         """
         Verify one module only does a mm op while the other
