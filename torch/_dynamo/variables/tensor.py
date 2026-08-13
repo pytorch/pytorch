@@ -36,7 +36,10 @@ import torch.random
 from torch import sym_float, sym_int
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo import compiled_autograd
-from torch._library.opaque_object import is_opaque_symbolic_type
+from torch._library.opaque_object import (
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -307,6 +310,12 @@ class TensorVariable(VariableTracker):
         specialized_props = get_specialized_props(
             target_cls, tx, example_value, infer_subclass_type(example_value)
         )
+        # These fields match the conditionally specialized metadata in
+        # get_specialized_props(). If fake execution changes them to symbolic
+        # values, they are omitted and the old cache must be invalidated.
+        for k in ("_size", "stride", "is_contiguous"):
+            if k not in specialized_props:
+                setattr(self, k, None)
         for k, v in specialized_props.items():
             setattr(self, k, v)
 
@@ -319,7 +328,6 @@ class TensorVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         version_before: int | None,
-        has_tensor_arg: bool,
     ) -> None:
         """
         Sync attributes if self was mutated by an inplace operation.
@@ -332,8 +340,7 @@ class TensorVariable(VariableTracker):
             and version_after is not None
             and version_after > version_before
         ):
-            if has_tensor_arg:
-                self.synchronize_attributes(tx)
+            self.synchronize_attributes(tx)
             tx.output.check_input_mutation_on_current_stream(tx)
 
     def debug_repr(self) -> str:
@@ -341,7 +348,7 @@ class TensorVariable(VariableTracker):
             self.proxy.node.meta["example_value"], self.python_type_name()
         )
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
             gb_type="repr() on tensor",
             context=f"repr() on {self.python_type_name()}",
@@ -359,7 +366,7 @@ class TensorVariable(VariableTracker):
     def is_tensor(self) -> bool:
         return True
 
-    def bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # THPVariable_bool calls at::Tensor::is_nonzero(), i.e. .item() != 0.
         from .constant import ConstantVariable
 
@@ -372,7 +379,7 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(tx, bool(item.value))
         return SymNodeVariable.create(tx, item.as_proxy() != 0)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -474,8 +481,11 @@ class TensorVariable(VariableTracker):
             ):
                 return CustomClassObjectVariable.create(proxy, example_value, tx=tx)
             # any other attributes on the subclass (that are not methods)
-            # are assumed to be constant metadata.
-            elif not callable(example_value):
+            # are assumed to be constant metadata. Opaque constant types are also
+            # constant metadata even if they are callable.
+            elif not callable(example_value) or is_opaque_constant_type(
+                type(example_value)
+            ):
                 return VariableTracker.build(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
@@ -634,7 +644,7 @@ class TensorVariable(VariableTracker):
     def method_attr_retain_grad(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
-            context=f"getattro_impl {self} retain_grad",
+            context=f"tp_getattro_impl {self} retain_grad",
             explanation="`Tensor.retain_grad()` does not work with AOTDispatcher.",
             hints=[],
         )
@@ -649,7 +659,7 @@ class TensorVariable(VariableTracker):
             and not self.has_grad_fn
         ):
             return ConstantVariable.create(None)
-        # None tells getattro_impl to use default .grad handling
+        # None tells tp_getattro_impl to use default .grad handling
         return None
 
     def method_attr_data(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -663,7 +673,7 @@ class TensorVariable(VariableTracker):
         if self.has_grad_fn:
             unimplemented(
                 gb_type="Tensor with grad_fn()",
-                context=f"getattro_impl {self} grad_fn",
+                context=f"tp_getattro_impl {self} grad_fn",
                 explanation="Dynamo does not support tracing tensors with a grad_fn directly.",
                 hints=[],
             )
@@ -683,7 +693,7 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
 
         # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, getattro_impl returns GetAttrVariable for both non-existent
+        # Today, tp_getattro_impl returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in all_tensor_attrs:
@@ -708,7 +718,7 @@ class TensorVariable(VariableTracker):
 
         return VariableTracker.build(tx, ret_val)
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         fake_val = self.as_proxy().node.meta["example_value"]
@@ -728,7 +738,7 @@ class TensorVariable(VariableTracker):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
                     gb_type="Strict mode banned op",
-                    context=f"getattro_impl {self} {name}",
+                    context=f"tp_getattro_impl {self} {name}",
                     explanation=f"Getattr invocation '{name}' in strict mode is not supported.",
                     hints=[
                         f"Remove `{name}` from the list of banned ops by "
@@ -1081,8 +1091,8 @@ class TensorVariable(VariableTracker):
         #   x.add_(y) where y.requires_grad=True => x.requires_grad becomes True
         # We detect inplace ops by checking if self's fake tensor version changes
         # after wrap_fx_proxy (which runs get_fake_value internally).
-        # We only synchronize when there's a tensor argument, since that's when
-        # metadata propagation is relevant.
+        # Some inplace ops mutate metadata even without tensor arguments, e.g.
+        # as_strided_ mutates size/stride from integer/list arguments.
 
         # See ops_consuming_unbacked_scalars in torch.py for the full allowlist
         # and reasoning.
@@ -1103,9 +1113,7 @@ class TensorVariable(VariableTracker):
         version_before = self._get_fake_version()
         with ctx():
             result = wrap_fx_proxy(tx, proxy)
-        self._sync_if_inplace_mutation(
-            tx, version_before, any(arg.is_tensor() for arg in args)
-        )
+        self._sync_if_inplace_mutation(tx, version_before)
 
         return result
 
@@ -1853,9 +1861,9 @@ class TensorVariable(VariableTracker):
         )
 
     def method___len__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self.sq_length(tx)
+        return self.sq_length_impl(tx)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for tensors (size along first dimension)."""
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
@@ -1921,7 +1929,7 @@ class TensorVariable(VariableTracker):
         ):
             get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-        self._sync_if_inplace_mutation(tx, version_before, value.is_tensor())
+        self._sync_if_inplace_mutation(tx, version_before)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
@@ -2042,7 +2050,7 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "copy_", [fma_result], {})
         return None
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # Rewrite __contains__ here so that downstream passes can trace through
@@ -2060,7 +2068,7 @@ class TensorVariable(VariableTracker):
     def method___contains__(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
-        return self.sq_contains(tx, arg)
+        return self.sq_contains_impl(tx, arg)
 
     def method_register_hook(
         self,
@@ -2343,8 +2351,8 @@ class TensorVariable(VariableTracker):
                 return None
         fwd_kwargs = dict(kwargs)
         fwd_kwargs.pop("layout", None)
-        fwd_kwargs.setdefault("dtype", self.getattro_impl(tx, "dtype"))
-        fwd_kwargs.setdefault("device", self.getattro_impl(tx, "device"))
+        fwd_kwargs.setdefault("dtype", self.tp_getattro_impl(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.tp_getattro_impl(tx, "device"))
         return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
             tx,
             [data_arg],
@@ -2800,7 +2808,7 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return self.proxy
 
-    def bool_impl(
+    def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
@@ -2815,7 +2823,7 @@ class SymNodeVariable(VariableTracker):
             )
         return SymNodeVariable.create(tx, self.as_proxy() != 0)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -3224,7 +3232,7 @@ class NumpyNdarrayVariable(TensorVariable):
 
         raise_type_error(tx, "unhashable type: 'numpy.ndarray'")
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -3273,7 +3281,7 @@ class NumpyNdarrayVariable(TensorVariable):
         "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
     }
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
@@ -3320,14 +3328,14 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ["base", "flags", "dtype"]:
             unimplemented(
                 gb_type="Unsupported ndarray attribute access",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
         elif name == "__version__":
             unimplemented(
                 gb_type="Unsupported ndarray.__version__ access",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
@@ -3639,7 +3647,7 @@ class DataPtrVariable(VariableTracker):
         )
         return self_root is other_root
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -3653,7 +3661,7 @@ class DataPtrVariable(VariableTracker):
             return ConstantVariable.create(op == "__eq__")
         unimplemented(
             gb_type="Data pointer comparison",
-            context=f"richcompare_impl {self} {op} {other}",
+            context=f"tp_richcompare_impl {self} {op} {other}",
             explanation="Dynamo can only trace data pointer comparisons "
             "when it can prove both operands have the same data pointer.",
             hints=[],
