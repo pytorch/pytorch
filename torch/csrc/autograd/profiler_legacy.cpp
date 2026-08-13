@@ -373,9 +373,7 @@ void pushProfilingCallbacksLegacy() {
             }
             bool record_cuda = state_ptr->config().state ==
                 torch::profiler::impl::ProfilerState::CUDA;
-            if (record_cuda &&
-                disable_cuda_profiling.find(fn.name()) !=
-                    disable_cuda_profiling.end()) {
+            if (record_cuda && disable_cuda_profiling.contains(fn.name())) {
               record_cuda = false;
             }
 
@@ -395,9 +393,7 @@ void pushProfilingCallbacksLegacy() {
             }
             bool record_cuda = state_ptr->config().state ==
                 torch::profiler::impl::ProfilerState::CUDA;
-            if (record_cuda &&
-                disable_cuda_profiling.find(fn.name()) !=
-                    disable_cuda_profiling.end()) {
+            if (record_cuda && disable_cuda_profiling.contains(fn.name())) {
               record_cuda = false;
             }
             state_ptr->popRange(fn, record_cuda);
@@ -506,7 +502,7 @@ void LegacyEvent::record(bool record_cuda) {
     for (const auto j : c10::irange(curShapesList.size())) {
       s.emplace_back(curShapesList.get(j).toInt());
     }
-    shapes.emplace_back(s);
+    shapes.emplace_back(std::move(s));
   }
 
   LegacyEvent evt(
@@ -557,10 +553,10 @@ at::IValue LegacyEvent::toIValue() const {
     for (const auto& k : shape) {
       s.emplace_back(k);
     }
-    shapesList.emplace_back(s);
+    shapesList.emplace_back(std::move(s));
   }
-  eventIValueList.emplace_back(shapesList);
-  return at::IValue(eventIValueList);
+  eventIValueList.emplace_back(std::move(shapesList));
+  return at::IValue(std::move(eventIValueList));
 }
 
 double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
