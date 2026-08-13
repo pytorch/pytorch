@@ -14,8 +14,24 @@ from dataclasses import dataclass
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl._mlir.dialects import llvm
+from flydsl._mlir import ir
+from flydsl._mlir.dialects import llvm, rocdl as _rocdl_ops
 from flydsl.expr import const_expr, range_constexpr, rocdl
+
+
+def _permlane_swap(width, old, src):
+    """v_permlane{16,32}_swap_b32 -> (new_old, new_src) as i32 IR values.
+
+    Both operands are read-modify-write: the instruction exchanges row groups
+    between them and returns both halves. width=32 swaps rows 2,3 of `old` with
+    rows 0,1 of `src`; width=16 swaps the odd rows of `old` with the even rows
+    of `src`.
+    """
+    i32 = ir.IntegerType.get_signless(32)
+    sty = ir.Type.parse("!llvm.struct<(i32, i32)>")
+    fn = _rocdl_ops.permlane16_swap if width == 16 else _rocdl_ops.permlane32_swap
+    res = fn(sty, fx.as_ir_value(old), fx.as_ir_value(src), False, False)
+    return llvm.extractvalue(i32, res, [0]), llvm.extractvalue(i32, res, [1])
 
 
 MXFP8_SCALE_BLOCK_K = 32
@@ -46,11 +62,10 @@ class MXFP8GemmParams:
     m_waves: int = 2
     n_waves: int = 2
     group_m: int = 0
-    frag_first: int = 1
 
     def __cache_signature__(self):
         return (
-            "mxfp8_gfx950_v3",
+            "mxfp8_gfx950_v4",
             self.m,
             self.n,
             self.k,
@@ -62,7 +77,6 @@ class MXFP8GemmParams:
             self.m_waves,
             self.n_waves,
             self.group_m,
-            self.frag_first,
         )
 
 
@@ -199,9 +213,6 @@ def make_mxfp8_param_and_validate(m, n, k, out_dtype, gemm_config):
     m_waves = int(gemm_config["BLOCK_M_WARPS"])
     n_waves = int(gemm_config["BLOCK_N_WARPS"])
     group_m = int(gemm_config["GROUP_M"])
-    frag_first = int(gemm_config["FRAG_FIRST"])
-    if frag_first not in (0, 1):
-        return None
     try:
         derived = mxfp8_gemm_derived(
             block_m, block_n, block_k, stages, m_waves, n_waves, group_m
@@ -227,7 +238,6 @@ def make_mxfp8_param_and_validate(m, n, k, out_dtype, gemm_config):
         m_waves=m_waves,
         n_waves=n_waves,
         group_m=group_m,
-        frag_first=frag_first,
     )
 
 
@@ -237,7 +247,7 @@ def make_mxfp8_gemm_kernel_name(param: MXFP8GemmParams) -> str:
         f"_{param.out_dtype}"
         f"_bm{param.block_m}_bn{param.block_n}_bk{param.block_k}"
         f"_s{param.stages}_mw{param.m_waves}_nw{param.n_waves}"
-        f"_g{param.group_m}_f{param.frag_first}"
+        f"_g{param.group_m}"
     )
 
 
@@ -266,7 +276,6 @@ def make_mxfp8_scaled_mm_gfx950(
     m_waves: int = 2,
     n_waves: int = 2,
     group_m: int = 0,
-    frag_first: int = 1,
 ):
     """Build a tiled gfx950 MXFP8 scaled GEMM launcher for one tile config."""
     if m <= 0 or n <= 0 or k <= 0:
@@ -539,7 +548,6 @@ def make_mxfp8_scaled_mm_gfx950(
         # their bytes, that the MFMA stream waits on.
         scale32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Uint32)
         scale_k32 = scale_k // 4
-        lane_row = (fx.Int32(tid) % fx.Int32(GFX950_WAVE_SIZE)) % fx.Int32(MXFP8_MFMA_N)
 
         def make_flat_buffer32(tensor, elems32):
             # The scale tensors arrive as u8 views, so their pointer carries
@@ -563,21 +571,45 @@ def make_mxfp8_scaled_mm_gfx950(
                 make_flat_buffer32(scale_b_u8, n * scale_k32), fx.make_layout(1, 1)
             )
 
-        def packed_scale_words(buf, base, thr_row, n_repeat, kh, col32):
+        def packed_scale_issue(buf, base, thr_row, n_repeat, kh, col32):
+            """Issue only the dword scale loads and return the landing registers.
+
+            Split out from the transpose so the loads can be hoisted above the
+            tile's direct-to-LDS DMA. vmcnt is an in-order counter, so a scale
+            load issued before the DMA block is satisfied by a counted wait
+            rather than the full drain a trailing load would need.
+            """
             rows = [fx.get_scalar(thr_row[0, mi, kh]) for mi in range(n_repeat)]
             repeat_stride = rows[1] - rows[0]
-            words = []
+            regs = []
             for q in range_constexpr(0, n_repeat, 4):
                 row = rows[q] + repeat_stride * scale_group
                 offset = (base + row) * fx.Int32(scale_k32) + col32
                 reg = fx.make_rmem_tensor(1, fx.Uint32)
                 fx.copy(scale32_atom, fx.slice(buf, (None, offset)), reg)
+                regs.append(reg)
+            return regs
+
+        def packed_scale_finish(regs):
+            """Broadcast each loaded dword's four rows across the four lane
+            groups, then extract this lane's K-quarter byte.
+
+            One dword holds a whole K-tile of scales for one row, and a wave's
+            64 lanes cover four MMA repeats, so lane group g needs row g of the
+            dword. Feeding the same register to both operands of a swap turns
+            the general 4x4 lane-group transpose into exactly that broadcast and
+            collapses four swaps into three. The VALU swaps replace ds_bpermute,
+            which shares the in-order lgkmcnt with the fragment ds_reads and so
+            drained them on every transpose.
+            """
+            words = []
+            for reg in regs:
                 packed = fx.get_scalar(reg[0]).to(fx.Int32)
-                for j in range_constexpr(4):
-                    idx = (fx.Int32(j * MXFP8_MFMA_N) + lane_row) * fx.Int32(4)
-                    lane_word = fx.Int32(
-                        rocdl.ds_bpermute(fx.Int32.ir_type, idx, packed)
-                    )
+                t0, t1 = _permlane_swap(32, packed, packed)
+                u0, u1 = _permlane_swap(16, t0, t0)
+                w0, w1 = _permlane_swap(16, t1, t1)
+                for lane_word in (u0, u1, w0, w1):
+                    lane_word = fx.Int32(lane_word)
                     byte = (lane_word >> (scale_group * fx.Int32(8))) & fx.Int32(0xFF)
                     words.append(byte * fx.Int32(0x01010101))
             return words
@@ -605,43 +637,70 @@ def make_mxfp8_scaled_mm_gfx950(
                     frag_A_retile[None, None, kh],
                 )
 
-        def mma_stage(k_tile):
-            for kh in range_constexpr(d.k_halves):
-                if const_expr(packed_scale):
+        def mma_stage(k_tile, mid=None):
+            """Run one K-tile's MFMAs. `mid` is the tile's fragment reads and
+            direct-to-LDS DMA, run between issuing the scale loads and consuming
+            them so those loads get the whole DMA block as latency shadow.
+            """
+            if const_expr(packed_scale):
+                issued = []
+                for kh in range_constexpr(d.k_halves):
                     col32 = k_tile * fx.Int32(block_k // MXFP8_MFMA_K) + fx.Int32(kh)
-                    sa_words = packed_scale_words(
-                        sa32, m_base, thr_mma_aRow, d.mma_m_repeat, kh, col32
-                    )
-                    sb_words = packed_scale_words(
-                        sb32, n_base, thr_mma_bRow, d.mma_n_repeat, kh, col32
-                    )
-                else:
-                    scale_col = (
-                        k_tile * fx.Int32(block_k // MXFP8_SCALE_BLOCK_K)
-                        + fx.Int32(kh * (MXFP8_MFMA_K // MXFP8_SCALE_BLOCK_K))
-                        + scale_group
-                    )
-                    sa_words = []
-                    for mi in range_constexpr(d.mma_m_repeat):
-                        local_row = fx.get_scalar(thr_mma_aRow[0, mi, kh])
-                        sa_words.append(
-                            load_scale_word(
-                                sa_flat,
-                                m_base + local_row,
-                                scale_col,
-                            )
+                    issued.append(
+                        (
+                            packed_scale_issue(
+                                sa32, m_base, thr_mma_aRow, d.mma_m_repeat, kh, col32
+                            ),
+                            packed_scale_issue(
+                                sb32, n_base, thr_mma_bRow, d.mma_n_repeat, kh, col32
+                            ),
                         )
-
-                    sb_words = []
+                    )
+                if mid is not None:
+                    mid()
+                for kh in range_constexpr(d.k_halves):
+                    sa_words = packed_scale_finish(issued[kh][0])
+                    sb_words = packed_scale_finish(issued[kh][1])
                     for ni in range_constexpr(d.mma_n_repeat):
-                        local_row = fx.get_scalar(thr_mma_bRow[0, ni, kh])
-                        sb_words.append(
-                            load_scale_word(
-                                sb_flat,
-                                n_base + local_row,
-                                scale_col,
+                        for mi in range_constexpr(d.mma_m_repeat):
+                            scaled_mma(
+                                frag_C[(None, 0), mi, ni],
+                                frag_A[None, mi, kh],
+                                frag_B[None, ni, kh],
+                                sa_words[mi],
+                                sb_words[ni],
                             )
+                return
+
+            if mid is not None:
+                mid()
+            for kh in range_constexpr(d.k_halves):
+                scale_col = (
+                    k_tile * fx.Int32(block_k // MXFP8_SCALE_BLOCK_K)
+                    + fx.Int32(kh * (MXFP8_MFMA_K // MXFP8_SCALE_BLOCK_K))
+                    + scale_group
+                )
+                sa_words = []
+                for mi in range_constexpr(d.mma_m_repeat):
+                    local_row = fx.get_scalar(thr_mma_aRow[0, mi, kh])
+                    sa_words.append(
+                        load_scale_word(
+                            sa_flat,
+                            m_base + local_row,
+                            scale_col,
                         )
+                    )
+
+                sb_words = []
+                for ni in range_constexpr(d.mma_n_repeat):
+                    local_row = fx.get_scalar(thr_mma_bRow[0, ni, kh])
+                    sb_words.append(
+                        load_scale_word(
+                            sb_flat,
+                            n_base + local_row,
+                            scale_col,
+                        )
+                    )
 
                 for ni in range_constexpr(d.mma_n_repeat):
                     for mi in range_constexpr(d.mma_m_repeat):
@@ -666,29 +725,28 @@ def make_mxfp8_scaled_mm_gfx950(
             cur = k_tile % fx.Int32(stages)
             write = (cur + fx.Int32(stages - 1)) % fx.Int32(stages)
             __barrier(steady_wait)
+
             # A direct-to-LDS load is a VMEM op that writes LDS, so the compiler
             # cannot prove it does not alias a later ds_read and drains vmcnt to
-            # zero in between. With frag_first the tile's fragments are read
-            # first, which leaves the DMA free to overlap the whole MFMA block;
-            # workgroups small enough to keep several resident per CU hide that
-            # latency across waves instead and prefer issuing the DMA earliest.
-            if const_expr(frag_first):
+            # zero in between. Reading the tile's fragments before issuing the
+            # DMA removes the reason for that drain: the compiler then emits a
+            # counted wait and sinks the DMA into the MFMA block. This ordering
+            # was measured against the reverse on 12 tile configs spanning
+            # 1 to 16 waves per CU and won 11 of 12 (the twelfth was a tie),
+            # by 2% to 53%, so it is fixed rather than searched.
+            def _mid(cur=cur, k_tile=k_tile, write=write):
                 load_fragments(cur)
                 async_load_b(k_tile + fx.Int32(stages - 1), write)
                 async_load_a(k_tile + fx.Int32(stages - 1), write)
-            else:
-                async_load_b(k_tile + fx.Int32(stages - 1), write)
-                async_load_a(k_tile + fx.Int32(stages - 1), write)
-                load_fragments(cur)
-            mma_stage(k_tile)
+
+            mma_stage(k_tile, _mid)
 
         # Drain: consume the buffers still in flight, walking vmcnt down to 0.
         for s in range_constexpr(stages - 1):
             k_tile = fx.Int32(main_loop_end + s)
             cur = k_tile % fx.Int32(stages)
             __barrier((stages - 2 - s) * d.ldg_wait_count)
-            load_fragments(cur)
-            mma_stage(k_tile)
+            mma_stage(k_tile, lambda cur=cur: load_fragments(cur))
 
         frag_C_out = fx.make_fragment_like(frag_C, out_elem)
         frag_C_out.store(frag_C.load().to(out_elem))
@@ -708,7 +766,6 @@ def make_mxfp8_scaled_mm_gfx950(
             m_waves=m_waves,
             n_waves=n_waves,
             group_m=group_m,
-            frag_first=frag_first,
         )
     )
 

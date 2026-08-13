@@ -26,7 +26,6 @@ _mxfp8_param = MXFP8GemmParams(
     m_waves=BLOCK_M_WARPS,
     n_waves=BLOCK_N_WARPS,
     group_m=GROUP_M,
-    frag_first=FRAG_FIRST,
 )
 _mxfp8_launcher = make_mxfp8_scaled_mm_gfx950(
     m=GEMM_M,
@@ -40,7 +39,6 @@ _mxfp8_launcher = make_mxfp8_scaled_mm_gfx950(
     m_waves=BLOCK_M_WARPS,
     n_waves=BLOCK_N_WARPS,
     group_m=GROUP_M,
-    frag_first=FRAG_FIRST,
 )
 _mxfp8_executor = None
 _mxfp8_init_lock = threading.Lock()
