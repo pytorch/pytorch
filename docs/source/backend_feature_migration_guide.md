@@ -52,9 +52,3 @@ Once your interface is registered:
 - ``GPU_TYPES`` (``torch/_inductor/utils.py``) will include your device type automatically, derived from ``BackendFeature.GPU in iface.backend_features(None)``.
 - Inductor codegen queries (``has_backend_feature`` / ``V.graph.has_feature``) see the inductor-codegen-tier members you advertise.
 - Migration points like online-softmax (``torch/_inductor/fx_passes/post_grad.py``) check ``ONLINE_SOFTMAX in iface.backend_features(device_type)``.
-
-### 3. Governance
-
-- Adding a new framework-level member → PR against PyTorch upstream.
-- Semantic change (rename or meaning change) to an existing member → RFC.
-- OOT backends should only advertise members that exist in the upstream enum.
