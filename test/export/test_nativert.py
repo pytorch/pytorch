@@ -20,7 +20,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS, parametrize
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    parametrize,
+)
 from torch.utils import _pytree as pytree
 
 
@@ -216,80 +220,86 @@ def make_dynamic_cls(cls, strict=False):
     test_class.__module__ = __name__
 
 
+def _nativert_aoti_basic_module():
+    class M(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 4)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            return self.relu(self.linear(x))
+
+    return M()
+
+
+def _nativert_aoti_multi_output_module():
+    class MMultiOutput(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 4)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            return (self.relu(self.linear(x)), x)
+
+    return MMultiOutput()
+
+
+def _nativert_aoti_pytree_module():
+    class M(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear1 = torch.nn.Linear(4, 4)
+            self.linear2 = torch.nn.Linear(4, 4)
+
+        def forward(self, x):
+            x1, (x2, x3) = x
+            y1 = self.linear1(x1)
+            y2 = self.linear2(x2)
+            y3 = self.linear2(x3)
+            return (y1, (y2, y3))
+
+    return M()
+
+
+NATIVERT_AOTI_CASES = ("basic", "multi_output", "pytree")
+
+
+def _nativert_aoti_case(device, case):
+    if case == "basic":
+        return _nativert_aoti_basic_module().to(device), (
+            torch.randn(4, 4, device=device),
+        )
+    if case == "multi_output":
+        return (
+            _nativert_aoti_multi_output_module().to(device),
+            (torch.randn(4, 4, device=device),),
+        )
+    if case == "pytree":
+        return (
+            _nativert_aoti_pytree_module().to(device),
+            (
+                (
+                    torch.randn(4, 4, device=device),
+                    (
+                        torch.randn(4, 4, device=device),
+                        torch.randn(4, 4, device=device),
+                    ),
+                ),
+            ),
+        )
+    raise AssertionError(f"unknown aoti case: {case}")
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
     hw_classification = HardwareClassification.CPU
 
-    @staticmethod
-    def get_module():
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.relu(self.linear(x))
-
-        return M()
-
-    @staticmethod
-    def get_module_multi_output():
-        class MMultiOutput(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return (self.relu(self.linear(x)), x)
-
-        return MMultiOutput()
-
-    @staticmethod
-    def get_model_pytree():
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear1 = torch.nn.Linear(4, 4)
-                self.linear2 = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                x1, (x2, x3) = x
-                y1 = self.linear1(x1)
-                y2 = self.linear2(x2)
-                y3 = self.linear2(x3)
-                return (y1, (y2, y3))
-
-        return M()
-
-    def _aoti_case(self, device, case):
-        if case == "basic":
-            return self.get_module().to(device), (torch.randn(4, 4, device=device),)
-        if case == "multi_output":
-            return (
-                self.get_module_multi_output().to(device),
-                (torch.randn(4, 4, device=device),),
-            )
-        if case == "pytree":
-            return (
-                self.get_model_pytree().to(device),
-                (
-                    (
-                        torch.randn(4, 4, device=device),
-                        (
-                            torch.randn(4, 4, device=device),
-                            torch.randn(4, 4, device=device),
-                        ),
-                    ),
-                ),
-            )
-        raise AssertionError(f"unknown aoti case: {case}")
-
     def _test_aoti(self, device, case):
-        m, sample_inputs = self._aoti_case(device, case)
+        m, sample_inputs = _nativert_aoti_case(device, case)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
 
@@ -371,7 +381,7 @@ class TestNativeRT(TestCase):
                 else:
                     raise e
 
-    @parametrize("case", ["basic", "multi_output", "pytree"])
+    @parametrize("case", NATIVERT_AOTI_CASES)
     def test_aoti(self, device, case):
         self._test_aoti(device, case)
 
@@ -383,7 +393,7 @@ class TestNativeRTTriton(TestNativeRT):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.lib.triton)
-    @parametrize("case", ["basic", "multi_output", "pytree"])
+    @parametrize("case", NATIVERT_AOTI_CASES)
     def test_aoti(self, device, case):
         self._test_aoti(device, case)
 
