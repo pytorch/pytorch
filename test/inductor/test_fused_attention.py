@@ -176,6 +176,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 atol = 3e-3
                 rtol = 1e-2
             if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.half:
+                # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+                # implementation (fp16_on_mi200 in numerical_accuracy.md), so
+                # the eager reference grads are the less accurate side here
+                # (grad rmse vs fp64 gold ~2e-3 vs ~1e-4 for the fused
+                # kernel). Measured max grad diff 3.4e-3 on 1/4096 elements.
                 atol = 5e-3
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
@@ -457,6 +462,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
     def _test_sdpa_rewriter_7(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
         atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
 
         def sfdp_pattern_7(query, key, value, training):
@@ -538,6 +546,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
     def _test_sdpa_rewriter_8(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
         atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
 
         def sfdp_pattern_8(query, key, value):

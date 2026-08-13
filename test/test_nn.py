@@ -13908,9 +13908,6 @@ if __name__ == '__main__':
             else:  # compact, fp16 (cpu / cuda / rocm)
                 expected_input_grad_max_ulp_diff = 192  # cpu 93
                 expected_weight_grad_max_ulp_diff = 64  # cpu 23, cuda/rocm 5
-                if isRocmArchAnyOf(MI200_ARCH):
-                    expected_input_grad_max_ulp_diff = 1024
-                    expected_weight_grad_max_ulp_diff = 256
         elif prob_target:
             # Probability-target caps with the near-zero ULP floor (see
             # ``grad_max_ulp``). fp32 takes the all-input-dtype path, so
@@ -13964,7 +13961,9 @@ if __name__ == '__main__':
             else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 48
                 expected_weight_grad_max_ulp_diff = 128
-                if isRocmArchAnyOf(MI200_ARCH):
+                if "cpu" not in device and isRocmArchAnyOf(MI200_ARCH):
+                    # bf16-grade backward GEMMs (see wb_grad_err_tol below);
+                    # measured 116 against the shared cap of 48.
                     expected_input_grad_max_ulp_diff = 256
         elif _resolved_policy == "accurate":
             # bias=False caps are device-independent here (the device-specific
@@ -14026,9 +14025,13 @@ if __name__ == '__main__':
         # Weight/bias grad_error use feps, except the prob+bias accelerator legs
         # (same cancellation inflates them too) which also get 16*eps.
         wb_grad_err_tol = eta * 16 if prob_bias_accel else feps
-        if isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
-            input_grad_err_tol = input_grad_err_tol * 3
-            wb_grad_err_tol = wb_grad_err_tol * 3
+        if "cpu" not in device and dtype == torch.float16 and isRocmArchAnyOf(MI200_ARCH):
+            # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+            # implementation (fp16_on_mi200 in numerical_accuracy.md). Only
+            # the weight grad error trips its cap there: measured
+            # 3.283e-3 = 3.36 * eps against the feps = 3 * eps cap, identical
+            # locally and in CI; input grads and the ULP caps pass unchanged.
+            wb_grad_err_tol = feps * 2
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
