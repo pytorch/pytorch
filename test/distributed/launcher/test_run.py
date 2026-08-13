@@ -34,7 +34,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_CUDA,
+    TEST_ACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -259,7 +259,7 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @patch("torch.cuda.is_available", return_value=False)
+    @patch("torch.accelerator.is_available", return_value=False)
     def test_nproc_launch_auto_configurations(self, _mock1):
         expected = torch._utils.cpu_count()
         self._test_nproc_launch_configuration("auto", expected)
@@ -689,7 +689,7 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIf(not TEST_ACCELERATOR, "requires GPU")
     # ElasticLaunchTest is a plain TestCase, but this test launches
     # `torchrun --nproc-per-node=2` which needs 2 GPUs. That process spawning
     # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
@@ -732,7 +732,8 @@ class ElasticLaunchTest(TestCase):
             default0 = []
             default1 = []
             for line in output.splitlines():
-                if "cuda:" not in line:
+                # Check for accelerator device references (cuda: or xpu:)
+                if not any(dev in line for dev in ("cuda:", "xpu:")):
                     continue
                 if line.startswith("[default0]:"):
                     default0.append(line[11:])
