@@ -246,9 +246,6 @@ class AOTTestCase(TestCase):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
 
 
-# Module-level `@torch.fx.wrap`ed helper for
-# `test_saved_tensors_hooks_gm_data_dependent_probe`. `torch.fx.wrap`
-# requires module scope.
 @torch.fx.wrap
 def _il_log_tensor_stats_for_regression(t, name):
     try:
