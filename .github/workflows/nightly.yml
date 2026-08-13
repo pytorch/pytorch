@@ -116,7 +116,7 @@ jobs:
           if [ -n "$EXISTING" ]; then
             BRANCH=$(gh pr view "$EXISTING" --json headRefName --jq '.headRefName')
           fi
-          git checkout -B "$BRANCH"
+          git checkout -b "$BRANCH"
           git add .github/merge_rules.yaml
           git commit -m "Update Metamates merge rule"
           git push --set-upstream origin "$BRANCH" -f
