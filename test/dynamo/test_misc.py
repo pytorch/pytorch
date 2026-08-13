@@ -18105,6 +18105,15 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     )
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
+        real_tensor_refs = []
+        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+
+        def record_real_tensor(mode, tensor, **kwargs):
+            fake = from_tensor(mode, tensor, **kwargs)
+            if mode.propagate_real_tensors and fake.real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            return fake
+
         @torch.compile(backend="eager", fullgraph=True)
         def f(mask, box):
             # u0, u1 = mask.tolist()
@@ -18114,7 +18123,18 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 mask, (h, w), mode="bilinear", align_corners=False
             )
 
-        f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+        with mock.patch.object(
+            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+        ):
+            f(
+                torch.tensor([30, 30], device=device),
+                torch.tensor([68, 32], device=device),
+            )
+
+        self.assertTrue(real_tensor_refs)
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in real_tensor_refs))
 
     def test_scalar_isin_decomposition(self):
         def f():

@@ -244,7 +244,7 @@ def clear_compile_context_weakrefs(
     _clear_fake_mode_weakrefs(tc.fake_mode)
     if hasattr(output_graph, "_old_fake_mode"):
         _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
-    output_graph.shape_env.tracked_fakes = None
+    output_graph.tracked_fakes.clear()
 
 
 class Tracker:
