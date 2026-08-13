@@ -23,6 +23,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_JETSON,
     IS_LINUX,
@@ -48,6 +49,7 @@ if not TEST_CUDA:
 
 
 class TestCudaMultiGPU(TestCase):
+    hw_classification = HardwareClassification.CUDA
     FIFTY_MIL_CYCLES = 50000000
 
     def test_cuda_synchronize(self):
@@ -1350,6 +1352,8 @@ t2.start()
 
 
 class TestCudaComm(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
             raise unittest.SkipTest("only one GPU detected")
