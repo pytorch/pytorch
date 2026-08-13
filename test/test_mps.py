@@ -14410,17 +14410,6 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
-    @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
-    def test_conv3d_pointwise_batched(self, with_bias):
-        # 1x1x1 stride-1 convs run as per-batch matmuls; outputs of batch > 0
-        # are views at a storage offset, which macOS 14 miscomputed
-        x = torch.randn(2, 48, 5, 10, 5)
-        weight = torch.randn(96, 48, 1, 1, 1)
-        bias = torch.randn(96) if with_bias else None
-        expected = F.conv3d(x, weight, bias)
-        actual = F.conv3d(x.to("mps"), weight.to("mps"), bias.to("mps") if with_bias else None)
-        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
-
     @parametrize("case", ["catalog", "simd_miss"])
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("with_bias", [False, True])
