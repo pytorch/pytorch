@@ -62,7 +62,7 @@ struct MagmaInitializer {
 
 namespace at::native {
 
-void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos);
+void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -808,7 +808,7 @@ namespace {
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
     // Select a custom pivoted LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if (compute_pivots && (m == n) && (4 <= batch && batch <= 65536) && m >= 256) {
+    if ((m == n) && ((compute_pivots && (4 <= batch && batch <= 65536) && m >= 256) || (!compute_pivots && batch >= 16 && m <= 1024))) {
       return SolverBackend::CUSTOM;
     }
 
@@ -921,7 +921,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
         lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
         break;
       case SolverBackend::CUSTOM:
-        ::at::native::lu_batched_blas3_kernel(input, pivots, infos);
+        ::at::native::lu_batched_blas3_kernel(input, pivots, infos, compute_pivots);
         break;
     }
 #endif
