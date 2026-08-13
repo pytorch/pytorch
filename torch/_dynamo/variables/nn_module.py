@@ -553,6 +553,12 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, types.FunctionType):
                 return variables.UserMethodVariable(subobj, self, source=source)
+            elif isinstance(subobj, torch._C._dynamo.eval_frame.DisableWrapper):
+                # torch._dynamo.disable-d method: build from the attribute source
+                # so it reconstructs through the descriptor (DisableWrapper's
+                # tp_descr_get binds self) and graph-breaks in
+                # SkipFunctionVariable.call_function.
+                return VariableTracker.build(tx, subobj, source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]

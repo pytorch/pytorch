@@ -4114,6 +4114,12 @@ BUILTIN_CALLABLES = {
 def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
     if not hashable(obj):
         return None
+    # torch._dynamo.disable returns a C-level DisableWrapper (see
+    # torch/csrc/dynamo/eval_frame.c). It is not a Python function, so classify
+    # it here as a skipped callable; SkipFunctionVariable then reads its
+    # _torchdynamo_disable attributes to graph-break instead of tracing into it.
+    if isinstance(obj, torch._C._dynamo.eval_frame.DisableWrapper):
+        return SkipFunctionVariable
     # Custom allow/disallow in graph takes precedence over the general lookup.
     if is_callable_disallowed(obj):
         return SkipFunctionVariable

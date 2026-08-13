@@ -139,3 +139,11 @@ runtime_overhead_eager_cpu,instruction_count,155600,0.1
 
 
 runtime_overhead_eager,instruction_count,170100,0.1
+
+
+
+disable_overhead,instruction_count,3369,0.1
+
+
+
+disable_dynamo_overhead,instruction_count,5291,0.1
