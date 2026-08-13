@@ -53,3 +53,25 @@ REGISTER_ALL_CLAMP_OPS(bool);
 REGISTER_ALL_CLAMP_OPS(float);
 REGISTER_ALL_CLAMP_OPS(half);
 REGISTER_ALL_CLAMP_OPS(bfloat);
+
+struct isposinf_functor {
+  template <typename T>
+  inline bool operator()(const T x) {
+    return x == ::metal::numeric_limits<T>::infinity();
+  }
+};
+
+struct isneginf_functor {
+  template <typename T>
+  inline bool operator()(const T x) {
+    return x == -::metal::numeric_limits<T>::infinity();
+  }
+};
+
+#define REGISTER_ISINF_OPS(T)           \
+  REGISTER_UNARY_OP(isposinf, T, bool); \
+  REGISTER_UNARY_OP(isneginf, T, bool);
+
+REGISTER_ISINF_OPS(float);
+REGISTER_ISINF_OPS(half);
+REGISTER_ISINF_OPS(bfloat);
