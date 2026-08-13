@@ -14,7 +14,11 @@ from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import (
     post_training_sparse_quantize,
 )
 from torch.nn.utils.parametrize import is_parametrized
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class ImplementedSparsifier(BaseDataSparsifier):
@@ -29,6 +33,8 @@ class ImplementedSparsifier(BaseDataSparsifier):
 
 
 class _BaseDataSparsiferTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r"""This helper test class takes in any supported type of and runs some tests.
     The user is required to pass in the data that needs to sparsified and the
     runner will run some tests that needs to be passed in order for the data
@@ -296,6 +302,8 @@ class _BaseDataSparsiferTestCase(TestCase):
 
 
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r"""This helper test class takes in any supported type of and runs some tests.
     This inherits the TestBaseDataSparsifierRuner wherein some functions are
     over-ridden to take accommodate the specific sparsifier.
@@ -496,6 +504,8 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
 
 
 class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """To add unit tests to support new data types for the BaseDataSparsifier, create the following
         data_list: List of tuples of name, data to be added to the constructor
         defaults: default config for the above data in data_list
@@ -569,6 +579,8 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
 
 
 class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """To add unit tests to support new data types for the NormDataSparsifier, create the following
     data_list: List of tuples of name, data to be added to the constructor
     defaults: default config for the above data in data_list
@@ -740,6 +752,8 @@ class Model(nn.Module):
 
 
 class TestQuantizationUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_ptq_sparsify_first(self):
         """The expectation is post_training_sparse_quantize function
         1. Takes in a model
