@@ -85,9 +85,10 @@ class TestStreams(torch._dynamo.test_case.TestCase):
             def f(a):
                 return a * 2 + 1
 
-            f(x)  # compile
+            self.assertEqual(f(x), x * 2 + 1)  # compile
             calls.clear()
-            f(x)  # steady-state cache hit -> no reconstruction
+            # steady-state cache hit -> no reconstruction
+            self.assertEqual(f(x), x * 2 + 1)
             self.assertEqual(
                 calls, [], "stream-free graph reconstructed user objects per call"
             )
@@ -104,6 +105,38 @@ class TestStreams(torch._dynamo.test_case.TestCase):
             calls.clear()
             g(x)  # stream is referenced -> reconstruction still emitted
             self.assertTrue(calls, "stream-using graph did not reconstruct the stream")
+
+    @requires_cuda
+    def test_ambient_stream_reconstruction_kept_when_used(self):
+        # Exercises the ambient-stream branch of the elision gate: the only
+        # registered object is the ambient current stream (index 0, no
+        # user-created stream), but the graph uses it via a stream op. Realizing
+        # current_stream() emits a get_external_object_by_index(0) node that the
+        # gate keys off, so the per-call reconstruction must still be emitted --
+        # otherwise synchronize_stream(0) would resolve a stale trace-time stream.
+        import torch._dynamo.graph_bytecode_inputs as gbi
+
+        calls = []
+        orig = gbi.store_user_object_weakrefs
+
+        def spy(*args):
+            calls.append(len(args))
+            return orig(*args)
+
+        with patch.object(gbi, "store_user_object_weakrefs", spy):
+            x = torch.randn(8, device="cuda")
+
+            @torch.compile(backend="eager")
+            def f(a):
+                torch.cuda.current_stream().synchronize()
+                return a + 1
+
+            self.assertEqual(f(x), x + 1)  # compile
+            calls.clear()
+            self.assertEqual(f(x), x + 1)  # ambient stream used -> reconstruction kept
+            self.assertTrue(
+                calls, "ambient-stream-op graph did not reconstruct the stream"
+            )
 
     @requires_cuda
     def test_leaf_function_module_survives_stream_graph(self):
