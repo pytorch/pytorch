@@ -105,18 +105,25 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
 
 
 class TestCheckpointableTensorDistributed(DTensorTestBase):
-    # `device_type` is hard-coded to "cpu" below rather than derived from
-    # whatever accelerator is present, so this is tied to CPU by
-    # construction -- CPU, not GENERIC.
+    # Deliberately CPU, not GENERIC or ACCELERATOR: the test always wants
+    # "cpu" regardless of what accelerator is present, not whatever
+    # `DTensorTestMixin.device_type` would dynamically pick.
+    #
+    # Do NOT add a `device_type` property/classmethod here to pin it: this
+    # class's own dict is scanned by `instantiate_device_type_tests` and any
+    # `device_type` found there is copied verbatim onto the generated
+    # `...CPU` class, shadowing `CPUTestBase.device_type = "cpu"` with the
+    # raw (non-string) descriptor and crashing "_" + cls.device_type with
+    # "can only concatenate str (not 'property') to str". `only_for="cpu"`
+    # below already pins device_type to "cpu" the correct way, through
+    # CPUTestBase, which precedes DTensorTestMixin in the generated class's
+    # MRO -- so `self.device_type` still resolves to "cpu" without an
+    # explicit override.
     hw_classification = HardwareClassification.CPU
 
     @property
     def world_size(self) -> int:
         return 4
-
-    @property
-    def device_type(self) -> str:
-        return "cpu"
 
     @with_comms
     @with_temp_dir
