@@ -6,7 +6,7 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._common_rules import einop_rule, pointwise_rule
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
 )
@@ -18,6 +18,8 @@ aten = torch.ops.aten
 class CommonRulesTest(DTensorContinuousTestBase):
     # hard code world size to 4 as we need to test
     # at least with 2d mesh
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 4
 
     def _gen_tensor_meta(self, shape):
