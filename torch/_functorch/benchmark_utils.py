@@ -46,7 +46,8 @@ def dump_chrome_trace(
     """
 
     if devices is None:
-        devices = ["cuda"]
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        devices = [accelerator.type] if accelerator is not None else ["cpu"]
 
     global synchronize
     if devices != ["cpu"] and torch.accelerator.is_available():
@@ -234,9 +235,8 @@ def benchmark_utilization(
         input_,
         chrome_trace_file_name,
         optimize_ctx,
-        [ProfilerActivity.CUDA],
+        list(torch.profiler.supported_activities()),
         num_runs=num_runs,
-        devices=["cuda"],
     )
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length
