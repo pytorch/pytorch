@@ -117,7 +117,7 @@ def simple_reduce_tests(rank, world_size):
 
 
 class RendezvousEnvTest(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     @requires_ucc()
     @retry_on_connect_failures
@@ -140,7 +140,7 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     @requires_ucc()
     @retry_on_connect_failures
@@ -149,7 +149,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupUCCTest(MultiProcContinuousTest):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
     def backend_str(cls) -> str:
@@ -1237,13 +1237,13 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     CommTest,
     globals(),
-    only_for=("cuda",),
+    except_for=("cpu",),
 )
 
 instantiate_device_type_tests(
     UccProcessGroupWithDispatchedCollectivesTests,
     globals(),
-    only_for=("cuda",),
+    except_for=("cpu",),
 )
 
 if __name__ == "__main__":
