@@ -61,6 +61,7 @@ class SampleModelForDimOne(torch.nn.Module):
 
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
+    hw_classification = common_utils.HardwareClassification.GENERIC
 
     def assert_export(
         self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
@@ -441,6 +442,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
 
 class TestCustomTranslationTable(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
     def test_custom_translation_table_overrides_ops(self):
         from onnxscript import opset18 as op
 
