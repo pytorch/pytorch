@@ -497,31 +497,16 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    @staticmethod
-    def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
-        for user in node.users:
-            if user.op == "output":
-                return True
-            if user.op == "call_method" and user.target in (
-                "is_contiguous",
-                "storage_offset",
-                "stride",
-            ):
-                return True
-            if (
-                isinstance(user.target, torch._ops.OpOverload)
-                and user.target.namespace != "aten"
-            ):
-                return True
-        return False
-
     def match(self, node: torch.fx.Node) -> tuple[str, int | None, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             # Splitting a wide GEMM returns non-contiguous views. Avoid changing
             # observable layout or passing those views to opaque custom operators.
-            if self._has_layout_sensitive_user(node):
+            # Note: this checks the linear node's direct users only; a layout
+            # change can also leak through aten view ops, but those are out of
+            # scope here (pre-existing limitation).
+            if _has_layout_sensitive_user(node):
                 return None
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
@@ -620,6 +605,36 @@ class BatchLinearLHSFusion(BatchFusion):
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
+
+
+def _op_namespace(tgt) -> str | None:
+    # Both OpOverload and OpOverloadPacket can appear as call_function targets.
+    # OpOverload exposes .namespace; OpOverloadPacket does not (accessing it
+    # raises), so derive the namespace from the qualified op name ("ns::op").
+    if isinstance(tgt, torch._ops.OpOverload):
+        return tgt.namespace
+    if isinstance(tgt, torch._ops.OpOverloadPacket):
+        return tgt._qualified_op_name.split("::")[0]
+    return None
+
+
+def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+    # A user that can observe the (possibly fused) output layout: the graph
+    # output, stride/contiguity/storage-offset queries, or an opaque custom op
+    # (both OpOverload and OpOverloadPacket call forms). aten ops are excluded
+    # because their layout-sensitive handlers are traced/folded elsewhere.
+    for user in node.users:
+        if user.op == "output":
+            return True
+        if user.op == "call_method" and user.target in (
+            "is_contiguous",
+            "storage_offset",
+            "stride",
+        ):
+            return True
+        if _op_namespace(user.target) not in (None, "aten"):
+            return True
+    return False
 
 
 # Poor person's check for if a node in the graph mutates its input.
