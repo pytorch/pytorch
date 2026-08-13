@@ -817,8 +817,16 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
+#ifndef USE_ROCM
       __threadfence(); // complete the acquire pattern after atomic
+#else
+      // On ROCm the producer blocks use committed stores (cmtdStore) instead of
+      // a __threadfence() to make their staging writes visible ([CMTSTRS]). That
+      // covers the release side, but the last block still needs an acquire fence
+      // to invalidate its (non-coherent) L1 before reading the staging buffer;
+      // otherwise it can observe stale/torn partial results. A single fence here
+      // is far cheaper than issuing per-element coherent loads.
+      __threadfence();
 #endif
       for (auto &v : value) {
         v = ident;
