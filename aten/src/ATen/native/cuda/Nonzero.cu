@@ -167,7 +167,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg,
 } // anonymous namespace
 
 template <typename scalar_t>
-void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
+static void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   Tensor self_ = self.contiguous();
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   int64_t chunk_size, num_chunks;
@@ -294,7 +294,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
 }
 
 template <typename scalar_t>
-void nonzero_static_cuda_out_impl(
+static void nonzero_static_cuda_out_impl(
     const Tensor& self,
     int64_t size,
     int64_t fill_value,
