@@ -31,8 +31,13 @@ template <typename scalar_t>
 void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
 #if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
   // If this is a large BAR device, we can just read directly from VRAM
+  // unless expandable VMM is active. After expandable-segment OOM, the direct
+  // host dereference can observe stale scalar values while D2H copies remain
+  // coherent.
   if (
       at::cuda::getCurrentDeviceProperties()->isLargeBar &&
+      !c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+          expandable_segments() &&
       is_cuda_caching_allocator_tensor(self)) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 #if ROCM_VERSION < 71400
