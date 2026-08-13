@@ -40,6 +40,7 @@
 #include <ATen/ops/trace_native.h>
 #include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -360,6 +361,21 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       StdVarType stdVarType) {
   TORCH_CHECK_TYPE(input_t.is_floating_point() || input_t.is_complex(),
                    "std and var only support floating point and complex dtypes");
+
+  // MPSGraph does not support complex dtypes. Decompose: var(z) = var(real) + var(imag).
+  if (c10::isComplexType(input_t.scalar_type())) {
+    auto real_view = at::view_as_real(input_t.contiguous()); // shape [..., 2]; last dim is [real, imag]
+    auto real_part = real_view.select(-1, 0).contiguous();
+    auto imag_part = real_view.select(-1, 1).contiguous();
+    auto var_real = std_var_common_impl_mps(real_part, dim, correction, keepdim, STANDARD_VARIANCE);
+    auto var_imag = std_var_common_impl_mps(imag_part, dim, correction, keepdim, STANDARD_VARIANCE);
+    auto var_sum = var_real.add(var_imag);
+    if (stdVarType == STANDARD_DEVIATION) {
+      return var_sum.sqrt();
+    }
+    return var_sum;
+  }
+
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
