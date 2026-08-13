@@ -1533,6 +1533,11 @@ class DeviceCachingAllocator {
   // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
 
+  // Tag recorded as internal_metadata_ on trace entries emitted while it is
+  // set (see malloc_with_address). Guarded by mutex, which the setter holds
+  // across the tagged region.
+  std::string internal_metadata_tag;
+
  public:
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
       : device_id(id),
@@ -1996,17 +2001,12 @@ class DeviceCachingAllocator {
     const size_t prefix_size = requested_addr - block_begin;
 
     // mallocWithAddress may allocate both prefix block and requested block,
-    // and free prefix block later. This adds a fake malloc/free pair for prefix
-    // block. A metadata is added for better memory visualization.
-    const auto original_user_metadata = getUserMetadata();
-    const auto malloc_with_address_metadata = original_user_metadata.empty()
-        ? std::string("mallocWithAddress")
-        : original_user_metadata + "\nmallocWithAddress";
-    setUserMetadata(malloc_with_address_metadata);
-    auto restore_user_metadata =
-        c10::make_scope_exit([this, original_user_metadata]() {
-          setUserMetadata(original_user_metadata);
-        });
+    // and free prefix block later. This adds a fake malloc/free pair for
+    // prefix block. Tag the resulting trace entries for better memory
+    // visualization, without touching the user-set metadata.
+    internal_metadata_tag = "mallocWithAddress";
+    auto clear_internal_metadata =
+        c10::make_scope_exit([this]() { internal_metadata_tag.clear(); });
 
     Block* prefix_block = nullptr;
     Block* requested_source = containing_block;
@@ -4456,6 +4456,7 @@ class DeviceCachingAllocator {
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
         metadata_override ? std::move(*metadata_override) : user_metadata);
+    te.internal_metadata_ = internal_metadata_tag;
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
