@@ -197,51 +197,21 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
-def _matches_device_autocast_class(value) -> bool:
+def device_type_for_autocast_class(value: Any) -> str | None:
+    """Return the device_type that registered ``value`` as its autocast class.
+
+    ``None`` means ``value`` is not a registered autocast class.  See
+    ``device_interface.device_type_for_autocast_class`` for how a class is
+    matched against what a device registered.
+    """
+    from ..device_interface import device_type_for_autocast_class as lookup
+
+    return lookup(value)
+
+
+def _matches_device_autocast_class(value: Any) -> bool:
     """Check whether value is an autocast class registered by a device."""
-    from ..device_interface import get_device_autocast_classes
-
-    if not isinstance(value, type):
-        return False
-    if not issubclass(value, torch.amp.autocast_mode.autocast):
-        return False
-    if value is torch.amp.autocast_mode.autocast:
-        return False
-
-    registered = get_device_autocast_classes()
-    if value in registered:
-        return True
-    if not registered:
-        return False
-    return _autocast_class_by_file(value) is not None
-
-
-def _autocast_class_by_file(value: type) -> type | None:
-    """Return the registered autocast class defined in value's source file."""
-    from ..device_interface import get_device_autocast_classes
-
-    try:
-        value_file = inspect.getfile(value)
-    except (TypeError, OSError):
-        return None
-    for autocast_class in get_device_autocast_classes():
-        try:
-            if inspect.getfile(autocast_class) == value_file:
-                return autocast_class
-        except (TypeError, OSError):
-            pass
-    return None
-
-
-def device_type_for_autocast_class(value: type) -> str | None:
-    from ..device_interface import get_device_autocast_classes
-
-    registered = get_device_autocast_classes()
-    device_type = registered.get(value)
-    if device_type is not None:
-        return device_type
-    autocast_class = _autocast_class_by_file(value)
-    return None if autocast_class is None else registered[autocast_class]
+    return device_type_for_autocast_class(value) is not None
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
@@ -861,15 +831,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ):
-            # pyrefly: ignore [bad-argument-type]
-            return AutocastModeVariable.create(self.value, args, kwargs)
-        elif _matches_device_autocast_class(self.value):
-            # Autocast class registered via DeviceInterface.
-            # Handles both exact reference match and multi-path
-            # import identity mismatch (e.g. torch.npu.amp vs
-            # torch_npu.npu.amp returning different Python objects
-            # for the same class).
+            # An autocast class registered via DeviceInterface.autocast_classes.
+        ) or _matches_device_autocast_class(self.value):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (

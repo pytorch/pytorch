@@ -1073,6 +1073,19 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return contextlib._GeneratorContextManager
 
 
+def _autocast_base_defaults() -> dict[str, Any]:
+    """Defaults of torch.amp.autocast_mode.autocast.__init__, by name."""
+    parameters = inspect.signature(torch.amp.autocast_mode.autocast).parameters
+    return {
+        name: parameter.default
+        for name, parameter in parameters.items()
+        if parameter.default is not inspect.Parameter.empty
+    }
+
+
+_AUTOCAST_BASE_DEFAULTS = _autocast_base_defaults()
+
+
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(
@@ -1082,20 +1095,13 @@ class AutocastModeVariable(ContextWrappingVariable):
     ) -> "AutocastModeVariable":
         from .torch import device_type_for_autocast_class
 
-        if func not in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ]:
-            # Also accept autocast subclasses registered via
-            # DeviceInterface.  issubclass handles multi-path import
-            # aliasing where the same class acquires different Python
-            # identities.
-            if not (
-                isinstance(func, type)
-                and issubclass(func, torch.amp.autocast_mode.autocast)
-            ):
-                raise AssertionError(f"unexpected autocast function: {func}")
+        # Subclasses registered via DeviceInterface.autocast_classes are
+        # accepted alongside the in-tree entry points.
+        if not (
+            isinstance(func, type)
+            and issubclass(func, torch.amp.autocast_mode.autocast)
+        ):
+            raise AssertionError(f"unexpected autocast function: {func}")
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
@@ -1118,6 +1124,17 @@ class AutocastModeVariable(ContextWrappingVariable):
                     raise AssertionError(
                         f"Cannot determine device_type for autocast class: {func}"
                     )
+            elif key not in bound_args.arguments:
+                # A subclass may narrow the constructor and not accept every
+                # base parameter, e.g. ``def __init__(self, dtype=None)``.
+                # Use the base default for whatever it does not accept, which
+                # is what its super().__init__ call gets when it does not pass
+                # that parameter either.  Note the binding above must stay
+                # against func's own signature: a subclass may order its
+                # parameters differently than the base (torch.npu.amp.autocast
+                # takes `enabled` first), so binding to the base signature
+                # would misread positional arguments.
+                arg = _AUTOCAST_BASE_DEFAULTS[key]
             else:
                 arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
