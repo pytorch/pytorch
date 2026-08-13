@@ -1587,16 +1587,9 @@ class Tensor(torch._C.TensorBase):
 
             read_only (bool): If True, the exported capsule is marked read-only
                 (``DLPACK_FLAG_BITMASK_READ_ONLY``) and the data is exported
-                through the storage's const data pointer, so a copy-on-write
-                tensor is not materialized. The consumer must not mutate the
-                data. Requires the versioned DLPack protocol
-                (``max_version >= (1, 0)``).
-
-        .. note::
-            ``data`` is the base address of the tensor's storage and
-            ``byte_offset`` the tensor's offset into that storage in bytes;
-            consumers must add ``byte_offset`` to ``data`` to reach the first
-            element.
+                through ``const_data_ptr()`` so a copy-on-write tensor is not
+                materialized. The consumer must not mutate the data. Requires
+                the versioned DLPack protocol (``max_version >= (1, 0)``).
         """
         if has_torch_function_unary(self):
             args = (self,)
