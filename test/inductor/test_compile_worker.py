@@ -22,11 +22,20 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_LINUX, skipIfWindows
+from torch.testing._internal.common_device_type import skipPRIVATEUSE1
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    skipIfWindows,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+
+device_type = getattr(torch.accelerator.current_accelerator(), "type", None)
 
 
 class TestCompileWorker(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def make_pool(self, size):
         return SubprocPool(size)
 
@@ -319,6 +328,8 @@ class TestCompileWorker(TestCase):
 
 @config.patch("quiesce_async_compile_time", 0.1)
 class TestCompileWorkerWithTimer(TestCompileWorker):
+    hw_classification = HardwareClassification.CPU
+
     def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
 
@@ -329,6 +340,8 @@ class TestCompileWorkerWatchdog(TestCase):
     # turns them into a "compile_worker_status" structured-trace artifact -- so a
     # stuck/slow worker leaves a breadcrumb in tlparse instead of silently
     # wedging. See subproc_pool.SubprocMain._watchdog_loop.
+    hw_classification = HardwareClassification.CPU
+
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_watchdog_reports_slow_jobs(self):
         reports = []
@@ -520,6 +533,8 @@ class TestCompileWorkerWatchdog(TestCase):
 
 
 class TestTimer(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_basics(self):
         done = Event()
 
@@ -585,6 +600,8 @@ class _FakeTritonKernel:
 
 
 class TestSubprocessEnv(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def assert_path_in_dir(self, path, expected_dir):
         expected_dir = os.path.abspath(expected_dir)
         self.assertEqual(
@@ -703,6 +720,7 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    @skipPRIVATEUSE1
     def test_nvgemm_precompile_sends_full_cache_env(self):
         from torch._inductor.async_compile import AsyncCompile
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
@@ -764,6 +782,7 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    @skipPRIVATEUSE1
     def test_worker_nvgemm_precompile_clears_cache_env(self):
         import torch
         import torch._inductor.runtime.compile_tasks as compile_tasks
@@ -840,6 +859,7 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    @skipPRIVATEUSE1
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
@@ -915,6 +935,8 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
@@ -943,7 +965,7 @@ class TestSetTritonLibdevicePath(TestCase):
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             self.skipTest("CUDA not available")
         if CUDA_HOME is None:
             self.skipTest("CUDA_HOME not set")
@@ -953,8 +975,8 @@ class TestSetTritonLibdevicePath(TestCase):
 
         torch._dynamo.reset()
         torch.manual_seed(42)
-        base = torch.randn(1000, device="cuda", dtype=torch.float32).abs() + 1e-6
-        exp = torch.randn(1000, device="cuda", dtype=torch.float32)
+        base = torch.randn(1000, device=device_type, dtype=torch.float32).abs() + 1e-6
+        exp = torch.randn(1000, device=device_type, dtype=torch.float32)
 
         eager_result = torch.pow(base, exp)
         compiled_result = torch.compile(torch.pow)(base, exp)
@@ -966,7 +988,7 @@ class TestSetTritonLibdevicePath(TestCase):
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             self.skipTest("CUDA not available")
         if CUDA_HOME is None:
             self.skipTest("CUDA_HOME not set")
@@ -983,7 +1005,7 @@ class TestSetTritonLibdevicePath(TestCase):
                 1.0,
                 3.9194295406341553,
             ],
-            device="cuda",
+            device=device_type,
             dtype=torch.float32,
         )
 
@@ -998,7 +1020,7 @@ class TestSetTritonLibdevicePath(TestCase):
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             self.skipTest("CUDA not available")
 
         if CUDA_HOME is None:
@@ -1013,7 +1035,7 @@ class TestSetTritonLibdevicePath(TestCase):
         def fn(x):
             return torch.pow(x, 2.0)
 
-        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        x = torch.randn(10, device=device_type, dtype=torch.float32)
         fn(x)
 
         # Verify libdevice path was set. The exact path is environment-specific
@@ -1031,6 +1053,8 @@ class TestSetTritonLibdevicePath(TestCase):
 
 
 class TestTritonCompileWorker(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
         from torch._inductor.runtime import triton_helpers
