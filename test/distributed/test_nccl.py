@@ -407,6 +407,49 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
                 handle.wait_signal(src_rank=bad_rank)
 
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip CUDA test for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(3)
+    def test_cuda_symmem_signal_pads_are_process_group_local(self):
+        symm_mem.set_backend("CUDA")
+        torch.cuda.set_device(self.rank)
+
+        subgroup = c10d.new_group([0, 2])
+        tensor = symm_mem.empty(64, device=self.device)
+        world_handle = symm_mem.rendezvous(tensor, group=c10d.group.WORLD)
+        subgroup_handle = None
+        if self.rank in (0, 2):
+            subgroup_handle = symm_mem.rendezvous(tensor, group=subgroup)
+
+        c10d.barrier()
+        if self.rank == 2:
+            subgroup_handle.put_signal(dst_rank=0)
+            torch.cuda.synchronize()
+        c10d.barrier()
+
+        if self.rank == 0:
+            # Subgroup-local rank 1 and WORLD rank 1 both use slot 1. Verify the
+            # subgroup signal arrived without modifying WORLD's physical pad.
+            subgroup_slot = subgroup_handle.get_signal_pad(
+                0, (1,), torch.uint32, storage_offset=1
+            )
+            world_slot = world_handle.get_signal_pad(
+                0, (1,), torch.uint32, storage_offset=1
+            )
+            self.assertEqual(subgroup_slot.item(), 1)
+            self.assertEqual(world_slot.item(), 0)
+            subgroup_handle.wait_signal(src_rank=1, timeout_ms=60000)
+            torch.cuda.synchronize()
+
+        c10d.barrier()
+        if self.rank == 1:
+            world_handle.put_signal(dst_rank=0)
+            torch.cuda.synchronize()
+        elif self.rank == 0:
+            world_handle.wait_signal(src_rank=1, timeout_ms=60000)
+            torch.cuda.synchronize()
+        c10d.barrier()
+
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
