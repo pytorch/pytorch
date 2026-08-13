@@ -647,6 +647,62 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(mut_inp, non_mut(foo(inp)))
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @parametrize("mark_step", (False, True))
+        def test_mutated_output_from_prior_generation_errors(self, mark_step):
+            class Model(nn.Module):
+                def forward(self, x, state=None):
+                    if state is None:
+                        state = torch.zeros_like(x)
+                    state.copy_(state + x)
+                    return x + state, state
+
+            compiled = torch.compile(Model().cuda().eval(), mode="reduce-overhead")
+            inp = torch.randn(1, 4, device="cuda")
+
+            with torch.no_grad():
+                _, state = compiled(inp)
+                if mark_step:
+                    torch.compiler.cudagraph_mark_step_begin()
+                with self.assertRaises(RuntimeError) as exc:
+                    compiled(torch.randn_like(inp), state)
+
+            FileCheck().check("tensor output of CUDAGraphs").check(
+                "mutated input"
+            ).check("Manually clone").check("cudagraph_trees_generation_cloning").run(
+                str(exc.exception)
+            )
+
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_mutated_output_from_prior_generation(self):
+            class Model(nn.Module):
+                def forward(self, x, state=None):
+                    if state is None:
+                        state = torch.zeros_like(x)
+                    state.copy_(state + x)
+                    return x + state, state
+
+            compiled = torch.compile(Model().cuda().eval(), mode="reduce-overhead")
+            inputs = [torch.randn(1, 4, device="cuda") for _ in range(3)]
+            expected_state = torch.zeros_like(inputs[0])
+
+            with torch.no_grad():
+                state = None
+                for inp in inputs:
+                    torch.compiler.cudagraph_mark_step_begin()
+                    expected_state.copy_(expected_state + inp)
+                    expected_out = inp + expected_state
+                    out, state = compiled(inp, state)
+                    self.assertEqual(out, expected_out)
+                    self.assertEqual(state, expected_state)
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
