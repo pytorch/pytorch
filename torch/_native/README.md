@@ -328,6 +328,12 @@ All modules under `torch._native` route through Python's standard `logging` and 
 TORCH_LOGS=+native_dsl python my_script.py
 ```
 
+Per-compile instrumentation (`torch/_native/instrumentation.py`) has its own artifact, off by default to avoid log spew:
+
+```
+TORCH_LOGS=+native_dsl_compile python my_script.py
+```
+
 When adding new code under `torch/_native`, follow the existing pattern:
 * Use `log = logging.getLogger(__name__)` per module.
 * Default to `log.info(...)` for registration-time diagnostics that the average user does not need to see; reserve `log.warning(...)` for genuine misuse (e.g. user-supplied callbacks that fail).
