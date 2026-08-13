@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import contextlib
 from typing import Any
+import warnings
 from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
-from torch.nn.utils._named_member_accessor import NamedMemberAccessor
+from torch.nn.utils._named_member_accessor import NamedMemberAccessor, _MISSING
 
 
 __all__ = ["functional_call"]
@@ -102,6 +103,8 @@ def _reparametrize_module(
     tie_weights: bool = False,
     strict: bool = False,
     stack_weights: bool = False,
+    *,
+    unsafe: bool = False,
 ):
     if tie_weights:
         untied_parameters_and_buffers = _untie_named_tensors_map(
@@ -111,6 +114,65 @@ def _reparametrize_module(
         untied_parameters_and_buffers = parameters_and_buffers
 
     accessor = NamedMemberAccessor(module)
+    from torch.nn.utils.parametrize import is_parametrized
+    
+    # Run shape and dtype validation checks if unsafe=False
+    if not unsafe:
+        for name, tensor in untied_parameters_and_buffers.items():
+            if tensor is None or tensor is _MISSING:
+                continue
+            try:
+                orig_tensor = accessor.get_tensor(name)
+            except (AttributeError, TypeError):
+                continue
+            if isinstance(orig_tensor, torch.Tensor) and isinstance(tensor, torch.Tensor):
+                if tensor.shape != orig_tensor.shape:
+                    raise ValueError(
+                        f"Expected tensor of shape {orig_tensor.shape} for parameter/buffer '{name}', "
+                        f"but got shape {tensor.shape}."
+                    )
+                if tensor.dtype != orig_tensor.dtype:
+                    raise ValueError(
+                        f"Expected tensor of dtype {orig_tensor.dtype} for parameter/buffer '{name}', "
+                        f"but got dtype {tensor.dtype}."
+                    )
+
+    disabled_parametrizations = []
+    
+    # Temporarily disable parametrizations if the user passes the regular parameter/buffer name.
+    # We do this because the user wants to completely replace/override the parametrized attribute
+    # with the provided raw tensor, bypassing the parametrization logic.
+    for name in list(untied_parameters_and_buffers.keys()):
+        prefix, _, attr = name.rpartition(".")
+        try:
+            submodule = accessor.get_submodule(prefix)
+        except (AttributeError, TypeError):
+            continue
+        if is_parametrized(submodule, attr):
+            # Save parametrization structure to restore later
+            parametrizations = submodule.parametrizations[attr]
+            prop = getattr(submodule.__class__, attr)
+            
+            # Determine if it was originally a Parameter or a Buffer
+            if parametrizations.is_tensor:
+                is_parameter = isinstance(parametrizations.original, torch.nn.Parameter)
+                original_tensor = parametrizations.original
+            else:
+                is_parameter = isinstance(getattr(parametrizations, 'original0'), torch.nn.Parameter)
+                original_tensor = getattr(parametrizations, 'original0')
+            
+            # Delete property descriptor and entry in parametrizations ModuleDict
+            delattr(submodule.__class__, attr)
+            del submodule.parametrizations[attr]
+            
+            # Register it temporarily as a regular parameter/buffer so that swap_tensors_dict
+            # registers it in the module's state, and accessor.check_keys() recognises it.
+            if is_parameter:
+                submodule.register_parameter(attr, torch.nn.Parameter(original_tensor))
+            else:
+                submodule.register_buffer(attr, original_tensor)
+                
+            disabled_parametrizations.append((submodule, attr, prop, parametrizations, is_parameter))
     if strict:
         missing_keys, unexpected_keys = accessor.check_keys(
             untied_parameters_and_buffers
@@ -154,6 +216,19 @@ def _reparametrize_module(
                 if k in new_parameters_and_buffers
             }
         )
+        # Restore disabled parametrizations in LIFO order to match disable sequence
+        for submodule, attr, prop, parametrizations, is_parameter in reversed(disabled_parametrizations):
+            try:
+                if is_parameter:
+                    if attr in submodule._parameters:
+                        del submodule._parameters[attr]
+                else:
+                    if attr in submodule._buffers:
+                        del submodule._buffers[attr]
+                setattr(submodule.__class__, attr, prop)
+                submodule.parametrizations[attr] = parametrizations
+            except Exception as e:
+                warnings.warn(f"Failed to restore parametrization for {attr}: {e}")
 
 
 @deprecated(
@@ -170,6 +245,7 @@ def functional_call(
     *,
     tie_weights: bool = True,
     strict: bool = False,
+    unsafe: bool = False,
 ):
     r"""Perform a functional call on the module by replacing the module parameters and buffers with the provided ones.
 
@@ -237,6 +313,7 @@ def functional_call(
         kwargs,
         tie_weights=tie_weights,
         strict=strict,
+        unsafe=unsafe,
     )
 
 
@@ -248,6 +325,7 @@ def _functional_call(
     *,
     tie_weights: bool = True,
     strict: bool = False,
+    unsafe: bool = False,
 ):
     # TODO allow kwargs such as unsafe and others for parametrization
     if (
@@ -274,6 +352,6 @@ def _functional_call(
     elif not isinstance(args, tuple):
         args = (args,)
     with _reparametrize_module(
-        module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+        module, parameters_and_buffers, tie_weights=tie_weights, strict=strict, unsafe=unsafe
     ):
         return module(*args, **kwargs)
