@@ -88,7 +88,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_binary_slice,
@@ -4377,22 +4377,12 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        # This can still be reached if a cached proxy's tracer turns out to be
-        # a sibling (not an ancestor) of the current subgraph, e.g. via stale
-        # cross-HOP VariableTracker reuse (see GH #193194) -- gracefully fall
-        # back instead of hard-crashing the whole compile.
+        # (A stale cross-tracer cached proxy used to reach this via
+        # wrap_symfloat; see the fix in
+        # https://github.com/pytorch/pytorch/issues/193194.)
         if self.parent is None:
-            unimplemented(
-                gb_type="Free variable could not be lifted to higher order op input",
-                context=f"proxy: {proxy}, example_value: {proxy.node.meta.get('example_value')}",
-                explanation=(
-                    "A free variable used inside a higher order operator's body "
-                    "(e.g. torch.utils.checkpoint) could not be traced back to an "
-                    "enclosing subgraph. This can happen when the same scalar "
-                    "computation (e.g. from a data-dependent .item() call) is "
-                    "cached and reused across unrelated higher order op call sites."
-                ),
-                hints=[*graph_break_hints.DYNAMO_BUG],
+            raise AssertionError(
+                "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
             )
 
         example_value = proxy.node.meta["example_value"]

@@ -3629,7 +3629,8 @@ class VariableBuilder:
         # proxy is cached frame-wide below by source name, so if it's first
         # created while tracing a HOP body (e.g. torch.utils.checkpoint), a
         # sibling HOP subgraph reusing the same source later can't reach it
-        # via its own tracer's parent chain. See GH #193194.
+        # via its own tracer's parent chain.
+        # See https://github.com/pytorch/pytorch/issues/193194.
         r = wrap_fx_proxy(
             self.tx,
             self.tx.output.root_tracer.create_proxy(

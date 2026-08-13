@@ -353,16 +353,6 @@
       ]
     }
   ],
-  "GB3612": [
-    {
-      "Gb_type": "Free variable could not be lifted to higher order op input",
-      "Context": "proxy: {proxy}, example_value: {proxy.node.meta.get('example_value')}",
-      "Explanation": "A free variable used inside a higher order operator's body (e.g. torch.utils.checkpoint) could not be traced back to an enclosing subgraph. This can happen when the same scalar computation (e.g. from a data-dependent .item() call) is cached and reused across unrelated higher order op call sites.",
-      "Hints": [
-        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
-      ]
-    }
-  ],
   "GB0026": [
     {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",
