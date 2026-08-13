@@ -1474,7 +1474,7 @@ fn(torch.randn(5))
         # Test program
         @torch.compile(backend="eager")
         def foo():
-            x = torch.ones([10])
+            x = torch.ones([10], device=device_type)
 
             def bar():
                 y = x + x
@@ -1494,7 +1494,7 @@ fn(torch.randn(5))
         def baz(x):
             return x + 1
 
-        baz(torch.ones(3))
+        baz(torch.ones(3, device=device_type))
 
         # `_log_traced_frames` is registered as an atexit callback, so we invoke
         # it explicitly for testing.

@@ -9,6 +9,10 @@ from unittest import mock
 from unittest.mock import patch
 
 import torch
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
@@ -369,12 +373,12 @@ class TestDynamoTimed(TestCase):
         if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
             torch._dynamo.reset_recompile_user_contexts()
 
-    def run_forward_backward(self):
-        model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
-        x = torch.rand([3], requires_grad=True)
+    def run_forward_backward(self, device="cpu"):
+        model = torch.compile(TestModel().to(device))  # noqa: UNSPECIFIED_BACKEND
+        x = torch.rand([3], requires_grad=True, device=device)
         output = model(x)
         loss_fn = torch.nn.MSELoss()
-        target = torch.tensor([1.0])
+        target = torch.tensor([1.0], device=device)
         loss = loss_fn(output, target)
         loss.backward()
 
@@ -396,7 +400,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            self.run_forward_backward()
+            self.run_forward_backward(device_type)
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         stack_trace_list = []
         for e in compilation_events:
@@ -422,7 +426,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            self.run_forward_backward()
+            self.run_forward_backward(device_type)
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
         self.assertEqual(
@@ -438,7 +442,7 @@ class TestDynamoTimed(TestCase):
         import torch._dynamo.convert_frame as convert_frame
 
         self.warmup()
-        self.run_forward_backward()
+        self.run_forward_backward(device_type)
 
         # Dummy code object
         def sample_func():
