@@ -3025,6 +3025,10 @@ _cache_config_ignore_prefix: list[str] = [
     # not relevant
     "worker_start_method",
     "compile_threads",
+    # only controls how often the sidecar watchdog reports a still-running job;
+    # it has no effect on compiled output, so including it would change the
+    # config hash and needlessly invalidate every cache entry
+    "compile_worker_watchdog_interval_seconds",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
