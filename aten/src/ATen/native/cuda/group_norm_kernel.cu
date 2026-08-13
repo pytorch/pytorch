@@ -7,11 +7,11 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
@@ -131,8 +131,8 @@ __global__ void RowwiseMomentsChannelsLastSmallDCUDAKernel(
     }
   }
 
-  alignas(WelfordType) __shared__ char
-      val_shared[sizeof(WelfordType) * kCUDANumThreads];
+  alignas(WelfordType)
+      __shared__ char val_shared[sizeof(WelfordType) * kCUDANumThreads];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
   val_shared_ptr[threadIdx.x] = val;
   __syncthreads();
@@ -184,7 +184,8 @@ __global__ void RowwiseMomentsChannelsLastCUDAKernel(
   const int64_t c_step = blockDim.x % D;
   for (int64_t j = threadIdx.x; j < group_size; j += blockDim.x) {
     const int64_t index = (n * HxW + hw) * C + c;
-    val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), ng * group_size + j);
+    val = welford_op.reduce(
+        val, static_cast<T_ACC>(X[index]), ng * group_size + j);
     hw += hw_step;
     c += c_step;
     if (c >= (g + 1) * D) {
@@ -230,8 +231,8 @@ __global__ void GroupNormBackwardChannelsLastCUDAKernel(
     const T_ACC* __restrict__ c2,
     const T_ACC* __restrict__ c3,
     T* __restrict__ dX) {
-  for (index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x +
-           threadIdx.x;
+  for (index_t index =
+           static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
        index < numel;
        index += static_cast<index_t>(blockDim.x) * gridDim.x) {
     const auto nhw_c = C_divider.divmod(index);
@@ -459,8 +460,7 @@ __global__ void ComputeInternalGradientsContiguousCUDAKernel(
   using T_ACC = acc_type<T, true>;
   const int64_t nc = blockIdx.x;
   using LoadT = memory::aligned_vector<T, VecSize>;
-  const auto* dY_vec =
-      reinterpret_cast<const LoadT*>(dY + nc * HxW);
+  const auto* dY_vec = reinterpret_cast<const LoadT*>(dY + nc * HxW);
   const auto* X_vec = reinterpret_cast<const LoadT*>(X + nc * HxW);
   const int64_t HxW_vec = HxW / VecSize;
   T_ACC sum1 = 0;
@@ -499,8 +499,7 @@ __global__ void ComputeInternalGradientsChannelsLastCUDAKernel(
     acc_type<T, true>* __restrict__ ds,
     acc_type<T, true>* __restrict__ db) {
   using T_ACC = acc_type<T, true>;
-  const int64_t channel_blocks =
-      (C + ChannelsPerBlock - 1) / ChannelsPerBlock;
+  const int64_t channel_blocks = (C + ChannelsPerBlock - 1) / ChannelsPerBlock;
   const int64_t n = blockIdx.x / channel_blocks;
   const int64_t first_channel =
       (blockIdx.x % channel_blocks) * ChannelsPerBlock;
@@ -850,8 +849,7 @@ void GroupNormKernelImplInternal(
   T_ACC* rstd_acc_data = rstd_acc.mutable_data_ptr<T_ACC>();
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-  const bool channels_last =
-      X.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+  const bool channels_last = X.is_contiguous(at::MemoryFormat::ChannelsLast) ||
       X.is_contiguous(at::MemoryFormat::ChannelsLast3d);
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? at::cuda::warp_size()
@@ -860,8 +858,7 @@ void GroupNormKernelImplInternal(
     if ((D == 1 || D == 2) && G >= 4 &&
         D * HxW >= cuda_utils::kCUDABlockReduceNumThreads) {
       constexpr int kGroupsPerBlock = 4;
-      const int64_t group_blocks =
-          (G + kGroupsPerBlock - 1) / kGroupsPerBlock;
+      const int64_t group_blocks = (G + kGroupsPerBlock - 1) / kGroupsPerBlock;
       RowwiseMomentsChannelsLastSmallDCUDAKernel<kGroupsPerBlock, T, T_ACC>
           <<<N * group_blocks, kCUDANumThreads, 0, cuda_stream>>>(
               C,
@@ -904,14 +901,15 @@ void GroupNormKernelImplInternal(
             a.mutable_data_ptr<T_ACC>(),
             b.mutable_data_ptr<T_ACC>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    auto iter = TensorIteratorConfig()
-                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
-                    .resize_outputs(false)
-                    .add_owned_output(Y.as_strided({N, HxW, C}, {HxW * C, C, 1}))
-                    .add_owned_const_input(X.as_strided({N, HxW, C}, {HxW * C, C, 1}))
-                    .add_owned_const_input(a.view({N, 1, C}))
-                    .add_owned_const_input(b.view({N, 1, C}))
-                    .build();
+    auto iter =
+        TensorIteratorConfig()
+            .check_all_same_dtype(std::is_same_v<T, T_ACC>)
+            .resize_outputs(false)
+            .add_owned_output(Y.as_strided({N, HxW, C}, {HxW * C, C, 1}))
+            .add_owned_const_input(X.as_strided({N, HxW, C}, {HxW * C, C, 1}))
+            .add_owned_const_input(a.view({N, 1, C}))
+            .add_owned_const_input(b.view({N, 1, C}))
+            .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
       return a * static_cast<T_ACC>(x) + b;
     });
@@ -919,8 +917,8 @@ void GroupNormKernelImplInternal(
   }
   constexpr int kVecSize = 16 / sizeof(T);
   if (D * HxW % kVecSize == 0 &&
-      memory::can_vectorize_up_to<T>(
-          reinterpret_cast<const char*>(X_data)) >= kVecSize) {
+      memory::can_vectorize_up_to<T>(reinterpret_cast<const char*>(X_data)) >=
+          kVecSize) {
     RowwiseMomentsContiguousCUDAKernel<kVecSize, T, T_ACC>
         <<<N * G, num_threads, 0, cuda_stream>>>(
             D * HxW,
@@ -1186,8 +1184,7 @@ void GroupNormBackwardKernelImplInternal(
   const T* mean_data = mean.const_data_ptr<T>();
   const T* rstd_data = rstd.const_data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
-  const bool channels_last =
-      X.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+  const bool channels_last = X.is_contiguous(at::MemoryFormat::ChannelsLast) ||
       X.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 
   if (HxW == 1 && !channels_last) {
@@ -1228,8 +1225,8 @@ void GroupNormBackwardKernelImplInternal(
     if (HxW % kVecSize == 0 &&
         memory::can_vectorize_up_to<T>(
             reinterpret_cast<const char*>(dY_data)) >= kVecSize &&
-        memory::can_vectorize_up_to<T>(
-            reinterpret_cast<const char*>(X_data)) >= kVecSize) {
+        memory::can_vectorize_up_to<T>(reinterpret_cast<const char*>(X_data)) >=
+            kVecSize) {
       ComputeInternalGradientsContiguousCUDAKernel<kVecSize, T>
           <<<N * C, num_threads, 0, cuda_stream>>>(
               HxW, dY_data, X_data, ds_data, db_data);
@@ -1279,8 +1276,7 @@ void GroupNormBackwardKernelImplInternal(
 
     if (channels_last) {
       const int64_t numel = N * C * HxW;
-      const int64_t blocks =
-          (numel + kCUDANumThreads - 1) / kCUDANumThreads;
+      const int64_t blocks = (numel + kCUDANumThreads - 1) / kCUDANumThreads;
       if (at::cuda::detail::canUse32BitIndexMath(X)) {
         using index_t = uint32_t;
         GroupNormBackwardChannelsLastCUDAKernel<index_t, T, T_ACC>
