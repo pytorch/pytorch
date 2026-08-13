@@ -59,8 +59,6 @@ def _common_supported(
         or not weight.is_contiguous()
     ):
         return False
-    # Reshaping a copy-on-write tensor would materialize it. Let ATen preserve
-    # its normal semantics for these uncommon inputs.
     if _is_cow_tensor(input) or _is_cow_tensor(weight):
         return False
     rows_m = input.numel() // n

@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
-    isRocmArchAnyOf, MI350_ARCH
+    isRocmArchAnyOf, MI350_ARCH, TEST_CUDA
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -23061,14 +23061,18 @@ if "flydsl" in dsl_ops_by_dsl:
             decorators=[
                 onlyCUDA,
                 skipCUDAIf(
-                    not isRocmArchAnyOf(MI350_ARCH),
+                    not (TEST_CUDA and isRocmArchAnyOf(MI350_ARCH)),
                     "flydsl rms_norm override requires gfx950",
                 ),
             ],
             skips=(
-                # Unsupported FlyDSL dtypes fall through to aten and appear supported.
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective -- but this variant is specifically for
+                # the override's supported dtypes only.
                 DecorateInfo(
-                    unittest.expectedFailure,
+                    unittest.skip("override intentionally narrower than aten"),
                     "TestCommon", "test_dtypes",
                 ),
             ),

@@ -28,7 +28,7 @@ FLYDSL_DTYPE_CONFIGS = {
 }
 
 
-def get_warp_size(arch: str) -> int:
+def _get_warp_size(arch: str) -> int:
     """Return wave64 for CDNA GPUs and wave32 for RDNA GPUs."""
     return 32 if is_rdna_arch(arch) else 64
 
@@ -50,7 +50,7 @@ def _dtype_config(dtype_str: str):
         raise ValueError(f"unsupported dtype: {dtype_str!r}") from exc
 
 
-def dtype_to_elem_type(dtype_str: str):
+def _dtype_to_elem_type(dtype_str: str):
     """Map a supported PyTorch dtype string to its FlyDSL type."""
     return _dtype_config(dtype_str)[0]
 
@@ -88,12 +88,12 @@ def _forward_block_threads(n: int) -> int:
     return 256
 
 
-def build_rmsnorm_module(
+def _build_rmsnorm_module(
     N: int,
     dtype_str: str,
     arch: str,
 ):
-    WARP_SIZE = get_warp_size(arch)
+    WARP_SIZE = _get_warp_size(arch)
 
     block_threads = _forward_block_threads(N)
     _, elem_bits = _dtype_config(dtype_str)
@@ -114,7 +114,7 @@ def build_rmsnorm_module(
         bid = fx.block_idx.x
         tid = fx.thread_idx.x
 
-        elem_dtype = dtype_to_elem_type(dtype_str)
+        elem_dtype = _dtype_to_elem_type(dtype_str)
         eps_c = Eps
         n_float = float(N)
 
@@ -294,8 +294,7 @@ def build_rmsnorm_module(
                     g_e = Gamma_buf[tail_idx]
                     g = g_e if dtype_str == "f32" else g_e.to(fx.Float32)
                     y = (tail_x * rrms) * g
-                    y_e = _to_elem(dtype_str, elem_dtype, y)
-                    row_out[tail_idx] = elem_dtype(y_e)
+                    row_out[tail_idx] = _to_elem(dtype_str, elem_dtype, y)
 
     @flyc.jit
     def launch_rmsnorm(
@@ -342,7 +341,7 @@ def _compile_rmsnorm_fwd(
     # even when two GPUs share the same architecture.
     del backend, device_index
     input_2d, weight, output_2d, rstd, rows_m, eps, stream = compile_args
-    launch = build_rmsnorm_module(n, dtype, arch)
+    launch = _build_rmsnorm_module(n, dtype, arch)
     return flyc.compile(
         launch,
         _make_compile_arg(input_2d),
@@ -373,6 +372,10 @@ def rmsnorm_fwd(
             f"Could not determine the ROCm arch of device {device_index}; "
             "set FLYDSL_GPU_ARCH to build the FlyDSL RMSNorm kernel"
         )
+    # _resolve_rocm_arch forwards HSA_OVERRIDE_GFX_VERSION verbatim, so it may
+    # carry feature flags ("gfx950:sramecc+"). Strip them the way the dispatcher
+    # predicate does.
+    arch = arch.split(":", 1)[0]
 
     rows_m = input.numel() // n
     input_shape = input.shape

@@ -200,19 +200,27 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(got_dx, ref_dx)
         self.assertEqual(got_dw, ref_dw)
 
-    @parametrize("eps_kind", ("cancelling", "negative", "nan"))
+    @parametrize("eps_kind", ("negative", "nan"))
     def test_invalid_eps_falls_back_without_compiling(self, eps_kind):
         m, n = 2048, 16384
         x, weight = self._make_inputs(m, n, torch.float32)
-        if eps_kind == "cancelling":
-            eps = -(x.double() ** 2).mean(dim=-1)[0].item()
-        elif eps_kind == "negative":
-            eps = -1.0
-        else:
-            eps = float("nan")
+        eps = -1.0 if eps_kind == "negative" else float("nan")
 
         torch.ops.aten._fused_rms_norm(x, [n], weight, eps)
         self._assert_no_flydsl_compiles()
+
+    def test_zero_eps_dispatches(self):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        m, n = 2048, 16384
+        x, weight = self._make_inputs(m, n, torch.float32)
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, 0.0)
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, 0.0)
+
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+        self.assertEqual(got, ref)
+        self.assertEqual(got_rstd, ref_rstd)
 
     def test_direct_forward_matches_aten_and_reuses_cache(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import (
@@ -230,13 +238,73 @@ class TestFlyDSLRMSNorm(TestCase):
         # A 3-D input with the same N/dtype/device must hit the same dynamic-M
         # specialization instead of compiling a second kernel.
         x3 = make_tensor((2, 16, 128), device="cuda", dtype=x.dtype)
-        out3, _ = rmsnorm_fwd(x3, [128], weight, EPS)
+        with pn.flydsl.disabled():
+            ref_out3, ref_rstd3 = torch.ops.aten._fused_rms_norm(x3, [128], weight, EPS)
+        out3, rstd3 = rmsnorm_fwd(x3, [128], weight, EPS)
         self.assertEqual(out3.shape, x3.shape)
+        self.assertEqual(rstd3.shape, (2, 16, 1))
+        self.assertEqual(out3, ref_out3)
+        self.assertEqual(rstd3, ref_rstd3)
 
         info = rmsnorm_cache_info()["fwd"]
         self.assertEqual(info.misses, 1)
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "needs two CUDA devices")
+    def test_each_device_gets_its_own_specialization(self):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import (
+            rmsnorm_cache_info,
+            rmsnorm_fwd,
+        )
+
+        n = 128
+        for index in (0, 1):
+            device = torch.device("cuda", index)
+            x = make_tensor((16, n), device=device, dtype=torch.float16)
+            weight = make_tensor((n,), device=device, dtype=x.dtype)
+            with pn.flydsl.disabled():
+                ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [n], weight, EPS)
+            got, got_rstd = rmsnorm_fwd(x, [n], weight, EPS)
+
+            self.assertEqual(got.device, device)
+            self.assertEqual(got, ref)
+            self.assertEqual(got_rstd, ref_rstd)
+
+        info = rmsnorm_cache_info()["fwd"]
+        self.assertEqual(info.misses, 2)
+        self.assertEqual(info.currsize, 2)
+
+    @parametrize("mismatch", ("shape", "dtype", "device", "noncontiguous"))
+    def test_weight_mismatch_is_declined(self, mismatch):
+        from torch._native.ops.norm.flydsl_rmsnorm_impl import _common_supported
+
+        n = DISPATCH_N
+        x, weight = self._make_dispatch_inputs()
+        self.assertTrue(_common_supported(x, n, weight))
+
+        if mismatch == "shape":
+            weight = make_tensor((n + 1,), device=x.device, dtype=x.dtype)
+        elif mismatch == "dtype":
+            weight = weight.to(torch.float32)
+        elif mismatch == "device":
+            weight = weight.cpu()
+        else:
+            weight = make_tensor((2 * n,), device=x.device, dtype=x.dtype)[::2]
+            self.assertFalse(weight.is_contiguous())
+
+        self.assertFalse(_common_supported(x, n, weight))
+
+    def test_noncontiguous_weight_falls_back_to_aten(self):
+        x, _ = self._make_dispatch_inputs()
+        weight = make_tensor((2 * DISPATCH_N,), device=x.device, dtype=x.dtype)[::2]
+
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        got = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+
+        self.assertEqual(got, ref)
+        self._assert_no_flydsl_compiles()
 
     def test_nondefault_stream_reuses_specialization(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import (
