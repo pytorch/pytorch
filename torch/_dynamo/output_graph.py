@@ -957,9 +957,6 @@ class OutputGraph(OutputGraphCommon):
 
         # Bytecode to insert right before we call the graph
         self.pregraph_bytecode: list[Instruction] = []
-        # ids of GraphArgs whose requires_grad_(True) was hoisted in front of
-        # the graph, see TensorVariable.hoist_requires_grad_to_pregraph.
-        self.hoisted_requires_grad_args: set[int] = set()
 
         # Maps SyntheticLocalSource → (fn, args, arg_sources) for hoisted
         # graph inputs created by synthetic_graph_input, so invoke_subgraph
@@ -3321,19 +3318,7 @@ class OutputGraph(OutputGraphCommon):
         return next_name
 
     def example_inputs(self) -> list[torch.Tensor]:
-        result = []
-        for arg in self.graphargs:
-            # A hoisted requires_grad_() input is traced as requiring grad while
-            # the real tensor still does not (the mutation happens in the
-            # pregraph bytecode, at runtime). The backend has to see the traced
-            # state or it will build an inference-only graph.
-            if (
-                arg.fake_tensor is not None
-                and id(arg) in self.hoisted_requires_grad_args
-            ):
-                result.append(arg.fake_tensor)
-            else:
-                result.append(arg.example)
+        result = [arg.example for arg in self.graphargs]
         # pyrefly: ignore[bad-return]
         return result
 
