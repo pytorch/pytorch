@@ -50,7 +50,11 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
@@ -60,7 +64,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_GPU,
     HAS_TRITON,
-    requires_triton,
     TRITON_HAS_CPU,
 )
 
@@ -244,7 +247,7 @@ class TritonExtensionBackendAcceleratorTests(BaseExtensionBackendTests):
             device, ExtensionTritonScheduling, ExtensionPythonWrapperCodegen
         )
 
-    @requires_triton()
+    @requires_capabilities(Capability.lib.triton)
     def test_codegen_with_custom_heuristics_module(self, device):
         self._register_custom_backend_with_heuristics(device)
 
@@ -260,7 +263,7 @@ class TritonExtensionBackendAcceleratorTests(BaseExtensionBackendTests):
             f"{EXTENSION_TRITON_META_FIELD}"
         ).check("@triton.jit").run(code)
 
-    @requires_triton()
+    @requires_capabilities(Capability.lib.triton)
     def test_codegen_with_custom_heuristics_module_udtk(self, device):
         self._register_custom_backend_with_heuristics(device)
 
