@@ -5906,7 +5906,7 @@ class TestLinalg(TestCase):
             def make_well_conditioned(*shape):
                 # Diagonal dominance limits the growth factor to be no larger than 2,
                 # so that nopiv Gaussian elimination becomes stable.
-                t = torch.randn(*shape, device=device, dtype=dtype)
+                t = make_fullrank_matrices_with_distinct_singular_values(*shape, device=device, dtype=dtype)
                 return make_diagonally_dominant(t)
 
             def make_ill_conditioned(*shape):
