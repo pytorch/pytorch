@@ -154,6 +154,12 @@ NUM_SAMPLES = 65536
 
 
 def _dtype_numerical_tolerances(dtype, rtol_multiplier=1.0):
+    """Return the baseline ``(rtol, atol)`` for a floating-point dtype.
+
+    The relative term is scaled for narrow per-case overrides. The absolute
+    term remains one minimum subnormal step so overrides do not weaken the
+    comparison around zero.
+    """
     finfo = torch.finfo(dtype)
     return rtol_multiplier * finfo.eps, finfo.smallest_normal * finfo.eps
 
@@ -180,7 +186,12 @@ def _get_numerical_tolerances(dtype, test_type, backend, op_name):
 
 
 def _ordered_float_ranks(tensor):
-    """Map finite fp16/bf16/fp32 values to monotonic integer ranks."""
+    """Map finite fp16/bf16/fp32 values to monotonic integer ranks.
+
+    IEEE sign-magnitude encodings are reflected across the sign boundary so
+    adjacent floating-point values receive adjacent ranks. Subtracting two
+    ranks therefore gives their ULP distance, including across signed zero.
+    """
     int_dtype = torch.int32 if tensor.dtype == torch.float32 else torch.int16
     width = tensor.element_size() * 8
     sign_mask = 1 << (width - 1)
@@ -195,6 +206,7 @@ def _ordered_float_ranks(tensor):
 
 
 def _unravel_index(flat_index, shape):
+    """Convert a row-major flat offset to an index tuple for diagnostics."""
     index = []
     for size in reversed(shape):
         index.append(flat_index % size)
@@ -203,6 +215,13 @@ def _unravel_index(flat_index, shape):
 
 
 def _tensor_ulp_diagnostic(actual, expected):
+    """Return the largest finite ULP difference for a compatible tensor pair.
+
+    The result contains the ULP distance, tensor index, actual value, and
+    expected value. Unsupported dtypes, mismatched tensors, empty tensors, and
+    pairs without any finite values return ``None``; the main assertion reports
+    those structural or nonfinite mismatches directly.
+    """
     if (
         actual.dtype != expected.dtype
         or actual.shape != expected.shape
@@ -231,6 +250,11 @@ def _tensor_ulp_diagnostic(actual, expected):
 
 
 def _format_ulp_diagnostics(actual, expected):
+    """Format maximum-ULP details for tensor leaves in matching output pytrees.
+
+    Non-tensor and unsupported leaves are omitted. An empty string is returned
+    when the output structures differ or no tensor leaf supports ULP analysis.
+    """
     actual_leaves, actual_spec = pytree.tree_flatten(actual)
     expected_leaves, expected_spec = pytree.tree_flatten(expected)
     if actual_spec != expected_spec:
@@ -732,11 +756,16 @@ class TestOpInfoProperties(TestCase):
     def _assert_compiled_matches_eager(
         self, compiled, eager, dtype, test_type, backend, op_name
     ):
-        """Assert bounded numerical parity while preserving structural checks."""
+        """Assert bounded numerical parity while preserving structure and dtype.
+
+        The test identity selects any narrow backend override. ``assertEqual``
+        still checks the complete output pytree and exact dtypes, while its
+        callable failure message computes per-leaf ULP details only on failure.
+        """
         rtol, atol = _get_numerical_tolerances(dtype, test_type, backend, op_name)
 
         def failure_message(message):
-            # ULP computation is diagnostic only and runs lazily on assertion failure.
+            """Append lazy per-leaf ULP details to the standard failure message."""
             diagnostics = _format_ulp_diagnostics(compiled, eager)
             return f"{message}\n{diagnostics}" if diagnostics else message
 
