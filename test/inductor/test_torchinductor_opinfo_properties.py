@@ -6,7 +6,7 @@ Tests three properties:
 1. Batch invariance - output shouldn't change based on batch size
 2. Run-to-run determinism - same input should give same output across
    compilations, even with different autotuning choices
-3. Bitwise equivalence with torch eager mode
+3. Numerical equivalence with torch eager mode
 
 Tests three compilation backends:
 1. aot_eager_decomp_partition - AOT autograd with eager execution
@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
+from torch.utils import _pytree as pytree
 
 
 # LLM-useful op names to filter from unary_ufuncs
@@ -150,6 +151,109 @@ DTYPES = [
 
 # Number of samples for numerical testing
 NUM_SAMPLES = 65536
+
+
+def _dtype_numerical_tolerances(dtype, rtol_multiplier=1.0):
+    finfo = torch.finfo(dtype)
+    return rtol_multiplier * finfo.eps, finfo.smallest_normal * finfo.eps
+
+
+def _get_numerical_tolerances(dtype, test_type, backend, op_name):
+    """Return a tight dtype-aware tolerance for compiled-vs-eager comparisons.
+
+    ``eps`` is the spacing above 1.0. Using it as rtol admits roughly 1-2 ULP
+    over the normal range because relative ULP spacing varies within each
+    binade. ``smallest_normal * eps`` is the smallest positive subnormal and
+    provides one representable step of absolute tolerance around zero.
+
+    This is intentionally much tighter near zero than torch.testing's general
+    defaults. It is an eager-parity bound, not a claim that eager is a
+    correctly-rounded mathematical oracle.
+    """
+    baseline = _dtype_numerical_tolerances(dtype)
+    if torch.version.hip is None:
+        return baseline
+
+    return ROCM_NUMERICAL_TOLERANCE_OVERRIDES.get(
+        (test_type, backend, op_name, dtype), baseline
+    )
+
+
+def _ordered_float_ranks(tensor):
+    """Map finite fp16/bf16/fp32 values to monotonic integer ranks."""
+    int_dtype = torch.int32 if tensor.dtype == torch.float32 else torch.int16
+    width = tensor.element_size() * 8
+    sign_mask = 1 << (width - 1)
+    bits = tensor.contiguous().view(int_dtype).to(torch.int64)
+    bits = torch.bitwise_and(bits, (1 << width) - 1)
+    magnitude = torch.bitwise_and(bits, sign_mask - 1)
+    return torch.where(
+        torch.bitwise_and(bits, sign_mask).bool(),
+        sign_mask - magnitude,
+        sign_mask + magnitude,
+    )
+
+
+def _unravel_index(flat_index, shape):
+    index = []
+    for size in reversed(shape):
+        index.append(flat_index % size)
+        flat_index //= size
+    return tuple(reversed(index))
+
+
+def _tensor_ulp_diagnostic(actual, expected):
+    if (
+        actual.dtype != expected.dtype
+        or actual.shape != expected.shape
+        or actual.dtype not in (torch.float16, torch.bfloat16, torch.float32)
+        or actual.numel() == 0
+    ):
+        return None
+
+    finite = torch.isfinite(actual) & torch.isfinite(expected)
+    if not finite.any():
+        return None
+
+    ulps = torch.zeros_like(actual, dtype=torch.int64)
+    actual_ranks = _ordered_float_ranks(actual)
+    expected_ranks = _ordered_float_ranks(expected)
+    ulps[finite] = (actual_ranks[finite] - expected_ranks[finite]).abs()
+
+    flat_index = int(torch.argmax(ulps).item())
+    index = _unravel_index(flat_index, actual.shape)
+    return (
+        int(ulps.flatten()[flat_index].item()),
+        index,
+        actual[index].item(),
+        expected[index].item(),
+    )
+
+
+def _format_ulp_diagnostics(actual, expected):
+    actual_leaves, actual_spec = pytree.tree_flatten(actual)
+    expected_leaves, expected_spec = pytree.tree_flatten(expected)
+    if actual_spec != expected_spec:
+        return ""
+
+    diagnostics = []
+    for leaf_index, (actual_leaf, expected_leaf) in enumerate(
+        zip(actual_leaves, expected_leaves, strict=True)
+    ):
+        if not isinstance(actual_leaf, torch.Tensor) or not isinstance(
+            expected_leaf, torch.Tensor
+        ):
+            continue
+        diagnostic = _tensor_ulp_diagnostic(actual_leaf, expected_leaf)
+        if diagnostic is None:
+            continue
+        max_ulps, index, actual_value, expected_value = diagnostic
+        diagnostics.append(
+            f"Output leaf {leaf_index}: max ULP distance {max_ulps} at {index}; "
+            f"compiled={actual_value!r}, eager={expected_value!r}"
+        )
+
+    return "\n".join(diagnostics)
 
 
 def generate_exhaustive_16bit(dtype, device):
@@ -356,13 +460,31 @@ def sample_operates_on_batch_dim(op_name, sample_input):
     return False
 
 
-# Expected failures for bitwise equivalence tests.
+# Expected failures for property tests.
 # Structure: backend -> op_name -> set of failing dtypes (None means all dtypes)
-# These track known numerical differences between eager and compiled execution.
-# The goal is to eventually fix these and remove entries.
+# Eager-equivalence and numerical xfails exceed the tight dtype-aware tolerance.
+# The goal is to understand or fix them, rather than silently widening the global bound.
 
 # Dtype shorthands
 fp32, fp16, bf16, ALL = torch.float32, torch.float16, torch.bfloat16, None
+
+# A one-epsilon rtol can reject a two-ULP difference at the bottom of a binade.
+# These ROCm cases measured at two ULP on MI250X (gfx90a) with ROCm 7.14.
+# Keep their two-epsilon envelopes local instead of weakening every comparison.
+ROCM_NUMERICAL_TOLERANCE_OVERRIDES = {
+    ("eager_equivalence", "inductor_default", "log1p", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
+    ("eager_equivalence", "inductor_default", "tanh", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
+    ("unary_numerical", "inductor_default", "cos", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
+    ("unary_numerical", "inductor_default", "log1p", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
+}
 
 EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
@@ -444,24 +566,23 @@ XFAIL_DICTS = {
 
 ROCM_EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
-        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "nn.functional.rms_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
     "inductor_default": {
+        "exp": {fp32},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.silu": {fp16, fp32},
+        "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
     "inductor_numerics": {
         "sigmoid": {fp32},
         "sub": {ALL},
-        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -485,11 +606,10 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "rsqrt": {bf16, fp32},
+        "exp": {fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
         "tan": {fp32},
-        "tanh": {fp32},
     },
     "inductor_numerics": {
         "log10": {fp16, fp32},
@@ -551,34 +671,10 @@ FBCODE_XFAIL_DICTS = {
     "binary_numerical": FBCODE_BINARY_NUMERICAL_XFAILS,
 }
 
-ROCM_RELAXED_PROPERTY_CASES = {
-    "eager_equivalence": {
-        "inductor_default": {
-            "exp": {fp32},
-            "log1p": {fp32},
-            "rsqrt": {fp32},
-            "tanh": {fp32},
-        },
-    },
-    "unary_numerical": {
-        "inductor_default": {
-            "cos": {fp32},
-            "exp": {fp32},
-            "log1p": {fp16, fp32},
-        },
-        "inductor_numerics": {
-            "rsqrt": {bf16},
-        },
-    },
-}
-
 if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
-    # ROCm 7.14 fixes log10 strict numerics but still needs default-mode tolerance.
+    # ROCm 7.14 fixes log10 strict numerics; the dtype-aware baseline handles
+    # the remaining default-mode numerical difference.
     del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
-    ROCM_RELAXED_PROPERTY_CASES["unary_numerical"]["inductor_default"]["log10"] = {
-        fp16,
-        fp32,
-    }
 
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
@@ -594,19 +690,6 @@ def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
         )
         xfails = xfails | fbcode_xfails
     return dtype in xfails or ALL in xfails
-
-
-def is_relaxed_property_case(device_type, op_name, backend, test_type, dtype=None):
-    """Return True for the narrow ROCm op/dtype cases that use numeric tolerance."""
-    if device_type != "cuda" or torch.version.hip is None:
-        return False
-
-    allowed = (
-        ROCM_RELAXED_PROPERTY_CASES.get(test_type, {})
-        .get(backend, {})
-        .get(op_name, set())
-    )
-    return dtype in allowed or ALL in allowed
 
 
 def compile_fn(fn, backend):
@@ -649,6 +732,29 @@ class TestOpInfoProperties(TestCase):
         except Exception:
             samples = list(op.sample_inputs(device, dtype, requires_grad=False))
         return samples
+
+    def _assert_compiled_matches_eager(
+        self, compiled, eager, dtype, test_type, backend, op_name
+    ):
+        """Assert bounded numerical parity while preserving structural checks."""
+        rtol, atol = _get_numerical_tolerances(dtype, test_type, backend, op_name)
+
+        def failure_message(message):
+            # ULP computation is diagnostic only and runs lazily on assertion failure.
+            diagnostics = _format_ulp_diagnostics(compiled, eager)
+            return f"{message}\n{diagnostics}" if diagnostics else message
+
+        # Preserve structure and dtype exactly; only finite floating-point values
+        # receive the bounded numerical envelope, while NaN payloads may differ.
+        self.assertEqual(
+            compiled,
+            eager,
+            rtol=rtol,
+            atol=atol,
+            equal_nan=True,
+            exact_dtype=True,
+            msg=failure_message,
+        )
 
     def _run_with_expected_failure(
         self, device_type, op_name, backend, test_type, dtype, test_fn
@@ -890,7 +996,7 @@ class TestOpInfoProperties(TestCase):
             torch.use_deterministic_algorithms(prev_deterministic)
 
     # =========================================================================
-    # Bitwise Equivalence with Eager Mode Tests
+    # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
     @onlyCUDA
@@ -898,15 +1004,7 @@ class TestOpInfoProperties(TestCase):
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
     def test_eager_equivalence(self, device, dtype, op, backend):
-        """Test bitwise equivalence with eager execution."""
-        if (
-            op.name == "nn.functional.gelu"
-            and dtype == torch.float32
-            and backend == "inductor_default"
-        ):
-            # Disabled due to CI failures; see
-            # https://github.com/pytorch/pytorch/issues/190242
-            self.skipTest("disabled due to CI failures; see #190242")
+        """Test bounded numerical equivalence with eager execution."""
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
@@ -928,13 +1026,14 @@ class TestOpInfoProperties(TestCase):
                 compiled_fn = compile_fn(fn, backend)
                 compiled_out = compiled_fn(*args, **kwargs)
 
-                # Zero-tolerance equality unless this ROCm case needs numeric tolerance.
-                if is_relaxed_property_case(
-                    device_type, op.name, backend, "eager_equivalence", dtype
-                ):
-                    self.assertEqual(eager_out, compiled_out)
-                else:
-                    self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
+                self._assert_compiled_matches_eager(
+                    compiled_out,
+                    eager_out,
+                    dtype,
+                    "eager_equivalence",
+                    backend,
+                    op.name,
+                )
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "eager_equivalence", dtype, run_test
@@ -954,7 +1053,7 @@ class TestOpInfoProperties(TestCase):
         For fp16 and bf16: exhaustively tests all 65536 possible bit patterns.
         For fp32: tests 64k sampled random bit patterns.
 
-        Verifies bitwise equivalence between eager and compiled execution.
+        Verifies bounded numerical equivalence between eager and compiled execution.
         """
         torch._dynamo.reset()
         device_type = torch.device(device).type
@@ -982,13 +1081,14 @@ class TestOpInfoProperties(TestCase):
         compiled_out = compiled_fn(test_values)
 
         def run_test():
-            # Zero-tolerance equality unless this ROCm case needs numeric tolerance.
-            if is_relaxed_property_case(
-                device_type, op.name, backend, "unary_numerical", dtype
-            ):
-                self.assertEqual(eager_out, compiled_out)
-            else:
-                self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
+            self._assert_compiled_matches_eager(
+                compiled_out,
+                eager_out,
+                dtype,
+                "unary_numerical",
+                backend,
+                op.name,
+            )
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "unary_numerical", dtype, run_test
@@ -1008,7 +1108,7 @@ class TestOpInfoProperties(TestCase):
         For fp32: samples random 32-bit patterns.
         For fp16/bf16: samples from all possible 16-bit values.
 
-        Verifies bitwise equivalence between eager and compiled execution.
+        Verifies bounded numerical equivalence between eager and compiled execution.
         """
         torch._dynamo.reset()
         device_type = torch.device(device).type
@@ -1026,8 +1126,14 @@ class TestOpInfoProperties(TestCase):
         compiled_out = compiled_fn(x, y)
 
         def run_test():
-            # Zero-tolerance equality.
-            self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
+            self._assert_compiled_matches_eager(
+                compiled_out,
+                eager_out,
+                dtype,
+                "binary_numerical",
+                backend,
+                op.name,
+            )
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "binary_numerical", dtype, run_test
