@@ -62,10 +62,9 @@ class ReplicateTest(MultiProcContinuousTest):
         """
         Distributed communication backend.
 
-        Environment variable:
-            TEST_DIST_BACKEND: Distributed backend (nccl, hccl, gloo, etc.)
+        Returns the default backend for the current device type.
         """
-        return os.environ.get("TEST_DIST_BACKEND", "nccl")
+        return dist.get_default_backend_for_device(cls.device_type())
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
