@@ -298,8 +298,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     bool reusable = c10::xpu::get_raw_device(current_device)
                         .has(sycl::aspect::ext_oneapi_per_event_profiling);
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
+    const auto* data = reinterpret_cast<const std::byte*>(handle_string.data());
     sycl::ext::oneapi::experimental::ipc::handle_data_t handle_data(
-        handle_string.data(), handle_string.data() + handle_string.size());
+        data, data + handle_string.size());
 
     sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
     xpu_event =
