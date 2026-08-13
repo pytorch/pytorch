@@ -28,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    IntWithoutSymInt,
     is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
@@ -970,7 +971,7 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         a.dtype is not torch.bool,
         lambda: (
             "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -994,7 +995,7 @@ def positive(a: TensorLikeType) -> TensorLikeType:
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
-        raise RuntimeError(msg)
+        raise NotImplementedError(msg)
     return a
 
 
@@ -1881,7 +1882,7 @@ def sub(
     a, b = _maybe_broadcast(a, b)
 
     if isinstance(a, TensorLike) and isinstance(b, TensorLike):
-        torch._check(
+        torch._check_not_implemented(
             not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
             lambda: (
                 "Subtraction, the `-` operator, with two bool tensors is not supported. "
@@ -2033,6 +2034,13 @@ def clamp(
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
+
+    if utils.is_integer_dtype(a.dtype):
+        limits = torch.iinfo(a.dtype)
+        if isinstance(min, IntWithoutSymInt):
+            min = builtins.max(limits.min, min)
+        if isinstance(max, IntWithoutSymInt):
+            max = builtins.min(limits.max, max)
 
     if min is not None:
         a_isnan = torch.isnan(a)
@@ -2414,7 +2422,7 @@ def _make_copy_from_view(fn, return_none_on_out_variant=False):
 
 
 @register_decomposition(aten.all)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def all(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -2429,7 +2437,7 @@ def all(
 
 
 @register_decomposition(aten.any)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def any(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -3733,7 +3741,7 @@ def stft(
     else:
         return_complex_ = return_complex
 
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
         lambda: "stft expected a tensor of floating point or complex values",
     )
@@ -3831,11 +3839,11 @@ def istft(
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
     win_length_ = win_length if win_length is not None else n_fft
 
-    torch._check(
+    torch._check_type(
         utils.is_complex_dtype(input.dtype),
         lambda: (
-            "istft input and window must be on the same device but got self on "
-            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+            "istft requires a complex-valued input tensor matching the "
+            "output from stft with return_complex=True."
         ),
     )
     n_frames = input.size(-1)

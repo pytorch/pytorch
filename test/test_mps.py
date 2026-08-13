@@ -710,6 +710,20 @@ class MatmulTest(TestCaseMPS):
         tensor_2 = torch.rand((100, ), device="mps")
         self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
 
+    # #177116: K > 2^15 silently wrong on M1/M2 (1st shape triggers fwd, 2nd triggers bwd)
+    @parametrize("shape,in_f,out_f", [((122, 40000), 40000, 128), ((32800, 128), 128, 16)])
+    def test_linear_large_K(self, shape, in_f, out_f):
+        torch.manual_seed(0)
+        x_cpu = torch.randn(*shape, requires_grad=True)
+        lin_cpu = nn.Linear(in_f, out_f, bias=False)
+        lin_mps = copy.deepcopy(lin_cpu).to("mps")
+        x_mps = x_cpu.detach().to("mps").requires_grad_(True)
+        lin_cpu(x_cpu).sum().backward()
+        lin_mps(x_mps).sum().backward()
+        self.assertEqual(lin_cpu(x_cpu), lin_mps(x_mps).cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(lin_cpu.weight.grad, lin_mps.weight.grad.cpu(), atol=1e-3, rtol=1e-4)
+        self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
+
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
@@ -11620,16 +11634,29 @@ class TestNNMPS(NNTestCase):
 
     def test_conv2d_discontiguous_weight(self):
         # Test for https://github.com/pytorch/pytorch/issues/55781
-        x = torch.ones(64, 16, 16, 16)
-        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
+        x = torch.ones(64, 16, 16, 16, device="mps")
+        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10, device="mps").reshape(32, 16, 1, 2)[:, :, :, ::2]
         self.assertFalse(weight.is_contiguous())
         y = torch.nn.functional.conv2d(x, weight, None)
-        if torch.backends.mkldnn.is_available():
-            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-            with torch.backends.mkldnn.flags(enabled=False):
-                y_ = torch.nn.functional.conv2d(x, weight, None)
-                self.assertEqual(y, y_)
         self.assertEqual(y.sum(), 4186112.)
+
+        # Non-dense weight view (channel slice of a 5D weight) must match CPU for
+        # forward and backward. MPSGraph conv mishandles such strided weights, so
+        # they need to be gathered before being fed to the graph.
+        xc = torch.randn(2, 8, 16, 16)
+        wc = torch.randn(6, 8, 3, 3, 3)
+
+        def conv(dev):
+            xi = xc.detach().to(dev).requires_grad_(True)
+            wi = wc.detach().to(dev).requires_grad_(True)
+            out = torch.nn.functional.conv2d(xi, wi[:, :, 1])
+            out.sum().backward()
+            return out, xi.grad, wi.grad
+
+        ref = conv("cpu")
+        res = conv("mps")
+        for r, e in zip(res, ref):
+            self.assertEqual(r.cpu(), e)
 
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -12163,6 +12190,20 @@ class TestLinalgMPS(TestCaseMPS):
             lhs = torch.linalg.det(expm(a).cpu())
             rhs = torch.exp(torch.diagonal(a.cpu(), dim1=-2, dim2=-1).sum(-1))
             self.assertEqual(lhs, rhs, atol=1e-3, rtol=1e-3)
+
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
+    def test_polar_backward(self, device, dtype, shape):
+        # Compare A.grad against CPU for the same random output grads gU, gH.
+        torch.manual_seed(0)
+        A_cpu = torch.randn(*shape, dtype=dtype, requires_grad=True)
+        A_mps = A_cpu.detach().to(device).requires_grad_(True)
+        U_cpu, H_cpu = torch.linalg.polar(A_cpu)
+        U_mps, H_mps = torch.linalg.polar(A_mps)
+        gU, gH = torch.randn_like(U_cpu), torch.randn_like(H_cpu)
+        torch.autograd.backward([U_cpu, H_cpu], [gU, gH])
+        torch.autograd.backward([U_mps, H_mps], [gU.to(device), gH.to(device)])
+        self.assertEqual(A_mps.grad.cpu(), A_cpu.grad, atol=1e-4, rtol=1e-4)
 
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
@@ -15986,7 +16027,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
-        'arange', 'linspace',
+        'arange', 'linspace', 'logspace',
         'special.xlog1py',
 
         # CPU accumulates sequantially, but GPU does in parallel
@@ -17242,6 +17283,23 @@ class TestMetalLibrary(TestCaseMPS):
         kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
 
+    def test_conv_weight_to_dhwio_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        oc, ic, kd, kh, kw = 5, 3, 2, 2, 4
+        weight = torch.randn(oc, ic, kd, kh, kw, device="mps")
+        # contiguous, permuted, and width-sliced source strides
+        for source in (
+            weight,
+            weight.permute(2, 3, 4, 1, 0).contiguous().permute(4, 3, 0, 1, 2),
+            torch.randn(oc, ic, kd, kh, 2 * kw, device="mps")[..., ::2],
+        ):
+            destination = torch.empty(kd, kh, kw, ic, oc, dtype=source.dtype, device="mps")
+            params = [oc, ic, kh, kw, *source.stride()]
+            lib.conv_weight_to_dhwio_float(source, destination, params,
+                                           threads=(oc, ic, kd * kh), group_size=(oc, 1, 1), arg_casts="int32")
+            self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
@@ -17254,6 +17312,7 @@ instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
+instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)

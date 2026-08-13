@@ -641,7 +641,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             tx, f"__subclass_{self.class_type.__name__}", self.class_type
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # [Note: __torch_function__] We currently only support attributes that are defined on
@@ -681,7 +681,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     kwargs,
                 )
         else:
-            # `TensorVariable.getattro_impl` doesn't handle user-defined
+            # `TensorVariable.tp_getattro_impl` doesn't handle user-defined
             # function/attribute well, so we explicitly handle them here.
             #
             # TODO move this logic into `TensorVariable`, or try to merge it
@@ -724,7 +724,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                         ],
                     )
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_torch_function(
         self,
