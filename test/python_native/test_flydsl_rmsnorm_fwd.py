@@ -92,18 +92,25 @@ class TestFlyDSLRMSNormArch(TestCase):
     def test_arch_gate_allows_only_gfx950(self, arch, expected):
         import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
 
+        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
+        arch_is_supported.cache_clear()
+        self.addCleanup(arch_is_supported.cache_clear)
         with patch.object(
             flydsl_rmsnorm_impl.fu, "_resolve_rocm_arch", return_value=arch
         ):
-            self.assertEqual(flydsl_rmsnorm_impl._is_supported_arch(0), expected)
+            self.assertEqual(arch_is_supported(0), expected)
 
-    def test_arch_gate_follows_env_changes(self):
+    def test_arch_gate_is_resolved_once_per_process(self):
         import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
 
+        arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
+        arch_is_supported.cache_clear()
+        self.addCleanup(arch_is_supported.cache_clear)
+
         with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
-            self.assertTrue(flydsl_rmsnorm_impl._is_supported_arch(0))
+            self.assertTrue(arch_is_supported(0))
         with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
-            self.assertFalse(flydsl_rmsnorm_impl._is_supported_arch(0))
+            self.assertTrue(arch_is_supported(0))
 
 
 class TestFlyDSLRMSNormHelpers(TestCase):
@@ -550,15 +557,29 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
     @parametrize("cow_arg", ("input", "weight"))
-    def test_cow_inputs_fall_back_without_compiling(self, cow_arg):
+    def test_cow_inputs_dispatch_and_remain_cow(self, cow_arg):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
         x, weight = self._make_dispatch_inputs()
+        with pn.flydsl.disabled():
+            ref, ref_rstd = torch.ops.aten._fused_rms_norm(x, [DISPATCH_N], weight, EPS)
+
         if cow_arg == "input":
             x = x._lazy_clone()
+            cow = x
         else:
             weight = weight._lazy_clone()
+            cow = weight
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        data_ptr = cow.const_data_ptr()
 
-        torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
-        self._assert_no_flydsl_compiles()
+        got, got_rstd = torch.ops.aten._fused_rms_norm(x, [DISPATCH_N], weight, EPS)
+
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+        self.assertEqual(got, ref)
+        self.assertEqual(got_rstd, ref_rstd)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertEqual(cow.const_data_ptr(), data_ptr)
 
     def test_user_disable_falls_back_and_restores(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info

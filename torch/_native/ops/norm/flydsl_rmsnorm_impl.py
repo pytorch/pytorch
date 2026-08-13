@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import torch
 
 from ... import flydsl_utils as fu
@@ -12,10 +14,16 @@ from .flydsl_rmsnorm_utils import normalized_shape_1d, SUPPORTED_DTYPES
 
 _SUPPORTED_ARCHES = ("gfx950",)
 _HIP_AVAILABLE = torch.version.hip is not None
-_is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
 
 
+@functools.cache
 def _is_supported_arch(device_index: int) -> bool:
+    """Whether this device's arch is one the kernel was tuned for.
+
+    Cached per device, which means FLYDSL_GPU_ARCH and HSA_OVERRIDE_GFX_VERSION
+    are read once per process: changing either afterwards needs a restart to
+    take effect.
+    """
     # HSA_OVERRIDE_GFX_VERSION may carry feature flags ("gfx950:sramecc+") and
     # _resolve_rocm_arch passes those through, so compare the base arch only --
     # the band tuning below does not depend on sramecc/xnack.
@@ -52,24 +60,15 @@ def _common_supported(
         return False
     if weight is None:
         return False
-    if (
-        weight.shape != (n,)
-        or weight.dtype != input.dtype
-        or weight.device != input.device
-        or not weight.is_contiguous()
-    ):
-        return False
-    if _is_cow_tensor(input) or _is_cow_tensor(weight):
-        return False
-    rows_m = input.numel() // n
-    itemsize = input.element_size()
-    if not _fits_int32_buffer_span(rows_m, n, itemsize):
-        return False
-    return True
+    return (
+        weight.shape == (n,)
+        and weight.dtype == input.dtype
+        and weight.device == input.device
+        and weight.is_contiguous()
+    )
 
 
-def _fused_rms_norm_fwd_perf_wins(input: torch.Tensor, n: int) -> bool:
-    rows_m = input.numel() // n
+def _fused_rms_norm_fwd_perf_wins(rows_m: int, n: int) -> bool:
     # Tuned on gfx950 (MI355) at rows_m=2048. 114688 is the last N where all
     # three dtypes still beat aten (1.15x-1.19x)
     return (
@@ -92,7 +91,10 @@ def _fused_rms_norm_cond(
         return False
     if not _common_supported(input, n, weight):
         return False
-    return _fused_rms_norm_fwd_perf_wins(input, n)
+    rows_m = input.numel() // n  # n has been validated to be non-Zero
+    if not _fits_int32_buffer_span(rows_m, n, input.element_size()):
+        return False
+    return _fused_rms_norm_fwd_perf_wins(rows_m, n)
 
 
 def _fused_rms_norm_impl(
