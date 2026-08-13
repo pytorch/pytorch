@@ -176,9 +176,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         implementation raised a TypeError for checkpoints containing int or bool
         tensors (#192485).
         """
-        dcp_sharding_info = json.dumps(
-            {"weight": {SAVED_OFFSETS_KEY: [0, 0]}}
-        )
+        dcp_sharding_info = json.dumps({"weight": {SAVED_OFFSETS_KEY: [0, 0]}})
         metadata = {
             "weight": {
                 SHAPE_KEY: [2, 4],
@@ -188,9 +186,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
                 "DCP_SHARDING_INFO": dcp_sharding_info,
             },
         }
-        input_files_data = {
-            "shard.safetensors": _InputFileData(metadata=metadata)
-        }
+        input_files_data = {"shard.safetensors": _InputFileData(metadata=metadata)}
         output_files_data = {
             "out.safetensors": _OutputFileData(fqn_data={"weight": None})
         }
