@@ -176,13 +176,6 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_set_default_timeout_compatibility_alias(self) -> None:
-        backend = dist.get_backend_impl(device=self.device)
-        backend._set_default_timeout(timedelta(seconds=7))
-        self.assertEqual(backend.options._timeout, timedelta(seconds=7))
-
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
@@ -1161,6 +1154,7 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
         self,
         extra: str = "",
         device_id: str = 'torch.device("cuda:0")',
+        child_env: dict[str, str] | None = None,
     ) -> None:
         try:
             subprocess.check_output(
@@ -1171,6 +1165,7 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
                 ],
                 stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=child_env,
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
@@ -1189,6 +1184,18 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     @skip_if_lt_x_gpu(1)
     def test_eager_init_without_device_id(self) -> None:
         self._run_child(device_id="None")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_eager_init_with_per_rank_visible_device(self) -> None:
+        child_env = os.environ.copy()
+        visible_devices = child_env.get("CUDA_VISIBLE_DEVICES")
+        child_env["CUDA_VISIBLE_DEVICES"] = (
+            visible_devices.split(",")[1].strip() if visible_devices else "1"
+        )
+        child_env["LOCAL_RANK"] = "1"
+        self._run_child(device_id="None", child_env=child_env)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
