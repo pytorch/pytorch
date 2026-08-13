@@ -2270,9 +2270,9 @@ class SliceVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
-class ListIteratorVariable(IteratorVariable):
-    # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
-    _cpython_type = type(iter([]))
+class BaseListIteratorVariable(IteratorVariable):
+    # In CPython list_iterator and _deque_iterator are siblings, not subclasses
+    # of one another, so the concrete VTs share this base rather than each other.
 
     _nonvar_fields = {
         "index",
@@ -2299,7 +2299,7 @@ class ListIteratorVariable(IteratorVariable):
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Objects/listobject.c#L4110-L4133
         if not self.is_mutable():
-            raise AssertionError("ListIteratorVariable must be mutable to iterate")
+            raise AssertionError("list iterator must be mutable to iterate")
         old_index = self.index
         if old_index >= len(self.items) or self.is_exhausted:
             self.is_exhausted = True
@@ -2345,17 +2345,22 @@ class ListIteratorVariable(IteratorVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
+class ListIteratorVariable(BaseListIteratorVariable):
+    # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
+    _cpython_type = type(iter([]))
+
+
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
 
 
-class DequeIteratorVariable(ListIteratorVariable):
+class DequeIteratorVariable(BaseListIteratorVariable):
     _cpython_type = type(iter(collections.deque()))
 
     _nonvar_fields = {
         "saved_state",
-        *ListIteratorVariable._nonvar_fields,
+        *BaseListIteratorVariable._nonvar_fields,
     }
 
     def __init__(
