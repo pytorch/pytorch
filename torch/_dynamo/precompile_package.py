@@ -289,6 +289,10 @@ class FrameInvariants:
     variants: int
     invariant: tuple[_GuardFact, ...]
     varying: tuple[_GuardFact, ...]
+    # Guards this module cannot compare between variants. Not "they held" and
+    # not "they differed" -- we do not know, and saying either would be a claim
+    # we cannot support.
+    undetermined: tuple[_GuardFact, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -679,11 +683,12 @@ def _normalize(text: str) -> str:
 
 
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
-    return tuple(
-        _normalize(part)
-        for part in (code_list or ())
-        if not _DYNAMO_INDICES.search(part)
-    )
+    # The _dynamo_*_indices parts are NOT boilerplate, whatever an earlier
+    # comment here claimed: they are the whole of TENSOR_MATCH's export info and
+    # they encode the dimension-marking guards, so mark_static on one variant
+    # and not the next shows up only here. Dropping them reported the guard that
+    # split two compilations as an invariant of both.
+    return tuple(_normalize(part) for part in (code_list or ()))
 
 
 class _SingleFileStore(DynamoStore):
@@ -754,6 +759,27 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
+# Guards whose C++ leaf compares something no fingerprint here models: subclass
+# metadata, a DTensor placement, an opaque object's guard values, a raw
+# DispatchKeySet, or process-wide state carried entirely in the leaf. Calling
+# two of these equal is how the report ends up asserting a precondition that
+# does not hold, so they are never compared -- they are reported separately as
+# undetermined, which is the honest answer and cannot mislead.
+_UNMODELLED_GUARD_TYPES = frozenset(
+    {
+        "DETERMINISTIC_ALGORITHMS",
+        "DISPATCH_KEY_SET_MATCH",
+        "DTENSOR_SPEC_MATCH",
+        "FSDP_TRAINING_STATE",
+        "GLOBAL_STATE",
+        "OPAQUE_OBJ_GUARD_FN_MATCH",
+        "SHAPE_ENV",
+        "TENSOR_SUBCLASS_METADATA_MATCH",
+        "TORCH_FUNCTION_STATE",
+    }
+)
+
+
 def _saved_hooks_fingerprint() -> str:
     """Name the installed saved-tensors hooks by content, never by address."""
     try:
@@ -822,30 +848,26 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
         return ""
     value = entry.value
     if isinstance(value, torch.Tensor):
+        # Ask the guard system what it stores rather than reconstructing it.
+        # Hand-rolling this failed four times running -- the concrete shape,
+        # then python type, then the conj/neg bits, then the rest of the
+        # dispatch key set -- and the last of those was still wrong, because
+        # TensorCheck stores the TLS-ADJUSTED key set, (ks | tls_included) -
+        # tls_excluded, not the tensor's own. get_tensor_guard_code_part is the
+        # function guards.py itself uses to render that, so it cannot drift.
+        from .guards import convert_to_concrete_values, get_tensor_guard_code_part
+
         try:
-            stride = tuple(value.stride())
+            return get_tensor_guard_code_part(
+                value,
+                "",
+                convert_to_concrete_values(value.size()),
+                convert_to_concrete_values(value.stride()),
+                type(value),
+                torch._C._dispatch_keys(value),
+            )
         except Exception:
-            stride = ()
-        # Mirror what TensorCheck actually compares (guards.cpp): the python
-        # type and the whole DISPATCH KEY SET, not a hand-picked couple of its
-        # bits. Conjugate and Negative are two keys in that set; the autograd
-        # keys are others, and those are exactly what an inference tensor
-        # lacks -- so capturing under no_grad in one variant and
-        # inference_mode in the next, which the module docstring tells users
-        # to do, splits the guard while every field here matched. Leaving any
-        # of it out reports the guard that split two variants as an invariant
-        # of both. The repr is a stable list of key names, so it neither
-        # churns nor over-splits: it compares what the guard compares.
-        try:
-            keys = str(torch._C._dispatch_keys(value))
-        except Exception:
-            keys = "<unavailable>"
-        return (
-            f"type={type(value).__name__}, dtype={value.dtype}, "
-            f"shape={tuple(value.shape)}, stride={stride}, "
-            f"device={value.device}, requires_grad={value.requires_grad}, "
-            f"keys={keys}"
-        )
+            return f"type={type(value).__name__}, dtype={value.dtype}, <unrenderable>"
     if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
         d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
     ):
@@ -938,6 +960,7 @@ class PrecompileSession:
         self._risky_dropped_guards: set[tuple[str, str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
+        self._undetermined: dict[tuple[str, str, int], set[_GuardFact]] = {}
         self._guard_filter_fn = self._recording_filter(
             guard_filter_fn or default_guard_filter_fn
         )
@@ -1020,20 +1043,25 @@ class PrecompileSession:
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
             namespaces = _module_namespaces(entries)
-            facts = set()
+            facts: set[_GuardFact] = set()
+            undetermined: set[_GuardFact] = set()
             for keep, entry in zip(decisions, entries):
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add((entry.guard_type, entry.name))
                 if not keep and _is_risky_drop(entry, namespaces):
                     self._risky_dropped_guards.add((entry.guard_type, entry.name))
+                unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
                 fact = _GuardFact(
                     guard_type=entry.guard_type,
                     source=_normalize(entry.name),
                     code=_render_code(entry.orig_guard.code_list),
-                    value=_value_fingerprint(entry),
+                    value="" if unmodelled else _value_fingerprint(entry),
                     enforced=keep,
                 )
-                facts.add(pool.setdefault(fact, fact))
+                fact = pool.setdefault(fact, fact)
+                # Never compared, so never claimed to hold: see
+                # _UNMODELLED_GUARD_TYPES.
+                (undetermined if unmodelled else facts).add(fact)
             # One filter call is one compilation, and the package knows which
             # frame is being compiled, which is the only place that mapping is
             # available to us.
@@ -1045,6 +1073,7 @@ class PrecompileSession:
                 else ("<unknown>", "<unknown>", 0)
             )
             self._guard_sets.setdefault(key, []).append(frozenset(facts))
+            self._undetermined.setdefault(key, set()).update(undetermined)
             return decisions
 
         return filter_fn
@@ -1082,6 +1111,12 @@ class PrecompileSession:
                     variants=len(sets),
                     invariant=tuple(sorted(shared, key=_fact_order)),
                     varying=tuple(sorted(everything - shared, key=_fact_order)),
+                    undetermined=tuple(
+                        sorted(
+                            self._undetermined.get((name, filename, lineno), set()),
+                            key=_fact_order,
+                        )
+                    ),
                 )
             )
         return tuple(out)
@@ -1108,6 +1143,9 @@ class PrecompileSession:
             "# these are the preconditions the artifact is only valid under.",
             "# 'varies' lists what differed between variants -- those are what",
             "# distinguish one compiled graph from another, not preconditions.",
+            "# 'unknown' lists guards whose check this report cannot model, so it",
+            "# cannot say whether they held across variants. Treat them as",
+            "# neither: they may or may not be preconditions.",
             "#",
             "# enforced = the guard is serialized and rechecked when the artifact",
             "#            is loaded.",
@@ -1128,7 +1166,8 @@ class PrecompileSession:
             lines.append("")
             lines.append(
                 f"frame {f.frame} ({where})  {f.variants} variant(s), "
-                f"{len(f.invariant)} invariant, {len(f.varying)} varying"
+                f"{len(f.invariant)} invariant, {len(f.varying)} varying, "
+                f"{len(f.undetermined)} undetermined"
             )
             if not f.invariant:
                 lines.append("  invariant: (none)")
@@ -1136,6 +1175,8 @@ class PrecompileSession:
                 lines.append(f"  invariant {fact.render()}")
             for fact in f.varying:
                 lines.append(f"  varies    {fact.render()}")
+            for fact in f.undetermined:
+                lines.append(f"  unknown   {fact.render()}")
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         with open(path, "w") as handle:
             handle.write("\n".join(lines) + "\n")

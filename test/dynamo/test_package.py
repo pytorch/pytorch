@@ -267,6 +267,23 @@ class PrecompileNoDispatchSlot(torch.nn.Module):
 PRECOMPILE_INV_CONFIG = {"mode": "sum"}
 
 
+def _in_inference_mode(tensor):
+    """Tag a tensor so the call using it runs under inference_mode."""
+    return _InferenceInput(tensor)
+
+
+def _marked_static(tensor):
+    torch._dynamo.mark_static(tensor, 0)
+    return tensor
+
+
+class _InferenceInput:
+    """Marker: the corpus runs this input inside inference_mode."""
+
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+
 class PrecompileInvariantModel(torch.nn.Module):
     """Reads a global across a graph break, so the resume frame guards it."""
 
@@ -2726,9 +2743,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # land in the intersection.
         for frame in (entry, frames[resume]):
             varies = rendered(frame.varying)
-            self.assertTrue(any("shape=(4, 8)" in r for r in varies), varies)
-            self.assertTrue(any("shape=(5, 8)" in r for r in varies), varies)
-            self.assertFalse(any("shape=(" in r for r in rendered(frame.invariant)))
+            # Rendered as guard code, so sizes read size=[4, 8].
+            self.assertTrue(any("size=[4, 8]" in r for r in varies), varies)
+            self.assertTrue(any("size=[5, 8]" in r for r in varies), varies)
+            self.assertFalse(any("size=[" in r for r in rendered(frame.invariant)))
 
     def test_invariants_file_is_written_and_reproducible(self):
         def capture(path):
@@ -2802,14 +2820,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     compiled(second)
                 frame = session.invariants()[0]
                 self.assertEqual(frame.variants, 2)
-                varying = [fact.render() for fact in frame.varying]
                 self.assertTrue(
-                    any("TENSOR_MATCH" in r for r in varying),
+                    any(fact.guard_type == "TENSOR_MATCH" for fact in frame.varying),
                     f"{label}: the guard that split the compilations is not "
-                    f"reported as varying: {varying}",
+                    f"reported as varying: {[f.render() for f in frame.varying]}",
                 )
                 self.assertFalse(
-                    any("TENSOR_MATCH" in fact.render() for fact in frame.invariant)
+                    any(fact.guard_type == "TENSOR_MATCH" for fact in frame.invariant)
                 )
 
     def test_invariants_report_saved_tensor_hooks_by_content(self):
@@ -2903,6 +2920,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             torch.ones(2, 3, 4, 5),
             torch.ones(2, 3, 4, 5).to(memory_format=torch.channels_last),
         ),
+        # TensorCheck stores the TLS-ADJUSTED key set, so a tensor built
+        # OUTSIDE inference_mode still splits the guard when the call is made
+        # inside it. Rendering the tensor's own key set missed exactly this.
+        "tls_dispatch_keys": lambda: (
+            torch.ones(4, 8),
+            _in_inference_mode(torch.ones(4, 8)),
+        ),
+        # The dimension-marking guards live entirely in code_list, which an
+        # earlier version discarded as boilerplate.
+        "dimension_marking": lambda: (
+            torch.ones(4, 8),
+            _marked_static(torch.ones(4, 8)),
+        ),
     }
 
     @parametrize("shape", sorted(_SPLIT_CORPUS))
@@ -2916,21 +2946,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
         session = precompile_capture(f, backend="eager", dynamic=False)
-        with session as compiled, torch.no_grad():
-            compiled(first)
-            compiled(second)
+        with session as compiled:
+            for arg in (first, second):
+                if isinstance(arg, _InferenceInput):
+                    with torch.inference_mode():
+                        compiled(arg.tensor)
+                else:
+                    with torch.no_grad():
+                        compiled(arg)
         frame = session.invariants()[0]
         # If Dynamo did not actually split, the case is not exercising anything
         # and the corpus entry is wrong -- say so rather than passing quietly.
         self.assertEqual(frame.variants, 2, f"{shape}: dynamo did not recompile")
-        varying = [fact.render() for fact in frame.varying]
+        # Key on the field, not the rendered text: the render is authoritative
+        # guard code now and does not spell the type.
         self.assertTrue(
-            any("TENSOR_MATCH" in r for r in varying),
+            any(fact.guard_type == "TENSOR_MATCH" for fact in frame.varying),
             f"{shape}: the guard that split the compilations is reported as an "
-            f"invariant of both. varying={varying}",
+            f"invariant of both. varying={[f.render() for f in frame.varying]}",
         )
         self.assertFalse(
-            any("TENSOR_MATCH" in fact.render() for fact in frame.invariant)
+            any(fact.guard_type == "TENSOR_MATCH" for fact in frame.invariant)
         )
 
     def test_invariants_marks_unenforced_preconditions(self):
