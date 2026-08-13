@@ -419,6 +419,8 @@ inductor_override_kwargs["cpu"] = {
         "atol": 3e-4,
         "rtol": 0.003,
     },
+    # The CPU kernel cannot handle different input and grad types
+    ("_softmax_backward_data", f16): {"reference_in_float": False},
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("polygamma.polygamma_n_0", f32): {"atol": 1e-3, "rtol": 1e-4},
     ("polygamma.polygamma_n_1", f32): {"atol": 1e-3, "rtol": 1e-4},
