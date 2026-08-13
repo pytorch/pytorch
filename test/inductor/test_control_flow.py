@@ -242,6 +242,18 @@ class CondModels:
 
             return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
+    class UnbackedSymIntPredicate(torch.nn.Module):
+        def forward(self, x, flag):
+            flag = flag.item()
+
+            def true_fn(x):
+                return x.clone()
+
+            def false_fn(x):
+                return x + 1
+
+            return torch.cond(flag > 0, true_fn, false_fn, (x,))
+
     class MismatchedOutputSize(torch.nn.Module):
         def forward(self, p, x, y, z):
             a = y.shape[0]
@@ -414,6 +426,21 @@ class CondTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_cond_unbacked_symint_predicate(self, device, dynamic):
+        for flag in (-1, 1):
+            torch._dynamo.reset()
+            self._run_test(
+                model=CondModels.UnbackedSymIntPredicate(),
+                inputs=(torch.randn(10, 20), torch.tensor(flag)),
+                device=device,
+                dynamic=dynamic,
+                num_predicates=0,
+            )
 
     @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
