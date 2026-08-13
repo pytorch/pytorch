@@ -18003,14 +18003,26 @@ class TestAutogradMultipleDispatch(TestCase):
                 threads_eq = ctx.tid == threading.get_ident()
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        # Graph spans both CPU and CUDA, so the engine hands off to a worker
+        inp = torch.rand(10, requires_grad=True).sin().to("cuda")
+        TestFn.apply(inp, None).sum().backward()
+        self.assertFalse(threads_eq)
 
+        inp = torch.rand(10, requires_grad=True).sin().to("cuda")
         with torch.autograd.set_multithreading_enabled(False):
             TestFn.apply(inp, None).sum().backward()
         self.assertTrue(threads_eq)
 
+        # Graph is entirely on CUDA, so the calling thread drives the backward
+        # See Note [ Engine threading optimization when single device ]
+        inp = torch.rand(10, device="cuda", requires_grad=True)
         TestFn.apply(inp, None).sum().backward()
-        self.assertFalse(threads_eq)
+        self.assertTrue(threads_eq)
+
+        inp = torch.rand(10, device="cuda", requires_grad=True)
+        with torch.autograd.set_multithreading_enabled(True):
+            TestFn.apply(inp, None).sum().backward()
+        self.assertTrue(threads_eq)
 
     @onlyCUDA
     def test_backward_tls_stash(self):
