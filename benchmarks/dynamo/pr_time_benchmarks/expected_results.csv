@@ -6,7 +6,7 @@ add_loop_eager_dynamic,compile_time_instruction_count,5468000000,0.1
 
 
 
-add_loop_inductor,compile_time_instruction_count,32830000000,0.1
+add_loop_inductor,compile_time_instruction_count,28860000000,0.1
 
 
 
@@ -42,11 +42,11 @@ sum_floordiv_regression,compile_time_instruction_count,3947000000,0.1
 
 
 
-symint_sum,compile_time_instruction_count,3556000000,0.1
+symint_sum,compile_time_instruction_count,4125000000,0.1
 
 
 
-symint_sum_loop,compile_time_instruction_count,8822000000,0.1
+symint_sum_loop,compile_time_instruction_count,9407000000,0.1
 
 
 
@@ -90,11 +90,11 @@ basic_InlineMod_eager,compile_time_instruction_count,7964000000,0.1
 
 
 
-dtensor_dispatch_detach,instruction_count,58820,0.1
+dtensor_dispatch_detach,instruction_count,57250,0.1
 
 
 
-dtensor_dispatch_to_from_local,instruction_count,197400,0.1
+dtensor_dispatch_to_from_local,instruction_count,197800,0.1
 
 
 
@@ -110,7 +110,7 @@ dtensor_dispatch_inplace,instruction_count,59860,0.1
 
 
 
-dtensor_dispatch_view,instruction_count,67940,0.1
+dtensor_dispatch_view,instruction_count,66880,0.1
 
 
 
@@ -118,16 +118,20 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,36750,0.1
+dtensor_dispatch_custom_handler,instruction_count,38000,0.1
 
 
 
-nn_module_guard_eval,instruction_count,83710,0.1
+nn_module_guard_eval,instruction_count,72080,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,116300,0.1
+nn_module_guard_eval_dynamic,instruction_count,104100,0.1
 
 
 
 autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
+
+
+
+runtime_overhead_eager_cpu,instruction_count,193900,0.1
