@@ -1796,10 +1796,8 @@ void LayerNormBackwardKernelImplInternal(
       const bool use_tiled_kernel = M < kGammaBetaTwoPassMinM ||
           ShouldUseHugeMGammaBetaBackwardKernel(M, N, warp_size, sm_count);
       if (use_tiled_kernel) {
-        // Use the optimized tiled kernel adapted for the current warp size.
-        // This replaces the legacy two-pass cuComputePartGradGammaBeta +
-        // cuComputeGradGammaBeta approach with a single-pass tiled reduction
-        // that has coalesced memory access and adaptive tile sizing.
+        // Single-pass tiled reduction with coalesced memory access and
+        // adaptive tile sizing, dispatched on the current warp size.
         if (warp_size == 64) {
           LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
             dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);

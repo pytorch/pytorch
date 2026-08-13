@@ -8472,11 +8472,13 @@ class TestNNDeviceType(NNTestCase):
         # restored ROCm tile-shape band (M < kGammaBetaTwoPassMinM) and the
         # two-pass band (M >= kGammaBetaTwoPassMinM) across fp16/bf16/fp32
         # for both layer_norm and rms_norm.
-        # fp32 tolerance matches test_layer_norm_backwards_eps's default band
-        # (atol=1e-4, rtol=1e-5) for this same kernel: the M >= 2048 band
-        # routes through the two-pass reduction, whose block-parallel sum
-        # order differs from the CPU reference's, so fp32 accumulation noise
-        # on the order of M * eps (~4e-4 at M=4096) is expected, not a bug.
+        # fp32 uses test_layer_norm_backwards_eps's default tolerances
+        # (atol=1e-4, rtol=1e-5) in the tiled band, but M >= 2048 routes
+        # through a block-parallel reduction whose summation order differs
+        # from the CPU reference's. That noise does not shrink with the
+        # reference magnitude, so near-zero entries need a larger atol;
+        # match the 1e-3 test_layer_norm_gamma_beta_backward_dispatch_boundaries
+        # uses for the same band.
         tolerances = {
             torch.float16: (1e-2, 1e-3),
             torch.bfloat16: (1e-2, 1.6e-2),
@@ -8485,9 +8487,11 @@ class TestNNDeviceType(NNTestCase):
         eps = 1e-5
         for op in ("layer_norm", "rms_norm"):
             for dtype in (torch.float16, torch.bfloat16, torch.float32):
-                atol, rtol = tolerances[dtype]
                 for N in (768, 1024):
                     for M in (128, 192, 1024, 2047, 2048, 4096):
+                        atol, rtol = tolerances[dtype]
+                        if dtype is torch.float32 and M >= 2048:
+                            atol, rtol = 1e-3, 1e-3
                         msg = f"op={op} dtype={dtype} M={M} N={N}"
                         x = torch.randn(M, N, dtype=dtype, device=device)
                         weight = torch.randn(N, dtype=dtype, device=device)
