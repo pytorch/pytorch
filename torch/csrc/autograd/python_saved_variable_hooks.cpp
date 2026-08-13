@@ -9,31 +9,35 @@ namespace py = pybind11;
 
 namespace torch::autograd {
 PySavedVariableHooks::PySavedVariableHooks(
-    py::function& pack_hook,
-    py::function& unpack_hook)
-    : // steals the reference (we will decref ourselves)
-      pack_hook_(pack_hook.release().ptr()),
-      unpack_hook_(unpack_hook.release().ptr()) {}
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+    py::function&& pack_hook,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+    py::function&& unpack_hook)
+    : // steals the reference
+      pack_hook_(std::move(pack_hook).release().ptr(), getPyInterpreter()),
+      unpack_hook_(std::move(unpack_hook).release().ptr(), getPyInterpreter()) {
+}
 
 // We don't use pybind for call_pack_hook and call_unpack_hook to avoid
 // https://github.com/pytorch/pytorch/issues/34172
 void PySavedVariableHooks::call_pack_hook(const at::Tensor& tensor) {
   py::gil_scoped_acquire acquire;
   THPObjectPtr obj(THPVariable_Wrap(tensor));
-  THPObjectPtr packed(
-      PyObject_CallFunctionObjArgs(pack_hook_, obj.get(), nullptr));
+  THPObjectPtr packed(PyObject_CallFunctionObjArgs(
+      pack_hook_.ptr(getPyInterpreter()), obj.get(), nullptr));
   if (!packed) {
     throw python_error();
   }
-  data_ = packed.release();
-  // obj is decrefed on exit, packed has their references stolen
-  // pack_hook_ and data_ will be manually decrefed when the saved variable is
-  // released
+  data_.emplace(packed.release(), getPyInterpreter());
+  // obj is decrefed on exit, packed's reference is stolen by data_
 }
 
 at::Tensor PySavedVariableHooks::call_unpack_hook() {
   py::gil_scoped_acquire acquire;
-  THPObjectPtr res(PyObject_CallFunctionObjArgs(unpack_hook_, data_, nullptr));
+  THPObjectPtr res(PyObject_CallFunctionObjArgs(
+      unpack_hook_.ptr(getPyInterpreter()),
+      data().ptr(getPyInterpreter()),
+      nullptr));
   if (!res) {
     throw python_error();
   }
@@ -43,27 +47,11 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
       THPUtils_typename(res));
   return THPVariable_Unpack(res);
   // res is decrefed on exit
-  // unpack_hook_ will be manually decrefed when the saved variable is released
 }
 
 std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
 PySavedVariableHooks::retrieve_unpack_hook_data() const {
-  Py_INCREF(unpack_hook_);
-  Py_INCREF(data_);
-  return std::make_pair(
-      c10::SafePyObject(unpack_hook_, getPyInterpreter()),
-      c10::SafePyObject(data_, getPyInterpreter()));
-}
-
-// NOLINTNEXTLINE(bugprone-exception-escape)
-PySavedVariableHooks::~PySavedVariableHooks() {
-  // If python is already dead, leak the wrapped python objects
-  if (Py_IsInitialized()) {
-    py::gil_scoped_acquire gil;
-    Py_XDECREF(pack_hook_);
-    Py_XDECREF(unpack_hook_);
-    Py_XDECREF(data_);
-  }
+  return std::make_pair(unpack_hook_, data());
 }
 
 void PyDefaultSavedVariableHooks::push_hooks(
@@ -93,7 +81,8 @@ std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
       py::reinterpret_steal<py::function>(pack_hook.release());
   py::function unpack_hook_ =
       py::reinterpret_steal<py::function>(unpack_hook.release());
-  return std::make_unique<PySavedVariableHooks>(pack_hook_, unpack_hook_);
+  return std::make_unique<PySavedVariableHooks>(
+      std::move(pack_hook_), std::move(unpack_hook_));
 }
 
 } // namespace torch::autograd
