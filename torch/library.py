@@ -678,8 +678,8 @@ def _del_library(
 
 @contextlib.contextmanager
 def _scoped_library(*args, **kwargs):
+    lib = Library(*args, **kwargs)
     try:
-        lib = Library(*args, **kwargs)
         yield lib
     finally:
         lib._destroy()
