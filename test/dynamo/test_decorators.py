@@ -1703,12 +1703,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 3)
 
     def test_assume_constant_result_specialize_args_container_dynamic_scalars(self):
-        # A scalar nested in a list/dict argument is promoted to a symbolic
-        # scalar by automatic dynamic once its value changes across calls. The
-        # specialize walk must recurse into the container and specialize that
-        # leaf via evaluate_expr, instead of graph breaking on the whole
-        # container's as_python_constant. fullgraph=True turns any graph break
-        # into a hard error, so this guards against that regression.
+        # A nested scalar promoted to a SymInt on recompile must be
+        # specialized by the container walk; fullgraph turns a graph-break
+        # regression into a hard error.
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select_list(sizes):
             return float(sum(sizes))

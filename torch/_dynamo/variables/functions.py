@@ -2183,10 +2183,8 @@ def _install_constant_arg_guards(
         _unguardable_constant_arg(source, value, name, "self-referential structure")
     ancestors.add(id(value))
     if isinstance(value, (tuple, list)):
-        # Subclasses can carry state beyond the items (instance __dict__ or
-        # slots) that the item walk would leave unguarded; TYPE_MATCH makes a
-        # later call with a different (sub)type recompile instead of silently
-        # reusing the stale constant.
+        # Exact types only (subclass state is invisible to the item walk);
+        # TYPE_MATCH forces a recompile when a later call switches types.
         if not (
             istype(value, (tuple, list, torch.Size))
             or _is_stateless_namedtuple(value)
@@ -2353,9 +2351,7 @@ def invoke_and_store_as_constant(
             # A symbolic scalar (e.g. an int made dynamic by automatic dynamic
             # shapes) has no single Python value to bake; evaluate_expr()
             # specializes it to the traced value and installs a shape-env
-            # guard, so a different value recompiles and re-invokes fn. This is
-            # also how a container's nested scalar is handled once automatic
-            # dynamic promotes it, via the structural walk below.
+            # guard, so a different value recompiles and re-invokes fn.
             return x.evaluate_expr(tx.output)
         # A sourceless value is built by the traced bytecode itself and a
         # constant-source one is already baked into the graph: neither can vary
