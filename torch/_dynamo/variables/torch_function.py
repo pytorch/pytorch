@@ -58,7 +58,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
-from .functions import UserMethodVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -697,7 +697,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 attr_source = AttrSource(cls_source, name)
                 if isinstance(attr, types.FunctionType):
                     install_guard(attr_source.make_guard(GuardBuilder.CLOSURE_MATCH))
-                    return UserMethodVariable(attr, self)
+                    return UserMethodVariable(UserFunctionVariable(attr), self)
 
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
@@ -709,7 +709,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
                 elif isinstance(attr, classmethod):
                     return UserMethodVariable(
-                        attr.__func__, self.class_type_var(tx), source=attr_source
+                        UserFunctionVariable(
+                            attr.__func__,
+                            source=attr_source and AttrSource(attr_source, "__func__"),
+                        ),
+                        self.class_type_var(tx),
+                        source=attr_source,
                     )
 
                 elif attr_is_overridden:

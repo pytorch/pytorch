@@ -342,7 +342,11 @@ class SuperVariable(VariableTracker):
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                variables.UserFunctionVariable(
+                    inner_fn.__func__, source=source and AttrSource(source, "__func__")
+                ),
+                self.objvar,
+                source=source,
             ).call_function(tx, args, kwargs)
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
@@ -1324,7 +1328,9 @@ class AutogradFunctionVariable(VariableTracker):
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                fn.__func__,
+                variables.UserFunctionVariable(
+                    fn.__func__, source=source and AttrSource(source, "__func__")
+                ),
                 variables.UserDefinedClassVariable(self.fn_cls),
                 source=source,
             ).call_function(tx, args, kwargs)
@@ -1553,7 +1559,9 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
                 install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                 return variables.UserMethodVariable(
-                    obj.__func__, self, source_fn=func_source, source=source
+                    variables.UserFunctionVariable(obj.__func__, source=func_source),
+                    self,
+                    source=source,
                 ).call_function(tx, args, kwargs)
 
         self._unsupported_method(name)
