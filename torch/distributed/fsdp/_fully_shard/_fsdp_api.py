@@ -197,3 +197,59 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+def _select_largest_first(
+    fqn_numbytes: list[tuple[str, int]], budget_bytes: int
+) -> list[str]:
+    """Select FQNs largest-first until the CPU offload budget is exhausted.
+
+    Parameters are sorted by byte size descending, with a stable tie-break on
+    FQN, and the longest prefix whose cumulative size does not exceed
+    ``budget_bytes`` is returned, stopping at the first parameter that would
+    exceed it. The selection is deterministic, never overshoots the budget, and
+    is monotonic in the budget: raising ``budget_bytes`` only extends the
+    prefix, so the selected set grows as a superset. It takes no torch
+    dependency so it can be unit tested on plain Python data.
+    """
+    ordered = sorted(fqn_numbytes, key=lambda kv: (-kv[1], kv[0]))
+    selected: list[str] = []
+    used = 0
+    for fqn, numbytes in ordered:
+        if used + numbytes > budget_bytes:
+            break
+        selected.append(fqn)
+        used += numbytes
+    return selected
+
+
+def cpu_offload_by_budget(
+    module: torch.nn.Module, budget_bytes: int, *, pin_memory: bool = True
+) -> dict[str, OffloadPolicy]:
+    """Build a per-parameter CPU offload map under a memory budget.
+
+    Returns a mapping from parameter FQN (relative to ``module``) to
+    :class:`OffloadPolicy`, suitable to pass as ``fully_shard``'s
+    ``offload_policy``. The largest parameters are offloaded first until
+    ``budget_bytes`` of parameter memory has been placed on CPU; the remaining
+    parameters stay on device and are omitted from the map. ``budget_bytes`` is
+    measured against full (unsharded) parameter sizes. A budget of ``0``
+    offloads nothing and a budget at or above the total parameter size offloads
+    everything, reproducing :class:`OffloadPolicy` and :class:`CPUOffloadPolicy`
+    respectively.
+
+    Note:
+        When only some parameters are offloaded, a parameter group spans both
+        CPU and device shards. Adam/AdamW stay correct on such a group, but the
+        default ``foreach``/``fused`` auto-selection does not engage a
+        multi-tensor kernel across mixed devices; pass ``fused=True`` (or
+        ``foreach=True``) to keep the per-device multi-tensor step.
+    """
+    if budget_bytes < 0:
+        raise ValueError(f"budget_bytes must be non-negative, but got {budget_bytes}")
+    fqn_numbytes = [
+        (fqn, param.numel() * param.element_size())
+        for fqn, param in module.named_parameters()
+    ]
+    policy = CPUOffloadPolicy(pin_memory=pin_memory)
+    return {fqn: policy for fqn in _select_largest_first(fqn_numbytes, budget_bytes)}
