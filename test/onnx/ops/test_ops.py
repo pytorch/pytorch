@@ -14,6 +14,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 class SchemaTest(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
     def test_symbolic_has_correct_schema(self):
         torch.library.opcheck(
             _symbolic_impl._symbolic,
@@ -92,6 +93,7 @@ class SchemaTest(common_utils.TestCase):
 
 
 class SymbolicOpsTest(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
     def test_symbolic_accepts_valid_inputs(self):
         output = torch.onnx.ops.symbolic(
             "custom_domain::CustomOp",
@@ -498,6 +500,7 @@ class SymbolicOpsTest(common_utils.TestCase):
 
 @common_utils.instantiate_parametrized_tests
 class NativeOnnxOpsTest(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
             model,
