@@ -1080,7 +1080,8 @@ class TestGeneratedVersionScript(unittest.TestCase):
         # symbols in torch_cuda.
         with tempfile.TemporaryDirectory() as tmpdir:
             path = gen_aot_lib.write_version_script(tmpdir, ["topk_f32_n1024_k8"])
-            text = open(path).read()
+            with open(path) as f:
+                text = f.read()
         # <prefix>_* covers every symbol the DSL emits for the kernel;
         # enumerating known suffixes left _args_spec/_kernel_info/
         # _function_name/_version in torch_cuda's ABI.
