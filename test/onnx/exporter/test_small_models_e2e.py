@@ -80,6 +80,25 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
+    def test_rfft_produces_correct_dft_length(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/155997
+        # The DFT node's dft_length must reflect the actual signal length, not
+        # be hardcoded to 1, otherwise shape-inference and runtime execution
+        # silently truncate the spectrum to a single frequency bin.
+        class RFFTModule(torch.nn.Module):
+            def forward(self, x):
+                x = torch.fft.rfft(x, n=512, dim=-1)
+                return x.real**2 + x.imag**2
+
+        x = torch.randn(4, 512, dtype=torch.float32)
+
+        onnx_program = self.export(RFFTModule(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertEqual(
+            onnx_program.model.graph.outputs[0].shape,
+            ir.Shape((4, 512 // 2 + 1)),
+        )
+
     def test_onnx_export_conditional(self):
         class CondModel(torch.nn.Module):
             def forward(self, x):
