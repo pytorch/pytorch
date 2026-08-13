@@ -3580,9 +3580,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = config.combo_kernel_max_num_nodes
+        all_sorted_nodes = [node for group in sorted_nodes for node in group]
         grouping_nodes = OrderedSet(
             ForeachKernelSchedulerNode._filter_nodes_for_combo_kernel_grouping(
-                scheduler.nodes
+                all_sorted_nodes
             )
         )
         for nodes in sorted_nodes:
