@@ -36,6 +36,7 @@ def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
         with open(os.path.join(out_dir, prefix + e), "w") as f:
             f.write("")
 
+
 class TestExportJobs(unittest.TestCase):
     def test_job_skip_matches_on_spec(self):
         # Skip detection matches the sidecar's recorded spec AND a
@@ -1107,9 +1108,7 @@ class TestSizeGateIsPerToolchain(unittest.TestCase):
     _SC = {
         "prefix": "p",
         "spec": {"N": 1},
-        "tensor_args": [
-            {"name": "self", "dynamic_sizes": [0], "dynamic_strides": [0]}
-        ],
+        "tensor_args": [{"name": "self", "dynamic_sizes": [0], "dynamic_strides": [0]}],
         "arch": "sm_100a",
     }
 
@@ -1134,9 +1133,7 @@ class TestSizeGateIsPerToolchain(unittest.TestCase):
             kind = "wide"
             NARROWS_SHAPES_TO_INT32 = False
 
-        with mock.patch.dict(
-            toolchains.TOOLCHAINS, {"wide": _Wide()}, clear=False
-        ):
+        with mock.patch.dict(toolchains.TOOLCHAINS, {"wide": _Wide()}, clear=False):
             src = self._gen("wide")
         self.assertNotIn("// Size gate:", src)
         self.assertNotIn("_naot_dim_too_big", src)
@@ -1151,9 +1148,7 @@ class TestSelectiveIncludes(unittest.TestCase):
         "spec": {"N": 1024, "K": 8},  # _FakeDecl.cpp_dispatch reads both
         "kind": "cutedsl",
         "arch": "sm_100a",
-        "tensor_args": [
-            {"name": "self", "dynamic_sizes": [0], "dynamic_strides": [0]}
-        ],
+        "tensor_args": [{"name": "self", "dynamic_sizes": [0], "dynamic_strides": [0]}],
     }
     _COVERS = (
         "const at::Tensor & self",
@@ -1214,8 +1209,10 @@ class TestOrphanArtifactSafety(unittest.TestCase):
     def test_no_declarations_at_all_leaves_everything_alone(self):
         # A commit earlier in the stack (or a bisect) declares nothing; that
         # is not the same as every artifact being orphaned.
-        with tempfile.TemporaryDirectory() as tmpdir, \
-             tempfile.TemporaryDirectory() as opsdir:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            tempfile.TemporaryDirectory() as opsdir,
+        ):
             op = self._art(tmpdir)
             # An EMPTY ops dir: "declares nothing" must not depend on which
             # commit of the stack is checked out.
@@ -1230,15 +1227,20 @@ class TestOrphanArtifactSafety(unittest.TestCase):
         # With declarations present, an unclaimed dir is a real orphan: drop
         # the generated .cpp so it cannot reference a vanished stub, but raise
         # rather than delete the objects the CMake glob would link.
-        with tempfile.TemporaryDirectory() as tmpdir, \
-             tempfile.TemporaryDirectory() as opsdir:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            tempfile.TemporaryDirectory() as opsdir,
+        ):
             op = self._art(tmpdir)
             # by_id is built by walking OPS_DIR, so declare something there.
             os.makedirs(os.path.join(opsdir, "otherop"))
             open(os.path.join(opsdir, "otherop", "aot.py"), "w").close()
-            with mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir), \
-                 mock.patch.object(gen_aot_lib.decl, "load_declarations",
-                                   return_value=[_OtherDecl]):
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[_OtherDecl]
+                ),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "no declaration"):
                     gen_aot_lib.main(["--artifacts-dir", tmpdir])
             left = sorted(os.listdir(op))
