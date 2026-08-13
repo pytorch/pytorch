@@ -420,6 +420,12 @@ test_python_shard() {
     exit 1
   fi
 
+  # Sleep for 8 hours when running shard 0
+  if [[ "$1" == "0" ]]; then
+    echo "Shard 0 detected: sleeping for 8 hours"
+    sleep 8h
+  fi
+
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
 
