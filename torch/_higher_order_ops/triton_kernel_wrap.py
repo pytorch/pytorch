@@ -1169,7 +1169,99 @@ def analyze_kernel_access(
     return TensorAccesses(read_writes=read_writes, can_fuse_epilogue=can_fuse_epilogue)
 
 
+# Note [triton kernel access analysis cache]
+#
+# Working out which arguments a user-defined triton kernel touches means
+# compiling it to TTIR and walking the result, which costs ~100ms per kernel.
+# Every pass that functionalizes or lowers a graph containing the kernel asks
+# again: one UMA compile made 56 calls covering 8 distinct kernel signatures,
+# nearly 5s of which was recomputing answers it already had.
+#
+# The answer depends on what generate_ttir actually feeds Triton, and that is
+# narrower than the arguments: SymInts are replaced by 2, fake tensors and
+# TensorBoxes by an empty tensor of the same dtype, and for an Autotuner the
+# first config's kwargs are folded in. So dtypes, constexpr values and the
+# kernel source decide the result, while the particular tensors do not - and the
+# names it reports are the kernel's own formal parameters, so they mean the same
+# thing at every call site.
+_accessed_tensors_cache: dict[Any, TensorAccesses] = {}
+
+
+def _accessed_tensors_cache_key(
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+) -> Any:
+    """Key covering everything generate_ttir derives its TTIR from.
+
+    Returns None if a key cannot be built, in which case the caller recomputes.
+    """
+    import sympy
+    from triton.runtime.autotuner import Autotuner
+
+    parts: list[Any] = []
+    if isinstance(kernel, Autotuner):
+        if kernel.configs:
+            kwargs = {**kwargs, **kernel.configs[0].kwargs}
+            parts.append(repr(sorted(kernel.configs[0].kwargs.items())))
+        kernel = kernel.fn
+    src_key = getattr(kernel, "cache_key", None)
+    if src_key is None:
+        src = getattr(kernel, "src", None)
+        if src is None:
+            return None
+        src_key = src
+    parts.append(src_key)
+    arg_names = getattr(kernel, "arg_names", None)
+    if arg_names is None:
+        return None
+    for name in arg_names:
+        if name not in kwargs:
+            return None
+        a = kwargs[name]
+        if isinstance(a, (SymInt, SymFloat, SymBool, sympy.Expr)):
+            parts.append((name, "sym"))
+        elif tma_descriptor_metadata and name in tma_descriptor_metadata:
+            parts.append(
+                (
+                    name,
+                    "tma",
+                    repr(tma_descriptor_metadata[name]),
+                    str(getattr(a, "dtype", None)),
+                )
+            )
+        elif hasattr(a, "dtype"):
+            parts.append((name, "tensor", str(a.dtype)))
+        else:
+            try:
+                parts.append((name, "val", repr(a)))
+            except Exception:
+                return None
+    return tuple(parts)
+
+
 def identify_accessed_tensors(
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+) -> TensorAccesses:
+    """See Note [triton kernel access analysis cache]."""
+    key = None
+    try:
+        key = _accessed_tensors_cache_key(kernel, kwargs, tma_descriptor_metadata)
+    except Exception:
+        log.debug("could not build a cache key for %s", kernel, exc_info=True)
+    if key is not None:
+        cached = _accessed_tensors_cache.get(key)
+        if cached is not None:
+            return cached
+    result = _identify_accessed_tensors(kernel, kwargs, tma_descriptor_metadata)
+    if key is not None:
+        _accessed_tensors_cache[key] = result
+    return result
+
+
+def _identify_accessed_tensors(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
