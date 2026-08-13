@@ -10436,6 +10436,30 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/131736
+    def test_softplus_after_moveaxis_matches_cpu(self):
+        x_cpu = torch.linspace(-1, 1, 6).view(2, 3)
+        x_mps = x_cpu.to("mps")
+        self.assertEqual(torch.nn.functional.softplus(x_mps.moveaxis(0, 1)).cpu(),
+                         torch.nn.functional.softplus(x_cpu).moveaxis(0, 1))
+
+    def test_softplus_backward_after_moveaxis_matches_cpu(self):
+        x_cpu = torch.linspace(-1, 1, 12).view(3, 4).requires_grad_(True)
+        x_mps = x_cpu.detach().to("mps").requires_grad_(True)
+        torch.nn.functional.softplus(x_cpu.moveaxis(0, 1)).sum().backward()
+        torch.nn.functional.softplus(x_mps.moveaxis(0, 1)).sum().backward()
+        self.assertEqual(x_mps.grad.cpu(), x_cpu.grad)
+
+    def test_softplus_channels_last_matches_cpu(self):
+        x_cpu = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last).requires_grad_(True)
+        x_mps = x_cpu.detach().to("mps").requires_grad_(True)
+        out_cpu = torch.nn.functional.softplus(x_cpu)
+        out_mps = torch.nn.functional.softplus(x_mps)
+        self.assertEqual(out_mps.cpu(), out_cpu)
+        out_cpu.sum().backward()
+        out_mps.sum().backward()
+        self.assertEqual(x_mps.grad.cpu(), x_cpu.grad)
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
