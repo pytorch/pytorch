@@ -57,6 +57,7 @@ static void adaptive_avg_pool2d_metal(const Tensor& input, Tensor& output, bool 
 
   auto stream = getCurrentMPSStream();
   const auto direction = backward ? "backward"sv : "forward"sv;
+  // TODO: Use 32-bit indexing when input is small enough.
   const auto kernel = fmt::format("adaptive_avg_pool2d_{}_{}", direction, scalarToMetalTypeString(input));
   const auto params = backward ? adaptive_avg_pool2d_params(output, input) : adaptive_avg_pool2d_params(input, output);
   @autoreleasepool {
