@@ -4015,6 +4015,19 @@ class TestCase(expecttest.TestCase):
         self._prev_torch_function_state = torch._C._get_torch_function_state()
         self._prev_fp32_precision = _snapshot_fp32_precision()
 
+        # Graph canonicalization is off by default in fbcode (justknob), but the
+        # expecttest goldens in this repo assume canonical node names, so force it
+        # on for tests. Dynamo is already imported by this point regardless of what
+        # the test module imports, because _run_custom calls
+        # torch.compiler.set_stance() before setUp, so this costs no extra import.
+        # Note this is a ContextVar-backed patch: a test that compiles on another
+        # thread (e.g. MultiThreadedTestCase) sees the unpatched value.
+        canonicalize = torch._dynamo.config.patch(
+            canonicalize_output_graph_node_order=True
+        )
+        canonicalize.__enter__()
+        self.addCleanup(canonicalize.__exit__, None, None, None)
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
