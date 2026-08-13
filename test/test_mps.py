@@ -14201,6 +14201,87 @@ class TestViewOpsMPS(TestCaseMPS):
             self.assertEqual(x.view(6).shape, [6])
 
 class TestConvolutionMPS(TestCaseMPS):
+    @parametrize("case", ("dimension", "parameter"))
+    def test_conv1d_large_kernel_int32_overflow(self, case):
+        int32_max = torch.iinfo(torch.int32).max
+        weight = torch.ones(1, 1, 256, device="mps")
+        if case == "dimension":
+            input_tensor = torch.empty(0, 1, 1, int32_max + 1, device="mps")
+            weight = weight.unsqueeze(2)
+        else:
+            input_tensor = torch.ones(1, 1, 1, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "signed 32-bit"):
+            if case == "dimension":
+                torch.ops.aten._mps_convolution(
+                    input_tensor, weight, None, [0, 0], [1, 1], [1, 1], 1
+                )
+            else:
+                F.conv1d(input_tensor, weight, stride=1 << 32, padding=1 << 32)
+
+    def test_conv1d_large_kernel(self):
+        input_tensor = torch.arange(2 * 260, dtype=torch.float32).reshape(1, 2, 260)
+        weight = torch.ones(3, 2, 256)
+        bias = torch.tensor([0.0, 1.0, 2.0])
+        expected = F.conv1d(input_tensor, weight, bias)
+        actual = F.conv1d(input_tensor.to("mps"), weight.to("mps"), bias.to("mps"))
+        self.assertEqual(actual.cpu(), expected)
+
+    def test_conv2d_h1_large_kernel(self):
+        input_tensor = torch.arange(2 * 260, dtype=torch.float32).reshape(1, 2, 1, 260)
+        input_tensor = input_tensor.contiguous(memory_format=torch.channels_last)
+        weight = torch.ones(3, 2, 1, 256)
+        bias = torch.tensor([0.0, 1.0, 2.0])
+        expected = F.conv2d(input_tensor, weight, bias)
+        actual = F.conv2d(input_tensor.to("mps"), weight.to("mps"), bias.to("mps"))
+        self.assertEqual(actual.cpu(), expected)
+        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+
+    @serialTest()
+    def test_conv1d_huge_padding(self):
+        int32_max = torch.iinfo(torch.int32).max
+        input_tensor = torch.zeros(1, 64, 1, device="mps")
+        input_tensor[0, 0, 0] = 2
+        weight = torch.zeros(1, 64, 3, device="mps")
+        weight[0, 0, 0] = 5
+        bias = torch.tensor([13.0], device="mps")
+        actual = F.conv1d(
+            input_tensor, weight, bias, stride=int32_max, padding=int32_max
+        )
+        expected = torch.tensor([[[13.0, 23.0]]], device="mps")
+        self.assertEqual(actual, expected)
+
+    def test_conv1d_high_channel_size(self):
+        output_channels = 65537
+        input_tensor = torch.ones(1, 1, 3)
+        weight = torch.ones(output_channels, 1, 3)
+        expected = F.conv1d(input_tensor, weight, padding=1)
+        actual = F.conv1d(input_tensor.to("mps"), weight.to("mps"), padding=1)
+        self.assertEqual(actual.cpu(), expected)
+
+    @serialTest()
+    def test_conv1d_im2col_int32_overflow(self):
+        input_channels = 8
+        # Stay below the large-filter route while making C * K * outW exceed INT32_MAX.
+        kernel_size = 255
+        int32_max = torch.iinfo(torch.int32).max
+        reduction_size = input_channels * kernel_size
+        output_length = int32_max // reduction_size + 1
+        input_length = output_length + kernel_size - 1
+        output_positions = [0, output_length // 2, output_length - 1]
+        input_positions = [position + kernel_size // 2 for position in output_positions]
+        expected = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
+        self.assertGreater(reduction_size * output_length, int32_max)
+        self.assertLess(input_channels * input_length, int32_max)
+        self.assertLess(output_length, int32_max)
+
+        input_tensor = torch.zeros(1, input_channels, input_length, dtype=torch.float16)
+        input_tensor[0, 0, input_positions] = expected
+        weight = torch.zeros(1, input_channels, kernel_size, dtype=torch.float16)
+        weight[0, 0, kernel_size // 2] = 1
+
+        output = F.conv1d(input_tensor.to("mps"), weight.to("mps"))
+        self.assertEqual(output[0, 0, output_positions].cpu(), expected)
+
     @staticmethod
     def _conv1d_tolerance(dtype, reduction_size):
         # Scale the established bounds by the square root of the accumulated terms.
