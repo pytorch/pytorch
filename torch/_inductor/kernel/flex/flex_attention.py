@@ -12,6 +12,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor import config
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
@@ -540,27 +541,30 @@ def flex_attention(
             raise error
 
     # Let the active choices handler append any backend-specific flex-attention
-    # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
-    choices = V.choices.append_flex_attention_choices(
-        choices,
-        configs,
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ],
-        [subgraph_buffer, mask_graph_buffer],
-        layout,
-        original_kernel_options,
-        SPARSE_Q_BLOCK_SIZE,
-        SPARSE_KV_BLOCK_SIZE,
-    )
+    # template choices (TLX on Blackwell). V.choices is TLXInductorChoices only
+    # when the fbtriton TLX integration is installed; gate on tlx_mode here since
+    # that override (unlike get_template_configs) does not re-check the knob.
+    if config.triton.tlx_mode is not None:
+        choices = V.choices.append_flex_attention_choices(
+            choices,
+            configs,
+            [
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+            ],
+            [subgraph_buffer, mask_graph_buffer],
+            layout,
+            original_kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
