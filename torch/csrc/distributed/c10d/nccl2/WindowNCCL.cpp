@@ -93,6 +93,15 @@ void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
   // Register the underlying segment as a NCCL_WIN_COLL_SYMMETRIC window
   // (collective). All ranks must reach this point with matching segments --
   // which holds for symmetric allocation patterns (the standard usage).
+#if defined(USE_ROCM)
+  // RCCL can accept ordinary HIP allocations where NCCL requires ncclMemAlloc.
+  // Preserve the nccl2 contract instead of making eligibility
+  // platform-dependent.
+  TORCH_CHECK(
+      pg_->isWindowRegistrationSegment(tensor.data_ptr()),
+      "WindowNCCL: tensor must be allocated from the NCCL mempool (e.g. ",
+      "torch.cuda.MemPool(backend.mem_allocator))");
+#endif
   NCCL_CHECK(
       nccl_api_,
       nccl_comm_,

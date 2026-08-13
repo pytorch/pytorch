@@ -651,6 +651,23 @@ void ProcessGroupNCCL::deregister_address(
   memoryRegistrationHandles_.erase(it);
 }
 
+#if defined(USE_ROCM)
+bool ProcessGroupNCCL::isWindowRegistrationSegment(const void* ptr) {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  auto it = memoryRegistrationHandles_.upper_bound(ptr);
+  if (it == memoryRegistrationHandles_.begin()) {
+    return false;
+  }
+  --it;
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
+  if (target < base || target - base >= it->second.len) {
+    return false;
+  }
+  return isNcclAllocatorSegment(it->first, it->second.len);
+}
+#endif
+
 std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
     const void* ptr) {
   std::lock_guard<std::mutex> lock(memory_registration_mutex_);
