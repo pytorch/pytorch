@@ -18112,6 +18112,88 @@ class TestAutogradMultipleDispatchOnCPU(TestCase):
             foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)]))
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class TestAutogradCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_profiler_emit_nvtx(self):
+        # This test is not intended to ensure correctness of nvtx ranges.
+        # That would require something a great deal more complex (you'd have to create a
+        # profile in a subprocess, open it, and parse the sql somehow).
+        # This test is merely intended to catch if emit_nvtx breaks on construction.
+        a = torch.tensor([1, 2, 3], dtype=torch.float32, device="cuda")
+        with torch.cuda.profiler.profile():
+            with emit_nvtx():
+                a.add(1.0)
+
+    def test_simple_reentrant_cross_device(self):
+        class ReentrantFunc(Function):
+            _cpu_mode = True
+
+            @staticmethod
+            def forward(ctx, x):
+                return x * (x + 2)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                with torch.enable_grad():
+                    if ReentrantFunc._cpu_mode:
+                        new_param = torch.randn(2, 2, requires_grad=True)
+                        (new_param**2).sum().backward()
+                    else:
+                        new_param = torch.randn(2, 2, device="cuda", requires_grad=True)
+                        (new_param**2).sum().backward()
+                return grad_output
+
+        # Reentrant starts on GPU thread, finishes on GPU thread
+        x = torch.randn(2, 2, device="cuda", requires_grad=True)
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on CPU thread, finishes on GPU thread
+        x = torch.randn(2, 2, requires_grad=True)
+        # set ReentrantFunc node to GPU to emit tasks to GPU queue
+        ReentrantFunc._cpu_mode = False
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on GPU thread, finishes on CPU thread
+        x = torch.randn(2, 2, device="cuda", requires_grad=True)
+        # set ReentrantFunc node to CPU to emit tasks to CPU queue
+        ReentrantFunc._cpu_mode = True
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+    def test_cross_device_reentrant_autograd(self):
+        # Output on gpu so that this task will be associated with the gpu thread
+        def fn_on_gpu(inp):
+            # Artificially increase the priority of the next op to make sure it runs
+            # as soon as we reach it before the ops of branch1.
+            dummy = inp * 2 * 2 * 2 * 2
+            return inp.to(device="cuda")
+
+        def parent_on_cpu(inp):
+            # Slow branch of ops on gpu so that the work queue for the gpu thread
+            # won't empty too quickly. They also have smaller priorities than the
+            # ones created by fn_on_gpu
+            branch1 = inp.to(device="cuda")
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
+            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
+            branch2 = checkpoint(fn_on_gpu, inp, use_reentrant=True)
+            out = branch2 + branch1
+            return out
+
+        inp = torch.rand(2, requires_grad=True)
+        out = parent_on_cpu(inp)
+        # This will segfault if the empty NodeTask is not handled properly in the
+        # gpu thread ReadyQueue
+        out.sum().backward()
+
+
 @skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
 class TestFunctionAssertMessages(TestCase):
     hw_classification = HardwareClassification.GENERIC
