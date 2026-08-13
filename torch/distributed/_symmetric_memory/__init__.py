@@ -15,7 +15,11 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
 from torch._prims_common import make_contiguous_strides_for
 from torch.utils._triton import has_triton
 
@@ -96,11 +100,7 @@ def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     device = torch.accelerator.current_accelerator(check_available=True)
     if device is None or _SymmetricMemory.get_backend(device) is None:
         return False
-    try:
-        c10d._resolve_process_group(group_name)
-    except RuntimeError:
-        return False
-    return True
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
