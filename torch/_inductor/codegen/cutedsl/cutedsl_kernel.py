@@ -260,6 +260,7 @@ class CuteDSLTemplateKernel(Kernel):
             from cutlass._mlir.dialects import math as mlir_math
             import operator
             from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
+            from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_elementwise_intrinsic
             """
         )
         return imports.getvalue()
