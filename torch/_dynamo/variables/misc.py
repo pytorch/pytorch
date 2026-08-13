@@ -1022,6 +1022,22 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
+def _forward_ad_active() -> bool:
+    """Whether a forward-mode AD level is live at the current tracing point.
+
+    Covers both `torch.func.jvp`, which pushes a Jvp functorch interpreter, and
+    a bare `torch.autograd.forward_ad.dual_level()`, which pushes neither. The
+    whole functorch stack is scanned rather than just its top so that a Jvp
+    layer under another transform (e.g. `vmap(jvp(f))`) is still seen.
+    """
+    if torch.autograd.forward_ad._current_level >= 0:
+        return True
+    return any(
+        ci.key() == torch._C._functorch.TransformType.Jvp
+        for ci in torch._C._functorch.get_interpreter_stack() or ()
+    )
+
+
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
@@ -1110,6 +1126,26 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
+        # Forward-mode duals carry requires_grad=False, so the branch below is
+        # not taken under forward AD. Check the custom jvp here instead, or
+        # tracing forward() inline would silently swap it for the default
+        # forward-AD rules of the primitives it decomposes into.
+        jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
+        if jvp_fn is not torch.autograd.Function.jvp and (
+            (requires_grad and torch.is_grad_enabled()) or _forward_ad_active()
+        ):
+            unimplemented(
+                gb_type="Unsupported custom jvp",
+                context=f"call_apply {self} {args} {kwargs}",
+                explanation="Dynamo does not support tracing "
+                "`torch.autograd.Function` subclasses that define "
+                "a custom `jvp` method.",
+                hints=[
+                    "Remove the custom `jvp` method if possible.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         if requires_grad and torch.is_grad_enabled():
             source = self.source
 
@@ -1143,20 +1179,6 @@ class AutogradFunctionVariable(VariableTracker):
                     hints=[
                         "Remove the custom `vjp` method if possible.",
                         "Use standard `backward` instead if applicable.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
-            if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented(
-                    gb_type="Unsupported custom jvp",
-                    context=f"call_apply {self} {args} {kwargs}",
-                    explanation="Dynamo does not support tracing "
-                    "`torch.autograd.Function` subclasses that define "
-                    "a custom `jvp` method.",
-                    hints=[
-                        "Remove the custom `jvp` method if possible.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
