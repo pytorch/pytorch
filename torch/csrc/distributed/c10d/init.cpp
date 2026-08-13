@@ -3098,11 +3098,6 @@ This API is experimental and subject to change.)")
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
           .def(
-              "_set_default_timeout",
-              &::c10d::Backend::setTimeout,
-              py::arg("timeout"),
-              py::call_guard<py::gil_scoped_release>())
-          .def(
               "_add_ephemeral_timeout",
               &::c10d::Backend::addEphemeralTimeout,
               py::arg("timeout"),
