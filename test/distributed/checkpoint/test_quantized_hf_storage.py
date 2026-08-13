@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
 
 class TestQuantizedHfStorage(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         """Set up common test fixtures."""
