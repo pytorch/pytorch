@@ -19,8 +19,6 @@ _TOOLS_FILE = os.path.abspath(toolchains.__file__)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 
-
-
 SIDECAR = {
     "prefix": "fakeop_f32_n1024_k8",
     "spec": {"dtype": "float32", "N": 1024, "K": 8, "deterministic": False},
@@ -29,7 +27,6 @@ SIDECAR = {
         {"name": "mOut", "dynamic_sizes": [0, 1], "dynamic_strides": [0]},
     ],
 }
-
 
 
 def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
@@ -958,19 +955,40 @@ class TestStaleGridPointArtifacts(unittest.TestCase):
             export._check_no_orphan_artifacts(tmpdir)
 
 
-class TestShouldRun(unittest.TestCase):
+class TestShouldRun(unittest.TestCase):  # _no_missing_runtimes helper
     """build_stage2.should_run decides whether the wheel ships kernels, so
     every skip arm needs to be deliberate rather than incidental."""
 
-    def _run(self, probes, env=None):
+    def _run(self, probes, env=None, missing=()):
         # probes: expr -> bool, consulted in place of a real torch subprocess.
+        #
+        # missing_runtimes is patched because should_run checks it BEFORE the
+        # arch logic: in an image without the DSL wheels (the Test tools job)
+        # every arch case would otherwise raise the missing-runtime error
+        # instead of exercising its own branch. The gate itself is covered by
+        # test_missing_runtime_is_fatal below.
         with (
             mock.patch.object(
                 build_stage2, "_torch_probe", side_effect=lambda e: probes.get(e, True)
             ),
+            mock.patch.object(
+                toolchains.Toolchain,
+                "missing_runtimes",
+                classmethod(lambda cls: list(missing)),
+            ),
             mock.patch.dict(os.environ, env or {}, clear=False),
         ):
             return build_stage2.should_run()
+
+    def test_missing_runtime_is_fatal(self):
+        # The gate the other cases neutralize: a declared kernel that cannot
+        # be built must fail the build, not ship a slower wheel.
+        with self.assertRaisesRegex(RuntimeError, "runtimes are not installed"):
+            self._run(
+                {"torch.version.hip is not None": False},
+                {"TORCH_CUDA_ARCH_LIST": "10.0a"},
+                missing=("cutlass",),
+            )
 
     def test_disabled_by_env(self):
         self.assertFalse(self._run({}, {"TORCH_NATIVE_AOT": "0"}))
