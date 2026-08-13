@@ -858,6 +858,7 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
   });
 }
 
+#ifdef USE_LINALG_SOLVER
 enum class SolverBackend : char {
   CUSOLVER,
   CUBLAS
@@ -987,6 +988,7 @@ namespace {
   }
 
 }
+#endif
 #endif
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
