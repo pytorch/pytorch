@@ -76,55 +76,36 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    def test_remove_no_ops_unbacked_broadcast_shape(self, device):
-        # Regression for GuardOnDataDependentSymNode in
-        # torch/_inductor/fx_passes/joint_graph.py::fake_tensors_eq.
-        # Old code compared shape tuples with `!=`, which coerces
-        # `SymInt(u0) != 1` to bool and raises on unbacked SymInts.
-        # We drive remove_no_ops directly on a hand-built graph where
-        # mul's output shape has an unbacked dim but the non-ones side
-        # has a size-1 in that dim, forcing fake_tensors_eq to compare
-        # (u0, 128) vs (1, 128).
+    def test_remove_no_ops_unbacked_shape_dde(self, device):
+        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
+        # which raises GuardOnDataDependentSymNode when the tuples contain
+        # two different unbacked SymInts (u0 vs u1).
         from torch._inductor.fx_passes.joint_graph import remove_no_ops
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
-        from torch.utils._ordered_set import OrderedSet
 
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             u0 = shape_env.create_unbacked_symint()
-            one_fake = torch.empty((u0, 128), device=device)   # ones side
-            x_fake = torch.empty((1, 128), device=device)      # non-ones side
-            out_fake = torch.empty((u0, 128), device=device)   # broadcast result
+            u1 = shape_env.create_unbacked_symint()
+            ones_val = torch.empty((u0, 128), device=device)
+            x_val = torch.empty((u1, 128), device=device)
 
         graph = torch.fx.Graph()
-        one_node = graph.placeholder("one")
+        ones_node = graph.placeholder("ones")
         x_node = graph.placeholder("x")
-        one_node.meta["val"] = one_fake
-        x_node.meta["val"] = x_fake
-        mul_node = graph.call_function(
-            torch.ops.aten.mul.Tensor, args=(one_node, x_node)
-        )
-        mul_node.meta["val"] = out_fake
-        graph.output(mul_node)
+        ones_node.meta["val"] = ones_val
+        x_node.meta["val"] = x_val
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
+        mul.meta["val"] = ones_val
+        graph.output(mul)
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
 
-        zeros: OrderedSet = OrderedSet()
-        ones: OrderedSet = OrderedSet([one_node])
-
-        # Before the fix, raises GuardOnDataDependentSymNode from
-        # fake_tensors_eq comparing torch.Size([u0, 128]) vs [1, 128].
-        remove_no_ops(gm, zeros, ones)
-
-        mul_nodes = [
-            n
-            for n in gm.graph.nodes
-            if n.op == "call_function" and n.target is torch.ops.aten.mul.Tensor
-        ]
+        # Must not raise. Shapes are not provably equal, so mul must stay.
+        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
         self.assertEqual(
-            len(mul_nodes),
+            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
             1,
-            "remove_no_ops must NOT elide mul — shapes are not provably equal",
         )
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
