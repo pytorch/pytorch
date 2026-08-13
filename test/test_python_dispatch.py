@@ -797,6 +797,17 @@ class TestPythonRegistration(TestCase):
             with self.assertRaisesRegex(ValueError, "reserved namespace"):
                 my_lib1 = Library("prim", kind)  # noqa: SCOPED_LIBRARY
 
+        # _scoped_library must report the constructor's error rather than
+        # masking it while unwinding.
+        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
+            with _scoped_library("myns", "BLA"):
+                pass
+
+        for kind in ("DEF", "FRAGMENT"):
+            with self.assertRaisesRegex(ValueError, "reserved namespace"):
+                with _scoped_library("prim", kind):
+                    pass
+
     def test_dispatcher_error_filenames(self) -> None:
         # Test that dispatcher errors report correct Python filenames and line numbers
         # when defining duplicate libraries (which triggers the filename tracking)
