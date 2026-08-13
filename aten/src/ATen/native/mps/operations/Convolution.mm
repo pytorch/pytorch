@@ -989,6 +989,26 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
   const bool allocate_grad_weight_cl = mps_conv_use_channels_last(input_t, grad_output_t) && !is3DConv;
 
+  // MPSGraph convolution2DWeightsGradient uses int16 for batch indexing and overflows
+  // when the batch dimension is >= 2^16.  Split into chunks of 65535 and accumulate.
+  constexpr int64_t kMaxBatch = (1 << 16) - 1;
+  if (!is3DConv && input_t.size(0) > kMaxBatch) {
+    const int64_t N = input_t.size(0);
+    auto acc = at::zeros(weight_size, grad_output_t.options());
+    for (int64_t i = 0; i < N; i += kMaxBatch) {
+      int64_t end = std::min(i + kMaxBatch, N);
+      acc += mps_convolution_backward_weights(weight_size,
+                                              grad_output_t.narrow(0, i, end - i),
+                                              input_t.narrow(0, i, end - i),
+                                              padding,
+                                              stride,
+                                              dilation,
+                                              groups,
+                                              bias_defined);
+    }
+    return acc;
+  }
+
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
   TensorArg grad_output{grad_output_t, "grad_output", 1};
