@@ -246,15 +246,13 @@ class AOTTestCase(TestCase):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
 
 
-# Module-level `@torch.fx.wrap`ed helper used by
-# `test_saved_tensors_hooks_gm_data_dependent_probe`. Must live at module
-# scope because `torch.fx.wrap` requires that. See the test's docstring for
-# the regression it exercises.
+# Module-level `@torch.fx.wrap`ed helper for
+# `test_saved_tensors_hooks_gm_data_dependent_probe`. `torch.fx.wrap`
+# requires module scope.
 @torch.fx.wrap
 def _il_log_tensor_stats_for_regression(t, name):
     try:
-        non_nan_infs = torch.isfinite(t)
-        if torch.all(non_nan_infs):
+        if torch.all(torch.isfinite(t)):
             pass
     except Exception:
         pass
@@ -4938,24 +4936,11 @@ def forward(self, tangents_1):
 
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
     def test_saved_tensors_hooks_gm_data_dependent_probe(self):
-        # Regression: `maybe_inline_graph_saved_tensors_hooks` used to run the
-        # user-supplied pack GraphModule twice — once as a subclass-detection
-        # probe (with NO ProxyTorchDispatchMode on the stack) and again as a
-        # fake execution to grab an example output value. Any data-dependent
-        # op inside the pack body (e.g. `bool(<fake_tensor>)` from user-side
-        # instrumentation like intermediate logging) would take the C++
-        # `Tensor.__bool__` shortcut, allocate a fresh unbacked SymInt via
-        # `_local_scalar_dense`, and — because no proxy tracer was active —
-        # never get bound. The symbol leaked into
-        # `pending_fresh_unbacked_symbols` and a later trace boundary raised
-        # `PendingUnbackedSymbolNotFound`.
-        #
-        # Reproduction shape (mirrors MAST job
-        # aps-aps_omnifmv5_1k_0517_0523_gb200_il_58_logging-fc1fad3f10):
-        # the pack GraphModule is built from `torch.fx.symbolic_trace` and
-        # contains an `@torch.fx.wrap`ed function whose body does
-        # `if torch.all(torch.isfinite(t)): ...`.  Under fake tracing, the
-        # `if` invokes `Tensor.__bool__` -> `.item()` and leaks.
+        # Regression: pack GraphModule bodies that allocate a fresh unbacked
+        # SymInt (e.g. via `.item()` / `bool(<fake_tensor>)` / nonzero) used
+        # to leak into `pending_fresh_unbacked_symbols` because
+        # `maybe_inline_graph_saved_tensors_hooks` ran the hook without a
+        # ProxyTorchDispatchMode, leaving no tracker to bind the symbol.
 
         def pack(x):
             x = _il_log_tensor_stats_for_regression(x, "in")
