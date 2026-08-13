@@ -26,19 +26,19 @@ inline void alpha_check(const ScalarType dtype, const Scalar& alpha) {
 
 // Basic checking for all sub functions.
 inline void sub_check(const TensorBase& self, const TensorBase& other) {
-  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool || other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with two bool tensors is not supported. "
               "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool && other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
 inline void sub_check(const TensorBase& self, const Scalar& scalar) {
-  TORCH_CHECK(self.scalar_type() != kBool || !scalar.isBoolean(),
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool || !scalar.isBoolean(),
               "Subtraction, the `-` operator, with two bool tensors is not supported. "
               "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && !scalar.isBoolean(),
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool && !scalar.isBoolean(),
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }

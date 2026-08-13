@@ -895,6 +895,7 @@ class TritonTemplateKernel(TritonKernel):
         return 0
 
     def jit_lines(self):
+        """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
             return "@triton.jit"
 
@@ -3236,14 +3237,14 @@ class ExternKernelChoice:
 
     def __init__(
         self,
-        kernel,
-        cpp_kernel=None,
+        kernel: Callable[..., Any],
+        cpp_kernel: str | None = None,
         *,
-        name=None,
-        has_out_variant=True,
-        op_overload=None,
-        use_fallback_kernel=False,
-        kernel_creator=None,
+        name: str | None = None,
+        has_out_variant: bool = True,
+        op_overload: torch._ops.OpOverload | None = None,
+        use_fallback_kernel: bool = False,
+        kernel_creator: Callable[..., ir.ExternKernel] | None = None,
     ) -> None:
         super().__init__()
         name = name or kernel.__name__
@@ -3275,7 +3276,7 @@ class ExternKernelChoice:
     def lookup(cls, name: str) -> Optional["ExternKernelChoice"]:
         return cls._registry.get(name)
 
-    def to_callable(self):
+    def to_callable(self) -> Callable[..., Any]:
         return getattr(extern_kernels, self.name)
 
     def call_name(self):
@@ -4139,6 +4140,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
                     results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    if not any(math.isfinite(timing) for timing in results.values()):
+                        raise self.create_no_valid_choices(
+                            name, "All choices failed to benchmark for backend."
+                        )
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
@@ -4789,16 +4794,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
-                elif (
-                    nvgemm_choice
-                    and use_nvgemm_subprocess
-                    # Scaled-GEMM enum args now pickle (see _register_enum_pickling
-                    # in nv_universal_gemm_utils), but the scaled precompile worker
-                    # still initializes CUDA and then forks -> "Cannot re-initialize
-                    # CUDA in forked subprocess". Keep scaled in-process until that
-                    # worker is made fork-safe (or the pool forced to spawn).
-                    and c.bmreq.variant.name != "SCALED_GEMM"
-                ):
+                elif nvgemm_choice and use_nvgemm_subprocess:
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
                         CUDAContextMetadata,
                     )
@@ -4966,8 +4962,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+                if global_tensor.shape[0] == 0:
+                    # No row to copy, and the 1D bias does not depend on M.
+                    bias = cls.benchmark_example_value(extern_node, hint_override)
+                else:
+                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                    bias = global_tensor[0].contiguous()
+                additional_example_inputs[extern_name] = bias
 
             return {
                 **unique_example_inputs,
@@ -5063,7 +5064,8 @@ class AlgorithmSelectorCache(PersistentCache):
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
-        current_out_size = out_base.storage().size()
+        # untyped_storage() counts bytes, unlike the deprecated TypedStorage.size().
+        current_out_size = out_base.untyped_storage().size() // out_base.element_size()
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage
