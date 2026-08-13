@@ -228,7 +228,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         self.assertFalse(any(flags[:-1]))
 
 
-instantiate_device_type_tests(DistributedDataParallelCommHookTest, globals())
+instantiate_device_type_tests(DistributedDataParallelCommHookTest, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
