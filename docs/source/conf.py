@@ -1872,6 +1872,8 @@ coverage_ignore_classes = [
     "linalg_polar_out",
     "linalg_qr",
     "linalg_qr_out",
+    "linalg_qr_piv",
+    "linalg_qr_piv_out",
     "linalg_slogdet",
     "linalg_slogdet_out",
     "linalg_solve_ex",

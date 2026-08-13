@@ -933,6 +933,8 @@ aten::linalg_polar
 aten::linalg_polar.out
 aten::linalg_qr
 aten::linalg_qr.out
+aten::linalg_qr_piv
+aten::linalg_qr_piv.out
 aten::linalg_solve_triangular
 aten::linalg_solve_triangular.out
 aten::linear.out

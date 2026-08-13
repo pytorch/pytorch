@@ -2923,7 +2923,8 @@ TORCH_IMPL_FUNC(linalg_qr_piv_out)(
         int* jpvt_b = jpvt_ptr + b * n;
         int64_t* P_b = P_ptr + b * n;
         for (int i = 0; i < n; ++i) {
-            P_b[i] = static_cast<int64_t>(jpvt_b[i] - 1);
+            P_b[i] = (m == 0) ? static_cast<int64_t>(i)
+                               : static_cast<int64_t>(jpvt_b[i] - 1);
         }
     }
 

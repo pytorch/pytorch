@@ -4500,7 +4500,6 @@ Tensor linalg_qr_backward(
   }
 }
 
-
 Tensor linalg_qr_piv_backward(
     const Tensor& gQ,
     const Tensor& gR,
@@ -4508,36 +4507,33 @@ Tensor linalg_qr_piv_backward(
     const Tensor& R,
     const Tensor& P,
     const std::string_view mode) {
-    // The backward formulas for QR with column pivoting follow from the standard QR case
-    // by substituting A -> A P. Using (dA) P = (dQ) R + Q (dR), the gradient becomes
-    // gA = gA0 * P^T, where gA0 is the gradient for the non-pivoted QR and P^T is the
-    // transpose of the permutation matrix.
+  // The backward formulas for QR with column pivoting follow from the standard
+  // QR case by substituting A -> A P. Using (dA) P = (dQ) R + Q (dR), the
+  // gradient becomes gA = gA0 * P^T, where gA0 is the gradient for the
+  // non-pivoted QR and P^T is the transpose of the permutation matrix.
 
-    auto [compute_q, reduced] = at::native::_parse_qr_piv_mode(mode);
+  auto [compute_q, reduced] = at::native::_parse_qr_piv_mode(mode);
 
-    TORCH_CHECK(
+  TORCH_CHECK(
       compute_q,
       "The derivative of linalg.qr_piv depends on Q, which is not computed when "
       "mode='r'. Please use linalg.qr_piv(A, mode='reduced') if you are "
       "going to differentiate through linalg.qr_piv.");
 
-    auto m = Q.sym_size(-2);
-    auto n = R.sym_size(-1);
+  auto m = Q.sym_size(-2);
+  auto n = R.sym_size(-1);
 
-    TORCH_CHECK(
+  TORCH_CHECK(
       reduced || m <= n,
       "The pivoted QR decomposition is not differentiable when "
       "mode='complete' and nrows > ncols.");
 
-    auto P_dense = P.contiguous();
-    auto gA = linalg_qr_backward(gQ, gR, Q, R, mode);
-    auto P_expanded = P_dense.toType(at::kLong).unsqueeze(-2).expand_as(gA);
-    auto out = at::empty_like(gA);
-    out.scatter_(-1, P_expanded, gA);
+  auto P_dense = P.contiguous();
+  auto gA = linalg_qr_backward(gQ, gR, Q, R, mode);
+  auto P_expanded = P_dense.toType(at::kLong).unsqueeze(-2).expand_as(gA);
 
-    return out;
+  return at::empty_like(gA).scatter(-1, P_expanded, gA);
 }
-
 
 std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
     const Tensor& dA,
@@ -4545,13 +4541,14 @@ std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
     const Tensor& R,
     const Tensor& P,
     const std::string_view mode) {
-    // For a perturbation dA of A with factorization A P = Q R,
-    // the JVP satisfies dA P = dQ R + Q dR, assuming the pivot
-    // pattern is locally constant (dP = 0).
+  // For a perturbation dA of A with factorization A P = Q R,
+  // the JVP satisfies dA P = dQ R + Q dR, assuming the pivot
+  // pattern is locally constant (dP = 0).
 
-    auto P_expanded = P.contiguous().toType(at::kLong).unsqueeze(-2).expand_as(dA);
-    auto dAP = dA.gather(-1, P_expanded);
-    return linalg_qr_jvp(dAP, Q, R, mode);
+  auto P_expanded =
+      P.contiguous().toType(at::kLong).unsqueeze(-2).expand_as(dA);
+  auto dAP = dA.gather(-1, P_expanded);
+  return linalg_qr_jvp(dAP, Q, R, mode);
 }
 
 // Based on:
