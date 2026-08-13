@@ -1508,7 +1508,25 @@ def maybe_inline_graph_saved_tensors_hooks(
             return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
 
         with _saved_tensor_hook_context(_get_extra_info()):
-            pack_out_val = pack_hook_gm(val)
+            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+            pack_g = pack_gm.graph
+            maybe_log_graph(
+                pack_gm,
+                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
+                structured_logs,
+            )
+            # Extract pack_out_val from the traced graph's output-node meta.
+            # `pack_g` is what gets inlined into the joint graph below via
+            # `node_copy`, so its output meta uses the same symbols the
+            # inlined nodes carry — no identity mismatch, no need to re-run
+            # the hook to get an "example value".
+            pack_out_val = pytree.tree_map_only(
+                torch.fx.Node,
+                lambda n: n.meta["val"],
+                pack_g.output_node().args[0],
+            )
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1519,18 +1537,6 @@ def maybe_inline_graph_saved_tensors_hooks(
                 "You can workaround it by manually returning subclass's inner tensors"
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
-
-        with _saved_tensor_hook_context(_get_extra_info()):
-            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
-            pack_g = pack_gm.graph
-            maybe_log_graph(
-                pack_gm,
-                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
-                aot_config,
-                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
-                structured_logs,
-            )
-            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.
