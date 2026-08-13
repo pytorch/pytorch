@@ -853,11 +853,17 @@ class CUDAGraph(_CUDAGraph):
         # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
         if self._instantiate_graph_data is not None:
             return self._instantiate_graph_data
-        from torch.cuda._graph_annotations import _is_tools_id_unavailable
+        from torch.cuda._graph_annotations import (
+            _get_node_type,
+            _is_tools_id_unavailable,
+        )
 
         _require_cuda_bindings()
         # Narrow for the type checker (cuda bindings are present past the check).
-        assert _cuda_runtime is not None and _cuda_driver is not None  # noqa: S101
+        if _cuda_runtime is None or _cuda_driver is None:
+            raise AssertionError(
+                "expected _cuda_runtime and _cuda_driver to be not None"
+            )
 
         if _is_tools_id_unavailable():
             raise RuntimeError(
@@ -866,23 +872,25 @@ class CUDAGraph(_CUDAGraph):
                 "(or cuda-compat >= 13.1 in LD_LIBRARY_PATH)"
             )
 
+        node_types = _cuda_driver.CUgraphNodeType
         node_type_names = {
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel: "kernel",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemcpy: "memcpy",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemset: "memset",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost: "host",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph: "child_graph",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEmpty: "empty",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent: "wait_event",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
+            node_types.CU_GRAPH_NODE_TYPE_KERNEL: "kernel",
+            node_types.CU_GRAPH_NODE_TYPE_MEMCPY: "memcpy",
+            node_types.CU_GRAPH_NODE_TYPE_MEMSET: "memset",
+            node_types.CU_GRAPH_NODE_TYPE_HOST: "host",
+            node_types.CU_GRAPH_NODE_TYPE_GRAPH: "child_graph",
+            node_types.CU_GRAPH_NODE_TYPE_EMPTY: "empty",
+            node_types.CU_GRAPH_NODE_TYPE_WAIT_EVENT: "wait_event",
+            node_types.CU_GRAPH_NODE_TYPE_EVENT_RECORD: "event_record",
+            node_types.CU_GRAPH_NODE_TYPE_MEM_ALLOC: "mem_alloc",
+            node_types.CU_GRAPH_NODE_TYPE_MEM_FREE: "mem_free",
+            node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP: "batch_mem_op",
+            node_types.CU_GRAPH_NODE_TYPE_CONDITIONAL: "conditional",
         }
         # Node types whose work lives in a separate cudaGraph_t (see the warning below).
         nested_graph_types = {
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
-            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+            node_types.CU_GRAPH_NODE_TYPE_GRAPH,
+            node_types.CU_GRAPH_NODE_TYPE_CONDITIONAL,
         }
         nested_node_types: set[str] = set()
 
@@ -900,7 +908,7 @@ class CUDAGraph(_CUDAGraph):
             node = nodes[i]
             handle_to_idx[int(node)] = i
 
-            ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            ntype = _get_node_type(node)
             if ntype in nested_graph_types:
                 nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
@@ -908,7 +916,7 @@ class CUDAGraph(_CUDAGraph):
             node_id = tools_id & 0xFFFFFFFF
 
             kernel_name = None
-            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel:
+            if ntype == node_types.CU_GRAPH_NODE_TYPE_KERNEL:
                 cu_node = _cuda_driver.CUgraphNode(init_value=int(node))
                 err, params = _cuda_driver.cuGraphKernelNodeGetParams(cu_node)
                 if err == _cuda_driver.CUresult.CUDA_SUCCESS and int(params.func):
@@ -924,13 +932,13 @@ class CUDAGraph(_CUDAGraph):
             # expected to succeed. Swallowing a failure would leave event_ptr 0 and make the
             # record/wait match quietly wrong rather than loud.
             event_ptr = 0
-            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
+            if ntype == node_types.CU_GRAPH_NODE_TYPE_EVENT_RECORD:
                 event_ptr = int(
                     _check_cuda_bindings(
                         _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
                     )
                 )
-            elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
+            elif ntype == node_types.CU_GRAPH_NODE_TYPE_WAIT_EVENT:
                 event_ptr = int(
                     _check_cuda_bindings(
                         _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
@@ -942,7 +950,7 @@ class CUDAGraph(_CUDAGraph):
             # _resolve_host_fn_name). Both are None/0 for other node types.
             host_fn_addr = 0
             host_fn_name = None
-            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost:
+            if ntype == node_types.CU_GRAPH_NODE_TYPE_HOST:
                 err, params = _cuda_runtime.cudaGraphHostNodeGetParams(node)
                 if err == _cuda_runtime.cudaError_t.cudaSuccess:
                     host_fn_addr = int(params.fn)
@@ -1223,6 +1231,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> _ModuleOrCallable: ...
 
 
@@ -1234,6 +1243,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -1244,6 +1254,7 @@ def make_graphed_callables(
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
+    enable_annotations: bool = False,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -1278,6 +1289,11 @@ def make_graphed_callables(
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
             :class:`~torch.cuda.MemPool` that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+        enable_annotations (bool, optional): If ``True``, the forward and backward
+            captures record kernel annotations from
+            :func:`torch.cuda.graph_annotations.mark_kernels` scopes inside the
+            callables (backward kernels are tagged via the scopes' autograd node
+            hooks). See :mod:`torch.cuda.graph_annotations`. Default: ``False``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -1417,6 +1433,7 @@ def make_graphed_callables(
             stream=stream,
             pool=mempool,
             capture_error_mode=capture_error_mode,
+            enable_annotations=enable_annotations,
         ):
             func_outputs = func(*args)
 
@@ -1446,6 +1463,7 @@ def make_graphed_callables(
                 stream=stream,
                 pool=mempool,
                 capture_error_mode=capture_error_mode,
+                enable_annotations=enable_annotations,
             ):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
