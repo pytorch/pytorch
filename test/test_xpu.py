@@ -3106,7 +3106,7 @@ class TestXPUMultiprocessing(TestCase):
     def test_event_multiprocess(self):
         for event in [
             torch.xpu.Event(enable_timing=False, interprocess=True),
-            torch.Event(enable_timing=False, interprocess=False),
+            torch.Event(enable_timing=False, interprocess=True),
         ]:
             self.assertTrue(event.query())
 
