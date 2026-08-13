@@ -806,7 +806,9 @@ struct FlatmmPipelineProblem
             self._find_ck_tile_op(epilogue=epilogue), use_v2_api=False
         )
         self.assertIn("has_hot_loop_v", code)
-        self.assertIn("GemmPipelineProblem", code)
+        # "GemmPipelineProblem" alone would also match "UniversalGemmPipelineProblem",
+        # which both API variants emit.
+        self.assertIn("ck_tile::GemmPipelineProblem<", code)
         self.assertIn("BaseGemmPipeline", code)
 
     @parametrize("epilogue", ("Default", "CShuffle"))
@@ -864,6 +866,9 @@ struct FlatmmPipelineProblem
         Every instance filter_op accepts must compile against the ck_tile headers
         installed on this host, whichever universal GEMM API they expose.
         """
+        rocm = config.rocm
+        if self._ck_tile._find_ck_tile_header(rocm.rocm_home, rocm.ck_dir) is None:
+            raise unittest.SkipTest("ck_tile headers are not installed")
         template = self._make_template()
         op = self._find_ck_tile_op(pipeline=pipeline, epilogue=epilogue)
         if template.filter_op(op) is None:
