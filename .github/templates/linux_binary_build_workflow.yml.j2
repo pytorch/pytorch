@@ -245,9 +245,8 @@ jobs:
     across iterations. libtorch_cpu/libtorch_cuda are Python-ABI-free; only
     libtorch_python + _C are recompiled per interpreter via the cmake.py cache
     invalidation. -#}
-{%- set unified_job_names = [] %}
-{#- Same groups again, but carrying the build job name, so the test and upload
-    jobs below can each depend on just their own group. -#}
+{#- Carries each group's build job name, so the test and upload jobs below can
+    each depend on just their own group. -#}
 {%- set unified_upload_groups = [] %}
 {%- for g in ns.groups %}
   {%- set group = g['configs'] %}
@@ -265,7 +264,6 @@ jobs:
       E.g. "manywheel-py3_10-cuda-aarch64-12_6" -> "-cuda-aarch64-12_6". -#}
   {%- set py_dotless = first['python_version'] | replace('.', '_') %}
   {%- set build_name_suffix = first['build_name'] | replace('manywheel-py' ~ py_dotless, '') %}
-  {%- set _ = unified_job_names.append(job_name) %}
   {%- set _ = unified_upload_groups.append({
         'job_name': job_name,
         'test_name': job_name | replace('-build', '-test'),
