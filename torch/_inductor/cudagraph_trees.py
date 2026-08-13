@@ -177,7 +177,7 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
-    torch.cuda._clear_cublas_workspaces()
+    torch._C._cuda_clearCublasWorkspaces()
 
 
 @contextlib.contextmanager
@@ -348,6 +348,17 @@ def mark_step_begin() -> None:
     MarkStepBox.mark_step_counter -= 1
 
 
+def mark_warmup_incomplete() -> None:
+    """Request another warmup for the active CUDA Graph Trees function.
+
+    This is a no-op unless called synchronously from a function currently running
+    in CUDA Graph Trees warmup.
+    """
+    manager = get_manager(create_if_none_exists=False)
+    if manager is not None:
+        manager.mark_warmup_incomplete()
+
+
 def reset_cudagraph_trees() -> None:
     "Clear all cudagraph trees"
     # see shutdown below for why this is necessary
@@ -393,11 +404,18 @@ def get_container(device_index: int) -> TreeManagerContainer:
 
 
 def get_manager(
-    device_index: int, create_if_none_exists: bool = True
+    device_index: int | None = None, create_if_none_exists: bool = True
 ) -> CUDAGraphTreeManager | None:
+    if device_index is None:
+        if not torch.cuda.is_initialized():
+            return None
+        device_index = torch.cuda.current_device()
+
     if create_if_none_exists:
         return get_container(device_index).get_tree_manager()
-    return get_container(device_index).tree_manager
+
+    container = get_obj(local, "tree_manager_containers").get(device_index)
+    return None if container is None else container.tree_manager
 
 
 def is_cudagraph_capture_sizes(int_key: int | tuple[int, ...]) -> bool:
@@ -2331,6 +2349,7 @@ class CUDAGraphTreeManager:
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
         self.path_state = ExecutionState.NONE
+        self.active_warmup_function: FunctionID | None = None
         self.device_index = device_index
 
         # the most recently invoked cudagraph wrapping of a function. Will be None
@@ -2702,7 +2721,14 @@ class CUDAGraphTreeManager:
         self.current_node = node
         self.path_state = ExecutionState.WARMUP
         self.update_generation()
-        return node.run(new_inputs)
+        self.active_warmup_function = function_id
+        result = node.run(new_inputs)
+        self.active_warmup_function = None
+        return result
+
+    def mark_warmup_incomplete(self) -> None:
+        if self.active_warmup_function is not None:
+            self.warmed_up_functions.discard(self.active_warmup_function)
 
     def new_graph_id(self) -> GraphID:
         return GraphID(next(self.graph_counter))
