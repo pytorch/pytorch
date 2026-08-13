@@ -60,18 +60,19 @@ splitter has collected them:
 
     fused_multiuse(((grad1, saved1), (grad2, saved2)), consumer_ctx)
 
-Fusion rules are passed explicitly (no global registry) as a list of
-(producer.main_backward, consumer.epilogue_backward, fused_impl) and applied in
-a single step. AccumulateGrad rules separately identify the main-backward output
-by forward input index:
+Fusion rules are passed explicitly (no global registry) as ``(pattern,
+replacement)`` pairs and applied in a single step. AccumulateGrad patterns
+separately identify the main-backward output by forward input index:
 
     accumulate_grad_rules = [
-        (producer.main_backward, input_idx, fused_accumulate),
+        ((producer.main_backward, input_idx), fused_accumulate),
     ]
     rules.append(
         (
-            (producer1.main_backward, producer2.main_backward),
-            consumer.epilogue_backward,
+            (
+                (producer1.main_backward, producer2.main_backward),
+                consumer.epilogue_backward,
+            ),
             fused_multiuse,
         )
     )
@@ -443,7 +444,8 @@ class FusibleFunction:
         ...     (a,) = consumer_ctx.saved_tensors      # consumer's preactivation
         ...     return (grad_producer_out @ w.T) * (a > 0).to(a.dtype)
         >>>
-        >>> rules = [(MMRelu.main_backward, MMRelu.epilogue_backward, mm_bw_relu_bw_fused)]
+        >>> pattern = (MMRelu.main_backward, MMRelu.epilogue_backward)
+        >>> rules = [(pattern, mm_bw_relu_bw_fused)]
         >>> out = MMRelu.apply(MMRelu.apply(x, w1), w2)
         >>> loss = out.sum()
         >>> apply_epilogue_fusion(loss, rules, expect_num_fusions=1)
@@ -613,10 +615,10 @@ def apply_epilogue_fusion(
 ):
     r"""Applies epilogue fusion rules to :class:`FusibleFunction` nodes in the autograd graph.
 
-    Each rule in :attr:`rules` specifies either one ``main_backward`` method or an
-    ordered tuple of methods, an ``epilogue_backward`` method, and the fused
-    implementation that should run in their place. This function traverses the
-    autograd graph starting from :attr:`root` and arms matching nodes in place.
+    Each rule in :attr:`rules` is a ``(pattern, replacement)`` pair. The pattern
+    contains either one ``main_backward`` method or an ordered tuple of methods,
+    followed by an ``epilogue_backward`` method. This function traverses the autograd
+    graph starting from :attr:`root` and arms matching nodes in place.
 
     This function should be called after the forward pass and before :meth:`backward`,
     on every iteration.
@@ -638,18 +640,21 @@ def apply_epilogue_fusion(
     Args:
         root (Tensor or Node): the loss tensor (or its ``grad_fn``) to traverse
             back from.
-        rules (list): fusion rules, each a tuple whose first item is either
-            ``producer_cls.main_backward`` or an ordered tuple of producer methods.
-            For one producer, ``fused_impl(grad_producer_out, main_saved_tensors,
-            consumer_ctx)`` returns the grad of the consumer's main output. For an
-            explicit multi-use splitter, ``fused_impl(terms, consumer_ctx)`` receives
-            ordered ``(grad_producer_out, main_saved_tensors)`` terms. Only registered
-            patterns fuse.
-        accumulate_grad_rules (list): fusion rules, each a tuple
-            ``(producer_cls.main_backward, input_idx, fused_impl)``. When that main
-            backward input feeds a unique leaf ``AccumulateGrad``, the normal gradient
-            is deferred and ``fused_impl(grad_producer_out, main_saved_tensors,
-            variable)`` must accumulate directly into ``variable.grad`` and return
+        rules (list): fusion rules expressed as ``(pattern, replacement)`` pairs.
+            A pattern is ``(producer_cls.main_backward,
+            consumer_cls.epilogue_backward)`` for one producer, or an ordered tuple
+            of producer methods in the first position for an explicit multi-use
+            splitter. A single-use replacement receives ``(grad_producer_out,
+            main_saved_tensors, consumer_ctx)``; a multi-use replacement receives
+            ``(terms, consumer_ctx)``, where terms are ordered
+            ``(grad_producer_out, main_saved_tensors)`` pairs. Only registered patterns
+            fuse.
+        accumulate_grad_rules (list): fusion rules expressed as ``(pattern,
+            replacement)`` pairs, where the pattern is
+            ``(producer_cls.main_backward, input_idx)``. When that main backward input
+            feeds a unique leaf ``AccumulateGrad``, the normal gradient is deferred and
+            the replacement receives ``(grad_producer_out, main_saved_tensors,
+            variable)``. It must accumulate directly into ``variable.grad`` and return
             ``None``. Default: ``()``.
         expect_num_fusions (int, optional): if given, assert exactly this many
             fusions were planned, raising a diagnostic that names any fusible
@@ -691,7 +696,8 @@ def apply_epilogue_fusion(
         ...     (a,) = consumer_ctx.saved_tensors      # consumer's preactivation
         ...     return (grad_producer_out @ w.T) * (a > 0).to(a.dtype)
         >>>
-        >>> rules = [(MMRelu.main_backward, MMRelu.epilogue_backward, mm_bw_relu_bw_fused)]
+        >>> pattern = (MMRelu.main_backward, MMRelu.epilogue_backward)
+        >>> rules = [(pattern, mm_bw_relu_bw_fused)]
         >>> x = torch.randn(4, 6, requires_grad=True)
         >>> w1 = torch.randn(6, 6, requires_grad=True)
         >>> w2 = torch.randn(6, 6, requires_grad=True)
@@ -703,11 +709,8 @@ def apply_epilogue_fusion(
     if isinstance(root, torch.Tensor):
         root = root.grad_fn
 
-    rule_map = {(p, c): impl for p, c, impl in rules}
-    accumulate_grad_rule_map = {
-        (producer, input_idx): impl
-        for producer, input_idx, impl in accumulate_grad_rules
-    }
+    rule_map = dict(rules)
+    accumulate_grad_rule_map = dict(accumulate_grad_rules)
 
     nodes, in_degree, edge_in_degree, seen = [], {}, {}, set()
     q = deque()
@@ -1019,13 +1022,27 @@ def mm_weight_accumulate_fused_backward(
 # epilogue. Single-use implementations depend only on the consumer epilogue, so
 # both producer classes reuse the same implementation.
 RULES = [
-    (MMRelu.main_backward, MMRelu.epilogue_backward, mm_relu_fused_backward),
-    (MMTanh.main_backward, MMRelu.epilogue_backward, mm_relu_fused_backward),
-    (MMRelu.main_backward, MMTanh.epilogue_backward, mm_tanh_fused_backward),
-    (MMTanh.main_backward, MMTanh.epilogue_backward, mm_tanh_fused_backward),
     (
-        (MMRelu.main_backward, MMRelu.main_backward),
-        MMRelu.epilogue_backward,
+        (MMRelu.main_backward, MMRelu.epilogue_backward),
+        mm_relu_fused_backward,
+    ),
+    (
+        (MMTanh.main_backward, MMRelu.epilogue_backward),
+        mm_relu_fused_backward,
+    ),
+    (
+        (MMRelu.main_backward, MMTanh.epilogue_backward),
+        mm_tanh_fused_backward,
+    ),
+    (
+        (MMTanh.main_backward, MMTanh.epilogue_backward),
+        mm_tanh_fused_backward,
+    ),
+    (
+        (
+            (MMRelu.main_backward, MMRelu.main_backward),
+            MMRelu.epilogue_backward,
+        ),
         mm_relu_multiuse_fused_backward,
     ),
 ]
@@ -1033,10 +1050,10 @@ RULES = [
 # These rules identify a main-backward output by its forward input index. They
 # apply only when that edge leads directly to a unique leaf AccumulateGrad.
 ACCUMULATE_GRAD_RULES = [
-    (MMRelu.main_backward, 0, mm_input_accumulate_fused_backward),
-    (MMRelu.main_backward, 1, mm_weight_accumulate_fused_backward),
-    (MMTanh.main_backward, 0, mm_input_accumulate_fused_backward),
-    (MMTanh.main_backward, 1, mm_weight_accumulate_fused_backward),
+    ((MMRelu.main_backward, 0), mm_input_accumulate_fused_backward),
+    ((MMRelu.main_backward, 1), mm_weight_accumulate_fused_backward),
+    ((MMTanh.main_backward, 0), mm_input_accumulate_fused_backward),
+    ((MMTanh.main_backward, 1), mm_weight_accumulate_fused_backward),
 ]
 
 

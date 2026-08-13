@@ -135,7 +135,7 @@ CHAINS = {
 
 
 def _rule_keys(rules):
-    return {(producer, consumer) for producer, consumer, _ in rules}
+    return {pattern for pattern, _replacement in rules}
 
 
 def _grads(tensors):
@@ -268,16 +268,21 @@ class TestCodaBwdFusionNumerics(TestCase):
         ha, hb = split_multi_use(h, 2)
         loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
 
-        rules = [
-            (
-                (MMRelu.main_backward, MMRelu.main_backward),
-                MMRelu.epilogue_backward,
-                coda.mm_relu_multiuse_fused_backward,
-            ),
-        ]
+        pattern = (
+            (MMRelu.main_backward, MMRelu.main_backward),
+            MMRelu.epilogue_backward,
+        )
+        replacement = coda.mm_relu_multiuse_fused_backward
+        rules = [(pattern, replacement)]
         accumulate_grad_rules = [
-            (MMRelu.main_backward, 0, coda.mm_input_accumulate_fused_backward),
-            (MMRelu.main_backward, 1, coda.mm_weight_accumulate_fused_backward),
+            (
+                (MMRelu.main_backward, 0),
+                coda.mm_input_accumulate_fused_backward,
+            ),
+            (
+                (MMRelu.main_backward, 1),
+                coda.mm_weight_accumulate_fused_backward,
+            ),
         ]
 
         LOG.reset()
@@ -403,7 +408,7 @@ class TestCodaBwdFusionPlanning(TestCase):
         h = MMRelu.apply(x, w1)
         ha, hb = split_multi_use(h, 2)
         loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
-        single_use_rules = [rule for rule in RULES if not isinstance(rule[0], tuple)]
+        single_use_rules = [rule for rule in RULES if not isinstance(rule[0][0], tuple)]
 
         LOG.reset()
         plan = apply_epilogue_fusion(loss, single_use_rules, _internal_debug=True)
@@ -619,8 +624,7 @@ class TestCodaBwdFusionPlanning(TestCase):
         w2 = torch.randn(6, 6, dtype=torch.double, requires_grad=True)
         rules = RULES + [
             (
-                MMReluRHS.main_backward,
-                MMRelu.epilogue_backward,
+                (MMReluRHS.main_backward, MMRelu.epilogue_backward),
                 coda.mm_relu_fused_backward,
             ),
         ]
