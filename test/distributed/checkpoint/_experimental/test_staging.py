@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
 from concurrent.futures import Future
+
 import torch
 from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
@@ -77,9 +78,7 @@ class TestDefaultStager(TestCase):
     def test_non_blocking_without_accelerator(self) -> None:
         """Test that non-blocking copy fails when no accelerator is available."""
         if torch.accelerator.is_available():
-            self.skipTest(
-                "Accelerator is available, cannot test unavailable scenario"
-            )
+            self.skipTest("Accelerator is available, cannot test unavailable scenario")
 
         options = CheckpointStagerConfig(use_non_blocking_copy=True)
         with self.assertRaises(AssertionError):
