@@ -23,7 +23,9 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
@@ -32,16 +34,8 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TestCase,
 )
-from torch.testing._internal.distributed._shard.sharded_tensor import (
-    ShardedTensorTestBase,
-    with_comms,
-)
 
 
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-BACKEND = torch.distributed.get_default_backend_for_device(device_type)
 
 
 def with_temp_dir(
@@ -89,26 +83,30 @@ class MyTestModule(torch.nn.Module):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
 
-class TestFSSpec(ShardedTensorTestBase):
+class TestFSSpec(MultiProcContinuousTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type)
 
-    @with_comms(backend=BACKEND, init_rpc=False)
+    @property
+    def device(self) -> torch.device:
+        return self._dev
+
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 2,
         "test requires 2+ accelerators",
     )
     @with_temp_dir
-    def test_fsspec(self):
+    def test_fsspec(self, device):
+        self._dev = torch.device(device)
         CHECKPOINT_DIR = self.temp_dir
 
-        model = FSDP(MyTestModule().to(device_type))
+        model = FSDP(MyTestModule().to(device))
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
-        model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
+        model(torch.rand(8, 8, device=self.device)).sum().backward()
         optim.step()
 
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
@@ -123,7 +121,7 @@ class TestFSSpec(ShardedTensorTestBase):
                 planner=dcp.DefaultSavePlanner(),
             )
 
-        model_2 = FSDP(MyTestModule().to(device_type))
+        model_2 = FSDP(MyTestModule().to(device))
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         with FSDP.summon_full_params(model):
@@ -173,14 +171,14 @@ class TestFSSpec(ShardedTensorTestBase):
             opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
         )
 
-    @with_comms(backend=BACKEND, init_rpc=False)
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 2,
         "test requires 2+ accelerators",
     )
     @with_temp_dir
-    def test_overwrite(self):
+    def test_overwrite(self, device):
+        self._dev = torch.device(device)
         t1, t2 = torch.randn(10), torch.randn(10)
 
         dcp.save(
@@ -271,6 +269,12 @@ class TestFileSystem(TestCase):
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
 
+
+instantiate_device_type_tests(
+    TestFSSpec,
+    globals(),
+    except_for=("cpu",),
+)
 
 if __name__ == "__main__":
     run_tests()
