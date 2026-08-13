@@ -817,9 +817,12 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
-      __threadfence(); // complete the acquire pattern after atomic
-#endif
+      // complete the acquire pattern after atomic
+      //
+      // On ROCm, committed stores [CMTSTRS] ensures the producer blocks writes are visbile to global memory.
+      // But the last block (consumer) still needs an acquire fence to invalidate its (non-coherent) L1,
+      // before reading the staging buffer. A single fence here is far cheaper than per-element committed loads.
+      __threadfence();
       for (auto &v : value) {
         v = ident;
       }
