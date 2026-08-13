@@ -46,6 +46,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -1263,6 +1264,8 @@ class _CapturableInterface(DeviceInterface):
 
 @instantiate_parametrized_tests
 class TestCheckMultipleDevicesOrAnyCpuNodes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Force lazy registry initialization before any mock.patch.dict on
