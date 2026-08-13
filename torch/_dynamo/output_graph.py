@@ -115,7 +115,12 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
+from .graph_bytecode_inputs import (
+    ambient_user_object_indices,
+    get_external_object_by_index,
+    has_user_objects,
+    index_to_bytecode_constructor,
+)
 from .graph_deduplication import apply_graph_deduplication
 from .graph_id_filter import (
     get_backend_override_for_compile_id,
@@ -3112,7 +3117,28 @@ class OutputGraph(OutputGraphCommon):
                 raise AssertionError("root_tx must not be None")
             cg = PyCodegen(self.root_tx)
 
-            if has_user_objects():
+            # The pre-graph reconstruction below runs on every compiled call and
+            # re-establishes index_to_external_object_weakref for this graph. On
+            # any accelerator the ambient current stream is registered at
+            # CURRENT_STREAM_INDEX even for graphs that never touch streams, so a
+            # stream-free call would needlessly reconstruct + store it each time.
+            # Skip the reconstruction only when the sole registered object is that
+            # unreferenced ambient sentinel. Every other registered object is
+            # registered because it is genuinely consumed -- whether through a
+            # get_external_object_by_index node (stream/event/user-object inputs,
+            # the used current stream, the cudagraph capture stream) or a hidden
+            # runtime retriever (the leaf_function nn.Module retriever) -- so its
+            # mere presence in the registry forces the store. This is robust to
+            # new hidden consumers without enumerating their graph nodes.
+            non_ambient_objects = (
+                index_to_bytecode_constructor.keys() - ambient_user_object_indices
+            )
+            ambient_stream_used = any(
+                node.op == "call_function"
+                and node.target is get_external_object_by_index
+                for node in self.graph.nodes
+            )
+            if has_user_objects() and (non_ambient_objects or ambient_stream_used):
                 # NB: This is where we store possible user objects before running the graph
                 # index_to_user_object_weakref is the function used in the graph to translate
                 # the dynamo-generated index into the actual object passed to the compiled function.
