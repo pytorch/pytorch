@@ -123,6 +123,11 @@ struct ReadyQueue {
   NodeTask pop();
   bool empty() const;
   size_t size() const;
+  // Drop tasks whose GraphTask has already completed (e.g. due to an error),
+  // releasing the grad tensors held by their InputBuffers. Used when a thread
+  // that drives the engine exits thread_main, since no one else will pop its
+  // local ready queue until the next backward call.
+  void drain_completed();
 };
 
 // A single instance of this struct should be created through the whole process
