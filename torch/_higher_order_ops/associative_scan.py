@@ -955,9 +955,18 @@ class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
         if get_proxy_mode() is None or any(bdim is None for bdim in self.in_dims):
             return super().__call__(*args)
         outputs = self.combine_fn(*args)
-        # All inputs are batched at -1 and combine_fn is elementwise, so every
-        # output leaf is batched at -1 too.
-        self.out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
+        # Every input is batched at -1 and, since the fast path only runs under
+        # compile where a non-elementwise combine_fn fails at lowering, combine_fn
+        # is elementwise here -- so every output leaf carries the batch axis at -1.
+        out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
+        # Mirror the base wrapper's cross-step consistency guard: out_dims must not
+        # change between scan steps.
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
+            )
+        self.out_dims = out_dims
         return outputs
 
 

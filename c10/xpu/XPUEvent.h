@@ -9,16 +9,41 @@ namespace c10::xpu {
  * acquired from the first recording stream. Later streams that record the event
  * must match the same device.
  *
- * Currently, XPUEvent does NOT support to export an inter-process event from
- * another process via inter-process communication(IPC). So it means that
- * inter-process communication for event handles between different processes is
- * not available. This could impact some applications that rely on cross-process
- * synchronization and communication.
+ * IPC (inter-process communication) for event handles is supported. If
+ * reconstructed from a handle or ipc_handle() is called, the XPUEvent is
+ * initialized eagerly instead of lazily.
  */
 struct XPUEvent {
   // Constructors
-  XPUEvent(bool enable_timing = false) noexcept
-      : enable_timing_{enable_timing} {}
+  XPUEvent(bool enable_timing = false, bool enable_ipc = false) noexcept
+      : enable_timing_{enable_timing}, enable_ipc_{enable_ipc} {}
+
+#if SYCL_COMPILER_VERSION >= 20260200
+  XPUEvent(
+      DeviceIndex device_index,
+      const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle_data)
+      : device_index_(device_index) {
+#ifdef _WIN32
+    TORCH_CHECK(false, "XPU IPC events are not supported on Windows.");
+#endif
+    // Events reconstructed from an IPC handle cannot be re-exported via
+    // ipc_handle(). So keep `enable_ipc_` false to avoid confusion.
+    auto& device = c10::xpu::get_raw_device(device_index);
+    reusable_ = device.has(sycl::aspect::ext_oneapi_ipc_event) &&
+        device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+    TORCH_CHECK(
+        reusable_,
+        "XPUEvent reconstructed from an IPC handle must be reusable.");
+    event_ = std::make_unique<sycl::event>(
+        sycl::ext::oneapi::experimental::ipc::event::open(
+            handle_data, c10::xpu::get_device_context()));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+    }
+  }
+#endif
 
   ~XPUEvent() {
     if (isCreated()) {
@@ -80,25 +105,34 @@ struct XPUEvent {
   }
 
   void record(const XPUStream& stream) {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (!isCreated()) {
-      device_index_ = stream.device_index();
-      assignEvent(stream.queue());
-      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      createEvent(stream.device_index());
+      if (!reusable_) {
+        assignEvent(stream.queue());
+      }
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
+    }
+    TORCH_CHECK(
+        device_index_ == stream.device_index(),
+        "Event device ",
+        device_index_,
+        " does not match recording stream's device ",
+        stream.device_index(),
+        ".");
+
+    if (reusable_) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      syclex::enqueue_signal_event(stream.queue(), *event_);
+#endif
     } else {
-      TORCH_CHECK(
-          device_index_ == stream.device_index(),
-          "Event device ",
-          device_index_,
-          " does not match recording stream's device ",
-          stream.device_index(),
-          ".");
       reassignEvent(stream.queue());
     }
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
           c10::kXPU,
@@ -109,9 +143,17 @@ struct XPUEvent {
 
   void block(const XPUStream& stream) {
     if (isCreated()) {
-      std::vector<sycl::event> event_list{event()};
-      // Make this stream wait until event_ is completed.
-      stream.queue().ext_oneapi_submit_barrier(event_list);
+      if (reusable_) {
+#if SYCL_COMPILER_VERSION >= 20260200
+        sycl::ext::oneapi::experimental::enqueue_wait_event(
+            stream.queue(), *event_);
+#endif
+      } else {
+        std::vector<sycl::event> event_list{event()};
+        // Make this stream wait until event_ is completed.
+        stream.queue().ext_oneapi_submit_barrier(event_list);
+      }
+
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(
@@ -137,7 +179,7 @@ struct XPUEvent {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
     uint64_t start_time_ns = event().get_profiling_info<command_end>();
-    // Return the eplased time in milliseconds.
+    // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
@@ -152,6 +194,25 @@ struct XPUEvent {
       event().wait_and_throw();
     }
   }
+
+#if SYCL_COMPILER_VERSION >= 20260200
+  sycl::ext::oneapi::experimental::ipc::handle_data_t ipc_handle() {
+    TORCH_CHECK(
+        enable_ipc_,
+        "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
+    if (!isCreated()) {
+      namespace syclex = sycl::ext::oneapi::experimental;
+      createEvent(c10::xpu::current_device());
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_creation(
+            c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+      }
+    }
+    TORCH_CHECK(reusable_, "XPUEvent must be reusable to support IPC.");
+    return sycl::ext::oneapi::experimental::ipc::event::get(*event_).data();
+  }
+#endif
 
  private:
   void assignEvent(sycl::queue& queue) {
@@ -168,10 +229,45 @@ struct XPUEvent {
     assignEvent(queue);
   }
 
+  void createEvent(c10::DeviceIndex device_index) {
+    device_index_ = device_index;
+    TORCH_CHECK(
+        !enable_ipc_ || !enable_timing_,
+        "XPUEvent cannot have both IPC and timing enabled.");
+#ifdef _WIN32
+    TORCH_CHECK(!enable_ipc_, "XPU IPC events are not supported on Windows.");
+#endif
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+
+    auto& device = c10::xpu::get_raw_device(device_index_);
+    if (enable_ipc_) {
+      TORCH_CHECK(
+          device.has(sycl::aspect::ext_oneapi_ipc_event),
+          "Requires the ext_oneapi_ipc_event extension, "
+          "which is not supported on this device. ",
+          "Please upgrade to a newer driver.");
+    }
+    // Base reusability on per-event profiling support regardless of
+    // enable_timing_, to align with c10::Event behavior.
+    reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+    if (reusable_) {
+      event_ = std::make_unique<sycl::event>(syclex::make_event(
+          c10::xpu::get_device_context(),
+          syclex::properties{
+              syclex::enable_ipc{enable_ipc_},
+              syclex::enable_profiling{enable_timing_}}));
+    }
+#else
+    TORCH_CHECK(
+        !enable_ipc_, "XPU IPC events require SYCL compiler 2026.2 or later.");
+#endif
+  }
+
   bool enable_timing_ = false;
+  bool enable_ipc_ = false;
+  bool reusable_ = false;
   c10::DeviceIndex device_index_ = -1;
-  // Only need to track the last event, as events in an in-order queue are
-  // executed sequentially.
   std::unique_ptr<sycl::event> event_;
 };
 
