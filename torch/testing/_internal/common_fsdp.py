@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -84,6 +85,10 @@ elif TEST_XPU:
     DEVICE_TYPE = "xpu"
     DISTRIBUTED_BACKEND = "xccl"
     DEVICE_COUNT = torch.xpu.device_count()
+elif TEST_PRIVATEUSE1:
+    DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
+    DISTRIBUTED_BACKEND = "hccl"
+    DEVICE_COUNT = getattr(torch, DEVICE_TYPE).device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
@@ -661,7 +666,7 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU or TEST_XPU:
+            if TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1:
                 time.sleep(self.delay_after_loss_ms / 1000)
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
@@ -677,7 +682,7 @@ class ModuleWithDelay(FSDPTestModel):
                     torch.cuda._sleep(
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
-                elif TEST_HPU or TEST_XPU:
+                elif TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -810,7 +815,7 @@ class MixtureOfExperts(NestedWrappedModule):
                         torch.cuda._sleep(
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
-                    elif TEST_HPU or TEST_XPU:
+                    elif TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1:
                         time.sleep(self.delay_before_free_ms / 1000)
 
                     return orig_reshard(*args, **kwargs)
@@ -1245,7 +1250,7 @@ class FSDPTestMixin:
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1588,7 +1593,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1635,7 +1640,7 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         device_id = rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
 
         super()._init_pg(rank, world_size, rdvz_file)
