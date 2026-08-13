@@ -3918,6 +3918,24 @@ class TestMaxAutotuneSubproc(TestCase):
             ),
         )
 
+    def test_async_autotuner_skips_unscheduled_choices(self):
+        inputs_key = "inputs"
+        scheduled_choice = mock.Mock(hash_key=lambda: "scheduled")
+        unscheduled_choice = mock.Mock(hash_key=lambda: "unscheduled")
+        future = mock.Mock()
+        future.result.return_value = 1.0
+        with mock.patch.object(
+            AsyncAutotuner,
+            "choice_hash_to_future",
+            {"scheduled" + inputs_key: future},
+        ):
+            self.assertEqual(
+                {scheduled_choice: 1.0},
+                AsyncAutotuner.get_results(
+                    [scheduled_choice, unscheduled_choice], inputs_key
+                ),
+            )
+
     @skipIfXpu(msg="XPU not support multiprocessing tensor reduction")
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
