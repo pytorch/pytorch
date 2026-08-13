@@ -20,6 +20,7 @@ from coda_backward_epilogue_fusion import (
     MMRelu,
     MMTanh,
     RULES,
+    split_multi_use,
 )
 
 import torch
@@ -254,6 +255,42 @@ class TestCodaBwdFusionNumerics(TestCase):
         if grad_ptrs is not None:
             self.assertEqual([t.grad.data_ptr() for t in tensors], grad_ptrs)
 
+    def test_multi_use_splitter_fusion(self, device):
+        torch.manual_seed(0)
+        base_x = torch.randn(4, 6, dtype=torch.double, device=device)
+        base_ws = [
+            torch.randn(6, 6, dtype=torch.double, device=device) for _ in range(3)
+        ]
+
+        x = base_x.clone().requires_grad_()
+        w1, wa, wb = [w.clone().requires_grad_() for w in base_ws]
+        h = MMRelu.apply(x, w1)
+        ha, hb = split_multi_use(h, 2)
+        loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
+
+        LOG.reset()
+        plan = apply_epilogue_fusion(
+            loss,
+            RULES,
+            accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+            expect_num_fusions=1,
+            expect_num_accumulate_grad_fusions=4,
+            _internal_debug=True,
+        )
+        loss.backward()
+
+        ex = base_x.clone().requires_grad_()
+        ew1, ewa, ewb = [w.clone().requires_grad_() for w in base_ws]
+        eh = torch.relu(ex @ ew1)
+        (torch.relu(eh @ ewa).sum() + torch.relu(eh @ ewb).sum()).backward()
+
+        self.assertEqual(_grads([x, w1, wa, wb]), _grads([ex, ew1, ewa, ewb]))
+        self.assertEqual(len(plan._multiuse_pairs_fused), 1)
+        self.assertEqual(LOG.c["multiuse_fused"], 1)
+        self.assertEqual(LOG.c["splitter_deferred"], 1)
+        self.assertEqual(LOG.c["accumulate_fused"], 4)
+        self.assertEqual(LOG.c["main_fully_deferred"], 3)
+
 
 class TestCodaBwdFusionPlanning(TestCase):
     """Structural behavior of the fusion planner and kernel-path accounting."""
@@ -331,9 +368,9 @@ class TestCodaBwdFusionPlanning(TestCase):
         )
 
     def test_branching_consumer_raises(self):
-        # An epilogue output consumed by more than one main node cannot be fused:
-        # its backward grad accumulates across the branches, which a single deferral
-        # placeholder cannot represent. The planner must reject it loudly.
+        # An implicit multi-use cannot be fused because InputBuffer would add the
+        # placeholders before the epilogue runs. split_multi_use makes those slots
+        # explicit; without it the planner must reject the pattern loudly.
         torch.manual_seed(1)
         x = torch.randn(4, 6, dtype=torch.double, requires_grad=True)
         w1 = torch.randn(6, 6, dtype=torch.double, requires_grad=True)
@@ -344,6 +381,56 @@ class TestCodaBwdFusionPlanning(TestCase):
         loss = MMRelu.apply(b, wa).sum() + MMRelu.apply(b, wb).sum()
         with self.assertRaisesRegex(RuntimeError, "exactly one consumer"):
             apply_epilogue_fusion(loss, RULES)
+
+    def test_multi_use_splitter_without_rule_stays_unfused(self):
+        torch.manual_seed(0)
+        x = torch.randn(4, 6, dtype=torch.double, requires_grad=True)
+        w1 = torch.randn(6, 6, dtype=torch.double, requires_grad=True)
+        wa = torch.randn(6, 6, dtype=torch.double, requires_grad=True)
+        wb = torch.randn(6, 6, dtype=torch.double, requires_grad=True)
+        h = MMRelu.apply(x, w1)
+        ha, hb = split_multi_use(h, 2)
+        loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
+        single_use_rules = [rule for rule in RULES if not isinstance(rule[0], tuple)]
+
+        LOG.reset()
+        plan = apply_epilogue_fusion(loss, single_use_rules, _internal_debug=True)
+        self.assertEqual(len(plan._multiuse_pairs_fused), 0)
+        self.assertEqual(len(plan._multiuse_pairs_unfused), 1)
+        self.assertEqual(
+            plan._multiuse_pairs_unfused[0].unfused_reason,
+            "no rule registered",
+        )
+        with self.assertRaisesRegex(AssertionError, "no rule registered"):
+            plan.assert_num_fusions(1)
+        loss.backward()
+        self.assertEqual(LOG.c["splitter_unfused"], 1)
+
+        ex = x.detach().clone().requires_grad_()
+        ew1 = w1.detach().clone().requires_grad_()
+        ewa = wa.detach().clone().requires_grad_()
+        ewb = wb.detach().clone().requires_grad_()
+        eh = torch.relu(ex @ ew1)
+        (torch.relu(eh @ ewa).sum() + torch.relu(eh @ ewb).sum()).backward()
+        self.assertEqual(_grads([x, w1, wa, wb]), _grads([ex, ew1, ewa, ewb]))
+
+    def test_multi_use_splitter_requires_one_consumer_per_output(self):
+        x, ws = self._inputs(4)
+        h = MMRelu.apply(x, ws[0])
+        ha, hb = split_multi_use(h, 2)
+        loss = (
+            MMRelu.apply(ha, ws[1]).sum()
+            + MMRelu.apply(ha, ws[2]).sum()
+            + MMRelu.apply(hb, ws[3]).sum()
+        )
+
+        plan = apply_epilogue_fusion(loss, RULES, _internal_debug=True)
+        self.assertEqual(len(plan._multiuse_pairs_fused), 0)
+        self.assertEqual(
+            plan._multiuse_pairs_unfused[0].unfused_reason,
+            "each splitter output must feed exactly one main backward",
+        )
+        loss.backward()
 
     def test_accumulate_grad_multiple_producers_raises(self):
         torch.manual_seed(0)

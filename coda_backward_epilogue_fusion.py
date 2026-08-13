@@ -7,7 +7,9 @@ the backward of an autograd.Function is not self-contained -- for a chain
 mm -> epilogue -> mm, the epilogue's backward wants to fuse as the epilogue of
 the *next* matmul's backward (grad_a = (grad_c @ W^T) * f'(a) is a matmul with a
 pointwise epilogue). A single Function can't express that, since its backward
-runs inside one node.
+runs inside one node. A multi-use activation adds another boundary: the autograd
+engine normally accumulates its branch gradients in the consumer's InputBuffer
+before running the epilogue backward.
 
 The approach: the user writes a "1-to-many" op that decomposes into two autograd
 nodes (a matmul node and an epilogue marker node), plus a fusion rule. Before
@@ -16,6 +18,9 @@ defer its activation gradient into the previous epilogue's backward (no graph
 rewriting; deferral rides a placeholder grad along the existing edge). It can
 also fuse a main-backward output with a leaf AccumulateGrad, so the GEMM writes
 or adds directly into the leaf's .grad instead of materializing a separate grad.
+For multi-use activations, split_multi_use() explicitly writes out one aliased
+output per use. Their gradients occupy distinct splitter InputBuffer slots, so
+the splitter can package all deferred GEMM terms for one registered fused rule.
 
 The user's forward receives TWO ctxs and saves into each explicitly:
 
@@ -50,6 +55,11 @@ its grad directly:
         variable.grad = ...                         # first backward
         addmm(variable.grad, ..., out=variable.grad) # subsequent accumulation
 
+A multi-use epilogue rule receives all ordered branch terms after the explicit
+splitter has collected them:
+
+    fused_multiuse(((grad1, saved1), (grad2, saved2)), consumer_ctx)
+
 Fusion rules are passed explicitly (no global registry) as a list of
 (producer.main_backward, consumer.epilogue_backward, fused_impl) and applied in
 a single step. AccumulateGrad rules separately identify the main-backward output
@@ -58,6 +68,13 @@ by forward input index:
     accumulate_grad_rules = [
         (producer.main_backward, input_idx, fused_accumulate),
     ]
+    rules.append(
+        (
+            (producer1.main_backward, producer2.main_backward),
+            consumer.epilogue_backward,
+            fused_multiuse,
+        )
+    )
     apply_epilogue_fusion(
         loss.grad_fn,
         rules,
@@ -90,6 +107,9 @@ class _Log:
             main_partial=0,
             main_fully_deferred=0,
             fused_impl=0,
+            multiuse_fused=0,
+            splitter_deferred=0,
+            splitter_unfused=0,
             accumulate_fused=0,
             epilogue_unfused=0,
         )
@@ -105,17 +125,28 @@ LOG = _Log()
 
 
 class DeferredGradTensor(torch.Tensor):
-    @staticmethod
-    def __new__(cls, shape, dtype, device, main_grad_out, main_saved_tensors):
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    @classmethod
+    def _new_wrapper(cls, shape, dtype, device):
+        return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             shape,
             dtype=dtype,
             device=device,
             requires_grad=False,
         )
+
+    @staticmethod
+    def __new__(cls, shape, dtype, device, main_grad_out, main_saved_tensors):
+        r = cls._new_wrapper(shape, dtype, device)
         r._main_grad_out = main_grad_out
         r._main_saved_tensors = main_saved_tensors
+        r._main_grad_terms = ((main_grad_out, main_saved_tensors),)
+        return r
+
+    @classmethod
+    def from_terms(cls, shape, dtype, device, terms):
+        r = cls._new_wrapper(shape, dtype, device)
+        r._main_grad_terms = tuple(terms)
         return r
 
     __torch_function__ = torch._C._disabled_torch_function_impl  # type: ignore[attr-defined]
@@ -125,7 +156,7 @@ class DeferredGradTensor(torch.Tensor):
         raise RuntimeError(
             f"DeferredGradTensor is a metadata-only placeholder for a deferred "
             f"grad_input and must not be used in a real op (got {func}). The "
-            f"consumer epilogue node should detect it and unwrap `._main_grad_out`; "
+            f"consumer epilogue or explicit splitter should detect and unwrap it; "
             f"reaching __torch_dispatch__ means the placeholder leaked into "
             f"computation."
         )
@@ -188,6 +219,7 @@ class _StagingCtx:
 
 _MAIN_BACKWARD = "_MainNodeBackward"
 _EPILOGUE_BACKWARD = "_EpilogueNodeBackward"
+_SPLITTER_BACKWARD = "_SplitterNodeBackward"
 _ACCUMULATE_GRAD = "AccumulateGrad"
 
 
@@ -197,6 +229,10 @@ def _is_main(node):
 
 def _is_epilogue(node):
     return type(node).__name__ == _EPILOGUE_BACKWARD
+
+
+def _is_splitter(node):
+    return type(node).__name__ == _SPLITTER_BACKWARD
 
 
 def _is_accumulate_grad(node):
@@ -245,6 +281,7 @@ class _EpilogueNode(Function):
         ctx.cls = cls
         ctx.save_for_backward(*epilogue_saved)
         ctx.fused_impl = None  # set by the plan when this node fuses
+        ctx.multiuse_fused_impl = None
         (out,) = out_holder
         return out.view_as(out)
 
@@ -252,14 +289,67 @@ class _EpilogueNode(Function):
     def backward(ctx, grad_out):
         cls = ctx.cls
         if isinstance(grad_out, DeferredGradTensor):
-            LOG.hit("fused_impl")
-            grad_main_out = ctx.fused_impl(
-                grad_out._main_grad_out, grad_out._main_saved_tensors, ctx
-            )
+            terms = grad_out._main_grad_terms
+            if len(terms) == 1:
+                LOG.hit("fused_impl")
+                grad_main_out = ctx.fused_impl(*terms[0], ctx)
+            else:
+                if ctx.multiuse_fused_impl is None:
+                    raise RuntimeError(
+                        "A multi-use DeferredGradTensor reached an unarmed epilogue"
+                    )
+                LOG.hit("multiuse_fused")
+                grad_main_out = ctx.multiuse_fused_impl(terms, ctx)
         else:
             LOG.hit("epilogue_unfused")
             grad_main_out = cls.epilogue_backward(ctx, grad_out)
         return (None, None, None, grad_main_out)
+
+
+class _SplitterNode(Function):
+    @staticmethod
+    def forward(ctx, tensor, num_uses):
+        if num_uses < 2:
+            raise RuntimeError("split_multi_use requires at least two uses")
+        ctx.input_meta = (tensor.shape, tensor.dtype, tensor.device)
+        ctx.num_uses = num_uses
+        ctx.defer_fusion = False
+        ctx.set_materialize_grads(False)
+        return tuple(tensor.view_as(tensor) for _ in range(num_uses))
+
+    @staticmethod
+    def backward(ctx, *grads):
+        deferred = [isinstance(grad, DeferredGradTensor) for grad in grads]
+        if ctx.defer_fusion:
+            if not all(deferred):
+                raise RuntimeError(
+                    "A fused splitter expected one DeferredGradTensor per explicit use"
+                )
+            LOG.hit("splitter_deferred")
+            terms = [term for grad in grads for term in grad._main_grad_terms]
+            shape, dtype, device = ctx.input_meta
+            grad_input = DeferredGradTensor.from_terms(shape, dtype, device, terms)
+        else:
+            if any(deferred):
+                raise RuntimeError(
+                    "A DeferredGradTensor reached an unarmed explicit splitter"
+                )
+            LOG.hit("splitter_unfused")
+            present_grads = [grad for grad in grads if grad is not None]
+            grad_input = (
+                None if not present_grads else sum(present_grads[1:], present_grads[0])
+            )
+        return grad_input, None
+
+
+def split_multi_use(tensor, num_uses):
+    """Returns one aliased output per downstream use of ``tensor``.
+
+    In backward, each output has a distinct InputBuffer slot. With a matching fusion
+    rule the splitter packages the deferred branch terms for the upstream epilogue;
+    without one it explicitly sums the ordinary gradients.
+    """
+    return _SplitterNode.apply(tensor, num_uses)
 
 
 def _make_fused_accumulate_grad_prehook(impl, variable):
@@ -270,8 +360,12 @@ def _make_fused_accumulate_grad_prehook(impl, variable):
                 "A fused AccumulateGrad expected a DeferredGradTensor from its "
                 f"producer, but got {type(grad).__name__}"
             )
+        if len(grad._main_grad_terms) != 1:
+            raise RuntimeError(
+                "A fused AccumulateGrad cannot consume a multi-use deferred gradient"
+            )
         LOG.hit("accumulate_fused")
-        result = impl(grad._main_grad_out, grad._main_saved_tensors, variable)
+        result = impl(*grad._main_grad_terms[0], variable)
         if result is not None:
             raise RuntimeError(
                 "An AccumulateGrad fused implementation must update variable.grad "
@@ -420,14 +514,44 @@ class _PlannedAccumulateGrad:
         )
 
 
+@dataclass
+class _PlannedMultiUsePair:
+    producers: tuple
+    splitter: object
+    consumer: object
+    unfused_reason: str | None
+
+    @property
+    def fused(self):
+        return self.unfused_reason is None
+
+    def _label(self):
+        producers = ", ".join(
+            f"{producer.cls.__name__}.main_backward" for producer in self.producers
+        )
+        return (
+            f"({producers}) -> split_multi_use -> "
+            f"{self.consumer.cls.__name__}.epilogue_backward"
+        )
+
+
 class _InternalDebugFusionPlan:
-    def __init__(self, fused, missing_rules, accumulate_grad_fused):
+    def __init__(
+        self,
+        fused,
+        missing_rules,
+        multiuse_fused,
+        multiuse_unfused,
+        accumulate_grad_fused,
+    ):
         self._pairs_fused = fused
         self._pairs_missing_rules = missing_rules
+        self._multiuse_pairs_fused = multiuse_fused
+        self._multiuse_pairs_unfused = multiuse_unfused
         self._accumulate_grad_fused = accumulate_grad_fused
 
     def assert_num_fusions(self, expected):
-        got = len(self._pairs_fused)
+        got = len(self._pairs_fused) + len(self._multiuse_pairs_fused)
         if got != expected:
             lines = [f"expected {expected} backward fusions, planned {got}"]
             if self._pairs_missing_rules:
@@ -440,6 +564,12 @@ class _InternalDebugFusionPlan:
                     "Did you forget to pass a rule for these to "
                     "apply_epilogue_fusion(rules=...)?"
                 )
+            if self._multiuse_pairs_unfused:
+                lines.append("Explicit multi-use candidate(s) did not fuse:")
+                lines += [
+                    f"  - {pair._label()}: {pair.unfused_reason}"
+                    for pair in self._multiuse_pairs_unfused
+                ]
             raise AssertionError("\n".join(lines))
         return self
 
@@ -454,13 +584,19 @@ class _InternalDebugFusionPlan:
     def __repr__(self):
         all_pairs = self._pairs_fused + self._pairs_missing_rules
         name = type(self).__name__
-        if not all_pairs and not self._accumulate_grad_fused:
+        all_multiuse = self._multiuse_pairs_fused + self._multiuse_pairs_unfused
+        if not all_pairs and not all_multiuse and not self._accumulate_grad_fused:
             return f"{name}(no candidates)"
         lines = [
             f"{p.producer.cls.__name__}.main -> "
             f"{p.consumer.cls.__name__}.epilogue: "
             f"{'FUSE' if p.fused else 'bail:' + p.unfused_reason}"
             for p in all_pairs
+        ]
+        lines += [
+            f"{pair._label()}: "
+            f"{'FUSE' if pair.fused else 'bail:' + pair.unfused_reason}"
+            for pair in all_multiuse
         ]
         lines += [f"{p._label()}: FUSE" for p in self._accumulate_grad_fused]
         return f"{name}(\n  " + "\n  ".join(lines) + "\n)"
@@ -477,11 +613,10 @@ def apply_epilogue_fusion(
 ):
     r"""Applies epilogue fusion rules to :class:`FusibleFunction` nodes in the autograd graph.
 
-    Each rule in :attr:`rules` specifies a pair of ``main_backward`` and
-    ``epilogue_backward`` methods together with the fused implementation that should run
-    in their place. This function traverses the autograd graph starting from
-    :attr:`root`, and for each adjacent pair of nodes matching a rule, mutates those
-    nodes in place so the fused implementation runs instead.
+    Each rule in :attr:`rules` specifies either one ``main_backward`` method or an
+    ordered tuple of methods, an ``epilogue_backward`` method, and the fused
+    implementation that should run in their place. This function traverses the
+    autograd graph starting from :attr:`root` and arms matching nodes in place.
 
     This function should be called after the forward pass and before :meth:`backward`,
     on every iteration.
@@ -492,18 +627,24 @@ def apply_epilogue_fusion(
     Tensor backward hooks are rejected because they run before the accumulator's
     prehooks and would observe the placeholder; post-accumulate hooks remain supported.
 
+    Multi-use fusion requires callers to pass each use through :func:`split_multi_use`.
+    Every declared output must feed exactly one main backward, and the splitter must be
+    the epilogue output's only consumer. The output order selects the ordered producer
+    tuple in the rule.
+
     It only operates on :class:`FusibleFunction` subclasses; see that class for more
     details.
 
     Args:
         root (Tensor or Node): the loss tensor (or its ``grad_fn``) to traverse
             back from.
-        rules (list): fusion rules, each a tuple
-            ``(producer_cls.main_backward, consumer_cls.epilogue_backward, fused_impl)``.
-            ``fused_impl(grad_producer_out, main_saved_tensors, consumer_ctx)`` returns
-            the grad of the consumer's main output, computing the producer's deferred
-            ``grad_input`` GEMM with the consumer's epilogue fused on. Only registered
-            pairs fuse.
+        rules (list): fusion rules, each a tuple whose first item is either
+            ``producer_cls.main_backward`` or an ordered tuple of producer methods.
+            For one producer, ``fused_impl(grad_producer_out, main_saved_tensors,
+            consumer_ctx)`` returns the grad of the consumer's main output. For an
+            explicit multi-use splitter, ``fused_impl(terms, consumer_ctx)`` receives
+            ordered ``(grad_producer_out, main_saved_tensors)`` terms. Only registered
+            patterns fuse.
         accumulate_grad_rules (list): fusion rules, each a tuple
             ``(producer_cls.main_backward, input_idx, fused_impl)``. When that main
             backward input feeds a unique leaf ``AccumulateGrad``, the normal gradient
@@ -568,7 +709,7 @@ def apply_epilogue_fusion(
         for producer, input_idx, impl in accumulate_grad_rules
     }
 
-    nodes, in_degree, seen = [], {}, set()
+    nodes, in_degree, edge_in_degree, seen = [], {}, {}, set()
     q = deque()
     if root is not None:
         seen.add(root)
@@ -576,13 +717,104 @@ def apply_epilogue_fusion(
     while q:
         node = q.popleft()
         nodes.append(node)
-        for fn, _ in node.next_functions:
+        for fn, output_nr in node.next_functions:
             if fn is None:
                 continue
             in_degree[fn] = in_degree.get(fn, 0) + 1
+            edge = (fn, output_nr)
+            edge_in_degree[edge] = edge_in_degree.get(edge, 0) + 1
             if fn not in seen:
                 seen.add(fn)
                 q.append(fn)
+
+    splitter_producers = {}
+    for node in nodes:
+        if not _is_main(node):
+            continue
+        for input_idx, (next_node, output_nr) in enumerate(node.next_functions):
+            if next_node is not None and _is_splitter(next_node):
+                splitter_producers.setdefault(next_node, []).append(
+                    (output_nr, node, input_idx)
+                )
+
+    multiuse_fused, multiuse_unfused = [], []
+    for splitter, entries in splitter_producers.items():
+        consumer = splitter.next_functions[0][0]
+        if consumer is None or not _is_epilogue(consumer):
+            continue
+
+        by_output = {}
+        for output_nr, producer, input_idx in entries:
+            by_output.setdefault(output_nr, []).append((producer, input_idx))
+        ordered_entries = []
+        invalid_outputs = False
+        for output_nr in range(splitter.num_uses):
+            matches = by_output.get(output_nr, [])
+            if len(matches) != 1 or edge_in_degree.get((splitter, output_nr), 0) != 1:
+                invalid_outputs = True
+                break
+            producer, input_idx = matches[0]
+            ordered_entries.append((producer, input_idx))
+
+        producers = tuple(
+            producer for _, producer, _ in sorted(entries, key=lambda entry: entry[0])
+        )
+        if invalid_outputs or len(entries) != splitter.num_uses:
+            multiuse_unfused.append(
+                _PlannedMultiUsePair(
+                    producers,
+                    splitter,
+                    consumer,
+                    "each splitter output must feed exactly one main backward",
+                )
+            )
+            continue
+        if len({producer for producer, _ in ordered_entries}) != len(ordered_entries):
+            multiuse_unfused.append(
+                _PlannedMultiUsePair(
+                    producers,
+                    splitter,
+                    consumer,
+                    "one main backward consumes multiple splitter outputs",
+                )
+            )
+            continue
+        if any(producer.defer_input_idx is not None for producer, _ in ordered_entries):
+            multiuse_unfused.append(
+                _PlannedMultiUsePair(
+                    producers,
+                    splitter,
+                    consumer,
+                    "a main backward already participates in another fusion",
+                )
+            )
+            continue
+        if in_degree.get(consumer, 0) != 1:
+            multiuse_unfused.append(
+                _PlannedMultiUsePair(
+                    producers,
+                    splitter,
+                    consumer,
+                    "the splitter must be the epilogue output's only consumer",
+                )
+            )
+            continue
+
+        producer_methods = tuple(
+            producer.cls.main_backward for producer, _ in ordered_entries
+        )
+        impl = rule_map.get((producer_methods, consumer.cls.epilogue_backward))
+        pair = _PlannedMultiUsePair(producers, splitter, consumer, None)
+        if impl is None:
+            pair.unfused_reason = "no rule registered"
+            multiuse_unfused.append(pair)
+            continue
+
+        splitter.defer_fusion = True
+        consumer.multiuse_fused_impl = impl
+        for producer, input_idx in ordered_entries:
+            producer.defer_input_idx = input_idx
+        multiuse_fused.append(pair)
 
     fused, missing_rules, accumulate_grad_fused = [], [], []
     for n in nodes:
@@ -630,6 +862,11 @@ def apply_epilogue_fusion(
                 f"{type(n).__name__}: {len(candidates)} inputs feed epilogue nodes; "
                 f"deferring more than one grad_input is not supported"
             )
+        if candidates and n.defer_input_idx is not None:
+            raise RuntimeError(
+                f"{type(n).__name__}: multiple inputs feed fusible nodes; "
+                "deferring more than one grad_input is not supported"
+            )
         if not candidates:
             continue
         idx, consumer = candidates[0]
@@ -652,7 +889,13 @@ def apply_epilogue_fusion(
         consumer.fused_impl = impl
         fused.append(_PlannedPair(n, consumer, None))  # None == fusion armed
 
-    plan = _InternalDebugFusionPlan(fused, missing_rules, accumulate_grad_fused)
+    plan = _InternalDebugFusionPlan(
+        fused,
+        missing_rules,
+        multiuse_fused,
+        multiuse_unfused,
+        accumulate_grad_fused,
+    )
     if expect_num_fusions is not None:
         plan.assert_num_fusions(expect_num_fusions)
     if expect_num_accumulate_grad_fusions is not None:
@@ -741,6 +984,18 @@ def mm_tanh_fused_backward(grad_producer_out, main_saved_tensors, consumer_ctx):
     return grad_main_input * (1 - torch.tanh(a_c) ** 2)
 
 
+def mm_relu_multiuse_fused_backward(terms, consumer_ctx):
+    grad_main_input = None
+    for grad_producer_out, main_saved_tensors in terms:
+        _x, w = main_saved_tensors
+        branch_grad = grad_producer_out @ w.transpose(-1, -2)
+        grad_main_input = (
+            branch_grad if grad_main_input is None else grad_main_input + branch_grad
+        )
+    (a,) = consumer_ctx.saved_tensors
+    return grad_main_input * (a > 0).to(a.dtype)
+
+
 def _mm_accumulate_grad(variable, mat1, mat2):
     if variable.grad is None:
         variable.grad = mat1 @ mat2
@@ -760,14 +1015,19 @@ def mm_weight_accumulate_fused_backward(
     _mm_accumulate_grad(variable, x.transpose(-1, -2), grad_producer_out)
 
 
-# One rule per (producer.main_backward, consumer.epilogue_backward) pair, passed
-# explicitly to apply_epilogue_fusion. The fused impl depends only on the
-# consumer's epilogue, so both producers reuse the same impl.
+# Rules are keyed by one producer or an ordered producer tuple plus the consumer
+# epilogue. Single-use implementations depend only on the consumer epilogue, so
+# both producer classes reuse the same implementation.
 RULES = [
     (MMRelu.main_backward, MMRelu.epilogue_backward, mm_relu_fused_backward),
     (MMTanh.main_backward, MMRelu.epilogue_backward, mm_relu_fused_backward),
     (MMRelu.main_backward, MMTanh.epilogue_backward, mm_tanh_fused_backward),
     (MMTanh.main_backward, MMTanh.epilogue_backward, mm_tanh_fused_backward),
+    (
+        (MMRelu.main_backward, MMRelu.main_backward),
+        MMRelu.epilogue_backward,
+        mm_relu_multiuse_fused_backward,
+    ),
 ]
 
 # These rules identify a main-backward output by its forward input index. They
@@ -845,6 +1105,52 @@ def scenario_mixed_chain():
     print("PASS: epilogues and leaf gradient accumulation fused across the chain.")
 
 
+def scenario_multi_use():
+    """One activation explicitly split across two downstream matmuls."""
+    print("\n########## scenario: explicit multi-use ##########")
+    torch.manual_seed(1)
+
+    def make():
+        return [
+            torch.randn(4 if i == 0 else 6, 6, dtype=torch.double, requires_grad=True)
+            for i in range(4)
+        ]
+
+    ref = make()
+    x, w1, wa, wb = ref
+    h = torch.relu(x @ w1)
+    (torch.relu(h @ wa).sum() + torch.relu(h @ wb).sum()).backward()
+    refs = [tensor.grad.clone() for tensor in ref]
+
+    ins = make()
+    for tensor, reference in zip(ins, ref):
+        tensor.data.copy_(reference.data)
+    x, w1, wa, wb = ins
+
+    h = MMRelu.apply(x, w1)
+    ha, hb = split_multi_use(h, 2)
+    loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
+    LOG.reset()
+    plan = apply_epilogue_fusion(
+        loss,
+        RULES,
+        accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+        expect_num_fusions=1,
+        expect_num_accumulate_grad_fusions=4,
+        _internal_debug=True,
+    )
+    print(plan)
+    loss.backward()
+
+    _check("multi-use", ins, refs)
+    print("kernel paths:", LOG)
+    assert LOG.c["multiuse_fused"] == 1  # noqa: S101
+    assert LOG.c["splitter_deferred"] == 1  # noqa: S101
+    assert LOG.c["accumulate_fused"] == 4  # noqa: S101
+    print("PASS: branch GEMMs, InputBuffer accumulation, and epilogue fused.")
+
+
 if __name__ == "__main__":
     scenario_mixed_chain()
+    scenario_multi_use()
     print("\nALL SCENARIOS PASSED")
