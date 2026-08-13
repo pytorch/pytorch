@@ -3051,9 +3051,21 @@ def get_gpu_dram_gbps() -> float:
     if ds_bw is not None:
         return ds_bw
 
-    from triton.testing import get_dram_gbps
+    try:
+        from triton.testing import get_dram_gbps
 
-    return get_dram_gbps()
+        return get_dram_gbps()
+    except Exception:
+        log.warning(
+            "get_gpu_dram_gbps: Triton DRAM bandwidth query failed on the "
+            "current device. Returning a conservative default; roofline "
+            "estimates will be inaccurate but will not crash."
+        )
+        # Return inf so that transfer_time = bytes / inf -> 0.0, consistent with
+        # get_device_tflops() returning 0.0 (compute_time -> 0.0). This makes
+        # roofline estimates degenerate to 0.0 on unsupported backends without
+        # producing extreme values.
+        return float("inf")
 
 
 def get_gpu_shared_memory() -> int:
@@ -4215,13 +4227,13 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
-    - Control flow nodes (Conditional, WhileLoop)
+    - Control flow nodes (Switch, WhileLoop)
     - Ops with sparse tensor outputs
     """
     from . import ir
 
     # Control flow nodes are cudagraph-unsafe
-    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+    if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
@@ -4520,12 +4532,16 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_package_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(torch.__file__))
+    )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
         "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            "TORCH_CUSTOM_PYTHONPATH",
+            os.pathsep.join((torch_package_root, *sys.path)),
         ),
     }
 
