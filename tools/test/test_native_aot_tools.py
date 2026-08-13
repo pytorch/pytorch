@@ -13,8 +13,6 @@ import unittest
 from tools.native_aot import export, toolchains
 
 
-
-
 SIDECAR = {
     "prefix": "fakeop_f32_n1024_k8",
     "spec": {"dtype": "float32", "N": 1024, "K": 8, "deterministic": False},
@@ -23,7 +21,6 @@ SIDECAR = {
         {"name": "mOut", "dynamic_sizes": [0, 1], "dynamic_strides": [0]},
     ],
 }
-
 
 
 def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
