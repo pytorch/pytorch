@@ -2521,6 +2521,48 @@ class DictTests(torch._dynamo.test_case.TestCase):
         remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
 
+        # Nodes binding unbacked symbols are barriers: reordering them changes
+        # the order the ShapeEnv resolves replacements (compile-time blowup).
+        # Checked before the call_method branch, since Dynamo emits item() as a
+        # call_method that would otherwise be reported safe.
+        unbacked_method = graph.call_method("item", (x,))
+        self.assertTrue(_is_safe_to_reorder(unbacked_method))
+        unbacked_method.meta["unbacked_bindings"] = {"u0": ()}
+        self.assertFalse(_is_safe_to_reorder(unbacked_method))
+
+        # increment_version bumps a version counter in place; matched by
+        # identity, so the torch._C alias (different __name__) is covered too.
+        self.assertFalse(
+            _is_safe_to_reorder(
+                graph.call_function(torch.autograd.graph.increment_version, (x,))
+            )
+        )
+        self.assertFalse(
+            _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
+        )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_canonical_graph_collectives_are_barriers(self):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+
+        # Functional collectives are barriers (comm/compute overlap + Inductor's
+        # in-place collective reuse). Dynamo graphs hold OpOverloadPackets,
+        # aten graphs hold OpOverloads, so both dispatch forms must be covered.
+        collective_overload = graph.call_function(
+            torch.ops._c10d_functional.all_reduce.default, (x, "sum", "0")
+        )
+        self.assertFalse(_is_safe_to_reorder(collective_overload))
+        collective_packet = graph.call_function(
+            torch.ops._c10d_functional.all_reduce, (x, "sum", "0")
+        )
+        self.assertFalse(_is_safe_to_reorder(collective_packet))
+        self.assertTrue(
+            _is_safe_to_reorder(graph.call_function(torch.ops.aten.add.Tensor, (x, x)))
+        )
+
 
 instantiate_parametrized_tests(DictTests)
 
