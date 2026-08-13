@@ -26,7 +26,13 @@ inputs:
   checkout-mode:
     description: Checkout mode passed to checkout-pytorch (one of "normal", "blobless", "treeless").
     required: false
-    default: 'treeless'
+    # blobless (blob:none), not treeless (tree:0): these jobs materialize the
+    # full working tree, so with treeless git must fetch every tree object
+    # on demand from github.com during checkout (amplified by recursive
+    # submodules), and those promisor fetches are a common source of transient
+    # HTTP 408/429 flakiness. blobless downloads all trees up front so checkout
+    # needs no lazy tree fetch; only file blobs are fetched, in one batch.
+    default: 'blobless'
   github-token:
     description: GITHUB_TOKEN, needed to retrieve the workflow job id.
     required: false
