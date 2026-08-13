@@ -4,7 +4,7 @@
 import numpy as np
 
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -16,6 +16,8 @@ class DTensorTestBaseUtilCPUTest(DTensorTestBase):
     This class tests if the basic functionalities of DTensorTestBase are
     working as expected on CPU, regardless of the presence of CUDA devices.
     """
+
+    hw_classification = HardwareClassification.CPU
 
     @property
     def backend(self):

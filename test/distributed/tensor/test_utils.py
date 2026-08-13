@@ -39,7 +39,11 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -63,6 +67,8 @@ R = Replicate()
 
 
 class LocalTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_strided_shard_to_replicate_preserves_even_unbacked_shape(self):
         import torch.distributed.tensor.placement_types as placement_types
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -390,6 +396,8 @@ class LocalTest(TestCase):
 
 
 class UtilTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
@@ -712,6 +720,8 @@ class UtilTest(DTensorTestBase):
 
 
 class UtilSingleDeviceTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compute_global_tensor_info_unsupported_placement(self):
         class MockDeviceMesh:
             def size(self, x):
@@ -814,6 +824,8 @@ class UtilSingleDeviceTest(TestCase):
 
 
 class TestStridedSharding(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -1095,6 +1107,8 @@ class TestStridedSharding(DTensorTestBase):
 
 
 class Test_StridedShard_Propagation(LocalDTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 16
@@ -1295,6 +1309,8 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
     The pattern follows _TestClipGradNormBase from test_fully_shard_clip_grad_norm_.py
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
@@ -1443,6 +1459,8 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
 
 
 class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 32
@@ -1500,6 +1518,8 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -1725,6 +1745,8 @@ class TestStridedShardCollectiveOpUtils:
 
 
 class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -1777,6 +1799,8 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
 
 class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTestBase):
     """Tests for _StridedShard layout and collective operations."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @property
     def world_size(self):
@@ -1889,6 +1913,8 @@ class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTes
 
 
 class TestExplicitRedistribute(LocalTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 4
@@ -1983,6 +2009,8 @@ class TestExplicitRedistribute(LocalTensorTestBase):
 
 
 class TestIsTensorShardable(LocalTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 8
