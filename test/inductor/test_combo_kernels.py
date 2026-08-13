@@ -3272,16 +3272,17 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             foreach_node.group_nodes_for_combo_kernels.side_effect = AssertionError(
                 "configured grouping callback was called"
             )
-            foreach_node._default_group_nodes_for_combo_kernels.return_value = [
-                [nodes[0]],
-                [nodes[1]],
-            ]
+            foreach_node._default_group_nodes_for_combo_kernels.side_effect = (
+                AssertionError("Kahn grouping was called")
+            )
+            foreach_node._filter_nodes_for_combo_kernel_grouping.return_value = nodes
             foreach_node.combinable_nodes.return_value = nodes
             Scheduler.create_combo_kernel_nodes(scheduler)
 
-        foreach_node._default_group_nodes_for_combo_kernels.assert_called_once_with(
-            scheduler
+        foreach_node._filter_nodes_for_combo_kernel_grouping.assert_called_once_with(
+            baseline_nodes
         )
+        foreach_node._default_group_nodes_for_combo_kernels.assert_not_called()
         foreach_node.combinable_nodes.assert_called_once_with(nodes)
         self.assertEqual(driver_calls, [(0, 2, eligible, 0, True)])
         self.assertEqual(scheduler.nodes, [combo])

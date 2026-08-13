@@ -3550,6 +3550,27 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         return filtered_nodes
 
     @staticmethod
+    def _filter_nodes_for_combo_kernel_grouping(
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """Exclude unsupported devices and mixed-order-reduction consumers."""
+        excluded_buffer_names = OrderedSet(
+            buf_name
+            for node in nodes
+            if isinstance(node, FusedMixOrderReductions)
+            for buf_name in node.get_buffer_names()
+        )
+        filtered_nodes = []
+        for node in nodes:
+            device = node.get_device()
+            if device and device.type in ("mps", "cpu"):
+                continue
+            if node.used_buffer_names() & excluded_buffer_names:
+                continue
+            filtered_nodes.append(node)
+        return filtered_nodes
+
+    @staticmethod
     def _default_group_nodes_for_combo_kernels(
         scheduler: Scheduler,
     ) -> list[list[BaseSchedulerNode]]:
@@ -3559,15 +3580,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = config.combo_kernel_max_num_nodes
-
-        excluded_buffer_names: OrderedSet[str] = OrderedSet(
-            [
-                buf_name
-                for group in sorted_nodes
-                for node in group
-                if isinstance(node, FusedMixOrderReductions)
-                for buf_name in node.get_buffer_names()
-            ]
+        grouping_nodes = OrderedSet(
+            ForeachKernelSchedulerNode._filter_nodes_for_combo_kernel_grouping(
+                scheduler.nodes
+            )
         )
         for nodes in sorted_nodes:
             # Group nodes by device first to avoid mixed-device fusion
@@ -3575,14 +3591,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 defaultdict(list)
             )
             for node in nodes:
-                device = node.get_device()
-                if device and (device.type == "mps" or device.type == "cpu"):
+                if node not in grouping_nodes:
                     continue
-
-                # exclude nodes that read from FusedMixOrderReductions output buffers'
-                if node.used_buffer_names() & excluded_buffer_names:
-                    continue
-                device_groups[device].append(node)
+                device_groups[node.get_device()].append(node)
 
             # Sub-group by stream and mempool to avoid mixing nodes across
             # context boundaries. When a context is inactive every node maps to
@@ -6667,13 +6678,13 @@ class Scheduler:
 
         mem_ctx = self._init_peak_memory_context()
         baseline_nodes = mem_ctx.baseline_nodes
-        default_groups = (
-            ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(self)
+        schedule_nodes = (
+            ForeachKernelSchedulerNode._filter_nodes_for_combo_kernel_grouping(
+                baseline_nodes
+            )
         )
         eligible_nodes = OrderedSet(
-            ForeachKernelSchedulerNode.combinable_nodes(
-                [node for group in default_groups for node in group]
-            )
+            ForeachKernelSchedulerNode.combinable_nodes(schedule_nodes)
         )
         max_distance = config.combo_kernel_max_distance
         memory_sim_time = 0.0
