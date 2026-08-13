@@ -101,6 +101,7 @@ persistent_tma_mm_template = TritonTemplate(
     name="mm_persistent_tma",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_tma_mm"),
+    supports_template_local_reduction=True,
 )
 
 # Non-TMA Triton template for persistent MM

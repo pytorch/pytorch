@@ -9,7 +9,7 @@ from typing import Any
 import sympy
 
 import torch
-from torch._inductor.ir import ComputedBuffer
+from torch._inductor.ir import ComputedBuffer, IRNode, Reduction
 from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
 from torch._inductor.ops_handler import DefaultHandler
 from torch._inductor.utils import OrderedSet
@@ -92,6 +92,14 @@ class GemmEpilogueIRFinalizer:
     output_name: str
     source_name: str
     kind: str
+
+
+@dataclasses.dataclass(frozen=True)
+class TemplateLocalReductionIR:
+    block_m: int
+    block_n: int
+    reduction_type: str
+    source_type: str
 
 
 def _expression_values(value: Any):
@@ -489,6 +497,91 @@ def grouped_reduction_ir(
         if len(terms) == group and len(frozenset(transforms)) == 1 and transforms[0]:
             return reduction_type, transforms[0]
     return None
+
+
+def template_local_reduction_ir(
+    buffer: ComputedBuffer, source: IRNode
+) -> TemplateLocalReductionIR | None:
+    """Match a reduction whose logical groups exactly cover source tiles."""
+    original_ranges = buffer._original_ranges
+    reduction_ranges = buffer._original_reduction_ranges
+    if (
+        original_ranges is None
+        or reduction_ranges is None
+        or len(original_ranges) != 2
+        or len(reduction_ranges) != 2
+        or len(source.get_size()) != 2
+    ):
+        return None
+    try:
+        block_m, block_n = (
+            V.graph.sizevars.optimization_hint(size) for size in reduction_ranges
+        )
+    except (TypeError, ValueError):
+        return None
+
+    m, n = source.get_size()
+    if not (
+        V.graph.sizevars.statically_known_equals(sympy.Mod(m, block_m), 0)
+        and V.graph.sizevars.statically_known_equals(sympy.Mod(n, block_n), 0)
+    ):
+        return None
+    expected_output = [m // block_m, n // block_n]
+    if not V.graph.sizevars.statically_known_list_equals(
+        original_ranges, expected_output
+    ):
+        return None
+
+    with buffer.with_original_inner_fn():
+        if not isinstance(buffer.data, Reduction):
+            return None
+        index, reduction_index = buffer.data.inner_fn_args()
+        if len(index) != 2 or len(reduction_index) != 2:
+            return None
+        store = GemmEpilogueIRAnalysis.store_from_buffer(buffer)
+        if store is None:
+            return None
+        classified = grouped_reduction_ir(
+            store,
+            source.get_name(),
+            block_m * block_n,
+            source.get_dtype(),
+        )
+        if classified is None:
+            return None
+
+        expected_load = source.make_indexer()(
+            (
+                index[0] * block_m + reduction_index[0],
+                index[1] * block_n + reduction_index[1],
+            )
+        )
+        load_indices = []
+        for expr in _walk(store.value):
+            if expr.op != "load" or expr.args[0] != source.get_name():
+                continue
+            load_index = expr.args[1]
+            if not any(
+                sympy.simplify(load_index - other) == 0 for other in load_indices
+            ):
+                load_indices.append(load_index)
+        load_matches = (
+            len(load_indices) == 1
+            and sympy.simplify(load_indices[0] - expected_load) == 0
+        )
+        if not load_matches:
+            return None
+
+        output_strides = [original_ranges[1], sympy.S.One]
+        expected_store = sum(
+            (var * stride for var, stride in zip(index, output_strides)),
+            sympy.S.Zero,
+        )
+        if sympy.simplify(store.index - expected_store) != 0:
+            return None
+
+    reduction_type, source_type = classified
+    return TemplateLocalReductionIR(block_m, block_n, reduction_type, source_type)
 
 
 def _synthetic_reductions_ir(

@@ -7975,6 +7975,174 @@ class TritonScheduling(SIMDScheduling):
             if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
                 node.debug_device_str = debug_triton_code
 
+    @staticmethod
+    def _choice_supports_template_local_reduction(
+        choice: ir.ChoiceCaller, block: tuple[int, int]
+    ) -> bool:
+        return (
+            isinstance(choice, ir.TritonTemplateCallerBase)
+            and getattr(choice, "supports_template_local_reduction", False)
+            and getattr(choice, "template_local_reduction_block", None) == block
+        )
+
+    @staticmethod
+    def _template_local_reduction_chains(
+        template: ir.TritonTemplateBuffer,
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> list[tuple[list[ir.ComputedBuffer], Any]] | None:
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            template_local_reduction_ir,
+        )
+
+        chains: list[list[ir.ComputedBuffer]] = []
+        chain_by_last_buffer: dict[str, int] = {}
+        for node in nodes:
+            if not (
+                isinstance(node, SchedulerNode)
+                and node.is_reduction()
+                and isinstance(node.node, ir.ComputedBuffer)
+                and isinstance(node.node.data, ir.Reduction)
+            ):
+                return None
+            reads = OrderedSet(dep.name for dep in node.read_writes.reads)
+            if len(reads) != 1:
+                return None
+            read = next(iter(reads))
+            if read == template.get_name():
+                chain = len(chains)
+                chains.append([])
+            elif read in chain_by_last_buffer:
+                chain = chain_by_last_buffer.pop(read)
+            else:
+                return None
+            chains[chain].append(node.node)
+            chain_by_last_buffer[node.node.get_name()] = chain
+        if not chains:
+            return None
+
+        m, n = template.get_size()
+        result = []
+        for reductions in chains:
+            if any(reduction._split_size is None for reduction in reductions[:-1]):
+                return None
+            matched = template_local_reduction_ir(reductions[0], template)
+            if matched is None or matched.reduction_type not in {
+                "max",
+                "min",
+                "prod",
+                "sum",
+            }:
+                return None
+            if any(
+                reduction.get_reduction_type() != matched.reduction_type
+                for reduction in reductions
+            ):
+                return None
+
+            expected_output = (m // matched.block_m, n // matched.block_n)
+            final = reductions[-1]
+            expected_stride = ir.FlexibleLayout.contiguous_strides(expected_output)
+            if not (
+                V.graph.sizevars.statically_known_list_equals(
+                    final.get_size(), expected_output
+                )
+                and V.graph.sizevars.statically_known_list_equals(
+                    final.get_stride(), expected_stride
+                )
+                and V.graph.sizevars.statically_known_equals(
+                    final.get_layout().offset, 0
+                )
+            ):
+                return None
+            result.append((reductions, matched))
+        return result
+
+    @classmethod
+    def _template_local_reduction_block(
+        cls,
+        template: ir.TritonTemplateBuffer,
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> tuple[int, int] | None:
+        chains = cls._template_local_reduction_chains(template, nodes)
+        if chains is None:
+            return None
+        blocks = OrderedSet((matched.block_m, matched.block_n) for _, matched in chains)
+        return next(iter(blocks)) if len(blocks) == 1 else None
+
+    @classmethod
+    def _template_supports_local_reduction_block(
+        cls, template: ir.TritonTemplateBuffer, block: tuple[int, int]
+    ) -> bool:
+        if isinstance(template, ir.MultiTemplateBuffer):
+            choice, _ = template.get_min_choice()
+            return cls._choice_supports_template_local_reduction(choice, block)
+        return (
+            template.supports_template_local_reduction
+            and template.template_local_reduction_block == block
+        )
+
+    @classmethod
+    def _is_template_local_reduction(
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        template = node1.get_template_node()
+        if (
+            not isinstance(template, ir.TritonTemplateBuffer)
+            or not node2.is_reduction()
+        ):
+            return False
+        if len(template.get_size()) != 2 or node2.has_aliasing_or_mutation():
+            return False
+        block = cls._template_local_reduction_block(template, node2.get_nodes())
+        if block is None:
+            return False
+        return cls._template_supports_local_reduction_block(template, block)
+
+    def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return self._is_template_local_reduction(node1, node2)
+
+    def can_fuse_reduction_epilogue_choice(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        choice: ir.ChoiceCaller,
+    ) -> bool:
+        template = node1.get_template_node()
+        if not isinstance(template, ir.MultiTemplateBuffer):
+            return False
+        block = self._template_local_reduction_block(template, node2.get_nodes())
+        return block is not None and self._choice_supports_template_local_reduction(
+            choice, block
+        )
+
+    def can_fuse_reduction_chain(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        if not node1.is_reduction() or not node2.is_reduction():
+            return False
+        nodes = [*node1.get_nodes(), *node2.get_nodes()]
+        if not nodes or not isinstance(nodes[0], SchedulerNode):
+            return False
+        reads = OrderedSet(dep.name for dep in nodes[0].read_writes.reads)
+        if len(reads) != 1:
+            return False
+        template = V.graph.get_buffer(next(iter(reads)))
+        if not isinstance(template, ir.TritonTemplateBuffer):
+            return False
+        block = self._template_local_reduction_block(template, nodes)
+        return (
+            block is not None
+            and self._template_supports_local_reduction_block(template, block)
+            and bool(node1.get_operation_names() & node2.ancestors)
+        )
+
+    def get_fusion_pair_priority(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        return 0 if self.can_fuse_reduction_chain(node1, node2) else 1
+
     @classmethod
     def get_backend_features(cls, device: torch.device):
         if (

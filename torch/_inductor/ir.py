@@ -6140,6 +6140,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        supports_template_local_reduction: bool = False,
+        template_local_reduction_block: tuple[int, int] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6160,6 +6162,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
         self.epilogue_fusable_outputs = {self.name: self.name}
+        self.supports_template_local_reduction = supports_template_local_reduction
+        self.template_local_reduction_block = template_local_reduction_block
 
         self.subgraph_inps: list[IRNode | Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
