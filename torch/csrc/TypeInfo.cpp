@@ -1,5 +1,6 @@
 #include <torch/csrc/TypeInfo.h>
 
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -115,7 +116,18 @@ static PyObject* THPDTypeInfo_compare(
 }
 
 static Py_hash_t THPDTypeInfo_hash(THPDTypeInfo* self) {
-  return static_cast<Py_hash_t>(self->type);
+  const auto dtype_hash = PyObject_Hash(
+      reinterpret_cast<PyObject*>(torch::getTHPDtype(self->type)));
+  if (dtype_hash == -1) {
+    return -1;
+  }
+  const auto type_hash =
+      PyObject_Hash(reinterpret_cast<PyObject*>(Py_TYPE(self)));
+  if (type_hash == -1) {
+    return -1;
+  }
+  const auto hash = dtype_hash ^ type_hash;
+  return hash == -1 ? -2 : hash;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
