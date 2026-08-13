@@ -15512,9 +15512,7 @@ def _get_device_name(idx):
     return f"{torch.accelerator.current_accelerator().type}:{idx}"
 
 
-# Although this is written to be generic over all accelerators, non-cuda accelerators
-# are not fully tested since sleep is only supported on cuda.
-class TestAutogradStreamSynchronization(TestCase):
+class _TestAutogradStreamSynchronizationBase(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
         for i in range(num_devices):
@@ -15540,13 +15538,15 @@ class TestAutogradStreamSynchronization(TestCase):
                     torch.get_device_module(acc).current_stream(), default_streams[i]
                 )
 
+
+class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:0    s1
@@ -15649,6 +15649,7 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
@@ -15657,35 +15658,30 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self, device
     ):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=True
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_3_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=False
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_4_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
         # Producer: cuda:1    s1
@@ -15742,15 +15738,13 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_multi_producer_case_4_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
@@ -15937,11 +15931,9 @@ class TestAutogradStreamSynchronization(TestCase):
         populate_events()
         check_ordering()
 
+    @onlyAccelerator
     @expectedFailureMPS
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
                 with set_warn_always_context(True):
@@ -15988,6 +15980,8 @@ class TestAutogradStreamSynchronization(TestCase):
 
 
 class TestMultithreadAutograd(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_py_multithread_fn(
         self, fn, args=(), num_threads=10, kwargs=None, pass_idx=False
     ):
