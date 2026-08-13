@@ -2167,6 +2167,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(3)
         self.assertEqual(opt(x), fn(x))
 
+    def test_explicit_range_dunder_bool(self):
+        # bool(range(...)) constant-folds before reaching the nb_bool slot, so
+        # the explicit wrapper call is the only path into RangeVariable's slot.
+        def fn(x):
+            return x + 1, range(0).__bool__(), range(5).__bool__()
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
     def test_index_int_subclass_fast_path(self):
         # _PyNumber_Index returns int/int-subclass items via the
         # PyLong_Check fast path without consulting nb_index, so an

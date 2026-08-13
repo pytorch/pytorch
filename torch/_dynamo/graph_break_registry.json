@@ -3732,6 +3732,14 @@
       ]
     }
   ],
+  "GB9118": [
+    {
+      "Gb_type": "Data pointer truth value",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "Dynamo cannot decide the truth value of a data pointer because the address is only known at runtime.",
+      "Hints": []
+    }
+  ],
   "GB0233": [
     {
       "Gb_type": "Attempted to use strided NestedTensor",
@@ -5700,16 +5708,6 @@
       "Explanation": "Infinite loop detected because while_loop's cond_fn always returns the same value {pred}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB8364": [
-    {
-      "Gb_type": "Missing bool_impl override",
-      "Context": "bool_impl {self}",
-      "Explanation": "{type(self).__name__} does not implement bool_impl. Add a bool_impl override to {type(self).__name__}.",
-      "Hints": [
-        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],

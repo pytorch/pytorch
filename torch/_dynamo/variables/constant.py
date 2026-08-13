@@ -264,7 +264,7 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         from .object_protocol import type_implements_mp_subscript
 
-        if type_implements_mp_subscript(type(self.value)):
+        if type_implements_mp_subscript(type(self.value)) and key.is_python_constant():
             try:
                 return ConstantVariable.create(self.value[key.as_python_constant()])
             except Exception as e:
@@ -950,6 +950,11 @@ class FakeIdVariable(VariableTracker):
         # the fake id is preserved in the resulting string, matching how
         # FakeIdVariable already resolves same-kind id()/hash() comparisons.
         return ConstantVariable.create(repr(self.value))
+
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors long_bool. The fake value is only meaningful at compile time,
+        # but its truthiness is, like tp_repr_impl, a plain function of it.
+        return ConstantVariable.create(self.value != 0)
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
