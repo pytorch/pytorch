@@ -1,7 +1,6 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
 import pytorch_test_common
-from pytorch_test_common import skipIfNoCuda
 
 import torch
 from torch.onnx._internal.torchscript_exporter import verification
@@ -10,6 +9,7 @@ from torch.onnx._internal.torchscript_exporter.utils import (
     _trigger_symbolic_function_registration,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
@@ -43,13 +43,8 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     return proto
 
 
-class _TestJITIRToONNX:
-    """Abstract base class for test cases.
-
-    Intentionally not a sub-class of unittest.TestCase so that unittest / pytest
-    don't run it directly. unitest.TestCase is mixed in as another base class when
-    creating concrete sub-types. See MakeTestCase().
-    """
+class _JITIRToONNXTestMixin:
+    """Shared logic for JIT IR to ONNX test classes."""
 
     opset_version = -1  # Sub-classes must override
     ort_providers = ["CPUExecutionProvider"]
@@ -82,6 +77,17 @@ class _TestJITIRToONNX:
             jit_outs,
             options,
         )
+
+
+class _TestJITIRToONNX(_JITIRToONNXTestMixin):
+    """Abstract base class for CPU-only test cases.
+
+    Intentionally not a sub-class of unittest.TestCase so that unittest / pytest
+    don't run it directly. unittest.TestCase is mixed in as another base class when
+    creating concrete sub-types. See MakeTestCase().
+    """
+
+    hw_classification = common_utils.HardwareClassification.GENERIC
 
     def test_example_ir(self):
         graph_ir = """
@@ -164,18 +170,6 @@ class _TestJITIRToONNX:
         x = torch.randn(5, 2)
         self.run_test(graph_ir, (x,))
 
-    @skipIfNoCuda
-    def test_log_softmax_half_to_float(self):
-        graph_ir = """
-        graph(%x: Tensor):
-          %half_to_float: bool = prim::Constant[value=1]()
-          %dim: int = prim::Constant[value=1]()
-          %y = aten::_log_softmax(%x, %dim, %half_to_float)
-          return (%y)
-        """
-        x = torch.randn(5, 2).half().to("cuda")
-        self.run_test(graph_ir, (x,))
-
     def test_native_dropout(self):
         graph_ir = """
         graph(%1 : Float(2, 3)):
@@ -188,6 +182,26 @@ class _TestJITIRToONNX:
         self.run_test(graph_ir, (a,))
 
 
+class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
+    """Abstract base class for CUDA-specific test cases.
+
+    Intentionally not a sub-class of unittest.TestCase so that unittest / pytest
+    don't run it directly. unittest.TestCase is mixed in as another base class when
+    creating concrete sub-types. See MakeTestCase() and instantiate_device_type_tests().
+    """
+
+    def test_log_softmax_half_to_float(self, device):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=1]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2, device=device).half()
+        self.run_test(graph_ir, (x,))
+
+
 def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(
@@ -198,6 +212,16 @@ def MakeTestCase(opset_version: int) -> type:
 
 
 TestJITIRToONNX_opset14 = MakeTestCase(14)
+
+
+class TestJITIRToONNXCUDA_opset14(
+    _TestJITIRToONNXCuda, pytorch_test_common.ExportTestCase
+):
+    hw_classification = common_utils.HardwareClassification.CUDA
+    opset_version = 14
+
+
+instantiate_device_type_tests(TestJITIRToONNXCUDA_opset14, globals(), only_for='cuda')
 
 if __name__ == "__main__":
     common_utils.run_tests()
