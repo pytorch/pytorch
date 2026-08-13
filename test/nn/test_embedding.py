@@ -1195,6 +1195,49 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     mode=mode,
                 )
 
+    # https://github.com/pytorch/pytorch/issues/192445
+    @onlyOn(["cuda"])
+    @dtypes(torch.int32, torch.int64)
+    def test_embedding_bag_per_sample_weights_mutated_indices(
+        self, device, dtype
+    ):
+        stderr = self.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+class TestEmbeddingBagMutatedIndices(TestCase):
+    def test_mutated_indices(self):
+        weight = torch.ones((5, 2), device="{device}")
+        indices = torch.zeros(1024, dtype={dtype}, device="{device}")
+        indices_alias = torch.from_dlpack(indices)
+        offsets = torch.tensor([0], dtype={dtype}, device="{device}")
+        per_sample_weights = torch.ones(1024, device="{device}", requires_grad=True)
+
+        output = F.embedding_bag(
+            indices,
+            weight,
+            offsets,
+            mode="sum",
+            per_sample_weights=per_sample_weights,
+        )
+        indices_alias.fill_(weight.size(0))
+        output.sum().backward()
+        torch.cuda.synchronize()
+
+if __name__ == "__main__":
+    run_tests()
+""")
+        has_cuda_assert = "device-side assert triggered" in stderr
+        has_hip_assert = "launch failure" in stderr
+        has_hip_assert = has_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
     def test_embedding_bag_dimension_errors(self, device):
         funcs = (
             lambda x, y, z: torch.nn.functional.embedding_bag(y, x, z),
