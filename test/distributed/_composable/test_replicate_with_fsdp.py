@@ -88,6 +88,9 @@ class ReplicateTest(MultiProcContinuousTest):
     def test_replicate_transformer(self, device):
         """
         This tests that replicate works on a transformer model with fully_shard and replicate layers
+
+        Args:
+            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
         run_subtests(
             self,
@@ -167,6 +170,8 @@ class ReplicateTest(MultiProcContinuousTest):
                 13. w2
                 14. resid_dropout
 
+        Args:
+            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
 
         model_args = ModelArgs()
@@ -209,6 +214,9 @@ class ReplicateTest(MultiProcContinuousTest):
     def test_replicate_tp_device_mesh(self, device):
         """
         This tests that a user can pass in a device mesh to replicate a module
+
+        Args:
+            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
 
         device = torch.device(device)
@@ -236,6 +244,9 @@ class ReplicateTest(MultiProcContinuousTest):
     def test_train_replicate_fsdp(self, device):
         """
         Tests that replicate_model has the same behavior as original model when training
+
+        Args:
+            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
 
         device = torch.device(device)
@@ -283,6 +294,9 @@ class ReplicateTest(MultiProcContinuousTest):
     def test_train_parity_2d_mlp(self, device):
         """
         Verifies when a device mesh is passed in, the model has the same behavior as the original model when training
+
+        Args:
+            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
         global_mesh = self.init_replicate_tp_mesh()
         run_subtests(
