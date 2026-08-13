@@ -21,6 +21,7 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     TORCH_CHECK(!output_size, "Must specify exactly one of output_size and scale_factors");
     TORCH_CHECK(static_cast<int64_t>(scale_factors->size()) == spatial_dimensions);
     c10::SmallVector<int64_t, 3> ret;
+    ret.reserve(spatial_dimensions);
     for (const auto i : c10::irange(spatial_dimensions)) {
       const double odim = static_cast<double>(input_size[i+2]) * scale_factors.value()[i];
       ret.push_back(c10::checked_convert<int64_t>(odim, "int64_t"));
