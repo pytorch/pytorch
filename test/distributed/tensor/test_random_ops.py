@@ -24,7 +24,11 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -44,6 +48,8 @@ def get_generator_seed_for_device_type(device_type: str):
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -373,6 +379,8 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @skip_unless_torch_gpu
     def test_rng_tracker_init(self):
@@ -712,6 +720,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
             blockwise_iter_if_localtensor(local_tensor, local_shard_offset)
 
+
+class TestPhiloxState(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_philox_state_seed_roundtrip(self):
         """
         Test that _PhiloxState seed can be read and re-set without error.
@@ -762,6 +774,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_with_seed(self, fn, create_input, num_runs):
         """Run fn num_runs times after resetting RNG, returning results and states."""
         device_module = torch.get_device_module(self.device_type)
@@ -982,6 +996,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 8
