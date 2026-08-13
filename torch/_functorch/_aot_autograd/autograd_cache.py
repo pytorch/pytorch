@@ -556,9 +556,12 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         # Deliberately stricter than Dynamo's AutocastState comparison, which
         # skips dtype for devices disabled on both sides -- that skip is what
         # this dict must not do when in-graph autocast is present.
+        # Scan nested GraphModules too: invoke_subgraph children are cacheable,
+        # and dtype=None autocast there is invisible to a root-only walk.
         has_in_graph_autocast = any(
             node.target is torch.amp.autocast_mode._enter_autocast
-            for node in gm.graph.nodes
+            for module in _iter_graph_modules(gm)
+            for node in module.graph.nodes
         )
         self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
             device_type: (

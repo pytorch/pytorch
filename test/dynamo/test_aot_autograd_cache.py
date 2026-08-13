@@ -4079,11 +4079,58 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_autocast_dtype("cpu", prev)
 
-    def test_ambient_autocast_enabled_changes_cache_key(self):
-        # Ambient autocast on vs off with the same dtype must not collide
-        # (enabled devices are still keyed even without in-graph autocast).
+    def test_nested_in_graph_autocast_keys_ambient(self):
+        # dtype=None autocast only in an invoke_subgraph child must still key
+        # ambient dtype (root-only _enter_autocast scan would miss it).
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x):
+            with torch.autocast("cpu"):
+                return (x @ x).sum()
+
         def fn(x):
-            return (x @ x).sum()
+            return gn(x)
+
+        config = self.default_config()
+        inputs = [torch.ones(3, 3)]
+        _, fx_g, _ = self._get_dynamo_output(fn, *inputs)
+        enter = torch.amp.autocast_mode._enter_autocast
+        self.assertFalse(
+            any(n.target is enter for n in fx_g.graph.nodes),
+            "expected dtype=None autocast only on the invoke_subgraph child",
+        )
+        self.assertTrue(
+            any(
+                n.target is enter
+                for module in autograd_cache._iter_graph_modules(fx_g)
+                if module is not fx_g
+                for n in module.graph.nodes
+            ),
+            "expected nested GraphModule to contain _enter_autocast",
+        )
+        prev = torch.get_autocast_dtype("cpu")
+        try:
+            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            c_bf16_a = self.gen_cache_key(fn, config, inputs=inputs)
+            c_bf16_b = self.gen_cache_key(fn, config, inputs=inputs)
+            torch.set_autocast_dtype("cpu", torch.float16)
+            c_fp16 = self.gen_cache_key(fn, config, inputs=inputs)
+            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            c_bf16_c = self.gen_cache_key(fn, config, inputs=inputs)
+            self.assertEqual(c_bf16_a, c_bf16_b)
+            self.assertEqual(c_bf16_a, c_bf16_c)
+            self.assertNotEqual(c_bf16_a, c_fp16)
+        finally:
+            torch.set_autocast_dtype("cpu", prev)
+
+    def test_ambient_autocast_enabled_changes_cache_key(self):
+        # In-graph autocast so both keys include a cpu entry; the enabled bit
+        # must still distinguish ambient-on vs ambient-off.
+        def fn(x):
+            y = x @ x
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                return y + x @ x
 
         config = self.default_config()
         inputs = [torch.ones(3, 3)]
