@@ -431,6 +431,49 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
       kwnames);
 }
 
+static PyObject* pyobject_dispatch_normalize_result(
+    const c10::FunctionSchema& schema,
+    PyObject* result) {
+  const auto& returns = schema.returns();
+  bool needs_normalization = false;
+  for (const auto& ret : returns) {
+    if (ret.real_type()->kind() != c10::TypeKind::TensorType) {
+      needs_normalization = true;
+      break;
+    }
+  }
+  if (!needs_normalization) {
+    return result;
+  }
+
+  py::object out = py::reinterpret_steal<py::object>(result);
+  if (returns.size() == 1) {
+    return torch::jit::toPyObject(
+               torch::jit::toIValue(out, returns[0].real_type()))
+        .release()
+        .ptr();
+  }
+
+  auto outs = py::cast<py::sequence>(out);
+  TORCH_CHECK_VALUE(
+      outs.size() == returns.size(),
+      schema.name(),
+      "() expected ",
+      returns.size(),
+      " returns but got ",
+      outs.size());
+  py::tuple normalized(returns.size());
+  for (const auto i : c10::irange(returns.size())) {
+    if (returns[i].real_type()->kind() == c10::TypeKind::TensorType) {
+      normalized[i] = outs[i];
+    } else {
+      normalized[i] = torch::jit::toPyObject(
+          torch::jit::toIValue(outs[i], returns[i].real_type()));
+    }
+  }
+  return normalized.release().ptr();
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -484,7 +527,7 @@ static PyObject* pyobject_dispatch_with_keyset(
   if (result == nullptr) {
     return nullptr;
   }
-  return result;
+  return pyobject_dispatch_normalize_result(self->handle->schema(), result);
 }
 
 static PyObject* pyobject_dispatch_vectorcall(

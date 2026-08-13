@@ -768,7 +768,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         f.register_autograd(backward, setup_context=setup_context)
 
         op = self.ns().pyobject_dispatch_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2, requires_grad=True)
         sizes = torch.tensor([1, 2, 3])
@@ -818,7 +818,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                 return self.list_module([input_embs[0]])[0]
 
         op = self.ns().pyobject_dispatch_module_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2)
         sizes = torch.tensor([1, 2, 3])
@@ -826,6 +826,25 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertIsInstance(y, list)
         self.assertEqual(passthrough, x)
         self.assertEqual(Consumer()(y), y[0])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_non_tensor_output(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_non_tensor_output",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tuple[Tensor, float, bool]:
+            return x.clone(), 2, 1  # type: ignore[return-value]
+
+        op = self.ns().pyobject_dispatch_non_tensor_output.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+
+        x = torch.randn(3)
+        y, scalar, predicate = f(x)
+        self.assertEqual(y, x)
+        self.assertIsInstance(scalar, float)
+        self.assertEqual(scalar, 2.0)
+        self.assertIs(predicate, True)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_normalizes_tensor_list_input(self):
