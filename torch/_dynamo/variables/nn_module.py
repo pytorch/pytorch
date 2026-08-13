@@ -792,6 +792,7 @@ class NNModuleVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
+        constant_implicit_args: list[VariableTracker] | None = None,
     ) -> VariableTracker:
         from . import ListIteratorVariable, TupleVariable
         from .constant import ConstantVariable
@@ -869,7 +870,14 @@ class NNModuleVariable(VariableTracker):
         if constant:
             fn = getattr(module, name)
             name = f"{module.__class__.__name__}_{name}_result"
-            return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
+            return invoke_and_store_as_constant(
+                tx,
+                fn,
+                name,
+                args,
+                kwargs,
+                implicit_args=constant_implicit_args or (),
+            )
 
         def assert_all_args_kwargs_const() -> None:
             if not all(

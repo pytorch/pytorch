@@ -6060,6 +6060,17 @@
       ]
     }
   ],
+  "GB1890": [
+    {
+      "Gb_type": "assume_constant_result default argument mutated in graph",
+      "Context": "function {name}, source {source_name}",
+      "Explanation": "Default arguments of function {name} marked with torch._dynamo.assume_constant_result were mutated inside the torch.compile region before the call, so its trace-time invocation would use a stale value.",
+      "Hints": [
+        "Perform the mutation outside the torch.compile region",
+        "Pass the already-mutated value explicitly instead"
+      ]
+    }
+  ],
   "GB3576": [
     {
       "Gb_type": "assume_constant_result specialize_args unguardable-source argument conversion failed",

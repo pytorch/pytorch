@@ -70,6 +70,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CellContentsSource,
+    ChainedSource,
     ClosureSource,
     ConstantSource,
     DefaultsSource,
@@ -89,6 +90,7 @@ from ..utils import (
     identity,
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
+    is_namedtuple_cls,
     is_tensor_base_attr_getter,
     is_wrapper_or_member_descriptor,
     istype,
@@ -206,6 +208,8 @@ def bind_args_cached(
     fn_source: Source | None,
     args: Sequence[Any],
     kwargs: dict[str, Any],
+    *,
+    force_guard_defaults: bool = False,
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
 
@@ -259,6 +263,7 @@ def bind_args_cached(
             if fn_source and not (
                 ConstantVariable.is_literal(spec.defaults[idx])
                 and config.skip_guards_on_constant_func_defaults
+                and not force_guard_defaults
             ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
@@ -798,6 +803,47 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
+    def _constant_implicit_args(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> list[VariableTracker]:
+        if not isinstance(self.fn, FunctionType):
+            raise TypeError("Only supports regular Python functions.")
+
+        fn_source = self.get_source()
+        self_args = self.self_args()
+        call_args = [*self_args, *args]
+        bound = bind_args_cached(
+            self.fn,
+            tx.output.root_tx,
+            fn_source,
+            call_args,
+            kwargs,
+            force_guard_defaults=getattr(self.fn, "_dynamo_specialize_args", False),
+        )
+        spec = _get_spec(self.fn)
+        spec.update_defaults(self.fn)
+        implicit_args = list(self_args)
+
+        for i, name in enumerate(spec.all_pos_names):
+            if i < len(call_args) or (
+                name in kwargs and name not in spec.posonly_names
+            ):
+                continue
+            if name in spec.pos_default_map:
+                implicit_args.append(bound[name])
+
+        for name in spec.kwonly_names:
+            if name not in kwargs and name in spec.kwdefaults:
+                implicit_args.append(bound[name])
+
+        if len(implicit_args) != len(self_args):
+            _check_no_in_graph_default_mutation(tx, self.get_name(), self.fn)
+
+        return implicit_args
+
     # func.__get__ binds the function to an instance via the tp_descr_get slot
     # wrapper. https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c#L1119
     def _get_dunder_get(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -936,8 +982,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             )
 
         if self.is_constant:
+            implicit_args = self._constant_implicit_args(tx, args, kwargs)
             return invoke_and_store_as_constant(
-                tx, self.fn, self.get_name(), args, kwargs
+                tx,
+                self.fn,
+                self.get_name(),
+                args,
+                kwargs,
+                implicit_args=implicit_args,
             )
 
         if (
@@ -1805,6 +1857,12 @@ class UserMethodVariable(UserFunctionVariable):
             )
             return var.call_function(tx, call_args, kwargs)
 
+        constant_implicit_args = (
+            self._constant_implicit_args(tx, args, kwargs)
+            if self.is_constant
+            else []
+        )
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -1829,7 +1887,12 @@ class UserMethodVariable(UserFunctionVariable):
                 or self.is_constant
             ):
                 return self.obj.call_method(
-                    tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
+                    tx,
+                    self.fn.__name__,
+                    list(args),
+                    kwargs,
+                    constant=self.is_constant,
+                    constant_implicit_args=constant_implicit_args,
                 )
         elif (
             _fsdp_param_group is not None
@@ -1840,7 +1903,14 @@ class UserMethodVariable(UserFunctionVariable):
             )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
-            return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
+            return invoke_and_store_as_constant(
+                tx,
+                fn,
+                self.get_name(),
+                args,
+                kwargs,
+                implicit_args=constant_implicit_args,
+            )
         return super().call_function(tx, args, kwargs)
 
     def _get_func(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1944,6 +2014,46 @@ def _mutated_constant_arg(name: str, source_name: str) -> Never:
     )
 
 
+def _mutated_constant_default(name: str, source_name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result default argument mutated in graph",
+        context=f"function {name}, source {source_name}",
+        explanation=f"Default arguments of function {name} marked with "
+        f"torch._dynamo.assume_constant_result were mutated inside the "
+        f"torch.compile region before the call, so its trace-time invocation "
+        f"would use a stale value.",
+        hints=[
+            "Perform the mutation outside the torch.compile region",
+            "Pass the already-mutated value explicitly instead",
+        ],
+    )
+
+
+def _check_no_in_graph_default_mutation(
+    tx: "InstructionTranslatorBase", name: str, fn: FunctionType
+) -> None:
+    side_effects = tx.output.side_effects
+    for value in (fn.__defaults__, fn.__kwdefaults__):
+        if value is not None and value in side_effects:
+            vt = side_effects[value]
+            if vt.mutation_type is not None and side_effects.is_modified(vt):
+                source_name = vt.source.name if vt.source else "<default argument>"
+                _mutated_constant_default(name, source_name)
+
+    for source in tx.output.side_effects.mutated_sources:
+        current = source
+        while isinstance(current, ChainedSource):
+            base = None
+            if isinstance(current, DefaultsSource) or (
+                isinstance(current, AttrSource)
+                and current.member in ("__defaults__", "__kwdefaults__")
+            ):
+                base = current.base
+            if base is not None and tx.output.resolve_source_value(base) is fn:
+                _mutated_constant_default(name, source.name)
+            current = current.base
+
+
 def _self_referential_constant_arg(source: Source, name: str) -> Never:
     unimplemented(
         gb_type="assume_constant_result specialize_args self-referential argument",
@@ -2016,6 +2126,18 @@ def _unguardable_constant_arg(
     )
 
 
+def _is_stateless_namedtuple(value: Any) -> bool:
+    # A namedtuple instance whose state is exactly its items: no instance
+    # __dict__ and no nonempty __slots__ anywhere in the MRO.
+    if not is_namedtuple_cls(type(value)):
+        return False
+    if hasattr(value, "__dict__"):
+        return False
+    return all(
+        not klass.__dict__.get("__slots__", ()) for klass in type(value).__mro__
+    )
+
+
 def _install_constant_arg_guards(
     source: Source,
     value: Any,
@@ -2029,12 +2151,14 @@ def _install_constant_arg_guards(
     EQUALS_MATCH: literals (per ConstantVariable.is_base_literal), enums, and
     constant classes (pytree ``register_constant`` or opaque ``typ="constant"``,
     which are guarded by their own __eq__). Containers are always walked -
-    tuples/lists guard their length, dicts their keys, dataclasses their type -
-    because EQUALS_MATCH short-circuits on pointer equality and would not see a
-    mutation reachable through them. Anything else, sets included (their
-    elements have no stable source to walk), is a graph break: value-based
-    invalidation is the point of specialize_args, so there is deliberately no
-    identity fallback.
+    tuples/lists guard their type and length, dicts their type and keys,
+    dataclasses their type - because EQUALS_MATCH short-circuits on pointer
+    equality and would not see a mutation reachable through them. Only exact
+    container types (plus torch.Size and stateless namedtuples) qualify:
+    subclasses can carry state beyond their items that the walk cannot see.
+    Anything else, sets included (their elements have no stable source to
+    walk), is a graph break: value-based invalidation is the point of
+    specialize_args, so there is deliberately no identity fallback.
     """
     # A nested object mutated in-graph before the call has guards derived from
     # its traced (post-mutation) state, which cannot match the frame-entry
@@ -2059,12 +2183,36 @@ def _install_constant_arg_guards(
         _unguardable_constant_arg(source, value, name, "self-referential structure")
     ancestors.add(id(value))
     if isinstance(value, (tuple, list)):
+        # Subclasses can carry state beyond the items (instance __dict__ or
+        # slots) that the item walk would leave unguarded; TYPE_MATCH makes a
+        # later call with a different (sub)type recompile instead of silently
+        # reusing the stale constant.
+        if not (
+            istype(value, (tuple, list, torch.Size))
+            or _is_stateless_namedtuple(value)
+        ):
+            _unguardable_constant_arg(
+                source,
+                value,
+                name,
+                f"sequence subclass {type(value).__name__} can carry state "
+                f"beyond its items",
+            )
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
         install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         for i, item in enumerate(value):
             _install_constant_arg_guards(
                 GetItemSource(source, i), item, name, ancestors, tx
             )
     elif isinstance(value, dict):
+        if not istype(value, dict):
+            _unguardable_constant_arg(
+                source,
+                value,
+                name,
+                f"dict subclass {type(value).__name__} can carry state "
+                f"beyond its items",
+            )
         for k in value:
             if not ConstantVariable.is_literal(k):
                 _unguardable_constant_arg(
@@ -2073,6 +2221,7 @@ def _install_constant_arg_guards(
                     name,
                     f"non-literal dict key of type {type(k).__name__}",
                 )
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
         install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
         tx.output.guard_on_key_order.add(source)
         for k, v in value.items():
@@ -2083,9 +2232,18 @@ def _install_constant_arg_guards(
         # dataclasses.fields() omits attributes set outside the generated
         # __init__ (assigned directly or in __post_init__); fn can read those,
         # so walking fields alone would leave them under TYPE_MATCH only.
-        extra = set(getattr(value, "__dict__", {})) - {
-            f.name for f in dataclasses.fields(value)
-        }
+        # Such state can live in __dict__ or, on slotted classes, in __slots__.
+        field_names = {f.name for f in dataclasses.fields(value)}
+        extra = set(getattr(value, "__dict__", ())) - field_names
+        for klass in type(value).__mro__:
+            slots = klass.__dict__.get("__slots__", ())
+            for slot in (slots,) if isinstance(slots, str) else slots:
+                if (
+                    slot not in field_names
+                    and slot not in ("__dict__", "__weakref__")
+                    and hasattr(value, slot)
+                ):
+                    extra.add(slot)
         if extra:
             _unguardable_constant_arg(
                 source,
@@ -2117,6 +2275,7 @@ def invoke_and_store_as_constant(
     name: str,
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    implicit_args: Sequence[VariableTracker] = (),
 ) -> VariableTracker:
     """
     Run `fn` on the converted arguments at compile time and bake the result into
@@ -2233,17 +2392,23 @@ def invoke_and_store_as_constant(
         # python constants (e.g. a nested int promoted to a dynamic SymInt by
         # automatic dynamic on recompile): walk the tracker and specialize the
         # dynamic leaves rather than graph-breaking on as_python_constant.
-        if isinstance(x, (variables.ListVariable, variables.TupleVariable)):
+        # Subclasses fall through to the graph break below: they can carry
+        # state beyond their items (see _install_constant_arg_guards).
+        if isinstance(
+            x, (variables.ListVariable, variables.TupleVariable)
+        ) and x.python_type() in (tuple, list, torch.Size):
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
             install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return x.python_type()(
                 convert_specialized(item, GetItemSource(source, i), ancestors)
                 for i, item in enumerate(x.items)
             )
-        if isinstance(x, variables.ConstDictVariable) and all(
+        if isinstance(x, variables.ConstDictVariable) and x.python_type() is dict and all(
             key.vt.is_python_constant()
             and ConstantVariable.is_literal(key.vt.as_python_constant())
             for key in x.items
         ):
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
             install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             tx.output.guard_on_key_order.add(source)
             result = {}
@@ -2271,6 +2436,13 @@ def invoke_and_store_as_constant(
         if x.is_tensor():
             return cast("TensorVariable", x).get_real_value()
         return convert_plain(x)
+
+    for x in implicit_args:
+        if not specialize_args and isinstance(x, variables.NNModuleVariable):
+            if x.source is not None:
+                install_guard(x.source.make_guard(GuardBuilder.ID_MATCH))
+        else:
+            convert(x)
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}

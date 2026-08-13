@@ -1814,6 +1814,121 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with self.assertRaisesRegex(Unsupported, "non-field attributes"):
             fn(torch.ones(4), Params(128))
 
+    def test_assume_constant_result_specialize_args_dataclass_slotted_extra(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Params:
+            __slots__ = ("seqlen", "scale")
+            seqlen: int
+
+            def __post_init__(self):
+                self.scale = 2.0
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return float(p.scale)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, p):
+            return x * select(p)
+
+        # scale lives in __slots__, not __dict__; it must still be detected
+        # as non-field state.
+        with self.assertRaisesRegex(Unsupported, "non-field attributes"):
+            fn(torch.ones(4), Params(128))
+
+    def test_assume_constant_result_specialize_args_dataclass_slots_true(self):
+        import dataclasses
+
+        @dataclasses.dataclass(frozen=True, slots=True)
+        class Params:
+            causal: bool
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return 1.0 if p.causal else 2.0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * select(p)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x, Params(True)), x * 1.0)
+        self.assertEqual(fn(x, Params(True)), x * 1.0)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(x, Params(False)), x * 2.0)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_container_subclass(self):
+        class DictCfg(dict):
+            def __init__(self, mode, **kwargs):
+                super().__init__(**kwargs)
+                self.mode = mode
+
+        class ListCfg(list):
+            def __init__(self, mode, items):
+                super().__init__(items)
+                self.mode = mode
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(cfg):
+            return 1.0 if cfg.mode == "a" else 2.0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, cfg):
+            return x * select(cfg)
+
+        # Instance attributes on container subclasses are invisible to the
+        # structural walk; a stale constant would be silently reused.
+        with self.assertRaisesRegex(Unsupported, "dict subclass"):
+            fn(torch.ones(4), DictCfg("a", k=1))
+        with self.assertRaisesRegex(Unsupported, "sequence subclass"):
+            fn(torch.ones(4), ListCfg("a", [1, 2]))
+
+    def test_assume_constant_result_specialize_args_container_type_change(self):
+        class DictCfg(dict):
+            pass
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(cfg):
+            return float(cfg["k"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, cfg):
+            return x * select(cfg)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x, {"k": 3}), x * 3.0)
+        # Same content but a subclass: the TYPE_MATCH guard must force a
+        # recompile (which then graph-breaks) instead of reusing the constant.
+        with self.assertRaisesRegex(Unsupported, "dict subclass"):
+            fn(x, DictCfg(k=3))
+
+    def test_assume_constant_result_specialize_args_namedtuple(self):
+        import collections
+
+        Params = collections.namedtuple("Params", ["seqlen", "causal"])
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return 1.0 if p.causal else 2.0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * select(p)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x, Params(128, True)), x * 1.0)
+        self.assertEqual(fn(x, Params(128, True)), x * 1.0)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(x, Params(128, False)), x * 2.0)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_assume_constant_result_specialize_args_on_method(self):
         import dataclasses
 
@@ -1822,6 +1937,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             seqlen: int
             causal: bool
 
+        @dataclasses.dataclass(frozen=True)
         class Selector:
             @torch._dynamo.assume_constant_result(specialize_args=True)
             def select(self, p):
@@ -1830,13 +1946,251 @@ class DecoratorTests(PytreeRegisteringTestCase):
         selector = Selector()
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnts)
+        @torch.compile(backend=cnts, fullgraph=True)
         def fn(x, p):
             return x * selector.select(p)
 
         for _ in range(5):
             fn(torch.ones(4), Params(128, True))
         fn(torch.ones(4), Params(256, True))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("module_receiver", [False, True])
+    def test_assume_constant_result_method_receiver(self, module_receiver):
+        class ObjectSelector:
+            def __init__(self, scale):
+                self.scale = scale
+
+            @torch._dynamo.assume_constant_result
+            def select(self):
+                return self.scale
+
+        class ModuleSelector(torch.nn.Module):
+            def __init__(self, scale):
+                super().__init__()
+                self.scale = scale
+
+            @torch._dynamo.assume_constant_result
+            def select(self):
+                return self.scale
+
+        selector_type = ModuleSelector if module_receiver else ObjectSelector
+        selector = selector_type(2.0)
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return x * selector.select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        selector = selector_type(3.0)
+        self.assertEqual(fn(x), x * 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_stateful_method(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Selector:
+            scale: float
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(self):
+                return self.scale
+
+        selector = Selector(2.0)
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return x * selector.select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        selector = Selector(2.0)
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        selector.scale = 3.0
+        self.assertEqual(fn(x), x * 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_nn_module_method(self):
+        class Selector(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = 2.0
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(self):
+                return self.scale
+
+        selector = Selector()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x * selector.select()
+
+        with self.assertRaisesRegex(Unsupported, "no value-guardable structure"):
+            fn(torch.ones(4))
+
+    @parametrize("kw_only", [False, True])
+    def test_assume_constant_result_specialize_args_dataclass_default(
+        self, kw_only
+    ):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Params:
+            scale: float
+
+        if kw_only:
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(*, p=Params(2.0)):
+                return p.scale
+
+        else:
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(p=Params(2.0)):
+                return p.scale
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return x * select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        if kw_only:
+            select.__kwdefaults__ = {"p": Params(2.0)}
+            default = select.__kwdefaults__["p"]
+        else:
+            select.__defaults__ = (Params(2.0),)
+            default = select.__defaults__[0]
+
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        default.scale = 3.0
+        self.assertEqual(fn(x), x * 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_dataclass_default(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Params:
+            scale: float
+
+        @torch._dynamo.assume_constant_result
+        def select(p=Params(2.0)):
+            return p.scale
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return x * select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        select.__defaults__ = (Params(3.0),)
+        self.assertEqual(fn(x), x * 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize(
+        "mutation", ["pos_rebind", "kw_rebind", "kw_item", "kw_input"]
+    )
+    def test_assume_constant_result_default_mutated_in_graph(self, mutation):
+        if mutation == "pos_rebind":
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(p=2.0):
+                return p
+
+        else:
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(*, p=2.0):
+                return p
+
+        kwdefaults = select.__kwdefaults__
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, defaults):
+            if mutation == "pos_rebind":
+                select.__defaults__ = (3.0,)
+            elif mutation == "kw_rebind":
+                select.__kwdefaults__ = {"p": 3.0}
+            elif mutation == "kw_item":
+                select.__kwdefaults__["p"] = 3.0
+            else:
+                defaults["p"] = 3.0
+            return x * select()
+
+        with self.assertRaisesRegex(
+            Unsupported, "default argument mutated in graph"
+        ):
+            fn(torch.ones(4), kwdefaults)
+
+    def test_assume_constant_result_unrelated_mutation(self):
+        def dummy():
+            pass
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select():
+            return 2.0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            dummy.attr = x
+            return x * select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        self.assertIs(dummy.attr, x)
+
+    def test_assume_constant_result_unused_default_mutated_in_graph(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p=2.0):
+            return p
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            select.__defaults__ = (3.0,)
+            return x * select(5.0)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 5)
+
+    @torch._dynamo.config.patch(skip_guards_on_constant_func_defaults=True)
+    def test_assume_constant_result_specialize_args_literal_default(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(value=2.0):
+            return value
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return x * select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        select.__defaults__ = (3.0,)
+        self.assertEqual(fn(x), x * 3)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_assume_constant_result_specialize_args_dataclass_cycle(self):
