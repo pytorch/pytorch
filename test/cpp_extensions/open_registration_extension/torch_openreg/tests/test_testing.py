@@ -307,6 +307,7 @@ class TestCapabilityGating(TestCase):
     """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
     executed_count = 0
+    setup_count = 0
 
     @classmethod
     def tearDownClass(cls):
@@ -316,6 +317,12 @@ class TestCapabilityGating(TestCase):
                 f"Capability gating failed! "
                 f"Expected {expected_runs} tests to run, "
                 f"but {cls.executed_count} tests executed."
+            )
+        if cls.setup_count != expected_runs:
+            raise AssertionError(
+                f"Capability preflight failed! "
+                f"Expected {expected_runs} test setups to run, "
+                f"but {cls.setup_count} setups executed."
             )
         super().tearDownClass()
 
@@ -363,13 +370,23 @@ class TestCapabilityGating(TestCase):
         type(self).executed_count += 1
 
 
-PrivateUse1TestBase._capabilities = classmethod(
-    lambda cls: {
-        Capability.lib: {Capability.lib.triton: lambda: True},
-        Capability.dtype: {Capability.dtype.bf16: lambda: False},
-    }
-)
+def _openreg_test_capabilities(_cls):
+    capabilities = PrivateUse1TestBase._capabilities()
+    capabilities[Capability.lib].update({Capability.lib.triton: lambda: True})
+    capabilities[Capability.dtype] = {Capability.dtype.bf16: lambda: False}
+    return capabilities
+
+
+def _openreg_capability_test_setup(self):
+    PrivateUse1TestBase.setUp(self)
+    type(self).setup_count += 1
+
+
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
+_capability_test_cls = globals()["TestCapabilityGatingOPENREG"]
+_capability_test_cls._capabilities = classmethod(_openreg_test_capabilities)
+_capability_test_cls.setUp = _openreg_capability_test_setup
+del _capability_test_cls
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
