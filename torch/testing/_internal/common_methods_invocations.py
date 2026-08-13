@@ -23076,10 +23076,6 @@ if "flydsl" in dsl_ops_by_dsl:
                 ),
             ],
             skips=(
-                DecorateInfo(
-                    unittest.skip("dedicated test covers noncontiguous ATen fallback"),
-                    "TestCommon", "test_noncontiguous_samples",
-                ),
                 # Unsupported FlyDSL dtypes fall through to aten and appear supported,
                 # so the probe's dtype set never matches the one listed here. xfail
                 # rather than skip: the failure is a plain deterministic assertion, and

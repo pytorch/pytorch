@@ -21,9 +21,10 @@ DISPATCH_M = 8192
 DISPATCH_N = 4096
 DISPATCH_DTYPE = torch.float16
 BACKWARD_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
-# 8192 is the band-2 boundary; 2056 is the one generic-path shape with no
-# scalar tail but more than one vector step, which the small N here reach only
-# at vec_steps == 1.
+# Covers every kernel path at every block-size tier. Three entries carry a
+# reason of their own. 3 is narrower than one vector, so it has no full vector
+# step and is all scalar tail. 2056 is the only entry that takes the generic
+# path with more than one vector step and no tail. 8192 is the band-2 boundary.
 KERNEL_PATH_NS = (
     3,
     2056,
