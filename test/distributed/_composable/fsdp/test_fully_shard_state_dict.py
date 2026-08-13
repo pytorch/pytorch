@@ -14,6 +14,9 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -21,7 +24,10 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -33,6 +39,8 @@ device_type = torch.device(get_devtype())
 
 
 class TestFullyShardStateDictMultiProcess(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(8, torch.get_device_module(device_type).device_count())
@@ -395,6 +403,8 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
 
 class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -446,6 +456,20 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
                 self.assertEqual(param, ref_param)
         else:
             self.assertEqual(len(full_sd), 0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardStateDictMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardStateDictMultiThread,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
