@@ -252,7 +252,7 @@ def make_mxfp8_gemm_kernel_name(param: MXFP8GemmParams) -> str:
     )
 
 
-# TODO: Move common ROCm synchronization and buffer-load helpers to FlyDSL.
+# TODO: Move this common ROCm synchronization helper to FlyDSL.
 def __barrier(vmcnt=0):
     llvm.InlineAsmOp(
         None,
@@ -568,11 +568,11 @@ def make_mxfp8_scaled_mm_gfx950(
             )
 
         # Packed scale path. One 4-byte load holds a whole K-tile of E8M0 scales
-        # for one row, and 64 lanes cover four MMA repeats at once, so
-        # ds_bpermute can do the 4x4 lane-group transpose that hands each row's
-        # dword to the lane group that needs it; each lane then shifts out its
-        # own K-quarter byte. This turns 16 single-byte loads per K-tile into 4
-        # dword loads, and it is the number of outstanding scale loads, not
+        # for one row, and 64 lanes cover four MMA repeats at once. VALU
+        # permlane swaps perform the 4x4 lane-group transpose that hands each
+        # row's dword to the lane group that needs it; each lane then shifts out
+        # its own K-quarter byte. This turns 16 single-byte loads per K-tile into
+        # 4 dword loads, and it is the number of outstanding scale loads, not
         # their bytes, that the MFMA stream waits on.
         scale32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Uint32)
         scale_k32 = scale_k // 4
