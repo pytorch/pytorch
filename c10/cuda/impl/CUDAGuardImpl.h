@@ -302,6 +302,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     TORCH_CHECK(
         !(flag & EventFlag::TIMING),
         "Cannot create IPC handle for event with timing enabled.");
+    DeviceIndex orig_device{-1};
+    if (device_index != -1) {
+      C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+      C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    }
     if (!*event) {
       createEvent(reinterpret_cast<cudaEvent_t*>(event), flag);
     }
@@ -310,6 +315,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaIpcGetEventHandle(&ipc_event_handle, cuda_event));
     std::string handle_string(
         reinterpret_cast<const char*>(&ipc_event_handle), CUDA_IPC_HANDLE_SIZE);
+    if (orig_device != -1) {
+      C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
+    }
     return handle_string;
   }
 
