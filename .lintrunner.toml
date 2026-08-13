@@ -294,6 +294,28 @@ command = [
 ]
 
 [[linter]]
+code = 'TORCHGEN_REGISTER_UNUSED_PARAMETER'
+include_patterns = [
+    'torchgen/**/*.py',
+    'aten/src/ATen/native/native_functions.yaml',
+    'aten/src/ATen/native/tags.yaml',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-tidy',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-tidy'
+]
+command = [
+    'bash',
+    '-lc',
+    'shopt -s failglob; python3 tools/linter/adapters/clangtidy_linter.py --binary=.lintbin/clang-tidy --build_dir=./build --check-unused-parameter -- build/aten/src/ATen/Register*.cpp'
+]
+
+[[linter]]
 code = 'CLANGTIDY_EXECUTORCH_COMPATIBILITY'
 include_patterns = [
     # c10 headers that must be C++17 compatible

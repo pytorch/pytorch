@@ -157,6 +157,7 @@ def check_file(
     binary: str,
     build_dir: Path,
     std: str | None,
+    check_unused_parameter: bool,
 ) -> list[LintMessage]:
     # Explicitly pass include path for linters that only check headers.
     # build/aten/src covers generated <ATen/...> headers (Functions.h etc.).
@@ -166,6 +167,14 @@ def check_file(
         "--extra-arg",
         f"-I{build_dir}/aten/src",
     ]
+    if check_unused_parameter:
+        build_include_args += [
+            "--config={Checks: misc-unused-parameters, WarningsAsErrors: '*'}",
+            "--extra-arg",
+            "-Wunused-parameter",
+            "--extra-arg",
+            "-Werror=unused-parameter"
+        ]
     cmd = [
         binary,
         f"-p={build_dir}",
@@ -252,6 +261,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--check-unused-parameter",
+        action="store_true",
+        help="Enable checks for unused parameters"
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="verbose logging",
@@ -325,6 +339,7 @@ def main() -> None:
                 binary_path,
                 abs_build_dir,
                 args.std,
+                args.check_unused_parameter,
             ): filename
             for filename in args.filenames
         }
