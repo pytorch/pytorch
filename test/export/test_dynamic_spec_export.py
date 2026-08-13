@@ -992,10 +992,12 @@ class <lambda>(torch.nn.Module):
 
 
 class TestExportDynamicSpecStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestExportDynamicSpecNonStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 
@@ -1561,10 +1563,12 @@ class _TestContainerSpecBase(TestCase):
 
 
 class TestContainerSpecStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestContainerSpecNonStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 
