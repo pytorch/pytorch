@@ -268,11 +268,23 @@ class TestCodaBwdFusionNumerics(TestCase):
         ha, hb = split_multi_use(h, 2)
         loss = MMRelu.apply(ha, wa).sum() + MMRelu.apply(hb, wb).sum()
 
+        rules = [
+            (
+                (MMRelu.main_backward, MMRelu.main_backward),
+                MMRelu.epilogue_backward,
+                coda.mm_relu_multiuse_fused_backward,
+            ),
+        ]
+        accumulate_grad_rules = [
+            (MMRelu.main_backward, 0, coda.mm_input_accumulate_fused_backward),
+            (MMRelu.main_backward, 1, coda.mm_weight_accumulate_fused_backward),
+        ]
+
         LOG.reset()
         plan = apply_epilogue_fusion(
             loss,
-            RULES,
-            accumulate_grad_rules=ACCUMULATE_GRAD_RULES,
+            rules,
+            accumulate_grad_rules=accumulate_grad_rules,
             expect_num_fusions=1,
             expect_num_accumulate_grad_fusions=4,
             _internal_debug=True,
