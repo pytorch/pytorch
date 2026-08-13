@@ -594,8 +594,16 @@ class BatchLinearLHSFusion(BatchFusion):
                 new_node = graph.call_function(  # type: ignore[operator]
                     operator.getitem, args=(fused_lhs_list, i)
                 )
-            node.replace_all_uses_with(new_node)
+            # Each slice keeps the row stride of the whole mm, so splitting a
+            # 208-wide mm into 192 + 16 gives strides (208, 1) where the linear
+            # returned (192, 1). Restore it, as consumers may require contiguity.
+            with graph.inserting_after(new_node):  # type: ignore[operator]
+                contiguous_node = graph.call_method(  # type: ignore[operator]
+                    "contiguous", args=(new_node,)
+                )
             new_node.meta.update(node.meta)
+            contiguous_node.meta.update(node.meta)
+            node.replace_all_uses_with(contiguous_node)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
 
