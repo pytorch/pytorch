@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     AlwaysWarnTypedStorageRemoval,
     BytesIOContext,
     download_file,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_CI,
     IS_FBCODE,
@@ -905,6 +906,8 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
     c: str
 
 class TestBothSerialization(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
@@ -927,6 +930,8 @@ class TestBothSerialization(TestCase):
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
+    hw_classification = HardwareClassification.GENERIC
+
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
@@ -1027,6 +1032,8 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize('weights_only', (True, False))
     def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
@@ -4845,6 +4852,8 @@ class TestSerialization(TestCase, SerializationMixin):
 
 
 class TestSerializationDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     def test_serialization_map_location(self, device):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -5138,6 +5147,8 @@ class TestEmptySubclass(torch.Tensor):
 
 
 class TestSubclassSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
         my_tensor = TestWrapperSubclass(wrapped_tensor)
@@ -5293,24 +5304,6 @@ class TestSubclassSerialization(TestCase):
             l_s = torch.load(f, weights_only=True)
             self.assertEqual(l_s, s)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
-    def test_tensor_subclass_map_location(self):
-        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
-        sd = {'t': t}
-
-        with TemporaryFileName() as f:
-            torch.save(sd, f)
-            with safe_globals([TwoTensor]):
-                sd_loaded = torch.load(f, map_location=torch.device('cuda:0'))
-                self.assertTrue(sd_loaded['t'].device == torch.device('cuda:0'))
-                self.assertTrue(sd_loaded['t'].a.device == torch.device('cuda:0'))
-                self.assertTrue(sd_loaded['t'].b.device == torch.device('cuda:0'))
-                # make sure map_location is not propagated over multiple torch.load calls
-                sd_loaded = torch.load(f)
-                self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
-                self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
-                self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
-
     @parametrize("opcode,opcode_name", [
         (b's', "SETITEM"),
         (b'u', "SETITEMS"),
@@ -5458,6 +5451,28 @@ class TestSubclassSerialization(TestCase):
             r"Only persistent_load of storage is allowed, but got <class 'int'>"
         ):
             torch.load(modified_buffer, weights_only=True)
+
+
+class TestSubclassSerializationCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
+    def test_tensor_subclass_map_location(self):
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        sd = {'t': t}
+
+        with TemporaryFileName() as f:
+            torch.save(sd, f)
+            with safe_globals([TwoTensor]):
+                sd_loaded = torch.load(f, map_location=torch.device('cuda:0'))
+                self.assertTrue(sd_loaded['t'].device == torch.device('cuda:0'))
+                self.assertTrue(sd_loaded['t'].a.device == torch.device('cuda:0'))
+                self.assertTrue(sd_loaded['t'].b.device == torch.device('cuda:0'))
+                # make sure map_location is not propagated over multiple torch.load calls
+                sd_loaded = torch.load(f)
+                self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
+                self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
+                self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())
