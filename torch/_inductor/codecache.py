@@ -1372,6 +1372,29 @@ class FxGraphHashDetails:
     )
 
     @classmethod
+    def _record_custom_op_schema_details(
+        cls, value: Any, result: OrderedSet[tuple[str, tuple[str, ...]]]
+    ) -> None:
+        if isinstance(value, torch._ops.OpOverload):
+            is_builtin = value.namespace in ("aten", "prim", "prims")
+            if not is_builtin or value._defined_in_python:
+                result.add(
+                    (
+                        str(value._schema),
+                        tuple(sorted(str(tag) for tag in value.tags)),
+                    )
+                )
+        elif isinstance(value, torch._ops.OpOverloadPacket):
+            for overload in value.op_overloads():
+                cls._record_custom_op_schema_details(overload, result)
+        elif isinstance(value, (list, tuple, AbstractSet)):
+            for item in value:
+                cls._record_custom_op_schema_details(item, result)
+        elif isinstance(value, dict):
+            for item in itertools.chain(value.keys(), value.values()):
+                cls._record_custom_op_schema_details(item, result)
+
+    @classmethod
     def _contains_tensor(cls, value: Any) -> bool:
         if isinstance(value, torch.Tensor):
             return True
@@ -1532,17 +1555,24 @@ class FxGraphHashDetails:
         # the kernel source code separately
         self.user_defined_triton_source: list[Any] = []
         if gm is not None:
+            custom_op_schema_details: OrderedSet[
+                tuple[str, tuple[str, ...]]
+            ] = OrderedSet()
             for module in gm.modules():
                 if not isinstance(module, torch.fx.GraphModule):
                     continue
-                for node in itertools.chain(
-                    module.graph.find_nodes(
-                        op="call_function", target=triton_kernel_wrapper_functional
-                    ),
-                    module.graph.find_nodes(
-                        op="call_function", target=triton_kernel_wrapper_mutation
-                    ),
-                ):
+                for node in module.graph.nodes:
+                    if node.op != "call_function":
+                        continue
+                    self._record_custom_op_schema_details(
+                        (node.target, node.args, node.kwargs), custom_op_schema_details
+                    )
+                    if node.target not in (
+                        triton_kernel_wrapper_functional,
+                        triton_kernel_wrapper_mutation,
+                    ):
+                        continue
+
                     from triton.runtime.autotuner import Autotuner
 
                     kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
@@ -1568,6 +1598,13 @@ class FxGraphHashDetails:
                     self.user_defined_triton_source.append(
                         (kernel_source, constant_args, configs)
                     )
+
+            if custom_op_schema_details:
+                # GraphModule serialization records operator names, but not the
+                # schemas and tags that determine compiler-visible semantics.
+                self.custom_op_schema_details = tuple(
+                    sorted(custom_op_schema_details)
+                )
 
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs

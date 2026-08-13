@@ -3341,6 +3341,7 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
         return self._uuid
 
 
+@instantiate_parametrized_tests
 class TestFxGraphCacheHashing(TestCase):
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
@@ -3354,6 +3355,66 @@ class TestFxGraphCacheHashing(TestCase):
         result = graph.call_function(torch.empty, ((4,),), kwargs)
         graph.output(result)
         return torch.fx.GraphModule({}, graph)
+
+    def _custom_op_schema_cache_key(self, mutates_out, target_kind):
+        with torch.library._scoped_library(
+            "test_fx_cache_schema", "FRAGMENT"
+        ) as lib:
+
+            def mul_out(
+                x: torch.Tensor, y: torch.Tensor, *, out: torch.Tensor
+            ) -> None:
+                pass
+
+            schema = torch.library.infer_schema(
+                mul_out, mutates_args=["out"] if mutates_out else []
+            )
+            lib.define("mul" + schema)
+            packet = torch.ops.test_fx_cache_schema.mul
+            op = packet.default
+
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.placeholder("y")
+            out = graph.placeholder("out")
+            if target_kind == "auto_functionalized":
+                from torch._higher_order_ops.auto_functionalize import (
+                    auto_functionalized,
+                )
+
+                graph.call_function(
+                    auto_functionalized,
+                    (op,),
+                    {"x": x, "y": y, "out": out},
+                )
+            else:
+                target = packet if target_kind == "packet" else op
+                graph.call_function(target, (x, y), {"out": out})
+            graph.output(out)
+            gm = torch.fx.GraphModule({}, graph)
+
+            with FakeTensorMode():
+                inputs = [torch.empty(4), torch.empty(4), torch.empty(4)]
+            return self._fx_graph_cache_key(gm, inputs), str(op._schema)
+
+    @parametrize("target_kind", ("overload", "packet", "auto_functionalized"))
+    def test_custom_op_schema_affects_cache_key(self, target_kind):
+        non_mutating_key, non_mutating_schema = self._custom_op_schema_cache_key(
+            False, target_kind
+        )
+        mutating_key, mutating_schema = self._custom_op_schema_cache_key(
+            True, target_kind
+        )
+
+        self.assertEqual(
+            non_mutating_schema,
+            "test_fx_cache_schema::mul(Tensor x, Tensor y, *, Tensor out) -> ()",
+        )
+        self.assertEqual(
+            mutating_schema,
+            "test_fx_cache_schema::mul(Tensor x, Tensor y, *, Tensor(a2!) out) -> ()",
+        )
+        self.assertNotEqual(non_mutating_key, mutating_key)
 
     def test_cpu_thread_count_affects_cache_key(self):
         def fn(x):
