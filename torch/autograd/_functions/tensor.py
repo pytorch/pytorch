@@ -18,7 +18,7 @@ class Type(Function):
     # pyrefly: ignore [bad-override]
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
-        ctx.input_device = -1 if not i.is_cuda else i.get_device()
+        ctx.input_device = -1 if i.device.index is None else i.device.index
         return i.type(dest_type)
 
     @staticmethod
