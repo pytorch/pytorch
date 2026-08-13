@@ -16,6 +16,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
+from torch.testing._internal.common_utils import skipIfRocmVersionAtLeast
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -401,6 +402,8 @@ class TestOrigami(TestCase):
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")
 
+    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 10.1 SIGSEGV.
+    @skipIfRocmVersionAtLeast([10, 1])
     def test_origami_configs_use_device_specific_values(self):
         """Verify that origami configs use architecture-specific num_stages and num_warps.
 
