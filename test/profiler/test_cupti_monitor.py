@@ -3591,6 +3591,130 @@ class TestWindowFinalizer(TestCase):
         self.assertIsNone(w._poll_thread)
 
 
+@unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+class TestProfilerObserverPmWindow(TestCase):
+    class _FakeMonitor:
+        def __init__(self) -> None:
+            self.now = 0
+            self.release_now = None
+            self.release_frame = None
+            self.requests = []
+            self.releases = 0
+            self.pm_sink = None
+            self.unregistered = False
+
+        def register(self, activities, callback):
+            self.callback = callback
+            return object()
+
+        def unregister(self, obs):
+            self.unregistered = True
+
+        def now_record_ns(self):
+            return self.now
+
+        def convert_time(self, value):
+            return value
+
+        def convert_time_array(self, values):
+            return values
+
+        def request_pm_sampling(self, sink, metrics):
+            self.requests.append(list(metrics))
+            self.pm_sink = sink
+
+        def release_pm_sampling(self, sink):
+            if self.pm_sink != sink:
+                return
+            self.pm_sink = None
+            self.releases += 1
+            if self.release_now is not None:
+                self.now = self.release_now
+            if self.release_frame is not None:
+                sink(self.release_frame)
+
+        def flush(self, *, sync=False):
+            pass
+
+    def _observer(self, monitor, *, defer_export):
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.observers.base import CuptiMonitorObserver
+        from torch.profiler._cupti.observers.profiler import ProfilerObserver
+
+        with (
+            patch.object(cupti_monitor, "CuptiMonitor", return_value=monitor),
+            patch.object(
+                CuptiMonitorObserver, "_register_graph_destroy_hooks", return_value=None
+            ),
+            patch.object(torch.cuda, "is_available", return_value=True),
+        ):
+            observer = ProfilerObserver(
+                enable_pm_sampling=True,
+                pm_metrics=["metric"],
+                defer_export=defer_export,
+            )
+        self.addCleanup(observer.join)
+        return observer
+
+    def test_pm_sampling_follows_window_lifetime(self):
+        monitor = self._FakeMonitor()
+        observer = self._observer(monitor, defer_export=True)
+        self.assertEqual(monitor.requests, [])
+
+        monitor.now = 100
+        observer.open_window()
+        self.assertEqual(monitor.requests, [["metric"]])
+        self.assertIsNotNone(monitor.pm_sink)
+
+        monitor.now = 200
+        window_id = observer.close_window()
+        self.assertEqual(window_id, 0)
+        self.assertEqual(monitor.releases, 1)
+        self.assertIsNone(monitor.pm_sink)
+        with observer._win_lock:
+            self.assertEqual(list(observer._boundaries), [(0, 200)])
+        self.assertIsNotNone(observer._obs)
+        self.assertFalse(monitor.unregistered)
+
+        observer.join()
+        self.assertEqual(monitor.releases, 1)
+        self.assertTrue(monitor.unregistered)
+
+    def test_close_keeps_pm_tail_with_prestamped_boundary(self):
+        import numpy as np
+
+        monitor = self._FakeMonitor()
+        observer = self._observer(monitor, defer_export=False)
+
+        def frame(*timestamps):
+            ts = np.asarray(timestamps, dtype=np.int64)
+            return {
+                "start_ns": ts,
+                "device_id": np.zeros(len(ts), dtype=np.int64),
+                "metric": ts.copy(),
+            }
+
+        observer.on_pm_samples(frame(50))
+        monitor.now = 100
+        observer.open_window()
+        observer.on_pm_samples(frame(150))
+        monitor.release_frame = frame(190, 210)
+        monitor.release_now = 900
+
+        monitor.now = 200
+        window_id = observer.close_window()
+        with observer._win_lock:
+            self.assertEqual(list(observer._boundaries), [(0, 200)])
+
+        observer._poll_once()
+        self.assertIsNone(observer._windows[window_id]["built"])
+
+        observer.join()
+        pm = observer._windows[window_id]["built"]["columns"]["pm_sampling"]
+        self.assertEqual(pm["start_ns"].tolist(), [150, 190])
+        self.assertEqual(pm["metric"].tolist(), [150, 190])
+
+
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
 class TestCuptiMonitorProfiler(TestCase):
