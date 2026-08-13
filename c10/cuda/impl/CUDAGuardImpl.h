@@ -307,18 +307,19 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
       C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
     }
+    const auto restore_device = c10::make_scope_exit([&]() {
+      if (orig_device != -1) {
+        C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device));
+      }
+    });
     if (!*event) {
       createEvent(reinterpret_cast<cudaEvent_t*>(event), flag);
     }
     cudaEvent_t cuda_event = reinterpret_cast<cudaEvent_t>(*event);
-    cudaIpcEventHandle_t ipc_event_handle;
-    C10_CUDA_CHECK(cudaIpcGetEventHandle(&ipc_event_handle, cuda_event));
-    std::string handle_string(
-        reinterpret_cast<const char*>(&ipc_event_handle), CUDA_IPC_HANDLE_SIZE);
-    if (orig_device != -1) {
-      C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
-    }
-    return handle_string;
+    cudaIpcEventHandle_t ipc_handle{};
+    C10_CUDA_CHECK(cudaIpcGetEventHandle(&ipc_handle, cuda_event));
+    return std::string(
+        reinterpret_cast<const char*>(&ipc_handle), CUDA_IPC_HANDLE_SIZE);
   }
 
   void reconstructEventFromIPCHandle(
@@ -331,7 +332,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     TORCH_CHECK(
         handle_string.size() == CUDA_IPC_HANDLE_SIZE,
         "handle_string must match size CUDA_IPC_HANDLE_SIZE");
-    cudaIpcEventHandle_t ipc_handle;
+    cudaIpcEventHandle_t ipc_handle{};
     std::memcpy(&ipc_handle, handle_string.data(), handle_string.size());
 
     DeviceIndex orig_device{-1};
@@ -339,11 +340,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
       C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
     }
+    const auto restore_device = c10::make_scope_exit([&]() {
+      if (orig_device != -1) {
+        C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device));
+      }
+    });
     C10_CUDA_CHECK(cudaIpcOpenEventHandle(
         reinterpret_cast<cudaEvent_t*>(event), ipc_handle));
-    if (orig_device != -1) {
-      C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
-    }
   }
 };
 
