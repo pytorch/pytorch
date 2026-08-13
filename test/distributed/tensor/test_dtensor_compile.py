@@ -1843,16 +1843,18 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         x2 = x2.to_local()
         self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
         opt_fn(x2)
-        # ACTs are unwrapped before AOT autograd tracing in
-        # process_inputs, so the graph receives a plain tensor with
-        # no wait_tensor op.
+        # ACTs are unwrapped before AOT autograd tracing in process_inputs, so the
+        # graph receives a plain tensor with no wait_tensor op. The ACT here
+        # requires grad, and process_inputs re-syncs requires_grad onto the
+        # unwrapped input, so AOTAutograd builds a training graph: the input is
+        # a `primals_` and is saved for backward (returned as a graph output).
         self.assertExpectedInline(
             str(fw_graph_cell[0]).strip(),
             """\
-def forward(self, arg0_1):
-    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+def forward(self, primals_1):
+    sin = torch.ops.aten.sin.default(primals_1)
     sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return (sin_1,)""",
+    return (sin_1, primals_1)""",
         )
 
     @skipIfTorchDynamo()

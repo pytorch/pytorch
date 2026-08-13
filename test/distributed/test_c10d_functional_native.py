@@ -1591,6 +1591,40 @@ class ACTCompileTest(TestCase):
         ref = elem.detach().unsqueeze(0)
         self.assertEqual(out.detach(), ref)
 
+    def test_act_compile_preserves_input_grad(self):
+        """
+        A grad-requiring top-level ACT input must still propagate a gradient to
+        its upstream producer. Mirrors the TP shape where a redistributed DTensor's
+        ``to_local()`` yields an ACT whose wrapper requires grad but whose inner
+        ``.elem`` is plain; unwrapping via trigger_wait() drops the wrapper's
+        requires_grad, so without the fix AOTAutograd builds a non-differentiable
+        graph and the gradient is lost. Asserts the recovered gradient value.
+        """
+
+        # Hands a compiled region an ACT with the wrapper-requires-grad /
+        # inner-plain split (as DTensor.to_local does), chaining backward to leaf.
+        class _MakeSplitACT(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return AsyncCollectiveTensor(x.detach())
+
+            @staticmethod
+            def backward(ctx, g):
+                return g.trigger_wait() if isinstance(g, AsyncCollectiveTensor) else g
+
+        leaf = torch.randn(4, 4, requires_grad=True)
+        act = _MakeSplitACT.apply(leaf)
+        self.assertTrue(act.requires_grad)
+        self.assertFalse(act.elem.requires_grad)  # the split that triggers the bug
+
+        compiled_fn = torch.compile(lambda x: (x * x).sum(), backend="aot_eager")
+        compiled_fn(act).backward()
+
+        self.assertIsNotNone(
+            leaf.grad, "input gradient was dropped (ACT requires_grad not preserved)"
+        )
+        self.assertEqual(leaf.grad, 2 * leaf.detach())
+
     def test_act_runtime_unwrap(self):
         """
         Verify that ACT inputs are resolved before the compiled graph
