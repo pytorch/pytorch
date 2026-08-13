@@ -59,13 +59,6 @@ at::Tensor allocate_reduce_scatter_output(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 }
 
-void register_work_for_functional_collective(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work) {
-  work->releaseResultTensors();
-  c10d::register_work(tensor, work);
-}
-
 } // namespace
 
 namespace c10d {
@@ -80,7 +73,7 @@ at::Tensor& all_reduce_(
 
   std::vector<at::Tensor> inputs{input};
   auto work = group->allreduce(inputs, opts);
-  register_work_for_functional_collective(input, work);
+  c10d::register_work(input, work);
   return input;
 }
 
@@ -140,7 +133,7 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 
   auto work = group->allreduce_coalesced(inputs, opts);
   for (const auto& tensor : inputs) {
-    register_work_for_functional_collective(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return inputs;
 }
@@ -179,7 +172,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 
   auto work = group->all_gather_single_coalesced(outputs, inputs);
   for (const auto& tensor : outputs) {
-    register_work_for_functional_collective(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return outputs;
 }
@@ -204,7 +197,7 @@ at::Tensor& all_gather_into_tensor_out(
   c10d::AllgatherOptions opts;
 
   auto work = group->all_gather_single(output, contig_input, opts);
-  register_work_for_functional_collective(output, work);
+  c10d::register_work(output, work);
   return output;
 }
 
@@ -263,7 +256,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 
   auto work = group->reduce_scatter_single_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
-    register_work_for_functional_collective(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return outputs;
 }
@@ -280,7 +273,7 @@ static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
 
   auto work = group->reduce_scatter_single_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
-    register_work_for_functional_collective(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return outputs;
 }
@@ -387,7 +380,7 @@ at::Tensor all_to_all_single(
       const_cast<at::Tensor&>(contig_input),
       output_split_sizes,
       input_split_sizes);
-  register_work_for_functional_collective(output, work);
+  c10d::register_work(output, work);
   return output;
 }
 
@@ -407,7 +400,7 @@ at::Tensor& broadcast_(
   std::vector<at::Tensor> inputs{input_real};
 
   auto work = group->broadcast(inputs, opts);
-  register_work_for_functional_collective(input, work);
+  c10d::register_work(input, work);
   return input;
 }
 
@@ -435,9 +428,9 @@ at::Tensor isend(
   auto group = c10d::resolve_process_group(group_name);
   std::vector<at::Tensor> input_wrap = {input};
   auto work = group->send(input_wrap, dst, tag);
-  register_work_for_functional_collective(input, work);
+  c10d::register_work(input, work);
   auto placeholder = at::empty({0}, input.options());
-  register_work_for_functional_collective(placeholder, work);
+  c10d::register_work(placeholder, work);
   return placeholder;
 }
 
@@ -449,7 +442,7 @@ at::Tensor irecv(
   auto group = c10d::resolve_process_group(group_name);
   std::vector<at::Tensor> output_wrap = {output};
   auto work = group->recv(output_wrap, src, tag);
-  register_work_for_functional_collective(output, work);
+  c10d::register_work(output, work);
   return output;
 }
 
@@ -487,8 +480,8 @@ std::vector<at::Tensor> batch_p2p_ops(
           static_cast<int64_t>(tag_list[i]));
       auto placeholder = at::empty({0}, t.options());
       if (work) {
-        register_work_for_functional_collective(t, work);
-        register_work_for_functional_collective(placeholder, work);
+        c10d::register_work(t, work);
+        c10d::register_work(placeholder, work);
         works.push_back(std::move(work));
       }
       result_tensors.push_back(std::move(placeholder));
@@ -498,7 +491,7 @@ std::vector<at::Tensor> batch_p2p_ops(
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
       if (work) {
-        register_work_for_functional_collective(t, work);
+        c10d::register_work(t, work);
         works.push_back(std::move(work));
       }
       result_tensors.push_back(std::move(t));
@@ -513,7 +506,7 @@ std::vector<at::Tensor> batch_p2p_ops(
           false,
           "The coalesced work object returned from group->endCoalescing() is empty");
     for (auto tensor : result_tensors) {
-      register_work_for_functional_collective(tensor, work);
+      c10d::register_work(tensor, work);
     }
   }
   return result_tensors;

@@ -112,19 +112,15 @@ class TORCH_API FlightRecorderHook
     std::chrono::milliseconds timeout{kBackendDefaultTimeout};
   };
 
-  // A recorded op whose collective the hook is still waiting on. work is null
-  // between the pre-hook and the post-hook, and stays null if the backend threw
-  // in between -- such an entry is never retired, which is the honest report:
-  // it was issued and never seen to finish.
-  //
-  // The Work reference is what makes the pointer in CompletionHookArgs a safe
-  // key: an address can only be reused once its Work is freed, and this holds
-  // one for as long as work_ids_ can resolve it.
+  // A recorded op whose collective the hook is still waiting on. work_key is
+  // null between the pre-hook and the post-hook, and stays null if the backend
+  // threw in between -- such an entry is never retired, which is the honest
+  // report: it was issued and never seen to finish.
   struct InflightOp {
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
     HookOpName name = HookOpName::UNKNOWN;
-    c10::intrusive_ptr<Work> work;
+    const void* work_key = nullptr;
   };
 
   FlightRecorderHook(
@@ -192,12 +188,10 @@ class TORCH_API FlightRecorderHook
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
-  // The reverse index a completion needs: CompletionHookArgs identifies the op
-  // by its Work, since op_id is assigned above the backend and a Work does not
-  // carry it, and the post-hook is where the two are seen together. Kept in
-  // step with inflight_ -- every entry here has a live entry there holding the
-  // Work.
-  std::unordered_map<const Work*, int64_t> work_ids_;
+  // The reverse index a completion needs. A caller-facing Work and the
+  // backend's tensor-free tracking copy share this opaque key, so correlating
+  // them does not extend tensor lifetimes.
+  std::unordered_map<const void*, int64_t> work_ids_;
 };
 
 } // namespace c10d
