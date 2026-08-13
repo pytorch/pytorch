@@ -107,6 +107,7 @@ launch.
 
 from torchgen.native_aot_decl import (
     AotDeclaration,
+    archs_of,
     decl_id,
     discover_declarations,
     load_by_path,
@@ -117,6 +118,7 @@ from torchgen.native_aot_decl import (
 
 __all__ = [
     "AotDeclaration",
+    "archs_of",
     "decl_id",
     "discover_declarations",
     "load_by_path",
