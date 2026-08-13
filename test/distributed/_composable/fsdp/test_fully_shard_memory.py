@@ -17,12 +17,15 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
 )
 from torch.distributed.tensor import init_device_mesh
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    HardwareClassification,
     run_tests,
-    TEST_CUDA,
     TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -36,6 +39,8 @@ device_type = torch.device(get_devtype())
 
 
 class TestFullyShardMemory(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(2, torch.get_device_module(device_type).device_count())
@@ -365,13 +370,14 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
     `foreach_reduce`.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
     # This test is CUDA-specific because it relies on torch.cuda._sleep.
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
     def test_ar_buffer_lifetime_mixed_dtype(self):
         """Regression guard for PR #140044 (`[FSDP2] Fix CUDA sync for bf16
         HSDP AR, fp32 params`).
@@ -499,6 +505,19 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                         f"(see PR #140044, PR #180900)."
                     ),
                 )
+
+
+instantiate_device_type_tests(
+    TestFullyShardMemory,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardHSDPSyncCorrectness,
+    globals(),
+    only_for=["cuda"],
+)
 
 
 if __name__ == "__main__":
