@@ -124,6 +124,7 @@ from .object_protocol import (
     mro_lookup,
     pynumber_as_ssize_t,
     pynumber_index,
+    type_disallows_instantiation,
     type_implements_nb_slot,
 )
 from .sets import SetVariable
@@ -1188,6 +1189,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         constant_args = check_constant_args(args, kwargs)
 
+        if isinstance(self.value, type) and type_disallows_instantiation(self.value):
+            raise_type_error(tx, f"cannot create '{self.value.__name__}' instances")
+
         if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
@@ -1263,16 +1267,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             try:
                 bound_args = inspect.signature(deque_signature).bind(*args, **kwargs)
             except TypeError as e:
-                unimplemented(
-                    gb_type="collections.deque() with bad arguments",
-                    context=f"args={args}, kwargs={kwargs}",
-                    explanation="Detected call to collections.deque() with bad arguments.",
-                    hints=[
-                        "Fix the call to collections.deque().",
-                        *graph_break_hints.USER_ERROR,
-                    ],
-                    from_exc=e,
-                )
+                raise_observed_exception(TypeError, tx, args=list(e.args))
             if bound_args is None:
                 raise AssertionError("bound_args is None after signature binding")
             if "iterable" in bound_args.arguments:
