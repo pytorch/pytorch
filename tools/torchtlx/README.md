@@ -15,9 +15,10 @@ python tools/torchtlx/bringup.py test --full     # ... plus the full Inductor/Tr
 ```
 
 There is no environment variable to set and nothing to rebuild: Triton is a
-pure runtime dependency of Inductor, so a swap is a ~30s pip operation.
-(`FBTRITON=1` exists further down, but it is build-infrastructure only -- it
-does not apply to you as a user.)
+pure runtime dependency of Inductor, so swapping to a published wheel is a
+~30s pip operation. `--from-source` is much slower -- it compiles Triton and
+LLVM, a few minutes. (`FBTRITON=1` exists further down, but it is
+build-infrastructure only and does not apply to you as a user.)
 
 ## What `test` runs
 
@@ -27,6 +28,17 @@ plus compiled pointwise, reduction and backward, asserting Inductor emitted a
 Triton kernel and the numerics match. It finishes in under 10s; it is not a
 correctness suite. `--full` adds `test/inductor/test_triton_kernels.py`
 (425 tests, ~2.5 min), which is what to run when validating a provider swap.
+
+## Tests for the wiring itself
+
+`test_wiring.py` asserts the claim this fork rests on -- that FBTriton is
+opt-in and the default build path is unchanged -- by evaluating the Triton
+block of `.ci/pytorch/binary_populate_env.sh` and comparing the emitted
+requirement strings. No GPU, no network:
+
+```bash
+python tools/torchtlx/test_wiring.py
+```
 
 ## Compile caches
 
@@ -72,6 +84,13 @@ torch wheel declares as its Triton dependency**.
 `triton~=<ver>` for cuda, `triton-rocm~=<ver>` for rocm. With `FBTRITON=1` it
 emits `fbtriton~=<ver>` for both -- one FBTriton wheel carries the nvidia and
 amd backends, so they share a name. XPU is unaffected.
+
+No workflow sets `FBTRITON`, so this is **manual invocation only** today --
+wiring it into a release job is a separate change. `TRITON_VERSION` is
+deliberately shared with upstream via `.ci/docker/triton_version.txt`, because
+FBTriton mirrors upstream's `X.Y.Z` (its `release/3.8.x` reports `3.8.0+fb`);
+a separate version file would live under `.ci/docker/` and invalidate every CI
+Docker image hash for a value that is identical anyway.
 
 There is **no FBTriton commit pin**, and nothing to keep up to date. Upstream
 dev builds request `<ver>+git<shorthash>` because CI builds that wheel itself

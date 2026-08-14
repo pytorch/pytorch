@@ -30,11 +30,12 @@ runtime dependency of Inductor.
 from __future__ import annotations
 
 import argparse
-import getpass
+import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -71,12 +72,32 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, **kwargs)
 
 
-def pip_cmd() -> list[str]:
-    """Prefer uv when present; it is far faster for these swaps."""
-    uv = shutil.which("uv") or str(Path.home() / ".local/bin/uv")
-    if Path(uv).exists():
-        return [uv, "pip"]
-    return [sys.executable, "-m", "pip"]
+def uv_bin() -> str:
+    """uv is required rather than optional.
+
+    The flags used here (--reinstall, --index-strategy) have no pip equivalent,
+    so a silent fallback to pip would fail after the uninstall step has already
+    removed every Triton.
+    """
+    uv = shutil.which("uv")
+    if uv is None:
+        raise SystemExit(
+            "uv is required (https://docs.astral.sh/uv/). It is in "
+            "requirements.txt, so `pip install -r requirements.txt` provides it."
+        )
+    return uv
+
+
+def uv_pip(subcommand: str, *args: str) -> list[str]:
+    """`uv pip <subcommand> --python <this interpreter> ...`.
+
+    --python pins the target to the interpreter running this script, which is
+    also what _probe.py inspects. Without it uv resolves the target from
+    VIRTUAL_ENV/CONDA_PREFIX, so `switch` could install into one environment
+    while `doctor` reports on another. It is a flag of the subcommand, not of
+    `uv pip`.
+    """
+    return [uv_bin(), "pip", subcommand, "--python", sys.executable, *args]
 
 
 def clear_caches() -> None:
@@ -88,18 +109,24 @@ def clear_caches() -> None:
     run). Done unconditionally on every switch; there is no reason to skip it,
     so it is not exposed as a separate command.
 
-    ~/.triton/llvm is deliberately left alone -- it is a download cache for the
-    LLVM toolchain, unrelated to compiled kernels and expensive to refetch.
+    Paths come from torch rather than being re-derived here: default_cache_dir()
+    handles tempfile.gettempdir() vs /var/tmp under fbcode and username
+    sanitisation, and Inductor puts the Triton cache *inside* that directory
+    (cache_dir()/triton/<device>) unless TRITON_CACHE_DIR overrides it. Guessing
+    the paths risks clearing the wrong thing, which is the exact failure this is
+    meant to prevent.
+
+    The LLVM toolchain download cache is deliberately left alone -- unrelated to
+    compiled kernels and expensive to refetch.
     """
-    targets = [
-        Path(
-            os.environ.get(
-                "TORCHINDUCTOR_CACHE_DIR",
-                f"/tmp/torchinductor_{getpass.getuser()}",
-            )
-        ),
-        Path(os.environ.get("TRITON_CACHE_DIR", str(Path.home() / ".triton" / "cache"))),
-    ]
+    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
+
+    targets = [Path(os.environ.get("TORCHINDUCTOR_CACHE_DIR", default_cache_dir()))]
+    triton_cache = os.environ.get("TRITON_CACHE_DIR")
+    if triton_cache:
+        # Only a separate target when overridden; otherwise it is nested in the
+        # Inductor cache dir above and already covered.
+        targets.append(Path(triton_cache))
     for path in targets:
         if path.is_dir():
             print(f"    clearing {path}")
@@ -109,51 +136,20 @@ def clear_caches() -> None:
 
 
 def probe() -> dict:
-    """Collect environment facts in a subprocess.
+    """Collect environment facts by running _probe.py in a subprocess.
 
-    torch and triton are imported fresh so `doctor` reflects what is installed
-    now, not what this process imported before a swap.
+    A subprocess so `doctor` reflects what is installed now, not what this
+    process imported before a swap. cwd is set outside the repo so `import
+    torch` resolves the installed package rather than the source directory.
     """
-    script = (
-        "import json, importlib, importlib.metadata as md; "
-        "out = {}; "
-        "import torch; "
-        "out['torch'] = torch.__version__; "
-        "out['torch_file'] = torch.__file__; "
-        "out['hip'] = torch.version.hip; "
-        "out['cuda'] = torch.version.cuda; "
-        "out['device_count'] = torch.cuda.device_count() if torch.cuda.is_available() else 0; "
-        "out['device_name'] = torch.cuda.get_device_name(0) if out['device_count'] else None; "
-        "out['gcn_arch'] = getattr(torch.cuda.get_device_properties(0), 'gcnArchName', None) "
-        "if out['device_count'] else None; "
-        "\ntry:\n"
-        "    import triton\n"
-        "    out['triton'] = triton.__version__\n"
-        "    out['triton_file'] = triton.__file__\n"
-        "    import triton.backends\n"
-        "    out['backends'] = sorted(triton.backends.backends.keys())\n"
-        "except Exception as e:\n"
-        "    out['triton_error'] = repr(e)\n"
-        "\nfor dist in ['fbtriton', 'triton', 'pytorch-triton', 'pytorch-triton-rocm']:\n"
-        "    try:\n"
-        "        out.setdefault('dists', {})[dist] = md.version(dist)\n"
-        "    except Exception:\n"
-        "        pass\n"
-        "\ntry:\n"
-        f"    importlib.import_module('{TLX_REGISTRY}')\n"
-        "    out['tlx_registry'] = True\n"
-        "except Exception as e:\n"
-        "    out['tlx_registry'] = False\n"
-        "    out['tlx_error'] = repr(e)\n"
-        "\nprint('<<<JSON>>>' + json.dumps(out))"
-    )
     res = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, cwd="/"
+        [sys.executable, str(Path(__file__).parent / "_probe.py")],
+        capture_output=True,
+        text=True,
+        cwd="/",
     )
     for line in res.stdout.splitlines():
         if line.startswith("<<<JSON>>>"):
-            import json
-
             return json.loads(line[len("<<<JSON>>>") :])
     raise RuntimeError(f"probe failed:\n{res.stdout}\n{res.stderr}")
 
@@ -226,7 +222,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-def resolves(pip: list[str], spec: str, extra: list[str] | None = None) -> bool:
+def resolves(spec: str, extra: list[str] | None = None) -> bool:
     """Check a spec resolves before we uninstall what is already working.
 
     The install has to be uninstall-then-install because the providers collide
@@ -234,7 +230,7 @@ def resolves(pip: list[str], spec: str, extra: list[str] | None = None) -> bool:
     the environment with no Triton at all.
     """
     res = run(
-        pip + ["install", "--dry-run", *(extra or []), spec],
+        uv_pip("install", "--dry-run", *(extra or []), spec),
         capture_output=True,
         text=True,
     )
@@ -245,7 +241,6 @@ def resolves(pip: list[str], spec: str, extra: list[str] | None = None) -> bool:
 
 
 def cmd_switch(args: argparse.Namespace) -> int:
-    pip = pip_cmd()
     extra: list[str] = []
     from_source = False
 
@@ -279,23 +274,63 @@ def cmd_switch(args: argparse.Namespace) -> int:
                 "unsafe-best-match",
             ]
             label = f"upstream Triton for ROCm {rocm}: {spec}"
+        elif info.get("cuda"):
+            cuda = info["cuda"].replace(".", "")
+            spec = "pytorch-triton"
+            extra = [
+                "--index-url",
+                f"https://download.pytorch.org/whl/nightly/cu{cuda}",
+                "--index-strategy",
+                "unsafe-best-match",
+            ]
+            # pytorch-triton, not plain `triton`: a dev torch expects the
+            # PyTorch-built wheel matching ci_commit_pins/triton.txt, and a
+            # release Triton from PyPI may not be compatible with it.
+            label = f"upstream Triton for CUDA {info['cuda']}: {spec}"
         else:
             spec = f"triton=={args.version}" if args.version else "triton"
             label = f"upstream Triton from PyPI: {spec}"
 
-    # Resolve before uninstalling: the providers collide on the `triton`
-    # package, so a failed install after the uninstall would leave the
-    # environment with no Triton at all.
-    if not from_source:
+    # Everything below the uninstall is unrecoverable if it fails, because the
+    # providers collide on the `triton` package and all of them are removed at
+    # once. So validate first, by whichever means fits the source.
+    tmpdir = None
+    if from_source and not args.editable:
+        # Build the wheel before uninstalling. A source build is the slow,
+        # failure-prone path (compiles Triton + LLVM) and currently the only way
+        # to get a TLX-capable FBTriton, so it must not be the unguarded one.
+        tmpdir = tempfile.mkdtemp(prefix="fbtriton-wheel-")
+        print(f"--- building FBTriton wheel from {spec} (compiles Triton + LLVM, slow)")
+        build = [uv_bin(), "build", "--wheel", "--out-dir", tmpdir, spec]
+        if run(build).returncode != 0:
+            print("error: build failed; leaving the current install alone")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return 1
+        wheels = sorted(Path(tmpdir).glob("*.whl"))
+        if not wheels:
+            print(f"error: build produced no wheel in {tmpdir}")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return 1
+        spec = str(wheels[0])
+        label = f"FBTriton wheel built from source: {wheels[0].name}"
+    elif from_source:
+        print(
+            "warning: --editable cannot be pre-validated, so a failed build will "
+            "leave this environment with no Triton. Drop --editable to build the "
+            "wheel first."
+        )
+    else:
         print(f"--- checking {spec} resolves")
-        if not resolves(pip, spec, extra):
+        if not resolves(spec, extra):
             return 1
 
     print(f"--- removing all triton distributions: {', '.join(TRITON_DISTRIBUTIONS)}")
-    run(pip + ["uninstall", *TRITON_DISTRIBUTIONS])
+    run(uv_pip("uninstall", *TRITON_DISTRIBUTIONS))
 
     print(f"--- installing {label}")
-    res = run(pip + ["install", "--reinstall", *extra, spec])
+    res = run(uv_pip("install", "--reinstall", *extra, spec))
+    if tmpdir:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     if res.returncode != 0:
         print("error: install failed -- the environment now has NO Triton")
