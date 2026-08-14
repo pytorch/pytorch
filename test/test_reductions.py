@@ -4109,7 +4109,7 @@ as the input tensor excluding its innermost dimension'):
             values = torch.tensor([float("nan")], device="cpu", dtype=torch.float32)
             torch.histogram(values, 2)
 
-instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()
