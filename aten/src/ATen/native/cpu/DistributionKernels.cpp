@@ -113,7 +113,7 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<G
 }
 #else
 void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<Generator> gen) {
-  TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
 
   Tensor self = iter.tensor(0);
   if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda)) {
