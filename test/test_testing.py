@@ -20,6 +20,7 @@ from collections.abc import Iterator
 import torch
 
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import _get_torch_rocm_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
@@ -39,6 +40,20 @@ import string
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
+    def test_rocm_version_uses_sdk_version(self):
+        with (
+            unittest.mock.patch.object(torch.version, "rocm", "10.1.0"),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (10, 1, 0))
+
+    def test_rocm_version_falls_back_to_hip_version(self):
+        with (
+            unittest.mock.patch.object(torch.version, "rocm", None),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
+
     # Ensure that assertEqual handles numpy arrays properly
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_assertEqual_numpy(self, device, dtype):

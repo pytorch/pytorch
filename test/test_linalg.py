@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, ROCM_VERSION, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -68,7 +68,6 @@ if TEST_SCIPY:
 def blaslt_supported_device():
     if torch.cuda.is_available():
         if torch.version.hip:
-            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
             archs = ['gfx90a', 'gfx94']
             if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx110', 'gfx120'])
@@ -9210,8 +9209,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @skipCUDAIf(
-        TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        TEST_WITH_ROCM and ROCM_VERSION < (7, 14),
         "hipsolverDnXsytrs requires ROCm >= 7.14"
     )
     @dtypes(*floating_and_complex_types())

@@ -26,7 +26,7 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
-ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
+ROCM_VERSION = LazyVal(lambda: _get_torch_rocm_version())
 
 # The CUPTI monitor needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
@@ -505,9 +505,10 @@ def _get_torch_cuda_version():
     return tuple(int(x) for x in cuda_version.split("."))
 
 def _get_torch_rocm_version():
-    if not TEST_WITH_ROCM or torch.version.hip is None:
+    rocm_version = getattr(torch.version, "rocm", None) or torch.version.hip
+    if rocm_version is None:
         return (0, 0)
-    rocm_version = str(torch.version.hip)
+    rocm_version = str(rocm_version)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
