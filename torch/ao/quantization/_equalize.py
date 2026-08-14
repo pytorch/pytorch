@@ -275,5 +275,5 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
         prev_weight = get_module_weight(prev_modules[name])
 
         difference = curr_weight.sub(prev_weight)
-        summed_norms += torch.norm(difference)
+        summed_norms += torch.linalg.vector_norm(difference)
     return bool(summed_norms < threshold)
