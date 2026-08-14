@@ -9,7 +9,7 @@ recompiled variant of each -- into a single serializable artifact.
 
 Usage::
 
-    session = precompile_capture(model, backend="inductor")
+    session = torch.compiler.precompile.capture(model, backend="inductor")
     with session as compiled:
         for variant in variants:  # every path you want covered
             with variant:
@@ -20,10 +20,10 @@ Usage::
 inference capture with nothing conditional in it is one statement, and
 ``invariants`` writes a readable report of what the capture established::
 
-    with precompile_capture(
+    with torch.compiler.precompile.capture(
         model,
         backend="inductor",
-        example_inputs=[(x1,), (x2,)],  # or ExampleInput(args, kwargs)
+        example_inputs=[(x1,), (x2,)],
         invariants="model.invariants",
     ) as compiled:
         pass
@@ -50,8 +50,10 @@ is a directory it fills, because a content-addressed cache owns its layout while
 an artifact you name is a file you move around.
 
     # later, in a fresh process
-    compiled = precompile_load(model, path, backend="inductor")
-    with serving():  # no compilation permitted
+    compiled = torch.compiler.precompile.load_package(
+        model, path, backend="inductor"
+    )
+    with torch.compiler.precompile.serving():  # no compilation permitted
         compiled(*args)
 
 Capture is by execution: a resume function only exists once the frame ahead of
@@ -147,13 +149,14 @@ Know these before relying on an artifact in production:
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
-Everything here is private and deliberately unexported: reach it as
-``torch._dynamo.precompile_package`` and expect the names to move. It is also
-neither of the other two things torch calls "precompile" --
-``torch.compiler.precompile`` is make_fx AOT capture to Python source, and
-``torch._dynamo.config.caching_precompile`` is transparent caching of
-``torch.compile`` artifacts, which drives the same CompilePackage machinery this
-module wraps but automatically, without an explicit capture block.
+The public surface is ``torch.compiler.precompile.capture``,
+``torch.compiler.precompile.load_package``, and
+``torch.compiler.precompile.serving``. The helpers in this module implement that
+surface and remain internal. This is distinct from calling
+``torch.compiler.precompile`` directly, which produces a self-contained Python
+source artifact from one example call, and from
+``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
+artifacts transparently without an explicit capture block.
 """
 
 from __future__ import annotations

@@ -8,11 +8,12 @@ from typing_extensions import ParamSpec
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
-# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
-# plus an acceleration cache. Re-exported from the private impl module, whose
-# ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
-# ``torch.compile`` guard-serialization caching mode), despite the shared word.
+# ``torch.compiler.precompile``: one-shot AOT capture -> self-contained Python source
+# plus an acceleration cache, with capture/load_package methods for guarded multi-graph
+# artifacts spanning graph breaks and recompilations. Re-exported from the private impl,
+# whose ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the
+# single public location. Distinct from ``torch._dynamo.config.caching_precompile``
+# (a ``torch.compile`` guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
