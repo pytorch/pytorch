@@ -30,7 +30,7 @@ jobs:
     # Run inside the CUDA CI image on OSDC (ARC has no host docker daemon). The
     # public GHCR mirror needs no ECR creds; --gpus all exposes the A10G.
     container:
-      image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-${{ needs.get-label-type.outputs.ci-docker-hash }}
+      image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
       options: "--gpus all"
     steps:
       - name: Setup Linux

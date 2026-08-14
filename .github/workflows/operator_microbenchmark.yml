@@ -40,8 +40,8 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.12xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc13-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
@@ -50,7 +50,7 @@ jobs:
           { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
       python-version: "3.10"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.0"
     secrets: inherit
 
@@ -66,7 +66,7 @@ jobs:
       docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
       python-version: "3.10"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.0"
     secrets: inherit
 

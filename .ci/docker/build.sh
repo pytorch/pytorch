@@ -99,10 +99,10 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc13)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
