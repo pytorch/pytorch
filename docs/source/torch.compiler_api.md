@@ -50,11 +50,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
+.. py:function:: precompile(fn, *example_args, backend="inductor", tracer="make_fx", decompositions=None, example_inputs=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None)
 
-   Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
+   Ahead-of-time precompile ``fn`` using one of two input forms. Positional example
+   arguments select the single-graph source-artifact path and return a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
-   ``fn`` is the whole computation, taking the model(s) as
+   The ``example_inputs`` keyword accepts a sequence of positional-argument tuples,
+   captures every graph-break continuation and guarded recompilation exercised by those
+   calls, and returns a completed session whose ``save(path)`` writes a package for
+   ``precompile.load_package``. ``fn`` is the whole computation, taking the model(s) as
    explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
    ``nn.Module`` arguments have their parameters/buffers lifted to graph inputs, so no
    weights are baked into the artifact -- you pass the model again at runtime to the
@@ -85,8 +89,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-   :param example_inputs: Example positional arguments to ``fn``; the ``nn.Module``
-       arguments are lifted and the rest are the runtime inputs.
+   :param example_args: Example positional arguments for the single-graph source artifact;
+       the ``nn.Module`` arguments are lifted and the rest are the runtime inputs.
+   :param example_inputs: Sequence of positional-argument tuples for multi-graph capture.
+       Calls run automatically under ``torch.no_grad()``. Do not combine this with
+       positional example arguments.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
@@ -98,9 +105,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
        training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
        and the parameter gradients are accumulated onto the runtime model like eager). A
-       source-artifact path requires one full graph; use
-       ``torch.compiler.precompile.capture`` below when Python graph-breaks or when several
-       guarded/recompiled variants must be retained. Unlike ``make_fx``, the dynamo driver
+       source-artifact path requires one full graph; pass a list of calls through the
+       ``example_inputs`` keyword when Python graph-breaks or when several guarded/recompiled
+       variants must be retained, or use ``torch.compiler.precompile.capture`` below when
+       the calls must be made manually. Unlike ``make_fx``, the dynamo driver
        does NOT re-validate the
        runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
        a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
@@ -115,11 +123,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        decomposition function) controlling how ATen ops are broken down in the captured
        graph; defaults to ``None``. ``tracer="make_fx"`` forwards it to ``make_fx`` during
        capture; ``tracer="dynamo"`` applies the same table by re-tracing Dynamo's captured
-       subgraph with it.
-   :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
-       single source of truth for the calling convention) and a binary acceleration
-       cache (no weights, no calling-convention metadata; it carries a small
-       format/version/backend/tracer/code_hash integrity tag that ``load`` verifies).
+       subgraph with it. ``tracer`` and ``decompositions`` apply only to positional input;
+       keyword ``example_inputs`` always selects multi-graph Dynamo capture.
+   :param guard_filter_fn: Multi-graph guard filter; returns one boolean per guard entry.
+   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256.
+   :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
+   :param invariants: Optional path receiving the multi-graph invariant report.
+   :returns: For positional input, ``(python_code, cache)`` -- a self-contained Python
+       source string and binary acceleration cache. For keyword ``example_inputs``, a
+       completed session exposing ``summary()``, ``save()``, and invariant reporting.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
@@ -128,6 +140,12 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        python_code, cache = torch.compiler.precompile(lambda m, x: m(x), model, x)
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)   # pass the model again at runtime
+
+       session = torch.compiler.precompile(
+           model,
+           example_inputs=[(example_a,), (example_b,)],
+       )
+       session.save("model.pt")
 ```
 
 ```{eval-rst}
@@ -165,6 +183,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    frame, resume continuations after graph breaks, and every guarded recompiled variant.
    Capture every path and specialization the artifact must serve, then call ``save(path)``
    on the returned session after the block exits.
+
+   When every call is known up front, the shorter equivalent is
+   ``precompile(fn, example_inputs=[(x1,), (x2,)])``; use ``capture`` when calls must be
+   made manually or under a caller-selected grad mode.
 
    ``example_inputs`` may be a sequence of positional-argument tuples. Those calls run
    automatically under ``torch.no_grad()`` when the capture begins; calls made explicitly

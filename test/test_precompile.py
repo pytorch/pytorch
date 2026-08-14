@@ -969,6 +969,14 @@ class TestPrecompile(TestCase):
     def test_precompile_method_type_hints_resolve(self, name):
         typing.get_type_hints(getattr(torch.compiler.precompile, name))
 
+    def test_precompile_example_inputs_is_a_keyword_argument(self):
+        signature = inspect.signature(torch.compiler.precompile)
+        self.assertEqual(
+            signature.parameters["example_inputs"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+        typing.get_type_hints(torch.compiler.precompile.__call__)
+
     @parametrize("name", ["save", "summary", "invariants", "write_invariants"])
     def test_precompile_session_method_is_documented(self, name):
         session_type = typing.get_type_hints(torch.compiler.precompile.capture)[
@@ -1246,9 +1254,9 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only harvests gradients"):
             torch.compiler.precompile(train_step, m, x, t, tracer="dynamo")
 
-    def test_tracer_dynamo_one_shot_graph_break_points_to_capture(self):
+    def test_tracer_dynamo_one_shot_graph_break_points_to_multi_graph_api(self):
         # The source-artifact path still requires one full graph. Its error points to the
-        # execution-driven capture API, which preserves graph breaks and recompilations.
+        # example_inputs form, which preserves graph breaks and recompilations.
         m = torch.nn.Linear(4, 4)
         x = torch.randn(5, 4)
 
@@ -1257,22 +1265,14 @@ class TestPrecompile(TestCase):
             print(y.sum().item())  # a data-dependent print: graph break
             return y
 
-        with self.assertRaisesRegex(PrecompileError, "precompile.capture"):
+        with self.assertRaisesRegex(PrecompileError, "example_inputs"):
             torch.compiler.precompile(fn, m, x, tracer="dynamo")
 
-    def test_multi_graph_capture_graph_breaks_and_recompiles(self):
-        inputs = [torch.randn(*shape) for shape in ((4, 8), (5, 8), (6, 8))]
-        expected = [_precompile_multi_graph(x) for x in inputs]
-
+    def _assert_multi_graph_session_round_trip(
+        self, session, inputs, expected, *, backend="eager", no_grad=False
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "artifact.pt")
-            session = torch.compiler.precompile.capture(
-                _precompile_multi_graph, backend="eager", dynamic=False
-            )
-            with session as compiled:
-                for x in inputs:
-                    compiled(x)
-
             summary = session.summary()
             self.assertEqual(summary.frames, 3)
             self.assertEqual(summary.resume_functions, 2)
@@ -1285,18 +1285,60 @@ class TestPrecompile(TestCase):
                 loaded = torch.compiler.precompile.load_package(
                     _precompile_multi_graph,
                     path,
-                    backend="eager",
+                    backend=backend,
                     dynamic=False,
                 )
             self.assertTrue(any("trust" in message for message in logs.output))
-            with (
-                loaded,
-                torch.compiler.precompile.serving(),
-            ):
+
+            def check_loaded():
                 for x, want in zip(inputs, expected):
                     self.assertEqual(loaded(x), want)
                 with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                     loaded(torch.randn(9, 8))
+
+            if no_grad:
+                with loaded, torch.no_grad(), torch.compiler.precompile.serving():
+                    check_loaded()
+            else:
+                with loaded, torch.compiler.precompile.serving():
+                    check_loaded()
+
+    def test_multi_graph_capture_graph_breaks_and_recompiles(self):
+        inputs = [torch.randn(*shape) for shape in ((4, 8), (5, 8), (6, 8))]
+        expected = [_precompile_multi_graph(x) for x in inputs]
+        session = torch.compiler.precompile.capture(
+            _precompile_multi_graph, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            for x in inputs:
+                compiled(x)
+        self._assert_multi_graph_session_round_trip(session, inputs, expected)
+
+    def test_multi_graph_capture_from_precompile_example_inputs(self):
+        inputs = [torch.randn(*shape) for shape in ((4, 8), (5, 8), (6, 8))]
+        expected = [_precompile_multi_graph(x) for x in inputs]
+        session = torch.compiler.precompile(
+            _precompile_multi_graph,
+            dynamic=False,
+            example_inputs=[(x,) for x in inputs],
+        )
+        self._assert_multi_graph_session_round_trip(
+            session, inputs, expected, backend="inductor", no_grad=True
+        )
+
+    def test_precompile_rejects_mixed_example_input_forms(self):
+        x = torch.randn(3)
+        with self.assertRaisesRegex(ValueError, "either positional"):
+            torch.compiler.precompile(
+                lambda y: y + 1,
+                x,
+                backend="eager",
+                example_inputs=[(x,)],
+            )
+
+    def test_precompile_capture_options_require_example_inputs(self):
+        with self.assertRaisesRegex(ValueError, "require example_inputs"):
+            torch.compiler.precompile(lambda: None, backend="eager", dynamic=False)
 
     def test_multi_graph_public_errors_are_precompile_errors(self):
         with tempfile.TemporaryDirectory() as tmp:

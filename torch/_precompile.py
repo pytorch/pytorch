@@ -4,6 +4,11 @@
     f_c = torch.compiler.precompile.load(python_code, cache)
     out = f_c(model, *example_inputs)   # pass the model again at runtime
 
+    session = torch.compiler.precompile(
+        fn, example_inputs=[(model, x1), (model, x2)]
+    )
+    session.save("model.pt")
+
 precompile captures your computation with ``make_fx`` (the default ``tracer``) -- a
 NON-STRICT trace of the ATen ops that run when ``fn`` executes once on the example
 inputs. It does not analyze your Python, so it comes with an explicit contract (the
@@ -18,11 +23,14 @@ dynamic shapes, and a ``decompositions`` table all work with it. See the ``trace
 the bottom of Note [precompile programming model].
 
 For a computation with graph breaks, or to retain several guarded/recompiled variants,
-use the execution-driven ``torch.compiler.precompile.capture`` session and reload its
-saved package with ``torch.compiler.precompile.load_package``. The direct call above
-remains the self-contained source-artifact path and requires one full Dynamo graph.
+pass a sequence of calls through ``example_inputs=[(...,), (...,)]``. That form returns
+an execution-driven session whose ``save()`` writes a package reloaded with
+``torch.compiler.precompile.load_package``. ``torch.compiler.precompile.capture`` remains
+available when the calls must be made manually, such as a training capture. The positional
+form above remains the self-contained source-artifact path and requires one full Dynamo
+graph.
 
-``precompile`` returns a self-contained, executable ``python_code`` string plus a
+The positional form returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
 captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor);
@@ -389,7 +397,7 @@ class _PrecompiledCallable(Protocol):
 
 
 class _PrecompileSession:
-    r"""Execution-driven multi-graph capture returned by :meth:`precompile.capture`."""
+    r"""Execution-driven multi-graph capture returned by :func:`precompile`."""
 
     def __init__(self, session: Any) -> None:
         self._session = session
@@ -1558,10 +1566,10 @@ def _capture_dynamo(
         reason = (str(e).splitlines() or [""])[0]
         raise PrecompileError(
             "precompile tracer='dynamo' could not capture fn as a single full graph "
-            f"({reason}). For graph-breaking code, use "
-            "torch.compiler.precompile.capture to collect every continuation and "
-            "recompiled variant; otherwise use tracer='make_fx' for a single non-strict "
-            "trace."
+            f"({reason}). For graph-breaking code, pass example_inputs=[(...,), ...] "
+            "to torch.compiler.precompile, or use torch.compiler.precompile.capture "
+            "when the calls must be made manually; otherwise use tracer='make_fx' for "
+            "a single non-strict trace."
         ) from e
     except GuardOnDataDependentSymNode as e:
         raise _unbacked_guard_error(e) from e
@@ -2678,12 +2686,29 @@ class _PrecompileApi:
     def __call__(
         self,
         fn: Callable[..., object],
-        *example_inputs: object,
+        *example_args: object,
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
-    ) -> tuple[str, bytes]:
-        """Ahead-of-time precompile ``fn`` against ``example_inputs``.
+        example_inputs: Sequence[tuple[object, ...]] | None = None,
+        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
+        recompile_limit: int = 256,
+        dynamic: bool | None = None,
+        invariants: str | None = None,
+    ) -> tuple[str, bytes] | _PrecompileSession:
+        """Ahead-of-time precompile ``fn`` against example inputs.
+
+        Passing positional example arguments keeps the self-contained source-artifact
+        path and returns ``(python_code, cache)``. Passing ``example_inputs`` as a
+        sequence of positional-argument tuples instead runs an execution-driven
+        multi-graph capture and returns a completed session. That form records graph-break
+        continuations and every guarded recompilation exercised by the supplied calls,
+        which run under ``torch.no_grad()``; inspect ``summary()`` and call ``save(path)``
+        on the result.
+
+        Do not combine the two input forms. ``tracer`` and ``decompositions`` apply only
+        to the positional source-artifact path; the multi-graph path uses Dynamo and
+        accepts ``guard_filter_fn``, ``recompile_limit``, ``dynamic``, and ``invariants``.
 
         .. note::
 
@@ -2696,10 +2721,10 @@ class _PrecompileApi:
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
-        THREADING: the inductor lowering step drives process-global compiler state
-        and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
-        path are NOT serialized.
+        For the positional source-artifact form, the inductor lowering step drives
+        process-global compiler state and is serialized by an internal lock, so concurrent
+        ``backend="inductor"`` calls lower one at a time. The make_fx capture phase and
+        the ``backend="eager"`` path are not serialized.
 
         ``backend`` selects how the captured graph is realized:
 
@@ -2733,8 +2758,9 @@ class _PrecompileApi:
           the graph (precompile pins Dynamo's ``trace_autograd_ops`` so it does not
           graph-break), and the artifact accumulates the resulting parameter gradients onto
           the runtime model exactly like eager. This source-artifact path requires one full
-          graph; for graph breaks and multiple guarded/recompiled variants, use
-          ``torch.compiler.precompile.capture``.
+          graph; for graph breaks and multiple guarded/recompiled variants, pass
+          ``example_inputs=[(...,), ...]`` or use ``torch.compiler.precompile.capture``
+          when the calls must be made manually.
           Dynamo's runtime guards are not embedded, and -- UNLIKE the ``make_fx`` tracer --
           the dynamo driver does NOT re-validate the runtime model/inputs at load: it does
           not reproduce the ``make_fx`` driver's param/buffer structural check (invariant 2)
@@ -2787,10 +2813,13 @@ class _PrecompileApi:
         bound checks. A shared ``shape_id`` is the way to get the check there;
         ``tracer="dynamo"`` enforces it either way, since the asserts ride in the graph.
 
-        Returns ``(python_code, cache)`` -- a self-contained, executable Python
-        source string (the single source of truth for the calling convention) and a
-        binary cache holding ONLY the backend artifact (NO metadata, NO weights).
-        Reload a runnable with ``torch.compiler.precompile.load(python_code, cache)``.
+        The positional form returns ``(python_code, cache)`` -- a self-contained,
+        executable Python source string (the single source of truth for the calling
+        convention) and a binary cache holding ONLY the backend artifact (NO metadata,
+        NO weights). Reload it with
+        ``torch.compiler.precompile.load(python_code, cache)``. The keyword
+        ``example_inputs`` form returns a completed ``PrecompileSession``; save it to a
+        package and reload with ``torch.compiler.precompile.load_package``.
 
         ``fn`` is the whole computation, e.g.::
 
@@ -2805,10 +2834,10 @@ class _PrecompileApi:
 
             python_code, cache = torch.compiler.precompile(train_step, model, x, t)
 
-        Among ``example_inputs``, the ``nn.Module`` arguments have their params/buffers
-        lifted to graph inputs (no weights are baked into the artifact -- invariant 1);
-        the rest are the runtime inputs. The reloaded callable is invoked with the SAME
-        argument structure -- pass the model(s) again at runtime, e.g.
+        Among the positional example arguments, the ``nn.Module`` arguments have their
+        params/buffers lifted to graph inputs (no weights are baked into the artifact --
+        invariant 1); the rest are the runtime inputs. The reloaded callable is invoked
+        with the SAME argument structure -- pass the model(s) again at runtime, e.g.
         ``f_c(model, x)``, and that runtime model must match the example model's
         parameter/buffer structure (invariant 2). Arguments are matched POSITIONALLY:
         pass the model(s) and inputs positionally both here and at load time; keyword-
@@ -2828,7 +2857,7 @@ class _PrecompileApi:
         are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
         (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
         here (see the Note): the runtime model must be structurally identical to the
-        example, and control flow / shapes are specialized to ``example_inputs``
+        example, and control flow / shapes are specialized to those positional examples
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked
         as a constant (invariant 1), effectful ops (invariant 4), and -- for the
@@ -2844,10 +2873,43 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
+        if example_inputs is not None:
+            if example_args:
+                raise ValueError(
+                    "pass either positional example arguments or example_inputs=[...], "
+                    "not both"
+                )
+            if decompositions is not None:
+                raise ValueError(
+                    "example_inputs=[...] selects multi-graph Dynamo capture; "
+                    "decompositions apply only to the positional source-artifact path"
+                )
+            session = self.capture(
+                fn,
+                backend=backend,
+                guard_filter_fn=guard_filter_fn,
+                recompile_limit=recompile_limit,
+                dynamic=dynamic,
+                example_inputs=example_inputs,
+                invariants=invariants,
+            )
+            with session:
+                pass
+            return session
+        if (
+            guard_filter_fn is not None
+            or recompile_limit != 256
+            or dynamic is not None
+            or invariants is not None
+        ):
+            raise ValueError(
+                "guard_filter_fn, recompile_limit, dynamic, and invariants require "
+                "example_inputs=[...]"
+            )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions
         )
-        compiled._compile(example_inputs)
+        compiled._compile(example_args)
         # Build the (expensive) python_code ONCE and thread it into to_cache_bytes so
         # the full metadata + embedded kernel source is not rebuilt, and so code_hash is
         # sha256 over exactly the bytes returned to the caller (a matched pair loads).
