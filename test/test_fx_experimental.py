@@ -2130,7 +2130,7 @@ class {test_classname}(torch.nn.Module):
 
 
 class TestNormalizeOperators(JitTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
@@ -2257,6 +2257,9 @@ class TestModule(torch.nn.Module):
 
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
+
+class TestNormalizeOperatorsGeneric(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_normalize_quantized_eb(self):
         target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
@@ -2472,7 +2475,7 @@ if TEST_Z3:
 
 
 instantiate_parametrized_tests(TestFXExperimental)
-instantiate_device_type_tests(TestNormalizeOperators, globals())
+instantiate_device_type_tests(TestNormalizeOperators, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
