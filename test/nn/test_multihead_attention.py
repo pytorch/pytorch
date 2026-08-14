@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
@@ -34,6 +35,8 @@ if TEST_NUMPY:
 
 
 class TestMultiheadAttentionNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     if TEST_CUDA:
         _do_cuda_memory_leak_check = True
         _do_cuda_non_default_stream = True
@@ -754,6 +757,8 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
