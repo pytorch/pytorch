@@ -171,6 +171,7 @@ import os
 import pickle
 import re
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
@@ -1429,6 +1430,8 @@ class PrecompiledCallable:
     ) -> None:
         self._compiled = compiled
         self._package = package
+        self._unload_lock = threading.Lock()
+        self._loaded = True
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         return self._compiled(*args, **kwargs)
@@ -1441,7 +1444,11 @@ class PrecompiledCallable:
 
     def unload(self) -> None:
         """Remove installed globals and precompile entries from the code objects."""
-        self._package.uninstall()
+        with self._unload_lock:
+            if not self._loaded:
+                return
+            self._package.uninstall()
+            self._loaded = False
 
 
 @contextlib.contextmanager

@@ -3690,6 +3690,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         second.unload()
         first.unload()
 
+    def test_repeated_unload_does_not_clear_a_later_package(self):
+        x = torch.randn(3, 4)
+        model = PrecompileSelfAct(torch.relu)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_risky_drops=False)
+
+        torch._dynamo.reset()
+        first = precompile_load(model, self.path(), backend="eager", dynamic=False)
+        with first:
+            first.unload()
+            second = precompile_load(model, self.path(), backend="eager", dynamic=False)
+        with second, torch.no_grad(), serving():
+            self.assertEqual(second(x), model(x))
+
     def test_unload_keeps_a_skip_another_package_still_holds(self):
         # install() skip_code()s a frame with no guarded codes, and the strategy
         # it had before cannot be read back, so restoring it unconditionally

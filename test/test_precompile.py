@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import typing
 import unittest
 
 import torch
@@ -963,6 +964,10 @@ class TestPrecompile(TestCase):
         self.assertEqual(method.__module__, "torch.compiler")
         self.assertEqual(method.__qualname__, f"precompile.{name}")
 
+    @parametrize("name", ["capture", "load_package", "serving"])
+    def test_precompile_method_type_hints_resolve(self, name):
+        typing.get_type_hints(getattr(torch.compiler.precompile, name))
+
     def test_backend_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
         with self.assertRaisesRegex(
@@ -1270,6 +1275,24 @@ class TestPrecompile(TestCase):
                     self.assertEqual(loaded(x), want)
                 with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                     loaded(torch.randn(9, 8))
+
+    def test_multi_graph_public_errors_are_precompile_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = torch.compiler.precompile.capture(
+                _precompile_multi_graph, backend="eager"
+            )
+            with session:
+                pass
+            with self.assertRaisesRegex(PrecompileError, "captured no compiled code"):
+                session.save(os.path.join(tmp, "artifact.pt"))
+
+            with self.assertLogs("torch._precompile", level="WARNING"):
+                with self.assertRaisesRegex(PrecompileError, "Failed to read"):
+                    torch.compiler.precompile.load_package(
+                        _precompile_multi_graph,
+                        os.path.join(tmp, "missing.pt"),
+                        backend="eager",
+                    )
 
     @parametrize("backend", ["inductor", "eager"])
     def test_tracer_dynamo_mark_unbacked_runs_across_sizes(self, backend):

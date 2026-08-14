@@ -307,8 +307,11 @@ import logging
 import marshal
 import pickle
 import types
+from collections.abc import Callable, Mapping, Sequence  # noqa: TC003
+from contextlib import AbstractContextManager  # noqa: TC003
 from types import MappingProxyType
-from typing import Any, cast, NewType, TYPE_CHECKING
+from typing import Any, cast, NewType, Protocol, TYPE_CHECKING
+from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -322,11 +325,6 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
-    from contextlib import AbstractContextManager
-
-    from torch._dynamo.precompile_package import PrecompiledCallable, PrecompileSession
-    from torch._dynamo.types import GuardFilterEntry
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -378,6 +376,60 @@ class PrecompileError(RuntimeError):
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
     """
+
+
+class _PrecompiledCallable(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(self, *exc: object) -> None: ...
+
+    def unload(self) -> None: ...
+
+
+class _PrecompileSession:
+    def __init__(self, session: Any) -> None:
+        self._session = session
+
+    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError
+
+        try:
+            return method(*args, **kwargs)
+        except PackageError as e:
+            raise PrecompileError(str(e)) from e
+
+    def __enter__(self) -> Callable[..., object]:
+        return self._call(self._session.__enter__)
+
+    def __exit__(self, *exc: object) -> None:
+        self._call(self._session.__exit__, *exc)
+
+    def invariants(self) -> tuple[Any, ...]:
+        return self._call(self._session.invariants)
+
+    def write_invariants(self, path: str) -> None:
+        self._call(self._session.write_invariants, path)
+
+    def summary(self) -> Any:
+        return self._call(self._session.summary)
+
+    def save(
+        self,
+        path: str,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = False,
+        require_no_dropped_guards: bool = False,
+    ) -> Any:
+        return self._call(
+            self._session.save,
+            path,
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+        )
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2769,13 +2821,12 @@ class _PrecompileApi:
         fn: Callable[..., object],
         *,
         backend: str = "inductor",
-        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
-        | None = None,
+        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
         example_inputs: Sequence[tuple[object, ...]] | None = None,
         invariants: str | None = None,
-    ) -> PrecompileSession:
+    ) -> _PrecompileSession:
         """Begin an execution-driven multi-graph precompile capture.
 
         Unlike calling ``precompile`` directly, this path preserves Dynamo graph breaks,
@@ -2790,17 +2841,22 @@ class _PrecompileApi:
         ``summary()`` before saving: identity guards cannot be serialized and are dropped
         by default, while unexercised paths are absent from the artifact.
         """
+        from torch._dynamo.exc import PackageError
         from torch._dynamo.precompile_package import precompile_capture
 
-        return precompile_capture(
-            fn,
-            backend=backend,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            example_inputs=example_inputs,
-            invariants=invariants,
-        )
+        try:
+            session = precompile_capture(
+                fn,
+                backend=backend,
+                guard_filter_fn=guard_filter_fn,
+                recompile_limit=recompile_limit,
+                dynamic=dynamic,
+                example_inputs=example_inputs,
+                invariants=invariants,
+            )
+        except PackageError as e:
+            raise PrecompileError(str(e)) from e
+        return _PrecompileSession(session)
 
     def load_package(
         self,
@@ -2808,11 +2864,10 @@ class _PrecompileApi:
         path: str,
         *,
         backend: str = "inductor",
-        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
-        | None = None,
+        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
-    ) -> PrecompiledCallable:
+    ) -> _PrecompiledCallable:
         """Load a multi-graph artifact saved by :meth:`capture`.
 
         Loading installs guarded bytecode and compiled backends process-wide on the
@@ -2827,14 +2882,19 @@ class _PrecompileApi:
             "an executable artifact. Only load a package you produced or otherwise "
             "trust."
         )
-        return precompile_load(
-            fn,
-            path,
-            backend=backend,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-        )
+        try:
+            return precompile_load(
+                fn,
+                path,
+                backend=backend,
+                guard_filter_fn=guard_filter_fn,
+                recompile_limit=recompile_limit,
+                dynamic=dynamic,
+            )
+        except PrecompileError:
+            raise
+        except RuntimeError as e:
+            raise PrecompileError(str(e)) from e
 
     def serving(self) -> AbstractContextManager[None]:
         """Forbid compilation while serving a loaded multi-graph artifact.
