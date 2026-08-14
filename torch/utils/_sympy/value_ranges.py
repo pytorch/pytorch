@@ -417,24 +417,26 @@ class ValueRanges(Generic[_T]):
 
 
 @functools.lru_cache(maxsize=4096)
-def _intersect_value_ranges(self: Any, other: Any) -> Any:
+def _intersect_value_ranges(
+    lhs: ValueRanges.AllVR, rhs: ValueRanges.AllVR
+) -> ValueRanges.AllVR:
     """Body of ValueRanges.__and__; see the comment there."""
-    if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
-        return self
-    if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
-        return other
-    if self.is_bool != other.is_bool:
-        raise AssertionError((self, other))
-    if self.is_int != other.is_int:
-        raise AssertionError((self, other))
-    if self.is_float != other.is_float:
-        raise AssertionError((self, other))
-    if self.is_bool:
-        return ValueRanges(
-            sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)
+    if rhs in (ValueRanges.unknown(), ValueRanges.unknown_int()):
+        return lhs
+    if lhs in (ValueRanges.unknown(), ValueRanges.unknown_int()):
+        return rhs
+    if lhs.is_bool != rhs.is_bool:
+        raise AssertionError((lhs, rhs))
+    if lhs.is_int != rhs.is_int:
+        raise AssertionError((lhs, rhs))
+    if lhs.is_float != rhs.is_float:
+        raise AssertionError((lhs, rhs))
+    if lhs.is_bool:
+        return ValueRanges(  # type: ignore[return-value]
+            sympy.Or(lhs.lower, rhs.lower), sympy.And(lhs.upper, rhs.upper)
         )
-    return ValueRanges(
-        sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper)
+    return ValueRanges(  # type: ignore[return-value]
+        sympy.Max(lhs.lower, rhs.lower), sympy.Min(lhs.upper, rhs.upper)
     )
 
 
