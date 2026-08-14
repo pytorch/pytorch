@@ -113,7 +113,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         Capability.distributed.backend,
     )
     def test_default_metadata(self, device) -> None:
-        device = f"{device_type}:{dist.get_rank()}"
+        device = f"{torch.device(device).type}:{dist.get_rank()}"
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
