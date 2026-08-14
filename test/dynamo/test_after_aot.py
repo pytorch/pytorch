@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch._dynamo.test_case
+from torch._dynamo.repro import after_aot
 from torch._dynamo.repro.after_aot import (
     _extract_distributed_info,
     _get_compile_args,
@@ -31,6 +32,15 @@ from torch.utils._triton import has_triton
 
 def strip_trailing_whitespace(r):
     return "\n".join([l.rstrip() for l in r.split("\n")])
+
+
+def _make_test_graph():
+    args = [torch.randn(4)]
+
+    def f(x):
+        return (x.sin(),)
+
+    return make_fx(f)(*args), args
 
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
@@ -138,6 +148,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
         options = SimpleNamespace(
             accuracy="accuracy",
             check_str=None,
+            is_inference=False,
             isolate=False,
             save_dir=None,
             tracing_mode="real",
@@ -155,6 +166,187 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             repro_minify(options, torch.nn.Identity(), lambda reader: None)
 
         self.assertIsNone(seen_repro_after)
+
+    def test_save_graph_repro_preserves_is_inference(self):
+        gm, args = _make_test_graph()
+        for is_inference in (False, True):
+            with self.subTest(is_inference=is_inference):
+                buf = io.StringIO()
+                save_graph_repro(
+                    buf,
+                    gm,
+                    args,
+                    "inductor",
+                    save_dir=None,
+                    is_inference=is_inference,
+                )
+                self.assertIn(
+                    f"is_inference={is_inference!r}",
+                    buf.getvalue(),
+                )
+
+    def test_wrap_compiler_debug_preserves_is_inference_for_failures(self):
+        gm, args = _make_test_graph()
+
+        for is_inference in (False, True):
+            for deferred in (False, True):
+                with self.subTest(is_inference=is_inference, deferred=deferred):
+
+                    def fake_compiler(gm, example_inputs, **kwargs):
+                        if not deferred:
+                            raise RuntimeError("compiler failure")
+
+                        def compiled(real_args):
+                            raise RuntimeError("deferred failure")
+
+                        return compiled
+
+                    with (
+                        torch._dynamo.config.patch(repro_after="aot", repro_level=1),
+                        patch.object(after_aot, "dump_compiler_graph_state") as dump,
+                        self.assertRaisesRegex(RuntimeError, "failure"),
+                    ):
+                        compiled = after_aot.wrap_compiler_debug(
+                            fake_compiler, "inductor"
+                        )(gm, args, is_inference=is_inference)
+                        compiled(args)
+
+                    dump.assert_called_once()
+                    self.assertIs(
+                        dump.call_args.kwargs["is_inference"],
+                        is_inference,
+                    )
+
+    def test_run_repro_preserves_is_inference_in_options(self):
+        cases = ((None, False), (False, False), (True, True))
+        for passed_is_inference, expected in cases:
+            with self.subTest(is_inference=passed_is_inference):
+                seen = []
+
+                def fake_repro_run(options, mod, load_args):
+                    seen.append(options.is_inference)
+
+                kwargs = {}
+                if passed_is_inference is not None:
+                    kwargs["is_inference"] = passed_is_inference
+
+                with (
+                    patch.object(after_aot, "repro_run", fake_repro_run),
+                    patch.object(sys, "argv", ["repro.py"]),
+                ):
+                    after_aot.run_repro(
+                        torch.nn.Identity(),
+                        lambda reader: None,
+                        **kwargs,
+                    )
+
+                self.assertEqual(seen, [expected])
+
+    def test_repro_run_preserves_is_inference(self):
+        gm, args = _make_test_graph()
+
+        for is_inference in (False, True):
+            with self.subTest(is_inference=is_inference):
+                seen = []
+
+                def fake_compile_fx_inner(gm, compile_args, **kwargs):
+                    seen.append(kwargs["is_inference"])
+
+                    def compiled(real_args):
+                        return gm(*real_args)
+
+                    return compiled
+
+                options = SimpleNamespace(
+                    accuracy="",
+                    is_inference=is_inference,
+                    save_dir=None,
+                    tracing_mode="real",
+                )
+                with (
+                    patch.object(after_aot, "repro_common", return_value=(gm, args)),
+                    patch(
+                        "torch._inductor.compile_fx.compile_fx_inner",
+                        fake_compile_fx_inner,
+                    ),
+                ):
+                    repro_run(options, torch.nn.Identity(), lambda reader: None)
+
+                self.assertEqual(seen, [is_inference])
+
+    def test_repro_minify_preserves_is_inference(self):
+        gm, args = _make_test_graph()
+
+        for is_inference in (False, True):
+            for isolate in (False, True):
+                with self.subTest(is_inference=is_inference, isolate=isolate):
+                    seen = []
+
+                    def fake_fails(gm, args, **kwargs):
+                        seen.append(kwargs["is_inference"])
+                        return False
+
+                    def fake_minifier(mod, args, *, module_fails, dump_state, **kwargs):
+                        module_fails(mod, args)
+                        self.assertIs(
+                            dump_state.keywords["is_inference"],
+                            is_inference,
+                        )
+
+                    options = SimpleNamespace(
+                        accuracy="",
+                        check_str=None,
+                        is_inference=is_inference,
+                        isolate=isolate,
+                        save_dir=None,
+                        tracing_mode="real",
+                        offload_to_disk=False,
+                        skip_saving_eager_intermediates=False,
+                        skip_sanity=False,
+                        max_granularity=None,
+                    )
+
+                    with (
+                        patch.object(
+                            after_aot, "repro_common", return_value=(gm, args)
+                        ),
+                        patch.object(after_aot, "isolate_fails", fake_fails),
+                        patch.dict(after_aot.ACCURACY_FAILS, {"": fake_fails}),
+                        patch("functorch.compile.minifier", fake_minifier),
+                    ):
+                        repro_minify(options, torch.nn.Identity(), lambda reader: None)
+
+                    self.assertEqual(seen, [is_inference])
+
+    def test_repro_analyze_preserves_is_inference(self):
+        gm, args = _make_test_graph()
+
+        for is_inference in (False, True):
+            with self.subTest(is_inference=is_inference):
+                seen = []
+
+                def fake_compile_fx_inner(gm, compile_args, **kwargs):
+                    seen.append(kwargs["is_inference"])
+                    raise RuntimeError("stop after compile")
+
+                options = SimpleNamespace(
+                    is_inference=is_inference,
+                    save_dir=None,
+                    tracing_mode="real",
+                )
+                with (
+                    patch.object(after_aot, "repro_common", return_value=(gm, args)),
+                    patch(
+                        "torch._inductor.compile_fx.compile_fx_inner",
+                        fake_compile_fx_inner,
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "stop after compile"),
+                ):
+                    after_aot.repro_analyze(
+                        options, torch.nn.Identity(), lambda reader: None
+                    )
+
+                self.assertEqual(seen, [is_inference])
 
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
@@ -381,7 +573,10 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         load_args._version = 0
         options = SimpleNamespace(
-            accuracy="accuracy", save_dir=None, tracing_mode="real"
+            accuracy="accuracy",
+            is_inference=False,
+            save_dir=None,
+            tracing_mode="real",
         )
         repro_run(options, Repro(), load_args)
 
@@ -744,7 +939,9 @@ class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
                     "torch.accelerator.synchronize",
                     side_effect=lambda: called.append(1),
                 ):
-                    repro_run(argparse.Namespace(accuracy=""), None, None)
+                    repro_run(
+                        argparse.Namespace(accuracy="", is_inference=False), None, None
+                    )
 
         self.assertGreater(len(called), 0)
 

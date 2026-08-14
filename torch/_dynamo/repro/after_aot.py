@@ -134,7 +134,7 @@ def _find_repeat_interleave_constraints(
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.output_code import OutputCode
@@ -302,6 +302,7 @@ def wrap_compiler_debug(
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
+        is_inference = kwargs.get("is_inference", False)
         compiler_fn = functools.partial(
             unconfigured_compiler_fn,
             compile_region_name=compile_region_name,
@@ -332,12 +333,14 @@ def wrap_compiler_debug(
                         fx.GraphModule(gm, orig_graph),
                         example_inputs,
                         compiler_name,
+                        is_inference=is_inference,
                     )
                 elif config.repro_level == 2:
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         example_inputs,
                         compiler_name,
+                        is_inference=is_inference,
                     )
                 log.error("CompilerError")
             raise
@@ -378,7 +381,10 @@ def wrap_compiler_debug(
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
-                    fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                    fx.GraphModule(gm, orig_graph),
+                    real_inputs,
+                    compiler_name,
+                    is_inference=is_inference,
                 )
 
             if config.repro_level == 4:
@@ -402,11 +408,13 @@ def wrap_compiler_debug(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
                         f"{compiler_name}_accuracy",
+                        is_inference=is_inference,
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
                         f"{compiler_name}_accuracy",
+                        is_inference=is_inference,
                     )
                     raise AccuracyError("Bad accuracy detected")
                 else:
@@ -432,12 +440,14 @@ def wrap_compiler_debug(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
                             compiler_name,
+                            is_inference=is_inference,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
                             compiler_name,
+                            is_inference=is_inference,
                         )
                     raise
 
@@ -855,6 +865,7 @@ def save_graph_repro(
     tracing_mode: str | None = None,
     check_str: str | None = None,
     stable_hash: bool = False,
+    is_inference: bool = False,
 ) -> None:
     if any(
         isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
@@ -903,10 +914,12 @@ def save_graph_repro(
     fd.write(
         f"    with torch.no_grad():\n"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}, "
+        f"is_inference={is_inference!r})\n"
         f"        # To run it separately, do \n"
         f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}, "
+        f"is_inference={is_inference!r})\n"
         f"        # mod(*args)"
     )
 
@@ -921,6 +934,7 @@ def dump_compiler_graph_state(
     compiler_name: str,
     *,
     accuracy: str | bool | None = None,
+    is_inference: bool = False,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -931,7 +945,13 @@ def dump_compiler_graph_state(
     )
     with open(file_name, "w") as fd:
         save_graph_repro(
-            fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
+            fd,
+            gm,
+            args,
+            compiler_name,
+            save_dir=subdir,
+            accuracy=accuracy,
+            is_inference=is_inference,
         )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
@@ -950,14 +970,26 @@ def dump_compiler_graph_state(
 
 
 def dump_to_minify(
-    gm: torch.fx.GraphModule, args: Sequence[Any], compiler_name: str
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: str,
+    *,
+    is_inference: bool = False,
 ) -> None:
     out = io.StringIO()
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro(out, gm, args, compiler_name, save_dir=subdir, command="minify")
+    save_graph_repro(
+        out,
+        gm,
+        args,
+        compiler_name,
+        save_dir=subdir,
+        command="minify",
+        is_inference=is_inference,
+    )
     return helper_for_dump_minify(out.getvalue())
 
 
@@ -970,6 +1002,7 @@ def isolate_fails(
     accuracy: bool | str | None = None,
     tracing_mode: str | None = None,
     check_str: str | None = None,
+    is_inference: bool = False,
 ) -> bool:
     if env is None:
         env = {}
@@ -988,6 +1021,7 @@ def isolate_fails(
             accuracy=accuracy,
             tracing_mode=tracing_mode,
             check_str=check_str,
+            is_inference=is_inference,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -1030,7 +1064,11 @@ def isolate_fails(
 
 
 def inductor_fails(
-    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
+    fx_g: torch.fx.GraphModule,
+    args: Sequence[Any],
+    check_str: str | None = None,
+    *,
+    is_inference: bool = False,
 ) -> bool:
     has_gpu = any(
         isinstance(arg, torch.Tensor) and arg.device.type != "cpu" for arg in args
@@ -1058,7 +1096,7 @@ def inductor_fails(
 
     try:
         compile_args = _get_compile_args(fx_g, args)
-        compile_mod = compile_fx_inner(fx_g, compile_args)
+        compile_mod = compile_fx_inner(fx_g, compile_args, is_inference=is_inference)
         if isinstance(compile_mod, str):
             raise AssertionError("compile_fx_inner should not return a string")
         compile_mod(args)
@@ -1078,13 +1116,16 @@ def inductor_accuracy_fails(
     *,
     require_fp64: bool = False,
     ignore_non_fp: bool = False,
+    is_inference: bool = False,
 ) -> bool:
     from torch._inductor.compile_fx import compile_fx_inner
 
     def _compile_with_symbolic_args(
         gm: torch.fx.GraphModule, inputs: list[Any]
     ) -> torch.fx.GraphModule:
-        return compile_fx_inner(gm, _get_compile_args(gm, inputs))  # type: ignore[return-value]
+        return compile_fx_inner(  # type: ignore[return-value]
+            gm, _get_compile_args(gm, inputs), is_inference=is_inference
+        )
 
     return backend_aot_accuracy_fails(
         fx_g,
@@ -1271,7 +1312,18 @@ def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequenc
     return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
 
-ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
+class _AccuracyFailsFn(typing.Protocol):
+    def __call__(
+        self,
+        fx_g: torch.fx.GraphModule,
+        args: Sequence[Any],
+        check_str: str | None = None,
+        *,
+        is_inference: bool = False,
+    ) -> bool: ...
+
+
+ACCURACY_FAILS: dict[str, _AccuracyFailsFn] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will
     # minify any time we see anything that diverges", whereas accuracy is more
@@ -1288,7 +1340,8 @@ def repro_minifier_query(options: ReproOptions, mod: nn.Module, load_args: Any) 
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
         ACCURACY_FAILS[options.accuracy],
-        check_str=options.check_str,  # type: ignore[call-arg]
+        check_str=options.check_str,
+        is_inference=options.is_inference,
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -1314,9 +1367,13 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
             save_dir=options.save_dir,
             accuracy=options.accuracy,
             tracing_mode=options.tracing_mode,
+            is_inference=options.is_inference,
         )
     else:
-        module_fails = ACCURACY_FAILS[options.accuracy]
+        module_fails = functools.partial(
+            ACCURACY_FAILS[options.accuracy],
+            is_inference=options.is_inference,
+        )
 
     with config.patch(repro_after=None):
         minifier(
@@ -1324,7 +1381,9 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
             args,
             module_fails=functools.partial(module_fails, check_str=options.check_str),
             dump_state=functools.partial(
-                dump_compiler_graph_state, compiler_name=compiler_name
+                dump_compiler_graph_state,
+                compiler_name=compiler_name,
+                is_inference=options.is_inference,
             ),
             save_dir=options.save_dir,
             offload_to_disk=options.offload_to_disk,
@@ -1349,7 +1408,9 @@ def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None
     compile_mod = copy.deepcopy(mod)
     compile_args = _get_compile_args(compile_mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(compile_mod, compile_args)
+        compiled = compile_fx_inner(
+            compile_mod, compile_args, is_inference=options.is_inference
+        )
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1501,7 +1562,9 @@ def repro_run(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
 
     compile_mod = copy.deepcopy(mod)
     compile_args = _get_compile_args(compile_mod, args)
-    compiled = compile_fx_inner(compile_mod, compile_args)
+    compiled = compile_fx_inner(
+        compile_mod, compile_args, is_inference=options.is_inference
+    )
     if isinstance(compiled, str):
         raise AssertionError("compile_fx_inner should not return a string")
 
@@ -1539,6 +1602,7 @@ def run_repro(
     tracing_mode: str | None = None,
     patch_code: str | None = None,
     check_str: str | None = None,
+    is_inference: bool = False,
     **kwargs: Any,
 ) -> Any:
     for k in kwargs:
@@ -1572,6 +1636,7 @@ default settings on this script:
 """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.set_defaults(is_inference=is_inference)
 
     def common_flags(parser: argparse.ArgumentParser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
