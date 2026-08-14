@@ -68,6 +68,9 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
     return multiply<inplace>(input, at::zeros({}, input.options()));
   }
 
+  TORCH_CHECK_TYPE(input.is_floating_point() || input.is_complex(),
+      "dropout only supports floating point and complex dtypes, but got ", input.scalar_type());
+
   at::Tensor b; // used for alpha_dropout only
   auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input);
   noise.bernoulli_(1 - p);
