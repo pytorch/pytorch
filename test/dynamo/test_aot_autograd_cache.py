@@ -4079,9 +4079,11 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_autocast_dtype("cpu", prev)
 
+    @dynamo_config.patch(inline_single_use_invoke_subgraph=False)
     def test_nested_in_graph_autocast_keys_ambient(self):
         # dtype=None autocast only in an invoke_subgraph child must still key
         # ambient dtype (root-only _enter_autocast scan would miss it).
+        # Keep the nested boundary: Dynamo inlines one-use regions by default.
         from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 
         @mark_compile_region
