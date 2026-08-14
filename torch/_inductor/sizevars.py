@@ -283,20 +283,25 @@ class SizeVarAllocator:
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
         # Note [sizevars query caches]
         # Lowering and scheduling ask the same symbolic questions thousands of
-        # times, and sympy caches none of it.  Each of these is a pure query -
-        # it consults the shape env but never guards on it - so _lru_cache can
-        # memoize it and drop everything whenever replacements change.  The
-        # cache has to sit above the sympy relational, not below: constructing
-        # a relational evaluates it, which drags in assumption queries, so by
-        # the time statically_known_true is reached the cost is already paid.
-        # Where a stale answer is possible it is safe in one direction only -
-        # ranges only ever narrow, so a provable fact stays provable and a
-        # stale negative merely forgoes an optimization.
+        # times, and sympy caches none of it.  The cache has to sit above the
+        # sympy relational, not below: constructing a relational evaluates it,
+        # which drags in assumption queries, so by the time
+        # statically_known_true is reached the cost is already paid.
+        #
+        # Two different invalidation rules apply, and picking the wrong one is
+        # a correctness bug rather than a slowdown:
+        #
+        # - _lru_cache watches len(self.replacements) only.  That is enough for
+        #   a substitution (simplify) or a heuristic (optimization_hint), where
+        #   a stale answer costs an optimization at worst.
+        # - _deduction_lru_cache also watches the ShapeEnv's deductive state.
+        #   Use it for anything answering "is this provably true", because such
+        #   an answer changes as the ShapeEnv learns and unlearns facts.
         #
         # Call counts below are from one model's cold compile.
 
         # 19901 calls, 296 distinct, ~17us each.
-        self._statically_known_true_cache = self._lru_cache(
+        self._statically_known_true_cache = self._deduction_lru_cache(
             self._statically_known_true_uncached
         )
         # Built lazily: importing .utils at construction time would cycle.
@@ -304,11 +309,12 @@ class SizeVarAllocator:
         # Asked repeatedly about the same pair while splitting iteration
         # ranges: 9954 calls, 161 distinct, ~67us each because the structural
         # walk falls back to building sympy.Eq(Mod(...), 0) and evaluating it.
-        self._is_multiple_of_cache = self._lru_cache(self._is_multiple_of)
-        # 93k calls, 1373 distinct.
+        self._is_multiple_of_cache = self._deduction_lru_cache(self._is_multiple_of)
+        # 93k calls, 1373 distinct.  A pure substitution, so replacements are
+        # the only input.
         self._simplify_cache = self._lru_cache(self._simplify_uncached)
         # A quarter of all lowering time: 31k calls, a few hundred distinct.
-        self._statically_known_equals_cache = self._lru_cache(
+        self._statically_known_equals_cache = self._deduction_lru_cache(
             self._statically_known_equals_uncached
         )
         # 76k calls, 388 distinct; each miss runs sympy substitution plus
@@ -598,7 +604,9 @@ class SizeVarAllocator:
         if cache is None:
             from .utils import expr_fits_within_32bit_uncached
 
-            cache = self._expr_fits_within_32bit_cache = self._lru_cache(
+            # Soundness query - it decides index width - so it must also
+            # follow the ShapeEnv's deductive state.
+            cache = self._expr_fits_within_32bit_cache = self._deduction_lru_cache(
                 expr_fits_within_32bit_uncached
             )
         return cache(e)
@@ -1326,6 +1334,39 @@ class SizeVarAllocator:
             nonlocal prior_len
             if prior_len != len(self.replacements):
                 prior_len = len(self.replacements)
+                fn_cache.cache_clear()
+            return fn_cache(*args, **kwargs)
+
+        return wrapper
+
+    def _deduction_state(self) -> tuple[int, ...]:
+        """State that a "is this provably true" answer depends on.
+
+        ShapeEnv._version_counter summarises replacements, divisible and
+        deferred runtime asserts.  It deliberately excludes axioms, because
+        ShapeEnv's own caches take axioms as an explicit key argument instead -
+        so a cache sitting above that layer has to watch them itself.  Without
+        that, adding an axiom would not make a newly provable fact visible, and
+        _add_axioms popping what it pushed would leave an answer that was only
+        true inside that scope.
+        """
+        shape_env = self.shape_env
+        return (shape_env._version_counter, len(shape_env.axioms))
+
+    def _deduction_lru_cache(self, fn, maxsize=None):
+        """lru_cache that clears whenever the ShapeEnv's deductive state moves.
+
+        See Note [sizevars query caches] for when to use this over _lru_cache.
+        """
+        fn_cache = functools.lru_cache(maxsize)(fn)
+        prior: tuple[int, ...] | None = None
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            nonlocal prior
+            state = self._deduction_state()
+            if prior != state:
+                prior = state
                 fn_cache.cache_clear()
             return fn_cache(*args, **kwargs)
 
