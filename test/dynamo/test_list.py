@@ -8,7 +8,7 @@ import sys
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import HardwareClassification, make_dynamo_test
 
 
 lst = []
@@ -33,6 +33,8 @@ class CmpKeyForListSort:
 
 
 class TupleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Tuple methods
     # + count
     # + index
@@ -205,6 +207,8 @@ class TupleTests(torch._dynamo.test_case.TestCase):
 
 
 class ListTests(TupleTests):
+    hw_classification = HardwareClassification.GENERIC
+
     # List methods
     # + append
     # + copy
