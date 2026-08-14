@@ -295,7 +295,7 @@ def _generic_event_handle_exporter_consumer(handle, p2c, c2p):
         e1 = torch.Event.from_ipc_handle(
             torch.accelerator.current_device_index(), handle
         )
-        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        torch.get_device_module()._sleep(200000000)  # spin for about 200 ms
         e1.record()
         c2p.put(0)
         # wait for parent process finished synchronization before
@@ -1052,7 +1052,7 @@ if __name__ == "__main__":
         p.start()
 
         c2p.get()  # wait for child to become ready
-        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        torch.get_device_module()._sleep(200000000)  # spin for about 200 ms
         e0.record()
         p2c.put(0)  # notify child event is recorded
 
