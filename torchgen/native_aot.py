@@ -41,6 +41,10 @@ class NativeAotManifest:
     # separate structured groups.
     op: str
     dispatch_key: DispatchKey
+    # Declared UNCONDITIONAL: these kernels are the implementation, so the
+    # consultation gates on the private mask instead of the user-facing
+    # switch (see gen_stub_consultation).
+    unconditional: bool = False
 
     @property
     def decl_id(self) -> str:
@@ -62,6 +66,29 @@ class NativeAotManifest:
         return self.op == g.functional.func.name.name.base
 
 
+def is_unconditional(d) -> bool:
+    """Whether a declaration's kernels ARE the op's implementation rather
+    than a faster route to the same answer (``UNCONDITIONAL``, default
+    False). Such an op's generated gate reads the private mask instead of
+    the user-facing switch, so nothing a caller can reach turns it off.
+
+    Lives here rather than with the rest of the contract in
+    native_aot_decl.py because torchgen is the only consumer: the export
+    tool and gen_aot_lib build the same kernels either way. Read through
+    this accessor, never d.UNCONDITIONAL -- the attribute is optional.
+
+    Rejects a non-bool rather than taking its truthiness: this flag decides
+    whether a user can switch the op off at all, so a typo'd "false" or a
+    stray 0/1 has to fail the build instead of quietly reading as True."""
+    declared = getattr(d, "UNCONDITIONAL", False)
+    if not isinstance(declared, bool):
+        raise RuntimeError(
+            f"{getattr(d, '__file__', getattr(d, 'ATEN_OP', '?'))}: "
+            f"UNCONDITIONAL must be a bool, got {declared!r}"
+        )
+    return declared
+
+
 def parse_native_aot_manifests(
     ops_dir: str,
 ) -> dict[tuple[DispatchKey, str], NativeAotManifest]:
@@ -70,11 +97,14 @@ def parse_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest] = {}
     if not os.path.isdir(ops_dir):
         return manifests
-    # Only the (dispatch_key, op) keys matter here; the declaration objects
-    # they map to are for the export tool and gen_aot_lib.
-    for key_str, op in discover_declarations(ops_dir):
+    # Beyond the (dispatch_key, op) keys, only UNCONDITIONAL is read here --
+    # it picks the gate in the generated wrapper. The rest of each
+    # declaration is for the export tool and gen_aot_lib.
+    for (key_str, op), d in discover_declarations(ops_dir).items():
         key = DispatchKey.parse(key_str)
-        manifests[(key, op)] = NativeAotManifest(op=op, dispatch_key=key)
+        manifests[(key, op)] = NativeAotManifest(
+            op=op, dispatch_key=key, unconditional=is_unconditional(d)
+        )
     return manifests
 
 
@@ -104,15 +134,34 @@ REGISTER_NO_CPU_DISPATCH({m.stub_name()})
 
 def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
     """The structured-wrapper call site. The stub has no kernel unless the
-    AOT library registered one, and the Context switch gates the whole
-    path; a true return means the AOT kernel filled the meta()-allocated
-    outputs and op.impl is skipped.
+    AOT library registered one, and a Context switch gates the whole path;
+    a true return means the AOT kernel filled the meta()-allocated outputs
+    and op.impl is skipped.
+
+    Which switch depends on the declaration. An ordinary op reads
+    allowNativeAot(), the user-facing off switch. An UNCONDITIONAL op reads
+    maskUnconditionalNativeAot() instead: its kernels ARE the
+    implementation, so the user-facing switch must not reach them, but a
+    gate still has to exist for the private hatch that reference
+    computations use -- omitting the check entirely would compile away the
+    only way to obtain stock aten values for such an op.
 
     The emitted comment is not decoration: the last conjunct LAUNCHES the
     kernel, which no reader can infer from the call site alone (asked in
     review of the generated code)."""
     device_type = f"c10::DeviceType::{m.dispatch_key}"
     stub = f"at::native::{m.stub_name()}"
+    if m.unconditional:
+        gate = "!at::globalContext().maskUnconditionalNativeAot()"
+        gate_comment = (
+            "// declared UNCONDITIONAL: these kernels are the implementation, so\n"
+            "// torch._native.set_aot_enabled(False) does NOT mask them; only the\n"
+            "// private reference-computation hatch does. A declined shape still\n"
+            "// falls through to op.impl.\n"
+        )
+    else:
+        gate = "at::globalContext().allowNativeAot()"
+        gate_comment = ""
     return (
         f"// native-AOT: the last conjunct is the LAUNCH, not a query -- it runs the\n"
         f"// AOT kernel into the meta()-allocated outputs and returns true if it\n"
@@ -120,7 +169,8 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
         f"// the stub is never called when AOT is switched off or the device is\n"
         f"// unsupported. op.impl below is the ordinary aten kernel, and it runs in\n"
         f"// exactly those three cases: switched off, unsupported device, or declined.\n"
-        f"if (!(at::globalContext().allowNativeAot() && "
+        f"{gate_comment}"
+        f"if (!({gate} && "
         f"{stub}.is_device_supported({device_type}) && "
         f"{stub}({device_type}, {impl_exprs}))) {{ op.impl({impl_exprs}); }}"
     )

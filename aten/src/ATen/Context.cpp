@@ -982,6 +982,16 @@ void Context::setAllowNativeAot(bool b) {
   allow_native_aot.store(b, std::memory_order_relaxed);
 }
 
+bool Context::maskUnconditionalNativeAot() const {
+  // Relaxed for the same reason as allowNativeAot: an independent flag read
+  // per op call, publishing no data.
+  return mask_unconditional_native_aot.load(std::memory_order_relaxed);
+}
+
+void Context::setMaskUnconditionalNativeAot(bool b) {
+  mask_unconditional_native_aot.store(b, std::memory_order_relaxed);
+}
+
 void Context::setAllowFP16ReductionCPU(bool b) {
   if ( b && !allow_fp16_reduction_cpu) {
     // Check that CPU supports fp16 reductions
