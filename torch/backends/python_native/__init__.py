@@ -182,6 +182,13 @@ class DSLController:
         from this DSL and embedded in the aten kernels themselves) so
         code inside the block sees stock aten behavior, e.g. for
         reference computations in tests.
+
+        Two things stay active by design, because for them the override IS
+        the implementation and masking would change results rather than
+        performance: overrides registered with
+        `unconditional_override=True`, and ops whose AOT declaration sets
+        UNCONDITIONAL. A reference computation that must bypass those too
+        has to nest torch._native._unconditional_masked().
         """
         from torch import _native
 
