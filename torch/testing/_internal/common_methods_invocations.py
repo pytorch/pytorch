@@ -46,7 +46,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
+    TEST_CUDA, skipIfNoFlyDSL
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -4770,6 +4771,23 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
         weight = make_arg(normalized_shape)
         yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
     # weight=None
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
+
+
+def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # Keep one large dispatching shape here; dedicated tests cover the other bands.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((8192, 4096), (4096,), {}),
+        # Exercise row- and N-threshold fallbacks.
+        ((64, 4096), (4096,), {'eps': 1e-5}),
+        ((8, 128), (128,), {'eps': 1e-5}),
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None is declined by the predicate and handled by aten.
     yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
 
 
@@ -23026,6 +23044,49 @@ if "cutedsl" in dsl_ops_by_dsl:
             **_cutedsl_topk_kwargs,
         ),
     ])
+
+if "flydsl" in dsl_ops_by_dsl:
+    from torch._native.ops.norm.flydsl_rmsnorm_impl import (
+        _is_supported_arch as _is_flydsl_rmsnorm_supported_arch,
+    )
+
+    dsl_ops_by_dsl["flydsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="flydsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_flydsl,
+            decorators=[
+                onlyCUDA,
+                skipIfNoFlyDSL,
+                skipCUDAIf(
+                    not (
+                        TEST_CUDA
+                        and _is_flydsl_rmsnorm_supported_arch(
+                            torch.cuda.current_device()
+                        )
+                    ),
+                    "flydsl rms_norm override requires gfx950",
+                ),
+            ],
+            skips=(
+                # Unsupported FlyDSL dtypes fall through to aten and appear supported,
+                # so the probe's dtype set never matches the one listed here. xfail
+                # rather than skip: the failure is a plain deterministic assertion, and
+                # an XPASS is the signal to reconcile the set and restore coverage.
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 

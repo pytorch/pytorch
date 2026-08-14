@@ -1791,6 +1791,7 @@ _dsl_checker = LazyDSLCheck()
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
 TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
+TEST_FLYDSL = LazyVal(lambda: _dsl_checker.is_available('flydsl'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1803,6 +1804,7 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
 skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
+skipIfNoFlyDSL = unittest.skipIf(not TEST_FLYDSL, "FlyDSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
