@@ -1,6 +1,8 @@
+import csv
 import io
 import itertools
 import logging
+import os
 import textwrap
 import tokenize
 from collections import defaultdict
@@ -1065,6 +1067,39 @@ class ComboKernel(Kernel):
         }
         return True
 
+    def _dump_uniform_group_size(
+        self, kernel_name: str | None, num_subkernels: int
+    ) -> None:
+        """
+        Record the uniform group size (number of collapsed sub-kernels) for the
+        current benchmark model, for offline dashboard analysis.
+
+        Only active when TORCHINDUCTOR_UNIFORM_DUMP_CSV is set (the perf
+        dashboard sets it to a path under the uploaded test-reports dir). The
+        model name comes from TORCHINDUCTOR_BENCH_MODEL_NAME, which the dynamo
+        benchmark runner stamps before each model. This is called only when
+        uniform dispatch actually fires (all build guards passed AND the
+        min_kernels gate in _detect_uniform_subkernels passed), so every row is a
+        combo kernel that truly dispatched via uniform dispatch -- exactly the
+        activated set. One row per activated kernel (a model may have several).
+        IO/errors are swallowed -- dumping must never break codegen.
+        """
+        dump_path = os.environ.get("TORCHINDUCTOR_UNIFORM_DUMP_CSV")
+        if not dump_path:
+            return
+        model = os.environ.get("TORCHINDUCTOR_BENCH_MODEL_NAME", "")
+        try:
+            is_new = (
+                not os.path.exists(dump_path) or os.path.getsize(dump_path) == 0
+            )
+            with open(dump_path, "a", newline="") as fh:
+                writer = csv.writer(fh)
+                if is_new:
+                    writer.writerow(["model", "kernel", "num_subkernels"])
+                writer.writerow([model, kernel_name or "", num_subkernels])
+        except OSError as e:
+            log.debug("uniform dispatch: group-size dump failed: %s", e)
+
     def select_dispatch_strategy(self) -> None:
         if self.dispatch_class is not None:
             return
@@ -1800,6 +1835,11 @@ class ComboKernel(Kernel):
         # Step 2: Verify bodies are truly identical and build slot mapping
         if not self._build_uniform_dispatch_info():
             return None
+
+        # Uniform dispatch has fully activated for this combo kernel (min_kernels
+        # gate + all build guards passed); record its group size for the dashboard
+        # activated-only analysis.
+        self._dump_uniform_group_size(name, len(self.sub_kernels))
 
         assert self._uniform_dispatch_info is not None
         slots = self._uniform_dispatch_info["slots"]

@@ -882,6 +882,7 @@ test_perf_for_dashboard() {
   # (32) applies.
   if [[ "$DASHBOARD_TAG" =~ uniformmink-([0-9]+) ]]; then
     export TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MIN_KERNELS="${BASH_REMATCH[1]}"
+    export TORCHINDUCTOR_UNIFORM_DUMP_CSV="$TEST_REPORTS_DIR/uniform_groupsizes.csv"
   fi
 
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough

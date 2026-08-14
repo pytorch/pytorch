@@ -4910,6 +4910,9 @@ def run(runner, args, original_dir=None):
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
             with guard_ctx:
+                # Stamp the current model name so inductor codegen can attribute
+                # per-model artifacts (e.g. uniform-dispatch group-size dump).
+                os.environ["TORCHINDUCTOR_BENCH_MODEL_NAME"] = name
                 runner.run_one_model(
                     name,
                     model,
