@@ -43,11 +43,11 @@ class ReadOnlyTensorWrapper(torch.Tensor):
 
     * the fast ``__dlpack_c_exchange_api__`` C exchange protocol (used by
       tvm-ffi / CuteDSL) points at the const exchange API, which exports
-      through the storage's const data pointer and sets
+      through ``const_data_ptr()`` and sets
       ``DLPACK_FLAG_BITMASK_READ_ONLY``;
     * the ``__dlpack__()`` capsule protocol forces ``read_only=True``.
 
-    Because the export uses the const data pointer, exporting a copy-on-write
+    Because the export uses ``const_data_ptr()``, exporting a copy-on-write
     tensor does not materialize it.
 
     The wrapper is export-only: every torch operation other than the DLPack
@@ -111,11 +111,6 @@ Returns an opaque object (a "DLPack capsule") representing the tensor.
 .. warning::
   Only call ``from_dlpack`` once per capsule produced with ``to_dlpack``.
   Behavior when a capsule is consumed multiple times is undefined.
-
-.. note::
-  ``data`` is the base address of the tensor's storage and ``byte_offset`` the
-  tensor's offset into that storage in bytes; consumers must add
-  ``byte_offset`` to ``data`` to reach the first element.
 
 Args:
     tensor: a tensor to be exported
