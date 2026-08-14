@@ -206,6 +206,8 @@ class TestOrigami(TestCase):
                 )
                 self.assertEqual(exhaustive_case["topk_calls"], 0)
 
+    # TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.15 SIGSEGV.
+    @skipIfRocmVersionAtLeast([7, 15])
     def test_origami_reduces_compile_work_vs_regular_max_autotune(self):
         """Test that origami reduces compile work (GPU benchmarking calls) vs regular max_autotune.
 
