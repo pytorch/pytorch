@@ -209,6 +209,7 @@ def _rocm_sdk_search_dirs(site_packages: Path) -> list[Path]:
     candidates = [
         core,
         core / "rocm_sysdeps" / "lib",
+        core / "host-math" / "lib",
         core / "llvm" / "lib",
         libs,
     ]
