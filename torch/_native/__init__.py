@@ -1,3 +1,4 @@
+import contextlib
 import os
 import warnings
 from functools import cache
@@ -103,9 +104,43 @@ _native_aot_embedded()
 def set_aot_enabled(enabled: bool) -> None:
     """Toggle at::globalContext().allowNativeAot(): the switch every
     generated stub consultation checks, so False gives stock-aten
-    behavior even with the AOT kernel library loaded."""
+    behavior even with the AOT kernel library loaded.
+
+    Does NOT reach ops whose declaration is UNCONDITIONAL: their kernels
+    are the implementation rather than a faster route to the same answer.
+    Use _unconditional_masked() if you need stock aten for one of those."""
     torch._C._set_native_aot_enabled(enabled)
 
 
 def aot_enabled() -> bool:
     return torch._C._get_native_aot_enabled()
+
+
+@contextlib.contextmanager
+def _unconditional_masked():
+    """PRIVATE, for reference computations only: also mask the overrides and
+    AOT kernels that are exempt from the user-facing switches (declaration
+    UNCONDITIONAL / register_op_override(unconditional_override=True)).
+
+    Exists because those two mechanisms otherwise have no off state, which
+    would leave a numerics test with no way to obtain stock aten values for
+    the op -- and a reference silently computed through the override under
+    test is worse than no reference. Not a user knob: masking an
+    unconditional override changes what the op computes.
+
+    Combine with python_native.<dsl>.disabled(), which masks everything
+    else; this only lifts the exemptions."""
+    from torch._native.registry import _set_mask_unconditional, _unconditional_is_masked
+
+    # Read both previous values BEFORE mutating either: setting one and then
+    # failing to read the other would leave the mask latched on for the rest
+    # of the process, silently masking unconditional overrides everywhere.
+    previous_jit = _unconditional_is_masked()
+    previous_aot = torch._C._get_native_aot_unconditional_masked()
+    try:
+        _set_mask_unconditional(True)
+        torch._C._set_native_aot_unconditional_masked(True)
+        yield
+    finally:
+        torch._C._set_native_aot_unconditional_masked(previous_aot)
+        _set_mask_unconditional(previous_jit)
