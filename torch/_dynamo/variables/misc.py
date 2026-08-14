@@ -82,7 +82,6 @@ from .base import (
     Member,
     Method,
     NO_SUCH_SUBOBJ,
-    unsupported_attr,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -523,24 +522,17 @@ class TracebackVariable(VariableTracker):
         val: VariableTracker,
     ) -> VariableTracker:
         name = name_var.as_python_constant()
-        if name == "tb_next":
-            if not self.is_valid_traceback(val):
-                raise_observed_exception(TypeError, tx)
-            if not isinstance(val, (TracebackVariable, ConstantVariable)):
-                raise AssertionError(
-                    f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
-                )
-            if self.has_reference_cycle(val) or (
-                istype(val, TracebackVariable) and val.has_reference_cycle(self)
-            ):
-                raise_observed_exception(ValueError, tx)
-            self.tb_next = val
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None and getset.setter is not None:
+            getset.setter(self, tx, val)
         return variables.ConstantVariable.create(None)
 
-    def _get_tb_next(self, tx: "InstructionTranslatorBase"):
+    def _get_tb_next(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.tb_next
 
-    def _set_tb_next(self, tx: "InstructionTranslatorBase", val):
+    def _set_tb_next(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
         if not self.is_valid_traceback(val):
             raise_observed_exception(TypeError, tx)
         if not isinstance(val, (TracebackVariable, ConstantVariable)):
@@ -554,8 +546,16 @@ class TracebackVariable(VariableTracker):
         self.tb_next = val
         return variables.ConstantVariable.create(None)
 
-    def _get_tb_lineno(self, tx: "InstructionTranslatorBase"):
+    def _get_tb_lineno(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.frame_summary.tp_getattro_impl(tx, "lineno")
+
+    def _get_tb_lasti(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="traceback.tb_lasti not supported",
+            context=f"{self} accessing 'tb_lasti'",
+            explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     # ref: CPython Objects/traceback.c tb_getsetters. `tb_next` is a getset with
     # getter+setter (tb_next_get / tb_next_set, which runs a reference-cycle
@@ -567,9 +567,10 @@ class TracebackVariable(VariableTracker):
         "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
     }
 
-    # ref: CPython Objects/traceback.c tb_memberlist.
+    # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
+    # READONLY. Dynamo graph breaks on read rather than modelling the value.
     tp_members = {
-        "tb_lasti": Member(unsupported_attr("tb_lasti")),
+        "tb_lasti": Member(_get_tb_lasti),
     }
 
     def tp_richcompare_impl(
@@ -679,9 +680,7 @@ class ExceptionVariable(VariableTracker):
             # setter. Anything else becomes a custom instance-dict attribute.
             getset = self.lookup_tp_getset_member(attr)
             if getset is not None and getset.setter is not None:
-                result = getset.setter(self, tx, args[1])
-                if result is not None:
-                    return result
+                getset.setter(self, tx, args[1])
             else:
                 # Arbitrary user attribute -> store in the instance __dict__
                 # via the side effects table.
@@ -709,7 +708,9 @@ class ExceptionVariable(VariableTracker):
                 args=[f"'{self.exc_type.__name__}' object has no attribute '{name}'"],
             )
 
-    def _set_context(self, tx: "InstructionTranslatorBase", val):
+    def _set_context(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
         # Constant can be either an Exception or None
         if not (
             val.is_constant_none()
@@ -728,7 +729,9 @@ class ExceptionVariable(VariableTracker):
         self.set_context(val)
         return variables.ConstantVariable.create(None)
 
-    def _set_cause(self, tx: "InstructionTranslatorBase", val):
+    def _set_cause(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
         if val.is_constant_none() or isinstance(
             val,
             (
@@ -746,7 +749,9 @@ class ExceptionVariable(VariableTracker):
             )
         return variables.ConstantVariable.create(None)
 
-    def _set_suppress_context(self, tx: "InstructionTranslatorBase", val):
+    def _set_suppress_context(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
         if val.is_constant_match(True, False):
             self.__suppress_context__ = val
         else:
@@ -755,7 +760,9 @@ class ExceptionVariable(VariableTracker):
             )
         return variables.ConstantVariable.create(None)
 
-    def _set_traceback(self, tx: "InstructionTranslatorBase", val):
+    def _set_traceback(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
         if not TracebackVariable.is_valid_traceback(val):
             raise_type_error(tx, "__traceback__ must be a traceback or None")
         self.__traceback__ = val
@@ -805,14 +812,16 @@ class ExceptionVariable(VariableTracker):
         "__setstate__": Method(setstate),
     }
 
-    def _get_args(self, tx: "InstructionTranslatorBase"):
+    def _get_args(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(
             tx,
             tuple(self.args),
             source=self.source and AttrSource(self.source, "args"),
         )
 
-    def _set_args(self, tx: "InstructionTranslatorBase", val):
+    def _set_args(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker
+    ) -> VariableTracker:
         # CPython coerces any iterable to a tuple (PySequence_Tuple).
         self.args = unpack_iterable(tx, val)
         return variables.ConstantVariable.create(None)
