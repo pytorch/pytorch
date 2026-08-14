@@ -27,6 +27,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -592,18 +593,14 @@ static PyObject* make_pyobject_dispatch_func(
     PyObject* cpp_dispatch_fn,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    // @allow-raw-throw: the handle must be freed before unwinding
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -613,17 +610,13 @@ static PyObject* make_pyobject_redispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    // @allow-raw-throw: the handle must be freed before unwinding
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
