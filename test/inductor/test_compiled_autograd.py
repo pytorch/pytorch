@@ -1729,6 +1729,28 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_custom_fn_vjp(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def vjp(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MyFn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn)
+
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
             class MyFn(torch.autograd.Function):
