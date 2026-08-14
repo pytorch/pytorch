@@ -303,15 +303,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         !(flag & EventFlag::TIMING),
         "Cannot create IPC handle for event with timing enabled.");
     DeviceIndex orig_device{-1};
-    if (device_index != -1) {
-      C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
-      C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
-    }
-    const auto restore_device = c10::make_scope_exit([&]() {
-      if (orig_device != -1) {
-        C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device));
-      }
-    });
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    const auto restore_device = c10::make_scope_exit(
+        [&]() { C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device)); });
     if (!*event) {
       createEvent(reinterpret_cast<cudaEvent_t*>(event), flag);
     }
@@ -328,23 +323,18 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const std::string& handle_string) const override {
     TORCH_CHECK(
         *event == nullptr,
-        "Event must be nullptr to reconstruct from IPC handle.");
+        "Event is already initialized; cannot reconstruct from IPC handle.");
     TORCH_CHECK(
         handle_string.size() == CUDA_IPC_HANDLE_SIZE,
-        "handle_string must match size CUDA_IPC_HANDLE_SIZE");
+        "IPC handle string doesn't match size CUDA_IPC_HANDLE_SIZE");
     cudaIpcEventHandle_t ipc_handle{};
     std::memcpy(&ipc_handle, handle_string.data(), handle_string.size());
 
     DeviceIndex orig_device{-1};
-    if (device_index != -1) {
-      C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
-      C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
-    }
-    const auto restore_device = c10::make_scope_exit([&]() {
-      if (orig_device != -1) {
-        C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device));
-      }
-    });
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    const auto restore_device = c10::make_scope_exit(
+        [&]() { C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(orig_device)); });
     C10_CUDA_CHECK(cudaIpcOpenEventHandle(
         reinterpret_cast<cudaEvent_t*>(event), ipc_handle));
   }

@@ -227,6 +227,7 @@ def discover_rocm_home() -> str:
 PLATFORM_TAGS: dict[str, str] = {
     "x86_64": "manylinux_2_28_x86_64",
     "aarch64": "manylinux_2_28_aarch64",
+    "riscv64": "manylinux_2_39_riscv64",
 }
 
 
@@ -494,7 +495,13 @@ def main() -> None:
         setup_cuda(cuda_version)
         env_out.update(cuda_build_env(cuda_version, arch))
         print(f"CUDA {cuda_version} environment configured")
-    elif gpu_arch_type in ("cpu", "cpu-aarch64", "cpu-s390x", "cpu-cxx11-abi"):
+    elif gpu_arch_type in (
+        "cpu",
+        "cpu-aarch64",
+        "cpu-riscv64",
+        "cpu-s390x",
+        "cpu-cxx11-abi",
+    ):
         cleanup_cuda_for_cpu_build()
         env_out.update(CPU_BUILD_ENV)
         print("CPU environment configured")
