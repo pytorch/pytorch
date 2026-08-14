@@ -3229,19 +3229,19 @@ class GraphModule(torch.nn.Module):
         primals_13: "Sym(s98)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=2), idx=0)
     ):
         mul: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(primals_3, primals_1);  primals_3 = None
-        mul_3: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(primals_7, primals_1);  primals_7 = None
-        mul_8: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul, primals_2);  mul = None
-        mul_11: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_3, primals_2);  mul_3 = None
-        mul_16: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_8, primals_1);  mul_8 = None
-        mul_19: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_11, primals_1);  mul_11 = None
-        mul_24: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_16, primals_2);  mul_16 = None
-        mul_27: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_19, primals_2);  mul_19 = None
+        mul_1: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(primals_7, primals_1);  primals_7 = None
+        mul_4: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul, primals_2);  mul = None
+        mul_5: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
+        mul_8: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_4, primals_1);  mul_4 = None
+        mul_9: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_5, primals_1);  mul_5 = None
+        mul_12: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_8, primals_2);  mul_8 = None
+        mul_13: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_9, primals_2);  mul_9 = None
         return (
-            mul_24,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a')
+            mul_12,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a')
             primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
             primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
-            mul_27,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b')
+            mul_13,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b')
             primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
             primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
@@ -3269,22 +3269,22 @@ class GraphModule(torch.nn.Module):
         tangents_1: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='a')
         tangents_2: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='b')
     ):
-        mul_32: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = None
-        mul_33: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_2, primals_2);  tangents_2 = None
-        mul_34: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_32, primals_1);  mul_32 = None
-        mul_35: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_33, primals_1);  mul_33 = None
-        mul_36: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_34, primals_2);  mul_34 = None
-        mul_37: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_35, primals_2);  mul_35 = primals_2 = None
-        mul_38: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_36, primals_1);  mul_36 = None
-        mul_39: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_37, primals_1);  mul_37 = primals_1 = None
+        mul_18: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = None
+        mul_19: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_2, primals_2);  tangents_2 = None
+        mul_20: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_18, primals_1);  mul_18 = None
+        mul_21: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_19, primals_1);  mul_19 = None
+        mul_22: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_20, primals_2);  mul_20 = None
+        mul_23: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_21, primals_2);  mul_21 = primals_2 = None
+        mul_24: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_22, primals_1);  mul_22 = None
+        mul_25: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_23, primals_1);  mul_23 = primals_1 = None
         return (
             None,  # None
             None,  # None
-            mul_38,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a')
+            mul_24,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a')
             primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=0)
             primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=0)
-            mul_39,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b')
+            mul_25,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b')
             primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=0)
             primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=0)
