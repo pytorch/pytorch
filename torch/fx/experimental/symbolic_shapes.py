@@ -4153,8 +4153,9 @@ class ShapeEnv:
         # Note [symbolic op memo]
         # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
         # numel and contiguity for every fake tensor recomputes the same
-        # products and comparisons over and over (99.4% of 334k ops in one UMA
-        # compile were repeats of 1937 distinct computations). Memoize on
+        # products and comparisons over and over: on one model over 99% of a
+        # few hundred thousand ops were repeats of about two thousand distinct
+        # computations. Memoize on
         # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
         # valid only while replacements have not moved. SymNode is immutable
         # after construction, so sharing one between call sites is safe. Nodes
