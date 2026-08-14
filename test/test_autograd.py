@@ -1096,6 +1096,20 @@ class TestAutograd(TestCase):
         x.grad = None
         y.grad = None
 
+    def test_prod_higher_order_stability(self):
+        def f(x):
+            return 4000.0 * torch.prod(x)
+
+        x = torch.tensor(
+            [0.03, 1.0, 1.0, 1.0], dtype=torch.float16, requires_grad=True
+        )
+        v = torch.tensor([0.0, 1.0, 0.0, 0.0], dtype=torch.float16)
+        expected = torch.tensor(4000.0, dtype=torch.float16)
+
+        self.assertEqual(torch.autograd.functional.hessian(f, x)[0, 1], expected)
+        self.assertEqual(torch.autograd.functional.vhp(f, x, v)[1][0], expected)
+        self.assertEqual(torch.func.hessian(f)(x.detach())[0, 1], expected)
+
     def test_grad(self):
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)

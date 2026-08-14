@@ -1059,6 +1059,14 @@ Tensor prod_backward(
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
+    if (at::GradMode::is_enabled()) {
+      // The fast path materializes result / input, which is numerically
+      // unstable in higher-order derivatives even when the final Hessian entry
+      // is perfectly in range. Use the safe no-division formula instead when
+      // building a backward graph.
+      return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
+          .view_as(input);
+    }
     return grad * (result / input).conj();
   } else if (!at::GradMode::is_enabled() && zero_idx.sym_size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -1093,6 +1101,10 @@ Tensor prod_backward(
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
+    if (at::GradMode::is_enabled()) {
+      // See comment in the flat prod_backward overload above.
+      return prod_safe_zeros_backward(grad, input, dim);
+    }
     return grad * (result / input).conj();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
