@@ -965,14 +965,8 @@ def generate_tensor_like_override_tests(cls):
                     f"Unsupported argument type {arg_type} for {arg_name} of function {func}"
                 )
 
-        # Special case; this doesn't have a schema but takes a list
-        if getattr(func, "__module__", None) == "torch.foreach":
-            args = inspect.getfullargspec(override)
-            nargs = len(args.args)
-            if args.defaults is not None:
-                nargs -= len(args.defaults)
-            func_args.extend([instance_gen()] for _ in range(nargs))
-        elif func is torch.sym_sum:
+        if func is torch.sym_sum:
+            # This doesn't have a schema but takes a list.
             func_args.append([TensorLike(), TensorLike()])
         elif func in annotated_args:
             for arg in annotated_args[func]:

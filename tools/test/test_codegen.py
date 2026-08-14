@@ -1,32 +1,22 @@
 from __future__ import annotations
 
 import dataclasses
-import tempfile
 import typing
 import unittest
 from collections import defaultdict
-from pathlib import Path
 
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
-from tools.autograd.gen_python_functions import (
-    group_alias_overloads,
-    load_python_module_aliases,
-    load_signatures,
-    method_impl,
-    should_generate_py_binding,
-)
 from tools.pyi.gen_pyi import generate_type_hints
 
 from torchgen import dest
-from torchgen.api.python import PythonSignatureAliased, PythonSignatureGroup, signature
+from torchgen.api.python import PythonSignatureGroup, signature
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
-    parse_native_yaml,
     static_dispatch,
 )
 from torchgen.model import (
@@ -43,18 +33,6 @@ from torchgen.selective_build.selector import SelectiveBuilder
 
 
 class TestGenPyi(unittest.TestCase):
-    def _foreach_signatures(self):
-        native_functions = parse_native_yaml(
-            "aten/src/ATen/native/native_functions.yaml",
-            "aten/src/ATen/native/tags.yaml",
-        ).native_functions
-        native_functions = list(filter(should_generate_py_binding, native_functions))
-        return load_signatures(
-            native_functions,
-            "tools/autograd/deprecated.yaml",
-            method=False,
-        )
-
     def test_inplace_foreach_returns_input_container(self) -> None:
         native_function, _ = NativeFunction.from_yaml(
             {
@@ -78,150 +56,6 @@ class TestGenPyi(unittest.TestCase):
             ") -> tuple[Tensor, ...] | list[Tensor]: ...",
             hints[0],
         )
-
-    def test_public_foreach_alias_manifest(self) -> None:
-        signatures = self._foreach_signatures()
-        aliases = load_python_module_aliases(
-            signatures,
-            "tools/autograd/python_aliases.yaml",
-            module="foreach",
-        )
-
-        groups = group_alias_overloads(aliases)
-        group_names = {str(name) for name in groups}
-        self.assertEqual(len(aliases), 145)
-        self.assertEqual(len(groups), 90)
-        self.assertNotIn("powsum", {pair.signature.name for pair in aliases})
-        self.assertNotIn("copy", group_names)
-        self.assertNotIn("zero", group_names)
-        self.assertIn("copy_", group_names)
-        self.assertIn("zero_", group_names)
-
-        add_signatures = {
-            pair.signature.signature_str()
-            for pair in aliases
-            if pair.signature.name == "add"
-        }
-        self.assertIn(
-            "add(TensorList inputs, TensorList other, *, Scalar alpha=1)",
-            add_signatures,
-        )
-        norm = next(pair for pair in aliases if pair.signature.name == "norm")
-        self.assertEqual(
-            norm.signature.signature_str(),
-            "norm(TensorList inputs, Scalar ord=2, *, ScalarType? dtype=None)",
-        )
-        clamp_min = {
-            pair.signature.signature_str()
-            for pair in aliases
-            if pair.signature.name == "clamp_min"
-        }
-        self.assertIn("clamp_min(TensorList inputs, Scalar min)", clamp_min)
-        pow_inplace = {
-            pair.signature.signature_str()
-            for pair in aliases
-            if pair.signature.name == "pow_"
-        }
-        self.assertIn("pow_(TensorList inputs, Scalar exponent)", pow_inplace)
-
-        for pair in aliases:
-            self.assertIsInstance(pair.signature, PythonSignatureAliased)
-            self.assertEqual(
-                pair.signature.return_arg_index,
-                0 if pair.signature.name.endswith("_") else None,
-            )
-
-        add_name = next(name for name in groups if str(name) == "add")
-        add_impl = method_impl(
-            add_name,
-            "torch.foreach",
-            groups[add_name],
-            method=False,
-        )
-        self.assertIn("THPForeachVariableFunctionsModule", add_impl)
-        self.assertIn("return at::_foreach_add", add_impl)
-
-        add_inplace_name = next(name for name in groups if str(name) == "add_")
-        add_inplace_impl = method_impl(
-            add_inplace_name,
-            "torch.foreach",
-            groups[add_inplace_name],
-            method=False,
-        )
-        self.assertIn("Python alias add_.Scalar", add_inplace_impl)
-        self.assertIn("return self_tensorlist;", add_inplace_impl)
-
-    def test_public_foreach_alias_tracks_reordered_return_argument(self) -> None:
-        alias = [
-            {
-                "module": "foreach",
-                "name": "add_.Scalar(Scalar other, Tensor(a!)[] inputs) -> ()",
-                "aten": "_foreach_add_(inputs, other)",
-            }
-        ]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "python_aliases.yaml"
-            path.write_text(yaml.safe_dump(alias))
-            pairs = load_python_module_aliases(
-                self._foreach_signatures(),
-                str(path),
-                module="foreach",
-            )
-
-        self.assertEqual(len(pairs), 1)
-        self.assertIsInstance(pairs[0].signature, PythonSignatureAliased)
-        self.assertEqual(pairs[0].signature.return_arg_index, 1)
-        groups = group_alias_overloads(pairs)
-        impl = method_impl(
-            next(iter(groups)),
-            "torch.foreach",
-            next(iter(groups.values())),
-            method=False,
-        )
-        self.assertIn("self_tensorlist = _r.args[1]", impl)
-
-    def test_public_foreach_alias_rejects_unused_arguments(self) -> None:
-        alias = [
-            {
-                "module": "foreach",
-                "name": (
-                    "add.Scalar(Tensor[] inputs, Scalar other, "
-                    "bool ignored=False) -> Tensor[]"
-                ),
-                "aten": "_foreach_add(inputs, other)",
-            }
-        ]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "python_aliases.yaml"
-            path.write_text(yaml.safe_dump(alias))
-            with self.assertRaisesRegex(
-                RuntimeError, "unused arguments: \\['ignored'\\]"
-            ):
-                load_python_module_aliases(
-                    self._foreach_signatures(),
-                    str(path),
-                    module="foreach",
-                )
-
-    def test_public_foreach_alias_rejects_duplicate_arguments(self) -> None:
-        alias = [
-            {
-                "module": "foreach",
-                "name": "add.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]",
-                "aten": "_foreach_add(inputs, inputs)",
-            }
-        ]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "python_aliases.yaml"
-            path.write_text(yaml.safe_dump(alias))
-            with self.assertRaisesRegex(
-                RuntimeError, r"duplicate arguments: \['inputs'\]"
-            ):
-                load_python_module_aliases(
-                    self._foreach_signatures(),
-                    str(path),
-                    module="foreach",
-                )
 
 
 class TestCreateDerivative(unittest.TestCase):

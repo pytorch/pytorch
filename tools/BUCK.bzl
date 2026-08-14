@@ -114,7 +114,6 @@ def define_tools_targets(
         resources = [
             "autograd/deprecated.yaml",
             "autograd/derivatives.yaml",
-            "autograd/python_aliases.yaml",
             "autograd/templates/ADInplaceOrViewType.cpp",
             "autograd/templates/Functions.cpp",
             "autograd/templates/Functions.h",
@@ -126,7 +125,6 @@ def define_tools_targets(
             "autograd/templates/annotated_fn_args.py.in",
             "autograd/templates/python_enum_tag.cpp",
             "autograd/templates/python_fft_functions.cpp",
-            "autograd/templates/python_foreach_functions.cpp",
             "autograd/templates/python_functions.cpp",
             "autograd/templates/python_functions.h",
             "autograd/templates/python_linalg_functions.cpp",

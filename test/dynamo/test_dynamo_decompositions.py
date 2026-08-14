@@ -334,7 +334,9 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    def test_public_foreach_add_inplace_fullgraph(self):
+    def test_tracing_public_foreach_api_has_no_graphbreak(self):
+        # WLOG can use any public foreach op, they're all registered similarly
+        # we use an inplace op to test aliasing on inputs being returned
         def fn(tensors):
             return torch.foreach.add_(inputs=tensors, other=1.0)
 
@@ -345,7 +347,7 @@ class GraphModule(torch.nn.Module):
 
         for graph in eager.graphs:
             self.assertIn(
-                torch.foreach.add_,
+                torch._foreach_add_,
                 {node.target for node in graph.graph.nodes},
             )
 
@@ -403,26 +405,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-        def invalid_keywords(tensors, end_tensors, weight):
-            return torch.foreach.lerp_(
-                self=tensors,
-                tensors1=end_tensors,
-                weight=weight,
-            )
-
-        with (
-            torch._dynamo.config.patch(enable_dynamo_decompositions=True),
-            self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "TypeError when making fake tensor call",
-            ),
-        ):
-            torch.compile(invalid_keywords, backend="eager", fullgraph=True)(
-                tensors,
-                end_tensors,
-                weight,
-            )
-
     @skipIfCrossRef
     def test_foreach_lerp_inplace_python_scalar_preserves_op(self):
         """Python scalar weights should use the native foreach_lerp_ op."""
@@ -450,7 +432,7 @@ class GraphModule(torch.nn.Module):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
 
-        lerp_ = torch.foreach.lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.1);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = lerp_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.1);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -486,7 +468,7 @@ class GraphModule(torch.nn.Module):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
 
-        lerp_ = torch.foreach.lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = lerp_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -522,7 +504,7 @@ class GraphModule(torch.nn.Module):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
 
-        lerp_ = torch.foreach.lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = lerp_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -558,21 +540,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-        def invalid_keywords(scalar, exps):
-            return torch.foreach.pow(self=scalar, exponent=exps)
-
-        with (
-            torch._dynamo.config.patch(enable_dynamo_decompositions=True),
-            self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "TypeError when making fake tensor call",
-            ),
-        ):
-            torch.compile(invalid_keywords, backend="eager", fullgraph=True)(
-                scalar,
-                exps,
-            )
-
     def test_foreach_pow_scalar_decomposition_disabled(self):
         """With decompositions disabled, foreach_pow with scalar base should remain.
 
@@ -599,9 +566,9 @@ class GraphModule(torch.nn.Module):
         l_exps_0_ = L_exps_0_
         l_exps_1_ = L_exps_1_
 
-        pow_1 = torch.foreach.pow(2.0, [l_exps_0_, l_exps_1_]);  l_exps_0_ = l_exps_1_ = None
-        getitem: "f32[4]" = pow_1[0]
-        getitem_1: "f32[4]" = pow_1[1];  pow_1 = None
+        _foreach_pow = torch._foreach_pow(2.0, [l_exps_0_, l_exps_1_]);  l_exps_0_ = l_exps_1_ = None
+        getitem: "f32[4]" = _foreach_pow[0]
+        getitem_1: "f32[4]" = _foreach_pow[1];  _foreach_pow = None
         return (getitem, getitem_1)
 """,
         )
@@ -632,9 +599,9 @@ class GraphModule(torch.nn.Module):
         l_exps_0_ = L_exps_0_
         l_exps_1_ = L_exps_1_
 
-        pow_1 = torch.foreach.pow(2.0, [l_exps_0_, l_exps_1_]);  l_exps_0_ = l_exps_1_ = None
-        getitem: "f32[4]" = pow_1[0]
-        getitem_1: "f32[4]" = pow_1[1];  pow_1 = None
+        _foreach_pow = torch._foreach_pow(2.0, [l_exps_0_, l_exps_1_]);  l_exps_0_ = l_exps_1_ = None
+        getitem: "f32[4]" = _foreach_pow[0]
+        getitem_1: "f32[4]" = _foreach_pow[1];  _foreach_pow = None
         return (getitem, getitem_1)
 """,
         )

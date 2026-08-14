@@ -298,7 +298,6 @@ set(GENERATED_CXX_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_2.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_foreach_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nested_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"

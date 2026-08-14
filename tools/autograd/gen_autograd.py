@@ -118,14 +118,8 @@ def gen_autograd_python(
 
     # Generate Python bindings
     deprecated_path = os.path.join(autograd_dir, "deprecated.yaml")
-    python_aliases_path = os.path.join(autograd_dir, "python_aliases.yaml")
     gen_python_functions.gen(
-        out,
-        native_functions_path,
-        tags_path,
-        deprecated_path,
-        python_aliases_path,
-        template_path,
+        out, native_functions_path, tags_path, deprecated_path, template_path
     )
 
 

@@ -10526,7 +10526,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
             sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
             for _ in range(2)
         ]
-        kwargs.pop("scalars", None)
+        kwargs.pop("value", None)
         kwargs.update(self._sample_kwargs(opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype))
         yield ForeachSampleInput(input, *args, **kwargs)
 
@@ -10561,8 +10561,6 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 kwargs = {}
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
                     args.append(rightmost_arg)
-                elif rightmost_arg_type in [ForeachRightmostArgType.Tensor, ForeachRightmostArgType.ScalarList]:
-                    kwargs["scalars"] = rightmost_arg
                 else:
                     kwargs["value"] = rightmost_arg
                 kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
@@ -11426,6 +11424,16 @@ foreach_other_op_db: list[ForeachFuncInfo] = [
         ),
     ),
 ]
+
+
+foreach_op_db: list[OpInfo] = (
+    foreach_unary_op_db
+    + foreach_binary_op_db
+    + foreach_pointwise_op_db
+    + foreach_reduce_op_db
+    + foreach_other_op_db
+)
+
 
 def reference_sign(x):
     if x.dtype == np.bool_:

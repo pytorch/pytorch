@@ -149,7 +149,6 @@ def get_generate_code_bin_outs():
         outs.update({
             "autograd/generated/python_enum_tag.cpp": ["autograd/generated/python_enum_tag.cpp"],
             "autograd/generated/python_fft_functions.cpp": ["autograd/generated/python_fft_functions.cpp"],
-            "autograd/generated/python_foreach_functions.cpp": ["autograd/generated/python_foreach_functions.cpp"],
             "autograd/generated/python_functions.h": ["autograd/generated/python_functions.h"],
             "autograd/generated/python_functions_0.cpp": ["autograd/generated/python_functions_0.cpp"],
             "autograd/generated/python_functions_1.cpp": ["autograd/generated/python_functions_1.cpp"],
