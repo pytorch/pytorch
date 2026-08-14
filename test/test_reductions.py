@@ -100,7 +100,7 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
 
     return result
 
-class TestReductions(TestCase):
+class TestReductionsDevice(TestCase):
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -3666,7 +3666,7 @@ class TestReductions(TestCase):
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
-class TestReductionsOnCPU(TestCase):
+class TestReductions(TestCase):
     # TODO: kill map2_ (and similar) uses and update to compare with NumPy
     # only works on CPU since this uses map2_, which is only supported on CPU
     def _testCSelection(self, torchfn, mathfn):
