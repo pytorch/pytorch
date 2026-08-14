@@ -2239,10 +2239,14 @@
 
 - func: divmod.Scalar(Tensor self, Scalar other) -> (Tensor, Tensor)
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: divmod
   tags: pointwise
 
 - func: divmod.Scalar_Tensor(Scalar self, Tensor other) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: divmod
   tags: pointwise
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor

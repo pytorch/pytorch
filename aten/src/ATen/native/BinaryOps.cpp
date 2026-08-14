@@ -1402,9 +1402,9 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
 
 std::tuple<Tensor, Tensor> divmod(const Scalar& self, const Tensor& other) {
   // Returns a tuple (quotient, remainder) as per Python divmod semantics
-  auto scaler_tensor = wrapped_scalar_tensor(self);
-  auto quotient = at::floor_divide(scaler_tensor, other);
-  auto remainder = at::remainder(scaler_tensor, other);
+  auto scalar_tensor = wrapped_scalar_tensor(self);
+  auto quotient = at::floor_divide(scalar_tensor, other);
+  auto remainder = at::remainder(scalar_tensor, other);
   return std::make_tuple(quotient, remainder);
 }
 
