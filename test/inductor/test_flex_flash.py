@@ -30,6 +30,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
     SM120OrLater,
     SM80OrLater,
     SM90OrLater,
@@ -911,6 +912,7 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     def test_vectorized_group_per_lane_gather(self):
         """Per-lane gather + lane-uniform load in one vec group (#188871).
 
@@ -930,6 +932,7 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     def test_vectorized_group_untraceable_index_op(self):
         """Nonlinear index ops (abs/clamp/min/max) must keep per-lane index
         semantics under vectorization — whether traced to sympy or treated as
@@ -956,6 +959,7 @@ class TestFlexFlash(InductorTestCase):
                 flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     def test_chained_kv_gather(self):
         """Document-style chained gather: the contiguous inner load promotes
         vectorization and the outer loaded-value index is opaque; it must stay
@@ -971,6 +975,7 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     def test_captured_table_int64_index(self):
         """Widening index casts must not break index-fragment materialization (#188871)."""
         seq_len = 512
@@ -983,6 +988,7 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     def test_inline_asm_score_mod(self):
         """score_mod using the inline_asm_elementwise HOP lowers to a PTX call
         inside the generated CuteDSL score_mod."""
@@ -1002,6 +1008,7 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     def test_inline_asm_score_mod_pack2(self):
         """pack=2 inline asm requires compile, so compare flash against the
         compiled Triton backend directly."""
@@ -1052,6 +1059,12 @@ class TestFlexFlash(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
+        if IS_SM8X:
+            if case.requires_grad:
+                self.skipTest("FLASH backward is not supported on SM 8.x")
+            if case.name not in {"basic", "gqa_basic", "mqa_basic"}:
+                self.skipTest("custom score_mod is not supported on SM 8.x")
+
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
@@ -1074,6 +1087,9 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_backward_deterministic_score_mod_cases(
         self, device, dtype, case
     ):
+        if IS_SM8X:
+            self.skipTest("FLASH backward is not supported on SM 8.x")
+
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
@@ -1112,17 +1128,12 @@ class TestFlexFlash(InductorTestCase):
                 )
 
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: (
-            IS_SM8X
-            and not params["case"].requires_grad
-            and params["case"].score_mod_factory is not None
-        ),
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
+        if IS_SM8X and case.score_mod_factory is not None:
+            self.skipTest("custom score_mod is not supported on SM 8.x")
+
         if case.requires_grad:
             major, _ = torch.cuda.get_device_capability()
             if major < 9:
@@ -1162,6 +1173,9 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_backward_deterministic_block_mask_raises(
         self, device, dtype, case
     ):
+        if IS_SM8X and case.score_mod_factory is not None:
+            self.skipTest("custom score_mod is not supported on SM 8.x")
+
         major, _ = torch.cuda.get_device_capability()
         if major >= 10:
             self.skipTest(
@@ -1443,14 +1457,6 @@ class TestFlexFlash(InductorTestCase):
     )
     @decorateIf(
         unittest.expectedFailure,
-        lambda params: (
-            IS_SM8X
-            and not params["case"].requires_grad
-            and params["case"].block_mask_num_heads == 1
-        ),
-    )
-    @decorateIf(
-        unittest.expectedFailure,
         lambda params: SM120OrLater and params["case"].name.endswith("_dim128"),
     )
     @dtypes(torch.float16, torch.bfloat16)
@@ -1491,6 +1497,7 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     @parametrize("case", ["offset", "stride"])
     def test_cutedsl_captured_alias_views_keep_distinct_layouts(self, device, case):
         make_tensor = functools.partial(
@@ -2001,6 +2008,7 @@ class TestFlexFlash(InductorTestCase):
         self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, mask_bias, col_mask)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "FLASH backward is not supported on SM 8.x")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_shared_captured_buffers(self, device, dtype):
         B, H, Q_LEN, KV_LEN, D = 2, 1, 512, 512, 64
@@ -2101,6 +2109,7 @@ class TestFlexFlash(InductorTestCase):
         self.assertNotIn("triton_poi_fused_view", wrapper_code)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -2190,6 +2199,7 @@ class TestFlexFlash(InductorTestCase):
             ).sum().backward()
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "FLASH backward is not supported on SM 8.x")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
@@ -2216,6 +2226,7 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "FLASH backward is not supported on SM 8.x")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_forwards_deterministic_flag(self, device, dtype):
         q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
@@ -2333,6 +2344,7 @@ class TestFlexFlash(InductorTestCase):
             self.assertNotIn('block_sparse_kwargs["dq_write_order_full"]', code_str)
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_generates_cute_hash(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -2374,6 +2386,7 @@ class TestFlexFlash(InductorTestCase):
         self.assertEqual(out.shape, (B, H, M, D))
 
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "FLASH backward is not supported on SM 8.x")
     @dtypes(torch.float16, torch.bfloat16)
     def test_gqa_expand_stride_zero_backward(self, device, dtype):
         """Test GQA backward with expand()-created K/V tensors (stride=0).
@@ -2545,6 +2558,7 @@ class TestFlexFlash(InductorTestCase):
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: IS_SM90,
@@ -3242,6 +3256,7 @@ class TestHierarchicalIndex(InductorTestCase):
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
+    @unittest.skipIf(IS_SM8X, "custom score_mod is not supported on SM 8.x")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
@@ -3359,6 +3374,9 @@ class TestHierarchicalIndex(InductorTestCase):
         )
 
         flash_vs_triton(q, k, v, score_mod=score_mod_4d)
+
+        if not SM100OrLater:
+            self.skipTest("score_mod vec_size 8 requires SM 10.0 or later")
 
         with torch._inductor.config.patch(force_disable_caches=True):
             with force_flex_flash_score_mod_vec_size(8):
