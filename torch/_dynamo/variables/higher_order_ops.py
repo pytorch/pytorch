@@ -6063,6 +6063,10 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
 
 
+class FuseOrErrHigherOrderVariable(BaseHOPVariable):
+    supports_aliasing = True
+
+
 class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.local_map_hop"
     supports_input_mutation = False
@@ -6404,4 +6408,5 @@ _hop_name_to_variable_class = {
     "invoke_subgraph": InvokeSubgraphHigherOrderVariable,
     "custom_function_call": CustomFunctionHigherOrderOperatorVariable,
     "local_map_hop": LocalMapWrappedHigherOrderVariable,
+    "fuse_or_err": FuseOrErrHigherOrderVariable,
 }

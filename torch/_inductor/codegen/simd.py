@@ -4112,6 +4112,20 @@ class SIMDScheduling(BaseScheduling):
             per_subkernel_blocks=per_subkernel_blocks,
         )
 
+        for op_group in combo_kernel_node.fuse_or_err_op_groups:
+            matching_kernels = sum(
+                any(
+                    not op_group.isdisjoint(node.get_operation_names())
+                    for node in nodes
+                )
+                for _, _, nodes in kernel_code_list
+            )
+            if matching_kernels > 1:
+                raise RuntimeError(
+                    "fuse_or_err: region did not compile into at most one kernel; "
+                    f"combo-kernel code generation produced {matching_kernels} kernels"
+                )
+
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
