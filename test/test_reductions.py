@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     parametrize, serialTest,
     gradcheck, gradgradcheck,
     skipIfMPS,
-    skipIfTorchDynamo,
+    skipIfTorchDynamo, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
@@ -101,6 +101,7 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
     return result
 
 class TestReductionsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -3667,6 +3668,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 class TestReductions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     # TODO: kill map2_ (and similar) uses and update to compare with NumPy
     # only works on CPU since this uses map2_, which is only supported on CPU
     def _testCSelection(self, torchfn, mathfn):
