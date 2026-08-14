@@ -8,7 +8,11 @@ from unittest import skipIf
 import torch.nn
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+)
 
 
 try:
@@ -24,6 +28,8 @@ class TestDependencyAPI(PackageTestCase):
     - extern()
     - deny()
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_extern(self):
         buffer = BytesIO()
