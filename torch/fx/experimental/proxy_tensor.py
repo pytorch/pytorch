@@ -538,11 +538,10 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
-# sympy Max/Min are n-ary (they flatten, e.g. Max(a, Max(b, c)) -> Max(a, b, c)),
-# but torch.sym_max/sym_min are binary. Reduce so _build_proxy_for_sym_expr can
-# rebuild flattened expressions as nested binary ops. These are module-level
-# (not lambdas) so they have a qualified name and survive FX codegen/pickling
-# when used as a graph node target.
+# sympy Max/Min/Mul are n-ary, but their corresponding Python functions are
+# binary. Reduce so _build_proxy_for_sym_expr can rebuild flattened expressions
+# as nested binary ops. These are module-level (not lambdas) so they have a
+# qualified name and survive FX codegen/pickling when used as a graph node target.
 def _nary_sym_max(*args: Any) -> Any:
     return functools.reduce(torch.sym_max, args)
 
@@ -551,11 +550,15 @@ def _nary_sym_min(*args: Any) -> Any:
     return functools.reduce(torch.sym_min, args)
 
 
+def _nary_mul(*args: Any) -> Any:
+    return functools.reduce(operator.mul, args)
+
+
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
     Returns a dict mapping sympy types to Python callables
-    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
+    (e.g. ``sympy.Mul`` -> ``_nary_mul``, ``sympy.Add`` -> ``torch.sym_sum``).
     """
     import sympy
 
@@ -587,6 +590,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     # torch.sym_sum handles n-ary integer addition and accepts both
     # sym_sum([a, b, c]) and sym_sum(a, b, c).
     handlers[sympy.Add] = torch.sym_sum
+    handlers[sympy.Mul] = _nary_mul
     return handlers
 
 
