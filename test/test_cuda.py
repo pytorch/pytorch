@@ -11847,7 +11847,8 @@ class TestCudaGreenContexts(TestCase):
 
         self.assertEqual(torch.cuda.current_stream(), caller_stream)
         self.assertEqual(callback_streams, [stream.cuda_stream for stream in streams])
-        torch.cuda.synchronize()
+        for stream in streams:
+            stream.synchronize()
         self.assertEqual(outputs[0], torch.tensor(1.0, device="cuda"))
         self.assertEqual(outputs[1], torch.tensor(2.0, device="cuda"))
 
