@@ -165,7 +165,6 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
-    BaseSetVariable,
     DictKeySetVariable,
     FrozensetVariable,
     OrderedSetClassVariable,
@@ -218,7 +217,6 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
-    "BaseSetVariable",
     "CallMethodVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",

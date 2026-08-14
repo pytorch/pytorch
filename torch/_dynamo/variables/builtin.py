@@ -142,7 +142,7 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import BaseSetVariable, FrozensetVariable, SetVariable
+from .sets import FrozensetVariable, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -2435,7 +2435,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
         if isinstance(
-            args[0], (variables.BaseSetVariable, variables.ConstDictVariable)
+            args[0],
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.ConstDictVariable,
+            ),
         ):
             items = list(args[0].items.keys())
         else:
@@ -3198,7 +3203,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable, BaseSetVariable)):
+        if isinstance(
+            a, (ListVariable, ConstDictVariable, SetVariable, FrozensetVariable)
+        ):
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
             bool_result = self.call_bool(tx, a)
@@ -3371,7 +3378,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
-        if isinstance(arg, (variables.BaseSetVariable, ConstDictVariable)):
+        if isinstance(
+            arg, (variables.SetVariable, variables.FrozensetVariable, ConstDictVariable)
+        ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
         if isinstance(arg, dict):
