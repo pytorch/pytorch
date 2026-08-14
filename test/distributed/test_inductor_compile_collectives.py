@@ -16,7 +16,11 @@ from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 from torch.fx.passes.regional_inductor import regional_inductor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 if not dist.is_available():
@@ -35,6 +39,8 @@ def _make_fx_with_allreduce():
 
 
 class TestInductorCompileCollectives(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
         os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
