@@ -189,6 +189,44 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1:], res[1:])
 
+    def test_heapq_polyfill(self):
+        # heapq is a C extension; Dynamo traces it via the pure-Python polyfill
+        # (torch/_dynamo/polyfills/heapq.py). Counter.most_common(n) routes
+        # through heapq.nlargest, so exercise it too.
+        import heapq
+        from collections import Counter
+
+        def fn(t):
+            h = [5, 3, 8, 1, 9, 2]
+            heapq.heapify(h)
+            heapq.heappush(h, 0)
+            smallest = heapq.heappop(h)
+            big = heapq.nlargest(3, [5, 3, 8, 1, 9, 2])
+            small = heapq.nsmallest(2, [5, 3, 8, 1, 9, 2])
+            common = Counter("abracadabra").most_common(2)
+            return t + 1, smallest, sorted(h), big, small, common
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.ones(3))
+        res = opt(torch.ones(3))
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1:], res[1:])
+
+    def test_polyfill_constant_fold_raises_catchable(self):
+        # Polyfilled constant-foldable functions (e.g. builtins.all) fold through
+        # the original C function. A user exception raised during the fold must
+        # surface as the real catchable exception, not an uncatchable
+        # InternalTorchDynamoError.
+        def fn(t):
+            try:
+                all(5)  # 'int' object is not iterable
+                return t + 1
+            except TypeError:
+                return t - 1
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(torch.ones(3)), fn(torch.ones(3)))
+
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
         from functools import lru_cache
@@ -4133,6 +4171,28 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor([1.0])
         z = fn(x)
         self.assertEqual(z, x + 1 + 3 + 5 + 7)
+
+    def test_disallow_instantiation_type_call(self):
+        # C types with Py_TPFLAGS_DISALLOW_INSTANTIATION (NULL tp_new) raise a
+        # catchable TypeError when called, matching CPython's type_call.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            msgs = []
+            for ty in (type(iter(range(3))), type(iter([]))):
+                try:
+                    ty(1, 3, 1)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return x + 1, msgs
+
+        _, msgs = fn(torch.tensor([1.0]))
+        self.assertEqual(
+            msgs,
+            [
+                "cannot create 'range_iterator' instances",
+                "cannot create 'list_iterator' instances",
+            ],
+        )
 
     @make_test
     def test_range_iterator(a, b):
