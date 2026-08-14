@@ -10,10 +10,16 @@ from torch._dynamo.repro.aoti import (
     get_module_string,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class MinifierUtilsTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_invalid_output_user_error_classification(self):
         class SimpleModel(torch.nn.Module):
             def forward(self, x):

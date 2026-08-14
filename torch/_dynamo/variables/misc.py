@@ -32,7 +32,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, cast, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -90,6 +90,11 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 
 
 if TYPE_CHECKING:
+    # numpy is an optional runtime dependency, so it is only imported for the
+    # dtype annotation below. Everything that actually touches numpy at runtime
+    # goes through torch._numpy or a guarded import inside a class body.
+    import numpy as np
+
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -1793,7 +1798,7 @@ class PythonModuleVariable(VariableTracker):
 
 
 class TypingVariable(VariableTracker):
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -1810,7 +1815,7 @@ class TypingVariable(VariableTracker):
                 explanation=f"Cannot subscript typing construct {self.value} with a non-constant key.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        new_typing = self.value[key.as_python_constant()]
+        new_typing = cast(Any, self.value)[key.as_python_constant()]
         return TypingVariable(new_typing)
 
     def tp_richcompare_impl(
@@ -1950,7 +1955,7 @@ class NumpyVariable(VariableTracker):
 
     constant_fold_functions = (tnp.issubdtype,)
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -2018,7 +2023,7 @@ class NumpyVariable(VariableTracker):
         from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
-        func = get_np_to_tnp_map().get(self.value)
+        func = get_np_to_tnp_map().get(cast(BuiltinFunctionType, self.value))
         if func is None:
             unimplemented(
                 gb_type="attempted to trace numpy function unsupported by PyTorch",
@@ -2039,7 +2044,7 @@ class NumpyVariable(VariableTracker):
         ) is not None:
             try:
                 return collection_variable_typ(
-                    self.value(
+                    self.as_python_constant()(
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     )
@@ -2110,7 +2115,10 @@ class NumpyVariable(VariableTracker):
         )
 
     def as_python_constant(self) -> BuiltinFunctionType:
-        return self.value
+        # The declared type is what callers rely on (they call the result), but
+        # the builder also routes numpy dtypes and `np._CopyMode` here, so this
+        # is a widening the annotation already claimed before `value` was typed.
+        return cast(BuiltinFunctionType, self.value)
 
     def as_proxy(self) -> Any:
         if config.trace_numpy:
@@ -2288,7 +2296,7 @@ class DebuggingVariable(VariableTracker):
     registered to config.reorderable_logging_functions.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -2315,7 +2323,7 @@ class DebuggingVariable(VariableTracker):
             # For export cases, we can just make debugging functions no-ops
             return ConstantVariable.create(None)
 
-        if not self.can_reorder_logs(self.value, args, kwargs):
+        if not self.can_reorder_logs(args, kwargs):
             unimplemented(
                 gb_type="attempted to reorder a debugging function that can't actually be reordered",
                 context=f"fn: {self.value}, args: {args}, kwargs: {kwargs}",
@@ -2338,7 +2346,7 @@ class DebuggingVariable(VariableTracker):
         return self.source.reconstruct(codegen)
 
     @staticmethod
-    def can_reorder_logs(fn: Any, args: Sequence[Any], kwargs: dict[str, Any]) -> bool:
+    def can_reorder_logs(args: Sequence[Any], kwargs: dict[str, Any]) -> bool:
         """
         Run some additional checks for what sort of function calls can we
         actually reorder.
@@ -2367,7 +2375,7 @@ class IgnoredFunctionVariable(VariableTracker):
     Represents a call to an arbitrary function that should be ignored.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -2457,7 +2465,7 @@ class ConstantLikeVariable(VariableTracker):
         # type: ignore[misc, assignment]
         np_dtype = type("invalid_type", (), {})
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -2547,7 +2555,11 @@ class NumpyDTypeVariable(ConstantLikeVariable):
         np.dtype() objects are serialized as strings, torch._numpy wrappers will normalize to the torch dtype.
         This also handles unsupported things nicely (i.e. structured arrays and object arrays).
         """
-        return self.value.type.__name__
+        # All three construction paths produce a real numpy.dtype: the
+        # np_constant_collections_map entry for tnp.dtype, builder.py's
+        # is_numpy_dtype branch, and ConstantLikeVariable.getattro_impl's
+        # isinstance(result, self.np_dtype) branch.
+        return cast("np.dtype[Any]", self.value).type.__name__
 
 
 np_constant_collections_map = {
