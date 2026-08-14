@@ -51,19 +51,27 @@ def _f32_to_ord(val):
     return arith.select(is_nan, fx.Int32(0x7FFFFFFF), ords)
 
 
-def _make_topk_storage(k: int, block_threads: int):
+def _make_topk_storage(k: int, sort_len: int, block_threads: int):
+    @fx.struct
+    class CounterStorage:
+        s_write_ctr: Array[Int32, 1, 4]
+        s_eq_ctr: Array[Int32, 1, 4]
+
+    @fx.union
+    class PhaseStorage:
+        s_hist: Array[Int32, 256, 16]
+        s_counters: CounterStorage
+        s_scan: Array[Int32, block_threads + 1, 16]
+        s_ords: Array[Int32, sort_len, 16]
+
     @fx.struct
     class SharedStorage:
-        s_hist: Array[Int32, 256, 16]
+        s_phase: PhaseStorage
         s_prefix: Array[Int32, 1, 4]
         s_mask: Array[Int32, 1, 4]
         s_rem_k: Array[Int32, 1, 4]
-        s_write_ctr: Array[Int32, 1, 4]
-        s_eq_ctr: Array[Int32, 1, 4]
-        s_scan: Array[Int32, block_threads + 1, 16]
-        s_vals: Array[Float32, k, 16]
-        s_ords: Array[Int32, k, 16]
-        s_idxs: Array[Int32, k, 16]
+        s_vals: Array[Float32, sort_len, 16]
+        s_idxs: Array[Int32, sort_len, 16]
         s_eq_vals: Array[Float32, k, 16]
         s_eq_idxs: Array[Int32, k, 16]
 
@@ -71,14 +79,15 @@ def _make_topk_storage(k: int, block_threads: int):
 
 
 def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
-    block_threads = max(k, _N_HIST_BINS)
+    num_stages = (k - 1).bit_length()
+    sort_len = 1 << num_stages
+    block_threads = max(sort_len, _N_HIST_BINS)
     warp_size = 32 if is_rdna_arch(get_rocm_arch()) else 64
     num_warps = block_threads // warp_size
     tile = block_threads * _VEC
     vec_iters = n // tile
     vec_tail_start = vec_iters * tile
     scalar_tail_iters = (n - vec_tail_start + block_threads - 1) // block_threads
-    num_stages = (k - 1).bit_length()
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def radix_select_topk_kernel(
@@ -98,21 +107,25 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
         row_indices = fx.slice(indices_buf, (row, None))
         input_div = fx.logical_divide(row_in, fx.make_layout(_VEC, 1))
         copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), 32)
-        storage = (
-            fx.SharedAllocator().allocate(_make_topk_storage(k, block_threads)).peek()
+        storage = fx.SharedAllocator().allocate(
+            _make_topk_storage(k, sort_len, block_threads)
         )
-        s_hist = storage.s_hist.view(fx.make_layout(_N_HIST_BINS, 1))
-        s_prefix = storage.s_prefix.view(fx.make_layout(1, 1))
-        s_mask = storage.s_mask.view(fx.make_layout(1, 1))
-        s_rem_k = storage.s_rem_k.view(fx.make_layout(1, 1))
-        s_write_ctr = storage.s_write_ctr.view(fx.make_layout(1, 1))
-        s_eq_ctr = storage.s_eq_ctr.view(fx.make_layout(1, 1))
-        s_scan = storage.s_scan.view(fx.make_layout(block_threads + 1, 1))
-        s_vals = storage.s_vals.view(fx.make_layout(k, 1))
-        s_ords = storage.s_ords.view(fx.make_layout(k, 1))
-        s_idxs = storage.s_idxs.view(fx.make_layout(k, 1))
-        s_eq_vals = storage.s_eq_vals.view(fx.make_layout(k, 1))
-        s_eq_idxs = storage.s_eq_idxs.view(fx.make_layout(k, 1))
+        s_hist = storage.s_phase.s_hist.peek().view(fx.make_layout(_N_HIST_BINS, 1))
+        s_prefix = storage.s_prefix.peek().view(fx.make_layout(1, 1))
+        s_mask = storage.s_mask.peek().view(fx.make_layout(1, 1))
+        s_rem_k = storage.s_rem_k.peek().view(fx.make_layout(1, 1))
+        s_write_ctr = storage.s_phase.s_counters.s_write_ctr.peek().view(
+            fx.make_layout(1, 1)
+        )
+        s_eq_ctr = storage.s_phase.s_counters.s_eq_ctr.peek().view(fx.make_layout(1, 1))
+        s_scan = storage.s_phase.s_scan.peek().view(
+            fx.make_layout(block_threads + 1, 1)
+        )
+        s_vals = storage.s_vals.peek().view(fx.make_layout(sort_len, 1))
+        s_ords = storage.s_phase.s_ords.peek().view(fx.make_layout(sort_len, 1))
+        s_idxs = storage.s_idxs.peek().view(fx.make_layout(sort_len, 1))
+        s_eq_vals = storage.s_eq_vals.peek().view(fx.make_layout(k, 1))
+        s_eq_idxs = storage.s_eq_idxs.peek().view(fx.make_layout(k, 1))
 
         def load_vec_f32(idx):
             r = fx.make_rmem_tensor(4, Float32)
@@ -255,7 +268,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
         if tid == 0:
             s_write_ctr[0] = 0
             s_eq_ctr[0] = 0
-        if tid < fx.Int32(k):
+        if tid < fx.Int32(sort_len):
             s_vals[tid] = float("-inf")
             s_idxs[tid] = 0
         gpu.barrier()
@@ -375,23 +388,31 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
 
         gpu.barrier()
 
+        def store_entry(ords, vals, idxs, pos, ord_value, val_value, idx_value):
+            ords[pos] = ord_value
+            vals[pos] = val_value
+            idxs[pos] = idx_value
+
         # Phase 3: cooperative bitonic sort.
         active = tid < fx.Int32(k)
-        sort_tid = active.select(tid, 0)
-        if active:
-            s_ords[tid] = _f32_to_ord(s_vals[sort_tid])
+        sort_active = tid < fx.Int32(sort_len)
+        sort_tid = sort_active.select(tid, 0)
+        if sort_active:
+            if active:
+                s_ords[tid] = _f32_to_ord(s_vals[sort_tid])
+            else:
+                s_ords[tid] = fx.Int32(_i32_const(1 << 31))
         gpu.barrier()
 
-        # Support non-power-of-two K by ignoring compare partners outside K.
-        # The bitonic network builds ascending blocks first, then the final
-        # stage merges everything into descending order.
+        # The padded bitonic network builds ascending blocks first, then the
+        # final stage merges everything into descending order.
         for stage in range_constexpr(num_stages):
             for sub_rev in range_constexpr(stage + 1):
                 sub = stage - sub_rev
                 step_size = 1 << sub
                 raw_partner = tid ^ fx.Int32(step_size)
-                partner_active = raw_partner < fx.Int32(k)
-                partner = (active & partner_active).select(raw_partner, 0)
+                partner_active = raw_partner < fx.Int32(sort_len)
+                partner = (sort_active & partner_active).select(raw_partner, 0)
                 my_o = s_ords[sort_tid]
                 my_i = s_idxs[sort_tid]
                 p_o = s_ords[partner]
@@ -405,53 +426,53 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
                     self_lt_partner = (my_o < p_o) | ((my_o == p_o) & (my_i > p_i))
                     self_gt_partner = (my_o > p_o) | ((my_o == p_o) & (my_i < p_i))
                 block_dir = (tid >> fx.Int32(stage + 1)) & 1
-                if active & partner_active:
+                if sort_active & partner_active:
                     if stage < num_stages - 1:
                         if tid < partner:
                             if block_dir == 0:
                                 if self_gt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                             else:
                                 if self_lt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                         else:
                             if block_dir == 0:
                                 if self_lt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                             else:
                                 if self_gt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                     else:
                         if tid < partner:
                             if block_dir == 0:
                                 if self_lt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                             else:
                                 if self_gt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                         else:
                             if block_dir == 0:
                                 if self_gt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                             else:
                                 if self_lt_partner:
-                                    s_ords[tid] = p_o
-                                    s_vals[tid] = p_v
-                                    s_idxs[tid] = p_i
+                                    store_entry(
+                                        s_ords, s_vals, s_idxs, tid, p_o, p_v, p_i
+                                    )
                 gpu.barrier()
 
         # Phase 4: results to gmem.
@@ -518,10 +539,10 @@ def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
             val_bits = ord32 ^ ((ord32 >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
             return val_bits.bitcast(Float32), ~inv_idx
 
-        def cas_desc(arr, i: int, j: int):
+        def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
             b = arr[j]
-            swap = a < b
+            swap = a < b if descending else a > b
             arr[i] = swap.select(b, a)
             arr[j] = swap.select(a, b)
 
@@ -534,14 +555,7 @@ def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
                             j = i ^ step
                             if j > i:
                                 block_dir = (i >> (s + 1)) & 1
-                                if block_dir == 0:
-                                    cas_desc(arr, i, j)
-                                else:
-                                    a = arr[i]
-                                    b = arr[j]
-                                    swap = a > b
-                                    arr[i] = swap.select(b, a)
-                                    arr[j] = swap.select(a, b)
+                                compare_and_swap(arr, i, j, block_dir == 0)
 
         def bitonic_merge_desc(arr, length: int, levels: int):
             if length > 1:
@@ -551,7 +565,7 @@ def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
                     for i in range_constexpr(length // merge_len):
                         start_i = i * merge_len
                         for j in range_constexpr(step):
-                            cas_desc(arr, start_i + j, start_i + j + step)
+                            compare_and_swap(arr, start_i + j, start_i + j + step, True)
 
         def topk_merge_desc(a, b):
             for i in range_constexpr(k):

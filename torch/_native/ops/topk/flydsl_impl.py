@@ -23,23 +23,20 @@ from ._common import (
 
 
 _RUNTIME_AVAILABLE: bool = fu.runtime_available()
-_RADIX_KS: frozenset[int] = frozenset({64, 128, 256, 512, 1024})
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
 # Per-K register ranges tuned on MI355.  K=32 loses to aten in the measured
 # range.  A separate row-count gate below handles GPU underutilization.
 _REGISTER_N_RANGE: tuple[int, int] = (1024, 8192)
 
-# Per-K radix ranges tuned on MI355.  Below these N ranges either
-# correctness is not guaranteed for the current FlyDSL radix kernel, or
-# aten wins.  A separate row-count gate below handles GPU underutilization.
-_RADIX_N_RANGE: dict[int, tuple[int, int]] = {
-    64: (16384, 32768),
-    128: (16384, 32768),
-    256: (16384, 32768),
-    512: (16384, 32768),
-    1024: (32768, 65536),
-}
+# Per-K radix ranges tuned on MI355.
+# A separate row-count gate below handles GPU underutilization.
+# K>1024 exceeds the device workgroup size limit.
+_RADIX_GATE_RANGES = (
+    ((64, 320), (4096, 32768)),
+    ((384, 768), (32768, 131072)),
+    ((832, 1024), (32768, 262144)),
+)
 _TOPK_KERNELS = None
 
 
@@ -52,19 +49,25 @@ def _register_wins(k: int, n: int) -> bool:
     return n_min <= n <= n_max
 
 
+def _radix_n_range(k: int) -> tuple[int, int] | None:
+    for (k_min, k_max), n_range in _RADIX_GATE_RANGES:
+        if k_min <= k <= k_max:
+            return n_range
+    return None
+
+
 def _radix_wins(k: int, n: int) -> bool:
-    n_range = _RADIX_N_RANGE.get(k)
-    if n_range is not None:
-        n_min, n_max = n_range
-        if n_min <= n <= n_max:
-            return True
-    return False
+    n_range = _radix_n_range(k)
+    if n_range is None:
+        return False
+    n_min, n_max = n_range
+    return n_min <= n <= n_max
 
 
 def _kernel_for(k: int, n: int) -> str | None:
     if (k in _REGISTER_KS) and _is_pow2(n) and _register_wins(k, n):
         return "register"
-    if k in _RADIX_KS and _radix_wins(k, n):
+    if _radix_wins(k, n):
         return "radix"
     return None
 
