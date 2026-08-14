@@ -152,7 +152,7 @@ RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 
 FROM cpu_final as rocm_final_legacy
-ARG ROCM_VERSION=6.0
+ARG ROCM_VERSION
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ARG DEVTOOLSET_VERSION=13
