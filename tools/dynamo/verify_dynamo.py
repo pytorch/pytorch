@@ -119,8 +119,12 @@ def check_rocm():
     if not torch.cuda.is_available() or torch.version.hip is None:
         return None
 
-    # Extracts main ROCm version from full string
-    torch_rocm_ver = TorchVersion(".".join(list(torch.version.hip.split(".")[0:2])))
+    # Extracts main ROCm SDK version from full string. Fall back to the HIP
+    # version for builds created before torch.version.rocm was available.
+    torch_rocm_version = getattr(torch.version, "rocm", None) or torch.version.hip
+    torch_rocm_ver = TorchVersion(
+        ".".join(list(torch_rocm_version.split(".")[0:2]))
+    )
 
     # check if torch rocm version matches system rocm version
     rocm_ver = get_rocm_version()
