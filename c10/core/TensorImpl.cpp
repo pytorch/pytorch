@@ -1097,7 +1097,7 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 
 } // namespace impl
 
-std::shared_ptr<c10::SafePyObject> FakeTensorMode::pin_pyobj() {
+std::shared_ptr<c10::SafePyObject> FakeTensorMode::cache_pyobj_cpp_fake_mode() {
   std::lock_guard<std::mutex> lock(pyobj_pin_mutex_);
   if (auto pin = pyobj_pin_.lock()) {
     return pin;
