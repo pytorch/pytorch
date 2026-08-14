@@ -131,8 +131,9 @@ struct Event final {
     return impl_.eventId();
   }
 
-  // Returns an IPC handle string for sharing this event with another process,
-  // lazily initializing the backend event if needed.
+  // Returns an IPC handle string for sharing this event with another process.
+  // If the event was not initialized, it will be eagerly initialized on the
+  // current device.
   std::string ipcHandle() {
     return impl_.ipcHandle();
   }
