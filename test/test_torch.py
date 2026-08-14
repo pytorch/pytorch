@@ -51,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyCPU,
+    onlyCUDA, onlyCPU, onlyOn,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA)
@@ -3510,6 +3510,127 @@ class TestTorchDeviceType(TestCase):
             idx = make_idx(size_i, high=1)
             out = source.take(idx)
             self.assertEqual(out.item(), source.item())
+
+    @onlyOn(["cpu", "cuda"])
+    @parametrize(
+        "index_dtype",
+        (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ),
+    )
+    def test_take_integer_index(self, device, index_dtype):
+        source = torch.arange(256, device=device).reshape(16, 16).t()
+        last_index = -1 if torch.iinfo(index_dtype).min < 0 else 255
+        index = torch.tensor(
+            [[0, 127], [64, last_index]], device=device, dtype=index_dtype
+        ).t()
+        expected = torch.take(source, index.to(torch.long))
+
+        self.assertFalse(source.is_contiguous())
+        self.assertFalse(index.is_contiguous())
+        self.assertEqual(torch.take(source, index), expected)
+
+        out = torch.empty_like(index, dtype=source.dtype)
+        self.assertEqual(torch.take(source, index, out=out), expected)
+        self.assertEqual(out, expected)
+
+    @onlyOn(["cpu", "cuda"])
+    @parametrize(
+        "index_dtype",
+        (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ),
+    )
+    def test_take_integer_index_backward(self, device, index_dtype):
+        source = torch.arange(4.0, device=device, requires_grad=True)
+        index = torch.tensor([0, 2, 2], device=device, dtype=index_dtype)
+
+        torch.take(source, index).sum().backward()
+
+        self.assertEqual(source.grad, torch.tensor([1.0, 0.0, 2.0, 0.0], device=device))
+
+    @onlyCPU
+    @parametrize(
+        "index_dtype",
+        (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ),
+    )
+    def test_take_integer_index_out_of_bounds(self, device, index_dtype):
+        source = torch.arange(16, device=device)
+        dtype_info = torch.iinfo(index_dtype)
+        invalid_indices = [source.numel(), dtype_info.max]
+        if dtype_info.min < 0:
+            invalid_indices.extend([-source.numel() - 1, dtype_info.min])
+
+        for invalid_index in invalid_indices:
+            index = torch.tensor([invalid_index], device=device, dtype=index_dtype)
+            with self.assertRaisesRegex(IndexError, "out of range"):
+                torch.take(source, index)
+
+    @onlyCUDA
+    @slowTest
+    @parametrize(
+        "index_dtype,invalid_index",
+        (
+            (torch.uint8, 16),
+            (torch.uint64, torch.iinfo(torch.uint64).max),
+        ),
+    )
+    def test_take_integer_index_out_of_bounds_cuda(
+        self, device, index_dtype, invalid_index
+    ):
+        # Run in a subprocess because a CUDA device-side assert poisons the
+        # process and makes subsequent CUDA tests fail.
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+class TestTakeOutOfBounds(TestCase):
+    def test_take_out_of_bounds(self):
+        source = torch.arange(16, device={device!r})
+        index = torch.tensor(
+            [{invalid_index}], device={device!r}, dtype={index_dtype}
+        )
+        torch.take(source, index)
+        torch.cuda.synchronize()
+
+if __name__ == "__main__":
+    run_tests()
+""")
+        has_cuda_assert = "device-side assert triggered" in stderr
+        has_hip_assert = (
+            "launch failure" in stderr
+            or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+            or "illegal memory access" in stderr
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
 
     # FIXME: find a test suite for the put operator
     # The bool instance does not work on GPU. See

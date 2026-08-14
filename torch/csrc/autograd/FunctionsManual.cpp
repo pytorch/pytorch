@@ -7824,13 +7824,14 @@ Tensor take_backward(
     const Tensor& self,
     const Tensor& indices) {
   Tensor grad_self = at::zeros_like(self);
+  Tensor long_indices = indices.to(at::kLong);
   // For Composite Compliance,
   // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
   if (areAnyTensorSubclassLike({grad, indices})) {
-    return grad_self.put(indices, grad, true);
+    return grad_self.put(long_indices, grad, true);
   }
-  return grad_self.put_(indices, grad, true);
+  return grad_self.put_(long_indices, grad, true);
 }
 
 Tensor to_sparse_backward(
