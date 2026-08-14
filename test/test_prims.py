@@ -290,6 +290,10 @@ class TestPrims(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
+
+class TestPrimsBasic(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_functional_rng_wrapper_with_positional_device(self):
         import torch._inductor.inductor_prims
 
@@ -300,9 +304,6 @@ class TestPrims(TestCase):
         self.assertEqual(rng_state.device.type, "cpu")
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
-
-class TestPrimsBasic(TestCase):
-    hw_classification = HardwareClassification.GENERIC
 
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
