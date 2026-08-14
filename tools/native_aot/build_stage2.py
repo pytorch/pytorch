@@ -21,15 +21,19 @@ not applicable to this build:
   * no toolchain targets this build's backend (Toolchain.BACKENDS); a
     ROCm build skips here today, and gains AOT support by adding a
     toolchain class rather than by editing this gate
-  * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
-    for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
-    arch list is unset and a supported GPU is present
+  * TORCH_CUDA_ARCH_LIST contains no exportable arch (Hopper and
+    Blackwell today -- see export.EXPORTABLE_ARCHES); on-device export
+    runs when the arch list is unset and a supported GPU is present.
+    Several exportable arches export one tree per arch, and the
+    generated stub selects per compute capability at runtime.
 
-Past those checks the DSL runtimes are REQUIRED, not optional: a
-toolchain that targets this backend was asked for declared kernels, and
-a wheel missing some of them underperforms silently instead of failing.
-So a missing runtime -- or any later failure -- fails the build. Set
-TORCH_NATIVE_AOT=0 to build without embedded DSL kernels.
+Only once every one of those checks has passed are the DSL runtimes
+REQUIRED, not optional: a toolchain that targets this backend was asked
+for declared kernels, and a wheel missing some of them underperforms
+silently instead of failing. So a missing runtime -- or any later
+failure -- fails the build, while a build that was going to skip anyway
+never demands them. Set TORCH_NATIVE_AOT=0 to build without embedded DSL
+kernels.
 """
 
 import os
@@ -85,6 +89,28 @@ def _torch_probe(expr: str) -> bool:
     return ok
 
 
+def _artifact_size(art: str) -> str:
+    """Summarize what is about to be linked in, as "N object(s), M.M MiB".
+
+    Reported because nothing else states it: these bytes land in
+    libtorch_cuda, and they scale with declarations x precompile points x
+    arches -- so a wheel can grow tens of MiB from an arch added to
+    TORCH_CUDA_ARCH_LIST, with no line in the build log that says so."""
+    from tools.native_aot import toolchains
+
+    # Every artifact ext except headers: a .o is linked in and a .cubin is
+    # embedded as bytes by its launcher, but an ABI header only feeds the
+    # compiler and contributes nothing to the shipped library.
+    exts = toolchains.all_artifact_exts() - {".h"}
+    sizes = [
+        os.path.getsize(os.path.join(root, fn))
+        for root, _, files in os.walk(art)
+        for fn in files
+        if os.path.splitext(fn)[1] in exts
+    ]
+    return f"{len(sizes)} object(s), {sum(sizes) / (1 << 20):.1f} MiB"
+
+
 def should_run() -> bool:
     if os.getenv("TORCH_NATIVE_AOT", "1") == "0":
         _report("disabled (TORCH_NATIVE_AOT=0)")
@@ -108,25 +134,6 @@ def should_run() -> bool:
         _report(f"skipped (no AOT toolchain targets {backend})")
         return False
 
-    # Past here the backend HAS toolchains, so their runtimes are REQUIRED,
-    # not optional: shipping a wheel with only some of the declared kernels
-    # is the silent-partial-artifact failure the sidecar and orphan checks
-    # exist to prevent, and it would show up as a performance regression
-    # rather than an error. Set TORCH_NATIVE_AOT=0 to opt out of AOT
-    # kernels entirely -- that is the supported way to build without the
-    # DSL wheels.
-    gaps = {
-        k: tc.missing_runtimes() for k, tc in usable.items() if tc.missing_runtimes()
-    }
-    if gaps:
-        detail = "; ".join(
-            f"{k} needs {', '.join(ms)}" for k, ms in sorted(gaps.items())
-        )
-        raise RuntimeError(
-            f"native-AOT stage 2: this {backend} build has AOT toolchains whose "
-            f"runtimes are not installed ({detail}). Install them, or set "
-            f"TORCH_NATIVE_AOT=0 to build without embedded DSL kernels."
-        )
     arch_list = os.getenv("TORCH_CUDA_ARCH_LIST")
     if arch_list:
         from tools.native_aot import export as export_mod
@@ -140,20 +147,50 @@ def should_run() -> bool:
             )
             return False
         if len(archs) > 1:
-            # export nests artifacts as <dir>/<arch>/<op>/ for >1 arch, but
-            # gen_aot_lib scans one level and the embedded-link globs are
-            # one level deep, so both would find nothing and the build would
-            # succeed shipping ZERO kernels. Loud beats silently-partial.
-            raise RuntimeError(
-                f"native-AOT stage 2: TORCH_CUDA_ARCH_LIST={arch_list!r} names "
-                f"{len(archs)} exportable arches ({' '.join(archs)}). Multi-arch "
-                f"export nests artifacts per arch, which the generator and the "
-                f"CMake globs do not walk, so no kernels would be linked. Build "
-                f"one exportable arch at a time, or set TORCH_NATIVE_AOT=0."
-            )
+            # Supported: export nests one tree per arch, gen_aot_lib walks both
+            # depths and emits a per-capability selector, and the embedded-link
+            # globs cover both. Reported because it multiplies embedded kernel
+            # bytes -- one full set per arch.
+            _report(f"multi-arch: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
+    else:
+        # On-device export compiles for whatever GPU is present, so check it is
+        # one we can export for BEFORE committing. Without this, a dev box
+        # outside EXPORTABLE_ARCHES (sm_86, sm_120) exports for its own arch and
+        # then fails in generation -- after a successful build, and leaving a
+        # tree that cannot even configure until build/native_aot is removed.
+        from tools.native_aot import export as export_mod
+
+        local = export_mod._detected_arch()
+        if local not in export_mod.EXPORTABLE_ARCHES:
+            _report(
+                f"skipped (local GPU is {local or 'undetectable'}; exportable: "
+                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+            )
+            return False
+
+    # LAST of the checks, deliberately: every skip above means stage 2 exports
+    # nothing, and demanding the DSL wheels for a build that was going to skip
+    # anyway just fails builds that never wanted them. Only once we know we
+    # WILL export are the runtimes required -- shipping a wheel with some of
+    # the declared kernels missing is the silent-partial failure the sidecar
+    # and orphan checks exist to prevent, and it surfaces as a performance
+    # regression rather than an error. TORCH_NATIVE_AOT=0 is the supported way
+    # to build without the DSL wheels.
+    gaps = {
+        k: tc.missing_runtimes() for k, tc in usable.items() if tc.missing_runtimes()
+    }
+    if gaps:
+        detail = "; ".join(
+            f"{k} needs {', '.join(ms)}" for k, ms in sorted(gaps.items())
+        )
+        raise RuntimeError(
+            f"native-AOT stage 2: this {backend} build has AOT toolchains whose "
+            f"runtimes are not installed ({detail}). Install them, or set "
+            f"TORCH_NATIVE_AOT=0 to build without embedded DSL kernels."
+        )
     return True
 
 
@@ -199,21 +236,24 @@ def _wheel_hash_and_size(path: str) -> tuple[str, int]:
 
 
 def patch_wheel(wheel_path: str, lib_path: str) -> None:
-    """Replace torch/lib/libtorch_cuda.so inside an already-built wheel
-    and fix its RECORD entry. The zip CLI updates members in place
-    without recompressing the rest of the archive (~30s vs several
-    minutes for a full `python -m build` reassembly, which would also
-    re-walk the whole cmake install manifest)."""
+    """Replace torch/lib/libtorch_cuda.so inside an already-built wheel and fix
+    its RECORD entry.
+
+    Rewritten member-by-member with zipfile rather than shelling out: the zip
+    CLI is absent from the manywheel images (they install unzip only), and
+    .ci/manywheel/repair_wheel.py already had to move off `wheel pack` because
+    it emitted invalid ZIP64 above 4GB (pytorch#189748) -- a CUDA wheel with
+    embedded kernels is squarely in that range. Copying members preserves each
+    entry's existing compression instead of recompressing the archive.
+    """
     import shutil
-    import tempfile
     import zipfile
 
-    if shutil.which("zip") is None:
-        raise RuntimeError("--wheel requires the zip CLI (in-place member update)")
     lib_rel = "torch/lib/libtorch_cuda.so"
     with zipfile.ZipFile(wheel_path) as zf:
-        records = [n for n in zf.namelist() if n.endswith(".dist-info/RECORD")]
-        if lib_rel not in zf.namelist() or len(records) != 1:
+        names = zf.namelist()
+        records = [n for n in names if n.endswith(".dist-info/RECORD")]
+        if lib_rel not in names or len(records) != 1:
             raise RuntimeError(f"{wheel_path}: not a torch wheel ({lib_rel}/RECORD)")
         record_rel = records[0]
         record_lines = zf.read(record_rel).decode().splitlines()
@@ -225,16 +265,27 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
             break
     else:
         raise RuntimeError(f"{wheel_path}: RECORD has no entry for {lib_rel}")
+    record_text = "\n".join(record_lines) + "\n"
 
-    with tempfile.TemporaryDirectory() as td:
-        os.makedirs(os.path.join(td, os.path.dirname(lib_rel)))
-        os.makedirs(os.path.join(td, os.path.dirname(record_rel)))
-        shutil.copy2(lib_path, os.path.join(td, lib_rel))
-        with open(os.path.join(td, record_rel), "w") as f:
-            f.write("\n".join(record_lines) + "\n")
-        subprocess.check_call(
-            ["zip", "-q", os.path.abspath(wheel_path), lib_rel, record_rel], cwd=td
-        )
+    # Rebuild beside the original and rename over it, so an interrupted rewrite
+    # cannot leave a half-written wheel where a valid one used to be.
+    tmp_whl = wheel_path + ".naot.tmp"
+    replaced = {lib_rel, record_rel}
+    try:
+        with (
+            zipfile.ZipFile(wheel_path) as src,
+            zipfile.ZipFile(tmp_whl, "w", allowZip64=True) as dst,
+        ):
+            for info in src.infolist():
+                if info.filename in replaced:
+                    continue
+                dst.writestr(info, src.read(info.filename), info.compress_type)
+            dst.write(lib_path, lib_rel, zipfile.ZIP_STORED)
+            dst.writestr(record_rel, record_text)
+        shutil.move(tmp_whl, wheel_path)
+    finally:
+        if os.path.exists(tmp_whl):
+            os.remove(tmp_whl)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -247,7 +298,18 @@ def main(argv: list[str] | None = None) -> int:
         help="also embed the relinked libtorch_cuda into this built wheel "
         "(CI: the dist/*.whl handed to test jobs must carry the kernels)",
     )
+    parser.add_argument(
+        "--print-verdict",
+        action="store_true",
+        help="print RUN or SKIP and exit; the shell callers install the DSL "
+        "runtimes only when this says RUN, so the decision lives in one place "
+        "(their own `python -c` probe disagreed with _torch_probe on GPU-less "
+        "CUDA builders, where a CUDA torch can segfault in teardown)",
+    )
     args = parser.parse_args(argv)
+    if args.print_verdict:
+        print("RUN" if should_run() else "SKIP", flush=True)
+        return 0
     if not should_run():
         return 0
     py = sys.executable
@@ -258,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     _report("generating stub sources")
     gen = [py, os.path.join(HERE, "gen_aot_lib.py"), "--artifacts-dir", art]
     subprocess.check_call(gen, cwd=REPO)
+    _report(f"embedding {_artifact_size(art)}")
     # Relink JUST torch_cuda: the embedded glob (CONFIGURE_DEPENDS)
     # picks up the new artifacts. A full `--target install` would also
     # work but walks the whole install manifest (~15 min); the targeted
@@ -283,8 +346,38 @@ def main(argv: list[str] | None = None) -> int:
     if not os.path.exists(built):
         raise RuntimeError(f"expected relinked library at {built}")
     installed = os.path.join(_installed_lib_dir(), "libtorch_cuda.so")
-    shutil.copy2(built, installed)
+    if not os.path.exists(installed):
+        # Refuse to create it: _installed_lib_dir found *a* torch, and writing a
+        # library into a layout that never had one means we are pointed at the
+        # wrong environment.
+        raise RuntimeError(
+            f"native-AOT stage 2: {installed} does not exist, so the torch on "
+            f"sys.path is not the one this tree built. Install the wheel from "
+            f"this build first, or set TORCH_NATIVE_AOT=0."
+        )
+    # Temp file + rename: copying in place truncates the library other processes
+    # may be mapping, and a failure part-way (ENOSPC, EPERM on a root-owned
+    # site-packages) would leave a torch that cannot import at all.
+    staged = installed + ".naot.tmp"
+    try:
+        shutil.copy2(built, staged)
+        os.replace(staged, installed)
+    finally:
+        if os.path.exists(staged):
+            os.remove(staged)
     _report(f"{os.path.getsize(built) >> 20} MiB relinked into {installed}")
+    # S2: size is not evidence. The artifacts dir is a CMake CACHE PATH while
+    # this script hardcodes one, and CONFIGURE_DEPENDS is Ninja/Makefile only --
+    # both let the relink succeed while embedding nothing, which would ship a
+    # kernel-free wheel with a green build.
+    if not _torch_probe("torch._native._native_aot_embedded()"):
+        raise RuntimeError(
+            "native-AOT stage 2: relinked libtorch_cuda reports no embedded "
+            "kernels (torch._native._native_aot_embedded() is False). The "
+            f"artifacts in {art} were not linked in -- check that CMake's "
+            f"NATIVE_AOT_ARTIFACTS_DIR matches, and that the generator honors "
+            f"CONFIGURE_DEPENDS."
+        )
     if args.wheel:
         _report(f"embedding into {args.wheel}")
         patch_wheel(args.wheel, built)
