@@ -7428,15 +7428,14 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(res_scalar.dtype, torch.float32)
         self.assertEqual(res_scalar.device.type, torch.device(self.device).type)
 
-        # Scalar-std overloads still use the fast-random decomposition.
+        # Confirm non-eager compilation
         torch.manual_seed(0)
-        eager_out = fn_scalar()
+        eager_out = torch.normal(mean, std)
         torch.manual_seed(0)
-        compiled_out = compiled_scalar()
+        compiled_out = compiled(mean, std)
         self.assertNotEqual(eager_out, compiled_out)
 
     @parametrize("mean_is_tensor", (False, True))
-    @config.patch(implicit_fallbacks=True)
     def test_normal_tensor_std_validation(self, mean_is_tensor):
         if self.device != "cpu":
             raise unittest.SkipTest("tensor std errors are asynchronous on GPU")
@@ -7448,7 +7447,12 @@ for dtype in (torch.int32, torch.int64):
         std = torch.full((4,), 0.5, device=self.device)
         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
 
-        self.assertEqual(compiled(mean, std).shape, std.shape)
+        result, (code,) = run_and_get_code(compiled, mean, std)
+        self.assertEqual(result.shape, std.shape)
+        # The std >= 0 check is compiled into the kernel; normal itself
+        # does not fall back to eager.
+        self.assertIn("normal expects all elements of std >= 0.0", code)
+        self.assertNotIn("torch.ops.aten.normal", code)
 
         std.fill_(-1.0)
         with self.assertRaisesRegex(

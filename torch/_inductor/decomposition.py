@@ -150,15 +150,6 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
 
 remove_decompositions(decompositions, decomps_to_exclude)
 
-# Tensor-std normal decompositions drop the native std >= 0 validation.
-# Keep these overloads intact so Inductor falls back to the validated ATen op.
-_normal_tensor_std_overloads = [
-    aten.normal.Tensor_Tensor,
-    aten.normal.float_Tensor,
-]
-remove_decompositions(decompositions, _normal_tensor_std_overloads)
-remove_decompositions(extra_random_decomps, _normal_tensor_std_overloads)
-
 
 def register_decomposition(
     ops: _GenericOperator | list[_GenericOperator],
