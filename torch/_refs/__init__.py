@@ -1119,7 +1119,7 @@ def trunc(a):
 # TODO: register this as a real ref/decomposition once TorchInductor supports complex!
 def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     input_dtype = self.dtype
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(input_dtype),
         lambda: f"view_as_complex is only supported for floating point"
         f"tensors, but got a tensor of scalar type: {input_dtype}",
@@ -1472,7 +1472,7 @@ def floor_divide(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType)
     elif utils.is_integer_dtype(dtype):
         return _floor_divide_integer(a, b)
     else:
-        torch._check(False, lambda: f"{dtype} not supported for floor_divide")
+        torch._check_type(False, lambda: f"{dtype} not supported for floor_divide")
 
 
 def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
@@ -1738,7 +1738,7 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     supports_rhs_python_scalar=False,
 )
 def logaddexp2(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_not_implemented(
         not (utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype)),
         lambda: "logaddexp2 doesn't support complex dtypes",
     )
@@ -2674,7 +2674,7 @@ def mean(
         out=None,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE,
     )
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
         lambda: (
             f"mean(): could not infer output dtype. "
@@ -3619,7 +3619,7 @@ def native_layer_norm(
         + ", but got input of size "
         + str(input.shape),
     )
-    torch._check(
+    torch._check_not_implemented(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
@@ -6415,7 +6415,7 @@ def _trilu_checks(
 ):
     torch._check(row >= 0, lambda: f"row must be non-negative, got {row}")
     torch._check(col >= 0, lambda: f"col must be non-negative, got {col}")
-    torch._check(
+    torch._check_not_implemented(
         dtype in (torch.int32, torch.int64),
         lambda: f"\"{name}\" not implemented for '{dtype}'",
     )
@@ -6594,7 +6594,7 @@ def bucketize(
 def cauchy(self, median=0, sigma=1, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
-    torch._check(
+    torch._check_not_implemented(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
@@ -6652,7 +6652,7 @@ def geometric(self, p, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
     # TODO: fix inductor rand_like for integer, bool dtypes
-    torch._check(
+    torch._check_not_implemented(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
         lambda: f"geometric not implemented for {self.dtype}",
@@ -6772,7 +6772,7 @@ def normal_functional(self, mean=0, std=1, *, generator=None):
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def rad2deg(self: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         not utils.is_complex_dtype(self.dtype),
         lambda: "rad2deg is not supported for complex tensors.",
     )
@@ -6782,7 +6782,7 @@ def rad2deg(self: TensorLikeType):
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def deg2rad(self: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         not utils.is_complex_dtype(self.dtype),
         lambda: "deg2rad is not supported for complex tensors.",
     )
