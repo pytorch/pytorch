@@ -36,9 +36,10 @@ Properties consumed by the driver scripts:
     spot artifacts left with no sidecar (export._check_no_orphan_artifacts).
     The idempotency skip keys on the sidecar itself, not on these.
   * ``link_source_globs``: artifact patterns the CMake project must
-    compile or link (kept in sync with the embedded-link block in
-    caffe2/CMakeLists.txt, which cannot import this file; see the
-    assertion in the tests).
+    compile or link, relative to the artifacts root -- so ``*/*/*.o`` for
+    kernels living at ``<arch>/<op>/`` (kept in sync with the
+    embedded-link block in caffe2/CMakeLists.txt, which cannot import
+    this file; see the assertion in the tests).
   * ``launcher_includes``: per-kind includes for the generated .cpp.
   * ``kernel_includes(sidecar)``: per-kernel includes for that same file,
     for toolchains whose export writes a header (CuTeDSL's ABI struct).
@@ -143,7 +144,8 @@ class CuteDslToolchain(Toolchain):
 
     kind = "cutedsl"
     artifact_exts = (".o", ".h")
-    link_source_globs = ("*/*.o",)
+    # One depth: artifacts always live at <arch>/<op>/, whatever the arch count.
+    link_source_globs = ("*/*/*.o",)
     launcher_includes = ()  # per-kernel header, included by prefix below
 
     # export_to_c emits `int32_t dynamic_shapes[]`, so the generated stub
@@ -230,7 +232,14 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         return sidecar
 
     def kernel_includes(self, sidecar: dict) -> list[str]:
-        return [f'#include "{sidecar["prefix"]}.h"']
+        # _include_dir is the path from the generated source to this artifact's
+        # tree (the source sits at <root>/<op>/, kernels at <root>/<arch>/<op>/).
+        # Joined with "/" rather than os.path.join: an #include takes forward
+        # slashes on every platform, and this module has no os import to rely on
+        # at the commit that introduces it.
+        rel = sidecar.get("_include_dir", "")
+        name = f"{sidecar['prefix']}.h"
+        return [f'#include "{rel + "/" + name if rel else name}"']
 
     def gen_launcher(self, sidecar: dict) -> str:
         prefix = sidecar["prefix"]
@@ -276,6 +285,16 @@ def get_toolchain(kind: str) -> Toolchain:
             f"unknown toolchain kind {kind!r}; known: {sorted(TOOLCHAINS)}"
         )
     return TOOLCHAINS[kind]
+
+
+def all_artifact_exts() -> set[str]:
+    """Every extension some toolchain writes beside a sidecar.
+
+    ONE notion of "kernel artifact" for both sweeps that hunt undescribed
+    files: export's per-directory orphan check and generation's
+    no-declaration check. Computed in two places, they could disagree about
+    a newly added toolchain and leave one sweep blind to its objects."""
+    return {e for tc in TOOLCHAINS.values() for e in tc.artifact_exts}
 
 
 def for_backend(backend: str) -> dict[str, Toolchain]:

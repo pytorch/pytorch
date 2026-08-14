@@ -8,16 +8,21 @@ point), cpp_launch(spec, launch_fn) (the invocation), cpp_helpers()
 (covered_axes, consumed by torch._native.aot_manifest) lives in the
 same module -- the two sides are kept in sync by hand.
 
-For each op with exported artifacts under ``<artifacts-dir>/<op>/``,
-emits ``aot_<op>_<key>.cpp`` containing:
+Kernels are exported to ``<artifacts-dir>/<arch>/<op>/`` -- one tree per
+arch, whatever the arch count. For each op found there this emits
+``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file covering every arch
+the op shipped for, containing:
 
   * a launch_<prefix>() marshalling helper per exported kernel,
     emitted by the sidecar kind's Toolchain (see toolchains.py); every
     toolchain produces the same launcher signature, so cpp_launch and
     the guard chain are toolchain-blind
-  * the stub kernel: helpers | prelude, then the dispatch chain -- one
-    `if (cpp_dispatch(spec)) { cpp_launch; return true; }` branch per
-    exported precompile point, then `return false` (the fallback)
+  * the stub kernel: an early-out over the shipped compute capabilities,
+    then helpers | prelude, then one cond chain PER CAPABILITY -- inside
+    each, an `if (cpp_dispatch(spec)) { cpp_launch; return true; }`
+    branch per exported precompile point, and `return false` at the end
+    (the fallback). A device runs only kernels built for exactly its
+    capability; anything else declines to op.impl.
   * registration on the generated at::native DispatchStub
     (<op>_aot_stub) via set_<device>_dispatch_ptr at static-init time
 
@@ -43,7 +48,13 @@ import sys
 REPO = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 )
-sys.path.insert(0, REPO)
+# append, never insert(0): the repo root holds a torch/ SOURCE tree with no
+# compiled extension, and ahead of site-packages it shadows the real torch so
+# any `import torch` dies with "loaded the torch/_C folder of the PyTorch
+# repository". Invisible in a `pip install -e .` checkout, where that tree IS
+# the installed torch -- which is how it reached CI (see export.py's copy of
+# this note, and the b200 build it broke).
+sys.path.append(REPO)
 
 from torchgen import native_aot_decl as decl
 
@@ -134,40 +145,140 @@ def indent(code: str, pad: str) -> str:
 
 
 def gen_launcher(sidecar: dict) -> str:
-    return toolchains.get_toolchain(sidecar.get("kind", "cutedsl")).gen_launcher(
-        sidecar
-    )
+    return toolchains.get_toolchain(sidecar["kind"]).gen_launcher(sidecar)
 
 
-def _arch_gate(d, sidecars: list[dict]) -> str:
-    """Runtime device gate: decline (fall through to the JIT/aten
-    routes) on any device outside the intersection of the arches the
-    DECLARATION supports (archs_of(d) -- op intent) and the arches the
-    artifacts were actually COMPILED for (sidecar 'arch' -- build
-    fact). Without it, a wheel whose artifacts target Blackwell would
-    attempt a wrong-arch cubin load on Hopper and fail at launch
-    instead of falling back. Emitted ahead of the declaration's own
-    prelude AND into cpp_covers, so declarations never hand-write arch
-    checks. Sidecars with no recorded arch (exported on-device) gate on
-    archs_of(d) alone -- the artifact matches the builder by construction.
-    Shipped arches outside d.ARCHS are a packaging bug: error here
-    rather than gate on kernels the op disowns."""
-    shipped = {a for sc in sidecars if isinstance(a := sc.get("arch"), str)}
-    if shipped - set(decl.archs_of(d)):
+_CURRENT_PROPS = "at::cuda::getCurrentDeviceProperties()"
+
+# Name of the local the generated gates read device properties through. Its
+# own prefix, because declaration-supplied bodies share the scope.
+_PROPS_LOCAL = "_naot_props"
+
+
+def _split_params(params: str) -> list[str]:
+    """A C++ parameter list split at its TOP-LEVEL commas.
+
+    `params.split(",")` cuts inside template argument lists too, and a
+    signature can carry one that holds a comma (`std::array<bool, 3>` for an
+    output mask, `std::pair<at::Tensor, at::Tensor>`). It hands the callers
+    below fragments -- "std::pair<at::Tensor" and "at::Tensor> pr" -- and
+    _int32_size_gate's refusal of unknown tensor-shaped types then judges a
+    fragment, naming a type that appears nowhere in the signature it was
+    given. Splitting at depth 0 is what lets those callers see whole types."""
+    out: list[str] = []
+    depth = 0
+    cur = ""
+    for ch in params:
+        if ch in "<([{":
+            depth += 1
+        elif ch in ">)]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    out.append(cur)
+    return [p.strip() for p in out if p.strip()]
+
+
+def _param_type_and_name(param: str) -> tuple[str, str]:
+    """One declaration -> (type without const/ref, parameter name)."""
+    name = param.split()[-1].lstrip("&*")
+    ctype = param[: -len(name)].strip().removeprefix("const ").rstrip("& ")
+    return ctype, name
+
+
+def _first_tensor_name(params: str) -> str | None:
+    """Name of the first plain at::Tensor parameter, or None."""
+    for p in _split_params(params):
+        ctype, name = _param_type_and_name(p)
+        if ctype == "at::Tensor":
+            return name
+    return None
+
+
+def _device_match(major: int, minor: int, props: str = _CURRENT_PROPS) -> str:
+    """The device predicate for one compute capability.
+
+    ``props`` is the properties expression to read. The stub runs inside the
+    wrapper's device guard, so the CURRENT device is the right one there; a
+    covers predicate does not -- it is called by the router before any guard --
+    so it must ask about the tensor's device instead, which is also what the
+    declarations' own covers bodies do."""
+    return f"{props}->major == {major} && {props}->minor == {minor}"
+
+
+# Compute capabilities the emitted gate can be built for. Not a support claim --
+# what an op ships for is its ARCHS -- but a bound, so a malformed arch cannot
+# produce a gate that is silently false on every device.
+_KNOWN_MAJORS = range(7, 13)
+
+
+def _cc_of(arch: str) -> tuple[int, int]:
+    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
+
+    Rejects anything it cannot parse into a plausible capability rather than
+    computing one: "sm_9" would give (0, 9) and "sm_1000" (100, 0), each
+    emitting a gate no device can satisfy, so the op would ship, link, and
+    decline every call with nothing reported. Suffixes other than the
+    arch-conditional "a" (e.g. the family-conditional "f" of CUDA 12.9+) are
+    refused too -- they mean something this generator has not been taught."""
+    digits = arch.removeprefix("sm_").removesuffix("a")
+    if not arch.startswith("sm_") or not digits.isdigit() or len(digits) not in (2, 3):
         raise RuntimeError(
-            f"{d.ATEN_OP}: artifacts exported for {sorted(shipped)} "
-            f"but the declaration supports only {decl.archs_of(d)}; re-export "
-            f"(export.py skips unsupported arches)"
+            f"cannot read a compute capability from arch {arch!r}: expected "
+            f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
         )
-    gate = sorted(shipped) or sorted(decl.archs_of(d))
-    majors = sorted({int(a.removeprefix("sm_").rstrip("a")) // 10 for a in gate})
-    accept = " || ".join(
-        f"at::cuda::getCurrentDeviceProperties()->major == {m}" for m in majors
-    )
-    return (
-        f"  // Device gate: declaration ARCHS x shipped artifacts = {' '.join(gate)}\n"
-        f"  if (!({accept})) return false;\n"
-    )
+    major, minor = divmod(int(digits), 10)
+    if major not in _KNOWN_MAJORS:
+        raise RuntimeError(
+            f"arch {arch!r} parses as compute capability {major}.{minor}, "
+            f"outside the known range {_KNOWN_MAJORS.start}-"
+            f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
+        )
+    return major, minor
+
+
+def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
+    """Group sidecars by the compute capability they were compiled for, in
+    ascending cc order, dropping candidates that lose the arch-conditional
+    tie-break.
+
+    Several arches can ship in one library (a multi-arch export nests one
+    tree per arch), and each device must run kernels built for exactly its
+    cc -- hence the grouping rather than one gate over the union, which
+    would accept a device nothing was compiled for.
+
+    Within one cc, an arch-conditional build ("sm_100a") and a plain one
+    ("sm_100") are both valid on the hardware. Prefer the conditional: it is
+    the one the kernels were written against (TMA, clusters), and shipping
+    both otherwise leaves the choice to directory order.
+
+    A sidecar with no recorded arch is rejected: export names the arch of
+    everything it writes, so this is a tree from before it did, and there is
+    no hardware such an artifact can be matched to. Erroring beats emitting a
+    branch that never matches and declines every call in silence."""
+    groups: dict[tuple[int, int], list[dict]] = {}
+    conditional: dict[tuple[int, int], bool] = {}
+    for sc in sidecars:
+        arch = sc.get("arch")
+        if not isinstance(arch, str):
+            raise RuntimeError(
+                f"{sc.get('prefix', '<unnamed>')} in {sc.get('_dir', '?')} "
+                f"records no arch. Re-export: the runtime gate is built from "
+                f"the arch each artifact was compiled for."
+            )
+        cc = _cc_of(arch)
+        is_cond = arch.endswith("a")
+        if cc in groups and conditional.get(cc, False) != is_cond:
+            # A conditional build for this cc wins outright; a plain one loses.
+            if not is_cond:
+                continue
+            groups[cc] = []
+        groups.setdefault(cc, []).append(sc)
+        conditional[cc] = conditional.get(cc, False) or is_cond
+    return {cc: groups[cc] for cc in sorted(groups)}
 
 
 # Tensor-shaped C++ types the gate must recognize or refuse. torchgen renders
@@ -176,6 +287,10 @@ def _arch_gate(d, sidecars: list[dict]) -> str:
 # signature carries c10::List<::std::optional<at::Tensor>> -- none of which
 # the two accessors below fit.
 _TENSOR_ISH = re.compile(r"\bat::\w*Tensor\w*|\bc10::List<")
+
+# A sidecar prefix must be usable as a C identifier: it is pasted into
+# extern "C" declarations, launcher names and version-script patterns.
+_C_IDENT = re.compile(r"[A-Za-z_]\w*")
 
 
 def _int32_size_gate(params: str) -> str:
@@ -218,12 +333,8 @@ def _int32_size_gate(params: str) -> str:
     # plus out-variant outputs as `const std::optional<at::Tensor>& x`.
     plain: list[str] = []
     optional: list[str] = []
-    for raw in params.split(","):
-        p = raw.strip()
-        if not p:
-            continue
-        name = p.split()[-1].lstrip("&*")
-        ctype = p[: -len(name)].strip().removeprefix("const ").rstrip("& ")
+    for p in _split_params(params):
+        ctype, name = _param_type_and_name(p)
         if ctype in ("std::optional<at::Tensor>", "::std::optional<at::Tensor>"):
             optional.append(name)
         elif ctype == "at::Tensor":
@@ -269,13 +380,57 @@ def gen_op(
     precomputed: list[str] | None = None,
     decl_path: str = "",
 ) -> str:
-    branches = []
-    for s in sidecars:
+    def _branch(s: dict, pad: str) -> str:
         dispatch = d.cpp_dispatch(s["spec"]).strip()
         launch = d.cpp_launch(s["spec"], f"launch_{s['prefix']}")
-        branches.append(
-            f"  if ({dispatch}) {{\n{indent(launch, '    ')}\n    return true;\n  }}"
+        return (
+            f"{pad}if ({dispatch}) {{\n{indent(launch, pad + '  ')}\n"
+            f"{pad}  return true;\n{pad}}}"
         )
+
+    # One cond chain per compute capability. A multi-arch export ships a tree
+    # per arch, and a kernel built for one cc must never be launched on
+    # another -- the module load would fail (unchecked, so it surfaces as the
+    # wrapper's rc) instead of declining. Selecting first, then running that
+    # cc's chain, is what keeps each artifact on its own hardware.
+    groups = _by_arch(sidecars)
+    # Everything below emits from the sidecars that SURVIVED the tie-break, not
+    # from the full list: a launcher for a dropped candidate would be defined
+    # and never called, which is -Wunused-function in an anonymous namespace and
+    # fatal under CI's WERROR. Reachable from a plain arch list, since both
+    # spellings of a capability are exportable ("10.0;10.0a").
+    sidecars = [sc for scs in groups.values() for sc in scs]
+    # Shipping an arch the declaration disowns is a packaging bug: error rather
+    # than gate on kernels the op does not claim to support.
+    shipped = {sc["arch"] for sc in sidecars}
+    if unclaimed := shipped - set(decl.archs_of(d)):
+        raise RuntimeError(
+            f"{op}: artifacts exported for {sorted(unclaimed)} but the "
+            f"declaration supports only {decl.archs_of(d)}; re-export "
+            f"(export.py skips unsupported arches)"
+        )
+
+    def _gate_for(props: str) -> str:
+        accept = " || ".join(
+            f"({_device_match(*cc, props=_PROPS_LOCAL)})" for cc in groups
+        )
+        return (
+            f"  // Device gate: one branch per shipped capability "
+            f"({', '.join(f'{maj}.{min_}' for maj, min_ in groups)})\n"
+            f"  // Read once into a local: this gate and every per-capability\n"
+            f"  // branch below ask the same question, and the accessor is a\n"
+            f"  // call per read.\n"
+            f"  const auto* {_PROPS_LOCAL} = {props};\n"
+            f"  if (!({accept})) return false;\n"
+        )
+
+    arch_gate = _gate_for(_CURRENT_PROPS)
+    branches = [
+        f"  if ({_device_match(*cc, props=_PROPS_LOCAL)}) {{\n"
+        + "\n".join(_branch(s, "    ") for s in scs)
+        + "\n  }"
+        for cc, scs in groups.items()
+    ]
     prelude_fn = getattr(d, "cpp_dispatch_prelude", None)
     helpers_fn = getattr(d, "cpp_helpers", None)
     prelude = (prelude_fn() or "") if prelude_fn else ""
@@ -285,8 +440,7 @@ def gen_op(
     # narrowing kind among this op's points is enough, since any point may
     # be the one selected at runtime.
     narrows = any(
-        toolchains.get_toolchain(sc.get("kind", "cutedsl")).NARROWS_SHAPES_TO_INT32
-        for sc in sidecars
+        toolchains.get_toolchain(sc["kind"]).NARROWS_SHAPES_TO_INT32 for sc in sidecars
     )
     covers_fn = covers_reg = ""
     if covers is not None:
@@ -294,11 +448,25 @@ def gen_op(
         # Coverage must be no wider than the stub's acceptance: the
         # arch gate declines in the stub, so covers must decline on the
         # same devices or gated calls lose their JIT route.
+        #
+        # Read the TENSOR's device, not the current one: covers is called by the
+        # router before any device guard, so on a mixed-capability host the
+        # current device need not be the one the op will run on -- and the
+        # declarations' own covers bodies already use
+        # getDeviceProperties(self.device().index()). Falls back to the current
+        # device only for a signature with no plain Tensor, which cannot be
+        # device-specific anyway.
+        _cov_t = _first_tensor_name(covers_params)
+        covers_props = (
+            f"at::cuda::getDeviceProperties({_cov_t}.device().index())"
+            if _cov_t
+            else _CURRENT_PROPS
+        )
         covers_fn = COVERS_FN_TMPL.format(
             op=op,
             key_lc=key.lower(),
             params=covers_params,
-            body=_arch_gate(d, sidecars)
+            body=_gate_for(covers_props)
             + (_int32_size_gate(covers_params) if narrows else "")
             + indent(covers_body, "  "),
         )
@@ -333,7 +501,7 @@ def gen_op(
             dict.fromkeys(  # ordered dedup across sidecars
                 line
                 for sc in sidecars
-                for tc in [toolchains.get_toolchain(sc.get("kind", "cutedsl"))]
+                for tc in [toolchains.get_toolchain(sc["kind"])]
                 for line in (*tc.kernel_includes(sc), *tc.launcher_includes)
             )
         ),
@@ -342,7 +510,7 @@ def gen_op(
         ),
         params=impl_params,
         size_gate_helper=SIZE_GATE_HELPER if narrows else "",
-        cond=_arch_gate(d, sidecars)
+        cond=arch_gate
         + (_int32_size_gate(impl_params) if narrows else "")
         + indent(prelude, "  "),
         guards="\n".join(branches),
@@ -488,7 +656,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--allow-stale",
         action="store_true",
-        help="generate even when artifact source hashes mismatch the tree",
+        help="generate even when artifact source hashes mismatch the tree "
+        "(a sidecar SCHEMA mismatch stays fatal: its fields may not be "
+        "readable)",
     )
     args = parser.parse_args(argv)
 
@@ -514,11 +684,28 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{args.artifacts_dir}: no artifacts, nothing to generate")
         return
 
-    all_prefixes: list[str] = []
+    # decl_id -> its arch dirs, so one declaration's artifacts are generated
+    # together however many arches it shipped for: a per-arch dir generated on
+    # its own would emit one .cpp per arch, each registering the same
+    # DispatchStub.
+    dirs_by_id: dict[str, list[str]] = {}
     for entry in sorted(os.listdir(args.artifacts_dir)):
         art_dir = os.path.join(args.artifacts_dir, entry)
         if not os.path.isdir(art_dir):
             continue
+        # ONE layout: <root>/<arch>/<decl_id>/ holds the artifacts, and
+        # <root>/<decl_id>/ holds only the generated .cpp that covers every
+        # arch. So every top-level directory is an arch, and its subdirectories
+        # are declarations; a top-level directory with no subdirectories is a
+        # generated-source dir and has nothing to discover.
+        for child in sorted(os.listdir(art_dir)):
+            sub = os.path.join(art_dir, child)
+            if os.path.isdir(sub):
+                dirs_by_id.setdefault(child, []).append(sub)
+
+    all_prefixes: list[str] = []
+    for entry, art_dirs in sorted(dirs_by_id.items()):
+        art_dir = art_dirs[0]
         d, decl_path = by_id.get(entry, (None, ""))
         if d is None:
             # Orphaned artifact dir (declaration renamed/removed): its
@@ -533,24 +720,26 @@ def main(argv: list[str] | None = None) -> None:
             # earlier commit of a stack, or a bisect) -- NOT that every
             # artifact is orphaned. Deleting there would destroy a whole
             # export for a checkout that simply predates the declarations.
-            # Only dirs holding files are op dirs: dirs of dirs are
-            # grouping levels (e.g. a per-arch fan-out), not orphans.
-            entries = [os.path.join(art_dir, fn) for fn in os.listdir(art_dir)]
+            entries = [
+                os.path.join(one, fn) for one in art_dirs for fn in os.listdir(one)
+            ]
             if not by_id or not any(os.path.isfile(p) for p in entries):
                 continue
+            # The stale .cpp sits with the generated sources at
+            # <root>/<decl_id>/, not in the arch tree the artifacts live in, so
+            # look for it there -- that is the copy the CMake glob would still
+            # compile against a stub that no longer exists.
+            src_dir = os.path.join(args.artifacts_dir, entry)
             removed = []
-            for p in entries:
-                fn = os.path.basename(p)
+            for fn in sorted(os.listdir(src_dir) if os.path.isdir(src_dir) else []):
                 if fn.startswith("aot_") and fn.endswith(".cpp"):
-                    os.remove(p)
+                    os.remove(os.path.join(src_dir, fn))
                     removed.append(fn)
             print(
                 f"{entry}: no declaration (renamed or removed?); "
                 + (f"deleted stale {', '.join(removed)}" if removed else "skipped")
             )
-            leftover_exts = {
-                e for tc in toolchains.TOOLCHAINS.values() for e in tc.artifact_exts
-            }
+            leftover_exts = toolchains.all_artifact_exts()
             leftover = sorted(
                 os.path.basename(p)
                 for p in entries
@@ -567,25 +756,88 @@ def main(argv: list[str] | None = None) -> None:
             continue
         sidecars = []
         stale = []
-        for fn in sorted(os.listdir(art_dir)):
-            if fn.endswith(".json"):
-                with open(os.path.join(art_dir, fn)) as f:
-                    sc = json.load(f)
-                # Staleness guard: the sidecar records the builder's
-                # source closure at export; a mismatch means the kernel
-                # source changed since the artifact was compiled.
-                if not export_mod.sources_current(sc):
-                    stale.append(sc.get("prefix", fn))
-                # Generation-time context: toolchains that embed artifact
-                # bytes (e.g. raw cubins) read them from the sidecar's dir.
-                sc["_dir"] = art_dir
-                sidecars.append(sc)
+        # Across every arch dir this declaration exported into.
+        for one_dir in art_dirs:
+            for fn in sorted(os.listdir(one_dir)):
+                if fn.endswith(".json"):
+                    path = os.path.join(one_dir, fn)
+                    with open(path) as f:
+                        sc = json.load(f)
+                    # The prefix names this kernel's extern "C" entry points and
+                    # its launcher, so a value that is not a C identifier reaches
+                    # the compiler as a syntax error inside a @generated file --
+                    # far from the export that chose it.
+                    prefix = sc.get("prefix", "")
+                    if not _C_IDENT.fullmatch(prefix):
+                        raise RuntimeError(
+                            f"{path}: prefix {prefix!r} is not a C identifier. It "
+                            f'names the kernel\'s extern "C" symbols and its '
+                            f"launcher, so generation would emit C++ that does "
+                            f"not compile."
+                        )
+                    # A schema bump is NOT waivable by --allow-stale: that flag
+                    # exists for artifacts whose sources drifted, which still
+                    # describe themselves in a shape this generator reads. A
+                    # different version may not, so emitting from it would
+                    # silently read the wrong fields.
+                    if sc.get("version") != export_mod.SIDECAR_VERSION:
+                        raise RuntimeError(
+                            f"{path}: sidecar schema version {sc.get('version')!r}, "
+                            f"but this generator reads version "
+                            f"{export_mod.SIDECAR_VERSION}. Re-export this arch "
+                            f"({sc.get('arch') or 'unknown arch'}) or delete the "
+                            f"tree; generation cannot be forced past a schema "
+                            f"change."
+                        )
+                    # Staleness guard: the sidecar records the builder's
+                    # source closure at export; a mismatch means the kernel
+                    # source changed since the artifact was compiled.
+                    if not export_mod.sources_current(sc):
+                        stale.append(sc)
+                    # Generation-time context: toolchains that embed artifact
+                    # bytes (e.g. raw cubins) read them from the sidecar's dir.
+                    sc["_dir"] = one_dir
+                    # Include path from where the generated .cpp lands (always
+                    # <root>/<decl_id>/, see out_dir below): "../<arch>/<id>"
+                    # the artifacts sit one level below it.
+                    rel = os.path.relpath(
+                        one_dir, os.path.join(args.artifacts_dir, entry)
+                    )
+                    if rel != ".":
+                        # Forward slashes: this goes into an #include, where a
+                        # Windows separator would not resolve.
+                        sc["_include_dir"] = rel.replace(os.sep, "/")
+                    sidecars.append(sc)
+        # One prefix must come from one artifact, or the generated file defines
+        # launch_<prefix> twice and the same object is globbed twice. Prefixes
+        # carry their arch, so the export cannot produce this; a copied or
+        # renamed arch tree can. Never deleted automatically: artifacts cost a
+        # full export to rebuild.
+        seen: dict[str, str] = {}
+        for sc in sidecars:
+            p = sc.get("prefix", "")
+            if p in seen:
+                raise RuntimeError(
+                    f"{entry}: {p} is present in both {seen[p]} and "
+                    f"{sc['_dir']}. Each arch directory must hold its own "
+                    f"artifacts once; a copied or renamed tree duplicates them. "
+                    f"Delete whichever is stale and re-run generation."
+                )
+            seen[p] = sc["_dir"]
         if stale and not args.allow_stale:
+            # Name the arches, and re-export THEM: a bare export.py run only
+            # maintains the one arch it resolves for (--arch, a toolchain's arch
+            # variable, or the local device), so it silently leaves every other
+            # arch tree stale -- and a tree that carries several is the normal
+            # case here. "Just re-run export" is the advice that does not work.
+            archs = sorted({sc.get("arch") or "?" for sc in stale})
             raise RuntimeError(
                 f"{entry}: {len(stale)} artifact(s) were exported from "
                 f"different kernel sources than the current tree (e.g. "
-                f"{stale[0]}). Re-run tools/native_aot/export.py (stale "
-                f"points re-export automatically), or pass --allow-stale."
+                f"{stale[0].get('prefix')} in {stale[0]['_dir']}). Re-export "
+                f"those arches -- `python tools/native_aot/export.py --arch "
+                f"{' '.join(archs)}` -- or delete their trees. Pass "
+                f"--allow-stale to generate anyway."
             )
         if not sidecars:
             continue
@@ -606,7 +858,13 @@ def main(argv: list[str] | None = None) -> None:
             precomputed_args(d.ATEN_OP),
             decl_path,
         )
-        out = os.path.join(art_dir, f"aot_{did}_{key.lower()}.cpp")
+        # The source covers every arch this declaration shipped, so it belongs
+        # to no single arch tree: always <root>/<decl_id>/, one arch or many.
+        # That also keeps generated sources one level deep for the CMake globs
+        # while only the .o files nest.
+        out_dir = os.path.join(args.artifacts_dir, entry)
+        os.makedirs(out_dir, exist_ok=True)
+        out = os.path.join(out_dir, f"aot_{did}_{key.lower()}.cpp")
         with open(out, "w") as f:
             f.write(src)
         print(f"wrote {out} ({len(sidecars)} kernels)")
