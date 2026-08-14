@@ -125,6 +125,32 @@ class TestDeclarationParsing(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "DISPATCH_KEY"):
                 native_aot.parse_native_aot_manifests(d)
 
+    def test_unconditional_defaults_false_and_is_read(self) -> None:
+        # Omitting UNCONDITIONAL must leave the op user-disableable: the
+        # default decides whether set_aot_enabled(False) reaches it, so a
+        # missing attribute reading as True would silently make every op
+        # non-maskable.
+        with tempfile.TemporaryDirectory() as d:
+            _write_declaration(d, "embfoo", _MIN_DECL.format(op="embfoo"))
+            (m,) = native_aot.parse_native_aot_manifests(d).values()
+            self.assertFalse(m.unconditional)
+        with tempfile.TemporaryDirectory() as d:
+            _write_declaration(
+                d, "embfoo", _MIN_DECL.format(op="embfoo") + "UNCONDITIONAL = True\n"
+            )
+            (m,) = native_aot.parse_native_aot_manifests(d).values()
+            self.assertTrue(m.unconditional)
+
+    def test_non_bool_unconditional_rejected(self) -> None:
+        # Truthiness would accept "false" or 0/1; this flag decides whether a
+        # user can switch the op off, so a typo has to fail the build.
+        with tempfile.TemporaryDirectory() as d:
+            _write_declaration(
+                d, "embfoo", _MIN_DECL.format(op="embfoo") + 'UNCONDITIONAL = "yes"\n'
+            )
+            with self.assertRaisesRegex(RuntimeError, "UNCONDITIONAL must be a bool"):
+                native_aot.parse_native_aot_manifests(d)
+
     def test_spec_arity_convention_enforced(self) -> None:
         # cpp_dispatch without a spec parameter violates the per-point
         # cardinality convention.
@@ -255,6 +281,26 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
     def test_wrapper_unchanged_without_manifest(self) -> None:
         body = self._wrapper_body(with_manifest=False)
         self.assertNotIn("aot_stub", body)
+        self.assertIn("op.impl(self, k, op.outputs_[0]);", body)
+
+    def test_unconditional_op_gates_on_the_private_mask(self) -> None:
+        # An UNCONDITIONAL declaration's kernels ARE the implementation, so
+        # the user-facing switch must not appear in its gate -- otherwise
+        # set_aot_enabled(False) silently changes what the op computes.
+        # A gate still has to exist (the private mask), or reference
+        # computations would have no way to reach stock aten.
+        self.manifest = native_aot.NativeAotManifest(
+            op="embfoo", dispatch_key=DispatchKey.CUDA, unconditional=True
+        )
+        body = self._wrapper_body(with_manifest=True)
+        self.assertNotIn("allowNativeAot()", body)
+        self.assertIn("// declared UNCONDITIONAL", body)
+        self.assertIn(
+            "if (!(!at::globalContext().maskUnconditionalNativeAot() && at::native::embfoo_aot_stub.is_device_supported(c10::DeviceType::CUDA) && at::native::embfoo_aot_stub(c10::DeviceType::CUDA, self, k, op.outputs_[0]))) { op.impl(self, k, op.outputs_[0]); }",
+            body,
+        )
+        # Declining still falls back: unconditional constrains who may switch
+        # the path off, not which shapes the grid covers.
         self.assertIn("op.impl(self, k, op.outputs_[0]);", body)
 
     # assertExpectedInline without pulling in torch's expecttest plumbing.

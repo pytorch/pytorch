@@ -452,6 +452,12 @@ class TORCH_API Context {
   // AOT kernel library loaded, e.g. for reference computations.
   bool allowNativeAot() const;
   void setAllowNativeAot(bool /*b*/);
+  // Ops whose declaration is UNCONDITIONAL read this instead: their AOT
+  // kernels are the implementation, so allowNativeAot must not mask them.
+  // Default false (never masked). Flipped only by the private hatch that
+  // lets tests obtain stock aten values for such an op -- not a user knob.
+  bool maskUnconditionalNativeAot() const;
+  void setMaskUnconditionalNativeAot(bool /*b*/);
 
   // Preserved for BC
   void lazyInitCUDA() {
@@ -551,6 +557,7 @@ class TORCH_API Context {
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
   std::atomic<bool> allow_native_aot{true};
+  std::atomic<bool> mask_unconditional_native_aot{false};
 
   using Key = std::pair<Float32Backend, Float32Op>;
   std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
