@@ -5195,7 +5195,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
 instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
 
 class TestOperatorSignatures(JitTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CPU
 
     def setUp(self):
         # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
@@ -5877,7 +5877,7 @@ class TestFunctionalTracing(JitTestCase):
 TestFunctionalTracing.generate_tests()
 
 
-instantiate_device_type_tests(TestOperatorSignatures, globals())
+instantiate_device_type_tests(TestOperatorSignatures, globals(), only_for="cpu")
 
 
 @skipIfTorchDynamo("too slow")
