@@ -277,6 +277,16 @@ class TestFlexGemmRuntimeImport(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    def test_clamp_codegen_uses_public_cutlass_api(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmCuteDSLOpOverrides,
+        )
+
+        self.assertEqual(
+            FlexGemmCuteDSLOpOverrides.clamp("x", "lower", "upper"),
+            "cutlass.min(cutlass.max(x, lower), upper)",
+        )
+
     @parametrize(
         "reduction_type",
         get_args(ReductionType),
@@ -6352,14 +6362,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertTrue(torch.isnan(actual).all())
-        check = FileCheck().check("cutlass_math.")
+        check = FileCheck()
         match case:
             case "clamp":
-                check = check.check("max").check("cutlass_math.min")
+                check = check.check("cutlass.max").check("cutlass.min")
             case "clamp_min":
-                check = check.check("max")
+                check = check.check("cutlass.max")
             case "clamp_max":
-                check = check.check("min")
+                check = check.check("cutlass.min")
         check.check_not("operator.ne").run(code)
 
     @skipIfNoCuteDSL

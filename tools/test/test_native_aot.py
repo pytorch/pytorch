@@ -302,6 +302,12 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
         # Declining still falls back: unconditional constrains who may switch
         # the path off, not which shapes the grid covers.
         self.assertIn("op.impl(self, k, op.outputs_[0]);", body)
+        # The emitted prose must not describe the route it just removed. The
+        # shared comment enumerates "switched off, unsupported device, or
+        # declined" -- true for an ordinary op, but for this one there is no
+        # switched-off case, and a comment contradicting its own gate is worse
+        # than none.
+        self.assertNotIn("switched off", body)
 
     # assertExpectedInline without pulling in torch's expecttest plumbing.
     def assertExpectedInline(self, actual: str, expected: str) -> None:

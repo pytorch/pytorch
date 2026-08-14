@@ -1042,10 +1042,24 @@ elseif(USE_CUDA)
   # generated .cpp is ~10s to compile).
   set(NATIVE_AOT_ARTIFACTS_DIR "${CMAKE_BINARY_DIR}/native_aot"
       CACHE PATH "Exported native-AOT kernel artifacts")
+  # TORCH_NATIVE_AOT=0 has to be honored HERE too, not only by stage 2: this
+  # block keys off "are there files in the artifacts dir", so a tree that
+  # exported once would otherwise keep embedding those kernels into every later
+  # configure -- including a build the user explicitly asked to skip, and one
+  # whose DSL sources have since changed underneath the artifacts.
+  if(DEFINED ENV{TORCH_NATIVE_AOT} AND "$ENV{TORCH_NATIVE_AOT}" STREQUAL "0")
+    message(STATUS "native-AOT: TORCH_NATIVE_AOT=0, not embedding kernels")
+    set(NATIVE_AOT_GEN_SRCS "")
+    set(NATIVE_AOT_KERNEL_OBJS "")
+  else()
   file(GLOB NATIVE_AOT_GEN_SRCS CONFIGURE_DEPENDS
        "${NATIVE_AOT_ARTIFACTS_DIR}/*/aot_*.cpp")
+  # One layout, whatever the arch count: kernel objects at <root>/<arch>/<op>/,
+  # and the generated source that covers every arch at <root>/<op>/ (globbed
+  # above). Keep in sync with Toolchain.link_source_globs; the tests assert the
+  # two agree, since this file cannot import that one.
   file(GLOB NATIVE_AOT_KERNEL_OBJS CONFIGURE_DEPENDS
-       "${NATIVE_AOT_ARTIFACTS_DIR}/*/*.o")
+       "${NATIVE_AOT_ARTIFACTS_DIR}/*/*/*.o")
   if(NATIVE_AOT_GEN_SRCS)
     message(STATUS "native-AOT embedded: ${NATIVE_AOT_ARTIFACTS_DIR}")
     set_source_files_properties(${NATIVE_AOT_KERNEL_OBJS} PROPERTIES
@@ -1068,12 +1082,20 @@ elseif(USE_CUDA)
       if(EXISTS "${_native_aot_ver}")
         target_link_options(torch_cuda PRIVATE
             "LINKER:--version-script=${_native_aot_ver}")
+        # LINK_DEPENDS as well as the option: without it ninja does not relink
+        # when only the script changes, so a regenerated script (new prefixes)
+        # would not take effect and the new entry points would stay public.
+        set_property(TARGET torch_cuda APPEND PROPERTY
+            LINK_DEPENDS "${_native_aot_ver}")
       else()
         message(FATAL_ERROR
             "native-AOT: kernel objects present but ${_native_aot_ver} is "
-            "missing. Re-run tools/native_aot/gen_aot_lib.py; without the "
-            "version script the DSL's entry points would join torch_cuda's "
-            "public ABI.")
+            "missing. Without the version script the DSL's entry points would "
+            "join torch_cuda's public ABI. Re-run "
+            "tools/native_aot/gen_aot_lib.py, or remove "
+            "${NATIVE_AOT_ARTIFACTS_DIR} to build without embedded kernels "
+            "(TORCH_NATIVE_AOT=0 skips stage 2, but this block keys off the "
+            "artifacts on disk).")
       endif()
     endif()
     # Per-op include dirs for the exported CuTeDSL ABI headers.
@@ -1120,6 +1142,7 @@ elseif(USE_CUDA)
   else()
     message(STATUS "native-AOT embedded: no artifacts under ${NATIVE_AOT_ARTIFACTS_DIR} (build proceeds without)")
   endif()
+  endif()  # TORCH_NATIVE_AOT=0 opt-out
 
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)

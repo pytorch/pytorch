@@ -153,22 +153,32 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
     stub = f"at::native::{m.stub_name()}"
     if m.unconditional:
         gate = "!at::globalContext().maskUnconditionalNativeAot()"
+        # The user-facing switch does NOT reach this op, so the shared comment's
+        # "switched off" case would describe a route that does not exist here.
         gate_comment = (
             "// declared UNCONDITIONAL: these kernels are the implementation, so\n"
-            "// torch._native.set_aot_enabled(False) does NOT mask them; only the\n"
-            "// private reference-computation hatch does. A declined shape still\n"
-            "// falls through to op.impl.\n"
+            "// torch._native.set_aot_enabled(False) does NOT mask them -- only the\n"
+            "// private reference-computation hatch does, which is why a gate exists\n"
+            "// at all. op.impl runs when that hatch is set, when the device is\n"
+            "// unsupported, or when the kernels decline this shape.\n"
+        )
+        cases = (
+            "// the stub is never called when the device is unsupported. op.impl\n"
+            "// below is the ordinary aten kernel.\n"
         )
     else:
         gate = "at::globalContext().allowNativeAot()"
         gate_comment = ""
+        cases = (
+            "// the stub is never called when AOT is switched off or the device is\n"
+            "// unsupported. op.impl below is the ordinary aten kernel, and it runs in\n"
+            "// exactly those three cases: switched off, unsupported device, or declined.\n"
+        )
     return (
         f"// native-AOT: the last conjunct is the LAUNCH, not a query -- it runs the\n"
         f"// AOT kernel into the meta()-allocated outputs and returns true if it\n"
         f"// handled the call, false if it declined this shape. && short-circuits, so\n"
-        f"// the stub is never called when AOT is switched off or the device is\n"
-        f"// unsupported. op.impl below is the ordinary aten kernel, and it runs in\n"
-        f"// exactly those three cases: switched off, unsupported device, or declined.\n"
+        f"{cases}"
         f"{gate_comment}"
         f"if (!({gate} && "
         f"{stub}.is_device_supported({device_type}) && "
