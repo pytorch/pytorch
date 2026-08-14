@@ -3088,7 +3088,7 @@
   result: auto_element_wise
 
 - name: special_bessel_y1(Tensor self) -> Tensor
-  self: grad * (at::special_bessel_y0(self) - result * self.reciprocal())
+  self: bessel_y1_backward(grad, self, result)
   result: auto_element_wise
 
 - name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor

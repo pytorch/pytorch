@@ -1207,20 +1207,37 @@ class TestUnaryUfuncs(TestCase):
         )
         gradcheck(torch.sinc, a)
 
-    # bessel_j1 and modified_bessel_i1 have a 0/0 closed-form gradient at x = 0
-    # whose analytic limit is 1/2. OpInfo sample generation does not reliably emit
-    # exact zeros, so this special-cased value is not covered there; check it here.
+    # The order-1 Bessel gradients are indeterminate at x = 0 as written: 0/0 for
+    # j1/i1 (limit 1/2) and (-inf) - (-inf) for y1 (limit +inf). OpInfo sample
+    # generation does not reliably emit exact zeros, and y1's domain floors samples
+    # away from 0, so these special-cased values are only covered here.
     @dtypes(torch.double)
     @parametrize(
-        "name",
-        ("bessel_j1", "modified_bessel_i1"),
+        "name, expected",
+        (
+            ("bessel_j1", 0.5),
+            ("modified_bessel_i1", 0.5),
+            ("bessel_y1", float("inf")),
+        ),
     )
-    def test_bessel_zero_limit_gradient(self, device, dtype, name):
+    def test_bessel_zero_limit_gradient(self, device, dtype, name, expected):
         op = getattr(torch.special, name)
         x = torch.zeros(4, dtype=dtype, device=device, requires_grad=True)
         (grad,) = torch.autograd.grad(op(x).sum(), x)
-        self.assertFalse(torch.isnan(grad).any())
-        self.assertEqual(grad, torch.full_like(grad, 0.5))
+        self.assertEqual(grad, torch.full_like(grad, expected))
+
+    # The x = 0 special casing must not swallow NaN: a NaN input has to keep
+    # producing a NaN gradient rather than the finite limit at the origin.
+    @dtypes(torch.double)
+    @parametrize(
+        "name",
+        ("bessel_j1", "modified_bessel_i1", "i1", "i1e"),
+    )
+    def test_bessel_nan_input_gradient(self, device, dtype, name):
+        op = getattr(torch.special, name)
+        x = torch.full((4,), float("nan"), dtype=dtype, device=device).requires_grad_()
+        (grad,) = torch.autograd.grad(op(x).sum(), x)
+        self.assertTrue(torch.isnan(grad).all())
 
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
