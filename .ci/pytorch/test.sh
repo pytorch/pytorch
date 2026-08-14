@@ -466,6 +466,7 @@ test_python_smoke_b200() {
       test_varlen_attention \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -2382,7 +2383,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
       elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
         # Keep in sync with the ROCm version in the benchmarks docker image
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm6.4"
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm7.2"
       else
         echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
         exit 1
