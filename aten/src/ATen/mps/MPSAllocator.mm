@@ -949,7 +949,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     _getAllocImpl().emptyCache();
   }
   void recordStream(const DataPtr& ptr, c10::Stream stream) override {
-    MPSStream* mps_stream = (stream.id() == 0) ? getDefaultMPSStream() : getStreamFromPool(stream.id());
+    MPSStream* mps_stream = getStreamByID(stream.id());
     _getAllocImpl().recordStream(ptr.get(), mps_stream);
   }
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(c10::DeviceIndex device [[maybe_unused]]) override {
