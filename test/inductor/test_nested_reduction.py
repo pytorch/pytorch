@@ -156,6 +156,21 @@ def _mxfp6_four_to_three_quantize(x, group_size=32):
     return _mxfp6_pack_four_to_three(values).view(B, D // 4, 3), scale
 
 
+def _rmsnorm_factor4_three_output_epilogue(x, weight, group_size=32):
+    B, D = x.shape
+    normalized = torch.nn.functional.rms_norm(x, (D,), weight)
+    groups = normalized.view(B, D // group_size, group_size)
+    scale = groups.abs().amax(dim=-1)
+    lanes = groups.view(B, D // group_size, group_size // 4, 4)
+    outputs = tuple(
+        torch.ops._inductor_test.realize(
+            (lane + 1) * lanes[..., lane] / scale.unsqueeze(-1)
+        )
+        for lane in range(3)
+    )
+    return torch.stack(outputs, dim=-1), scale
+
+
 def _mxfp6_internal_source_full_resolution_fork(x, group_size=32):
     B, D = x.shape
     xg = x.view(B, D // group_size, group_size).float()
@@ -1869,7 +1884,6 @@ class _NestedReductionBase:
             self.check_numeric(g, (x, z))
         self.assertTrue(saw_staged_reduction)
 
-    @inductor_config.patch("fx_graph_cache", False)
     def test_looped_standalone_sub_parent_large_group(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
@@ -1915,6 +1929,22 @@ class _NestedReductionBase:
         )
         x = values.repeat(B, D // values.numel())
         self.check_nested_matches_unnested(_mxfp6_four_to_three_quantize, (x,))
+        self.check_fusion()
+
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": False,
+            "loop_ordering_after_fusion": False,
+            "triton.coalesce_tiling_analysis": False,
+        }
+    )
+    def test_rmsnorm_factor4_three_output_epilogue(self):
+        B, D, G = 8, 4096, 32
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(
+            _rmsnorm_factor4_three_output_epilogue, (x, weight, G)
+        )
         self.check_fusion()
 
     def test_dynamic_batch_mxfp6_four_to_three_pack(self):
@@ -2698,10 +2728,12 @@ class _NestedReductionBase:
         self._check_rejected(f, (torch.randn(4, 2048, device=GPU_TYPE),))
 
 
+@inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
     force_persistent_outer_reduction = True
 
 
+@inductor_config.patch("force_disable_caches", True)
 class NestedReductionNonPersistentTest(_NestedReductionBase, TestBase):
     force_persistent_outer_reduction = False
 
