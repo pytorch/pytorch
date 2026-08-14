@@ -132,16 +132,15 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
 // of them in libtorch).
 //
 
-// Moves [begin, end) into a freshly allocated Stack, destroying the drained
-// IValues and resetting end to begin. On exception (Stack allocation
-// failure) the buffer is left untouched.
-TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue*& end);
+// Moves [begin, end) into a freshly allocated Stack. Destroying the
+// (then moved-from) IValues is left to the caller's BoxedBuffer.
+TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end);
 
 namespace detail {
-// Uninitialized storage for N boxed IValues. Destroys the constructed
-// prefix [begin, end) on destruction; a successful boxedBufferToStack
-// empties the range, so the destructor only does work when boxing or the
-// Stack allocation threw.
+// Uninitialized storage for N boxed IValues. The destructor destroys
+// [begin, end): cheap moved-from IValues after a successful
+// boxedBufferToStack, or the constructed prefix if boxing or the Stack
+// allocation threw.
 template <size_t N>
 struct BoxedBuffer final {
   // See Dispatcher::callWithDispatchKeySlowPath for why this is not an
