@@ -882,6 +882,9 @@ class MPSTestBase(DeviceTypeTestBase):
         available = psutil.virtual_memory().available
         if available < size:
             gc.collect()
+            # Sync and cleanup MPS memory before checking available memory
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
         return psutil.virtual_memory().available >= size
 
     @classmethod
