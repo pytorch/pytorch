@@ -23067,6 +23067,10 @@ if "cutedsl" in dsl_ops_by_dsl:
     ])
 
 if "flydsl" in dsl_ops_by_dsl:
+    from torch._native.ops.topk.flydsl_impl import (
+        _is_supported_arch as _is_flydsl_topk_supported_arch,
+    )
+
     _flydsl_topk_skips = (
         DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
         DecorateInfo(unittest.skip("topk override requires contiguous input"),
@@ -23096,7 +23100,20 @@ if "flydsl" in dsl_ops_by_dsl:
         supports_fwgrad_bwgrad=False,
         supports_out=False,
         supports_cow_input_no_materialize_forward=False,
-        decorators=[DecorateInfo(onlyCUDA)],
+        decorators=[
+            DecorateInfo(onlyCUDA),
+            DecorateInfo(
+                skipCUDAIf(
+                    not (
+                        torch.cuda.is_available()
+                        and _is_flydsl_topk_supported_arch(
+                            torch.cuda.current_device()
+                        )
+                    ),
+                    "flydsl topk override requires gfx950",
+                )
+            ),
+        ],
         skips=_flydsl_topk_skips,
     )
     dsl_ops_by_dsl["flydsl"].extend([

@@ -23,6 +23,7 @@ from ._common import (
 
 
 _RUNTIME_AVAILABLE: bool = fu.runtime_available()
+_SUPPORTED_ARCHES = ("gfx950",)
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
 # Per-K register ranges tuned on MI355.  K=32 loses to aten in the measured
@@ -73,6 +74,12 @@ def _kernel_for(k: int, n: int) -> str | None:
 
 
 @functools.cache
+def _is_supported_arch(device_index: int) -> bool:
+    arch = fu._resolve_rocm_arch(device_index)
+    return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
+
+
+@functools.cache
 def _min_rows_for_full_wave(device_idx: int) -> int:
     return torch.cuda.get_device_properties(device_idx).multi_processor_count
 
@@ -86,6 +93,9 @@ def _eligible(
         return False
     if not self.is_cuda or self.dtype != torch.float32:
         return False
+    device_index = self.device.index
+    if device_index is None or not _is_supported_arch(device_index):
+        return False
     if any_cow(self):
         return False
     if not largest or not sorted_:
@@ -96,7 +106,7 @@ def _eligible(
         return False
     N = self.shape[-1] if self.ndim >= 1 else 0
     M = self.numel() // N if N else 0
-    if M < _min_rows_for_full_wave(self.device.index or 0):
+    if M < _min_rows_for_full_wave(device_index):
         return False
     return _kernel_for(k, N) is not None
 
