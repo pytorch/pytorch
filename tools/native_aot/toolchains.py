@@ -44,6 +44,10 @@ Properties consumed by the driver scripts:
     for toolchains whose export writes a header (CuTeDSL's ABI struct).
   * ``NARROWS_SHAPES_TO_INT32``: the exported ABI takes i32 extents, so
     gen_aot_lib emits a stub gate declining dims past INT32_MAX.
+  * ``ARCH_ENV_VAR``: env var this kind reads when no arch is passed
+    explicitly; export._effective_arch resolves it so the sidecar records
+    the arch actually compiled for and a run that changes only that
+    variable is not skipped as already exported.
 
 Export runs as stage 2 of the two-stage build (build torch -> build
 the AOT lib), so torch is always importable during export.
@@ -83,6 +87,12 @@ class Toolchain:
     # exported ABI, not of aten, so it lives per-kind: Triton takes its
     # scalar widths from the kernel's own signature and needs no such gate.
     NARROWS_SHAPES_TO_INT32: bool = False
+
+    # Env var this kind falls back to when no explicit arch is given. The
+    # sidecar records the arch it resolves to, so a run that changes only
+    # this variable is not mistaken for one that already exported (see
+    # export._effective_arch).
+    ARCH_ENV_VAR: str | None = None
 
     REQUIRED_BUILD_KEYS: tuple[str, ...] = ()
 
@@ -140,11 +150,16 @@ class CuteDslToolchain(Toolchain):
     # must decline dims that do not fit (see gen_aot_lib._int32_size_gate).
     NARROWS_SHAPES_TO_INT32 = True
 
+    ARCH_ENV_VAR = "CUTE_DSL_ARCH"
+
     # tvm_ffi: the JIT wrappers pass --enable-tvm-ffi, and cutlass imports
     # it during compile even though the exported ABI does not use it.
     REQUIRED_RUNTIMES = ("cutlass", "tvm_ffi")
     REQUIRED_BUILD_KEYS = ("fn", "fake_args", "tensor_args")
 
+    # Rendered into the generated file's anonymous namespace, so the module
+    # handle, the once_flag and launch_ itself all get internal linkage --
+    # nothing here is part of libtorch_cuda's exported surface.
     LAUNCHER_TMPL = """\
 {prefix}_Kernel_Module_t {prefix}_module;
 c10::once_flag {prefix}_loaded;
@@ -176,8 +191,8 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
 
         A kernel-free @cute.jit takes the num_kernels == 0 branch, so it
         initializes the engine for any target: ~0.12s, once per process,
-        no CUDA device needed (verified GPU-less). That is what lets one
-        worker export for any mix of arches.
+        no CUDA device needed. That is what lets one worker export for
+        any mix of arches.
         """
         if cls._warmed_up:
             return
@@ -200,8 +215,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         if arch:
             # --gpu-arch is authoritative: dsl.py prefers
             # compile_options.gpu_arch over the CUTE_DSL_ARCH env var, so
-            # one process can export for several arches (verified: three
-            # arches, three distinct objects, one pid).
+            # one process can export for several arches.
             opts = f"{opts} --gpu-arch {arch}" if opts else f"--gpu-arch {arch}"
             self._warm_up_exporter()
         compiled = cute.compile(
