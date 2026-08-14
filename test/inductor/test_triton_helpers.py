@@ -26,6 +26,7 @@ from torch._inductor.runtime.triton_helpers import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -156,6 +157,8 @@ if HAS_GPU:
 class ExclusiveScanDecoupledLookback64Test(TestCase):
     """Test cases for exclusive_scan_decoupled_lookback_64 dtype fix."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_gpu()
     def test_flag_2_branch_with_int64_index(self) -> None:
         """Test `if flag == 2` branch with int64 index."""
@@ -214,6 +217,8 @@ class SelectOneTest(TestCase):
     bitcast from int32 to a 16-bit dtype fails with a size mismatch error.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_select_one(self, dtype: torch.dtype) -> None:
         device = torch.device(GPU_TYPE)
         BLOCK_SIZE = 4
@@ -251,6 +256,8 @@ class SelectOneTest(TestCase):
 
 class Random4xTest(TestCase):
     """Test cases for rand4x/randn4x helper packing order."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _run_random_4x_order(self, normal: bool, block_size: int) -> None:
         device = torch.device(GPU_TYPE)
@@ -374,6 +381,8 @@ class Random4xTest(TestCase):
 
 
 class MinimumMaximumTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
         a = torch.tensor(
             [
