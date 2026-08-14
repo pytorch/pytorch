@@ -7216,11 +7216,12 @@ class GraphModule(torch.nn.Module):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), x)
 
+    @parametrize("length", [5, 9])
     @parametrize("combine_mode", ["generic", "pointwise"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_unbatched_xs(self, combine_mode, device):
-        xs = torch.randn(5, 2, device=device)
+    def test_associative_scan_in_vmap_unbatched_xs(self, length, combine_mode, device):
+        xs = torch.randn(length, 2, device=device)
         h = torch.randn(3, 2, device=device)
 
         def fn(xs, h):
@@ -7235,26 +7236,27 @@ class GraphModule(torch.nn.Module):
             return torch.vmap(inner_fn, in_dims=0)(h)
 
         out = fn(xs, h)
-        # Reference: loop associative_scan over the batch, capturing each hi slice.
         exp = torch.stack(
             [
-                associative_scan(
-                    lambda a, b, hi=h[i]: a + b + hi, xs, dim=0, combine_mode="generic"
-                )
+                _fake_associative_scan(lambda a, b, hi=h[i]: a + b + hi, xs, dim=0)
                 for i in range(h.shape[0])
             ]
         )
         self.assertEqual(out, exp)
 
+    @parametrize("coupling", ["add", "mul"])
     @parametrize("combine_mode", ["generic", "pointwise"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_mixed_batched_pytree(self, combine_mode, device):
+    def test_associative_scan_in_vmap_mixed_batched_pytree(
+        self, coupling, combine_mode, device
+    ):
         a = torch.randn(3, 5, 2, device=device)
         b = torch.randn(5, 2, device=device)
 
         def combine_fn(l, r):
-            return {"a": l["a"] + r["a"], "b": l["b"] + r["b"] + r["a"]}
+            coupled = l["b"] + r["b"] + r["a"] if coupling == "add" else l["b"] * r["a"]
+            return {"a": l["a"] + r["a"], "b": coupled}
 
         def fn(a, b):
             def inner_fn(ai):
@@ -7265,6 +7267,7 @@ class GraphModule(torch.nn.Module):
             return torch.vmap(inner_fn, in_dims=0)(a)
 
         out = fn(a, b)
+
         exp_list = [
             associative_scan(
                 combine_fn, {"a": a[i], "b": b}, dim=0, combine_mode="generic"
@@ -7277,16 +7280,22 @@ class GraphModule(torch.nn.Module):
     @parametrize("combine_mode", ["generic", "pointwise"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_unbatched_xs_multilevel(
-        self, combine_mode, device
-    ):
-        xs = torch.randn(7, 2, device=device)
+    def test_associative_scan_in_vmap_divergence_cascade(self, combine_mode, device):
+        xs = {
+            "a": torch.randn(5, 2, device=device),
+            "b": torch.randn(5, 2, device=device),
+            "c": torch.randn(5, 2, device=device),
+        }
         h = torch.randn(4, 2, device=device)
 
         def fn(xs, h):
             def inner_fn(hi):
-                def combine_fn(a, b):
-                    return a + b + hi
+                def combine_fn(l, r):
+                    return {
+                        "a": l["a"] + r["a"] + hi,
+                        "b": l["b"] + r["b"] + r["a"],
+                        "c": l["c"] + r["c"] + r["b"],
+                    }
 
                 return associative_scan(
                     combine_fn, xs, dim=0, combine_mode=combine_mode
@@ -7295,14 +7304,20 @@ class GraphModule(torch.nn.Module):
             return torch.vmap(inner_fn, in_dims=0)(h)
 
         out = fn(xs, h)
-        exp = torch.stack(
-            [
-                associative_scan(
-                    lambda a, b, hi=h[i]: a + b + hi, xs, dim=0, combine_mode="generic"
-                )
-                for i in range(h.shape[0])
-            ]
-        )
+        exp_list = []
+        for i in range(h.shape[0]):
+
+            def combine_fn(l, r, hi=h[i]):
+                return {
+                    "a": l["a"] + r["a"] + hi,
+                    "b": l["b"] + r["b"] + r["a"],
+                    "c": l["c"] + r["c"] + r["b"],
+                }
+
+            exp_list.append(
+                associative_scan(combine_fn, xs, dim=0, combine_mode="generic")
+            )
+        exp = {k: torch.stack([o[k] for o in exp_list]) for k in ("a", "b", "c")}
         self.assertEqual(out, exp)
 
     @skipIfTorchDynamo("not a dynamo test")

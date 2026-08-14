@@ -135,14 +135,13 @@ class _VmapCombineFnWrapper:
         positional arguments, and are held fixed for the wrapper's lifetime.
       - ``out_dims`` is ``None`` until ``__call__`` runs at least once, and only then
         holds the flat per-output markers aligned to the op's flat outputs. Because a
-        scan HOP may not invoke the combine_fn at all (e.g. scan length < 2), a caller
-        MUST check for ``out_dims is None`` and decide the fallback itself:
-        ``associative_scan_batch_rule`` falls back to the xs batch dims (the op is a
-        no-op so outputs alias xs), while ``scan_batch_rule`` asserts the op always
-        runs. The consistency check below guards ``out_dims`` stability across steps,
-        not ``in_dims`` correctness -- ``in_dims`` must be chosen by the caller so the
-        outputs carry the same batch dims as the inputs (see associative_scan_batch_rule,
-        which probes for the output dims and expands xs accordingly).
+        scan HOP may not invoke the combine_fn at all (e.g. scan length < 2),
+        ``scan_batch_rule`` reads ``out_dims`` after the op runs and asserts it is not
+        ``None``. The consistency check below guards ``out_dims`` stability across
+        steps, not ``in_dims`` correctness -- ``in_dims`` must be chosen by the caller
+        so the outputs carry the same batch dims as the inputs. ``associative_scan_batch_rule``
+        does not read ``out_dims``: it expands every unbatched xs leaf up front so all
+        outputs are batched at the last axis regardless of scan length.
     """
 
     def __init__(
