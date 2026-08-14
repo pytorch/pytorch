@@ -1098,17 +1098,17 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 } // namespace impl
 
 std::shared_ptr<c10::SafePyObject> FakeTensorMode::cache_pyobj_cpp_fake_mode() {
-  std::lock_guard<std::mutex> lock(pyobj_pin_mutex_);
-  if (auto pin = pyobj_pin_.lock()) {
-    return pin;
+  std::lock_guard<std::mutex> lock(pyobj_cpp_fake_mode_mutex_);
+  if (auto pyobj_cpp_fake_mode = pyobj_cpp_fake_mode_.lock()) {
+    return pyobj_cpp_fake_mode;
   }
   if (fake_mode_pyobj_ == nullptr) {
     return nullptr;
   }
-  auto pin = (*c10::impl::getGlobalPyInterpreter())
-                 ->strong_ref_from_weakref(*fake_mode_pyobj_);
-  pyobj_pin_ = pin;
-  return pin;
+  auto pyobj_cpp_fake_mode = (*c10::impl::getGlobalPyInterpreter())
+                                 ->strong_ref_from_weakref(*fake_mode_pyobj_);
+  pyobj_cpp_fake_mode_ = pyobj_cpp_fake_mode;
+  return pyobj_cpp_fake_mode;
 }
 
 void FakeTensorMode::set_constant(
