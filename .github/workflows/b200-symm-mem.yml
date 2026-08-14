@@ -62,16 +62,16 @@ jobs:
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
     secrets: inherit
 
-  linux-jammy-cuda13_2-py3_12-gcc11-sm100-build-symm:
-    name: linux-jammy-cuda13.2-py3.12-gcc11-sm100-symm
+  linux-jammy-cuda13_2-py3_12-gcc13-sm100-build-symm:
+    name: linux-jammy-cuda13.2-py3.12-gcc13-sm100-symm
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       runner: l-x86iavx512-16-128
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-jammy-cuda13.2-py3.12-gcc11-sm100-symm
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11
+      build-environment: linux-jammy-cuda13.2-py3.12-gcc13-sm100-symm
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
@@ -79,14 +79,14 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda13_2-py3_12-gcc11-sm100-test:
-    name: linux-jammy-cuda13.2-py3.12-gcc11-sm100-symm
+  linux-jammy-cuda13_2-py3_12-gcc13-sm100-test:
+    name: linux-jammy-cuda13.2-py3.12-gcc13-sm100-symm
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda13_2-py3_12-gcc11-sm100-build-symm
+      - linux-jammy-cuda13_2-py3_12-gcc13-sm100-build-symm
     with:
-      build-environment: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc11-sm100-build-symm.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc11-sm100-build-symm.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc11-sm100-build-symm.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc13-sm100-build-symm.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc13-sm100-build-symm.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_12-gcc13-sm100-build-symm.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
     secrets: inherit

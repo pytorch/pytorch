@@ -76,8 +76,8 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda13.2-py3.10-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.10-gcc13-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.6'
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -90,7 +90,7 @@ jobs:
           { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
       python-version: "3.10"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -105,7 +105,7 @@ jobs:
       docker-image: ${{ needs.inductor-build-cuda132.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build-cuda132.outputs.test-matrix }}
       python-version: "3.10"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
