@@ -46,7 +46,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-_allowed_backends = tuple(Backend.backend_list)
+_allowed_backends = ("goo", "nccl", "ucc", "hccl")
 
 if (
     "BACKEND" not in os.environ

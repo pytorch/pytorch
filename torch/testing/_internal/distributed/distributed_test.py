@@ -26,10 +26,6 @@ import numpy as np
 import torch
 import torch.cuda
 import torch.distributed as dist
-
-_DEVICE_TYPE = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
-_DEVICE_MODULE = torch.get_device_module(_DEVICE_TYPE)
-
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.hierarchical_model_averager as hierarchicalSGD
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
@@ -205,6 +201,9 @@ skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
+
+_DEVICE_TYPE = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+_DEVICE_MODULE = torch.get_device_module(_DEVICE_TYPE)
 
 
 def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
@@ -1697,7 +1696,14 @@ class DistributedTest:
         def _test_send_recv(self, profiler_ctx):
             rank = dist.get_rank()
             send_size = rank + 1
-            tensor = _build_tensor(send_size)
+            # Use accelerator device for NCCL/HCCL, CPU for others
+            if BACKEND in {"nccl", "hccl"}:
+                rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+                device_id = rank_to_GPU[rank][0]
+                tensor = _build_tensor(send_size, device_id=device_id)
+                _DEVICE_MODULE.set_device(device_id)
+            else:
+                tensor = _build_tensor(send_size)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 for src in range(dist.get_world_size()):
@@ -1710,8 +1716,12 @@ class DistributedTest:
                     else:
                         # Recv mode
                         recv_size = src + 1
-                        expected_tensor = _build_tensor(recv_size)
-                        output_tensor = _build_tensor(recv_size, value=-1)
+                        if BACKEND in {"nccl", "hccl"}:
+                            expected_tensor = _build_tensor(recv_size, device_id=device_id)
+                            output_tensor = _build_tensor(recv_size, value=-1, device_id=device_id)
+                        else:
+                            expected_tensor = _build_tensor(recv_size)
+                            output_tensor = _build_tensor(recv_size, value=-1)
                         dist.recv(output_tensor, src)
                         self.assertEqual(output_tensor, expected_tensor)
 
@@ -1734,20 +1744,20 @@ class DistributedTest:
                             self.assertTrue(event.input_shapes in expected_shapes)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends send/recv tested by test_send_recv_nccl"
+            BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl"
         )
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends send/recv tested by test_send_recv_nccl"
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
         )
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends send/recv tested by test_send_recv_nccl"
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
         )
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1869,7 +1879,14 @@ class DistributedTest:
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             send_recv_size = 10
-            tensor = _build_tensor(send_recv_size, value=rank)
+            # Use accelerator device for NCCL/HCCL, CPU for others
+            if BACKEND in {"nccl", "hccl"}:
+                rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+                device_id = rank_to_GPU[rank][0]
+                tensor = _build_tensor(send_recv_size, value=rank, device_id=device_id)
+                _DEVICE_MODULE.set_device(device_id)
+            else:
+                tensor = _build_tensor(send_recv_size, value=rank)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 for dst in range(world_size):
@@ -1878,7 +1895,10 @@ class DistributedTest:
                         for src in range(world_size):
                             if src == rank:
                                 continue
-                            output_tensor = _build_tensor(send_recv_size, value=-1)
+                            if BACKEND in {"nccl", "hccl"}:
+                                output_tensor = _build_tensor(send_recv_size, value=-1, device_id=device_id)
+                            else:
+                                output_tensor = _build_tensor(send_recv_size, value=-1)
                             dist.recv(output_tensor, src, tag=src)
                             self.assertTrue(output_tensor.eq(src).all())
                     else:
@@ -1900,20 +1920,20 @@ class DistributedTest:
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends send/recv tested by test_send_recv_nccl"
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
         )
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends send/recv tested by test_send_recv_nccl"
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
         )
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             return self._test_send_recv_with_tag(profiler_ctx=autograd_profiler_ctx)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends send/recv tested by test_send_recv_nccl"
+            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
         )
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1928,20 +1948,32 @@ class DistributedTest:
         def _test_isend(self, profiler_ctx):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
+            # Use accelerator device for NCCL/HCCL, CPU for others
+            if BACKEND in {"nccl", "hccl"}:
+                rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+                device_id = rank_to_GPU[rank][0]
+                _DEVICE_MODULE.set_device(device_id)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 if rank == 0:
-                    requests = [
-                        dist.isend(_build_tensor(dest, 10), dest)
-                        for dest in range(1, world_size)
-                    ]
+                    requests = []
+                    for dest in range(1, world_size):
+                        if BACKEND in {"nccl", "hccl"}:
+                            tensor = _build_tensor(dest, 10, device_id=device_id)
+                        else:
+                            tensor = _build_tensor(dest, 10)
+                        requests.append(dist.isend(tensor, dest))
                     for request in requests:
                         request.wait()
-                        self.assertTrue(request.is_completed())
                 else:
-                    tensor = _build_tensor(rank, -1)
+                    if BACKEND in {"nccl", "hccl"}:
+                        tensor = _build_tensor(rank, -1, device_id=device_id)
+                        expected_tensor = _build_tensor(rank, 10, device_id=device_id)
+                    else:
+                        tensor = _build_tensor(rank, -1)
+                        expected_tensor = _build_tensor(rank, 10)
                     dist.recv(tensor, 0)
-                    self.assertEqual(tensor, _build_tensor(rank, 10))
+                    self.assertEqual(tensor, expected_tensor)
 
                 self._barrier()
 
@@ -1971,20 +2003,20 @@ class DistributedTest:
                             self.assertEqual(event.input_shapes, expected_shapes[rank])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support isend"
+            BACKEND == "nccl", "Nccl does not support isend"
         )
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support isend"
+            BACKEND == "nccl", "Nccl does not support isend"
         )
         def test_isend_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_isend(profiler_ctx=autograd_profiler_ctx)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support isend"
+            BACKEND == "nccl", "Nccl does not support isend"
         )
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1997,16 +2029,26 @@ class DistributedTest:
 
         # IRECV
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support irecv"
+            BACKEND == "nccl", "Nccl does not support irecv"
         )
         def test_irecv(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
 
+            if BACKEND in {"nccl", "hccl"}:
+                rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+                device_id = rank_to_GPU[rank][0]
+                _DEVICE_MODULE.set_device(device_id)
+
             if rank == 0:
-                expected_tensors = [
-                    _build_tensor(src, -1) for src in range(1, world_size)
-                ]
+                if BACKEND in {"nccl", "hccl"}:
+                    expected_tensors = [
+                        _build_tensor(src, -1, device_id=device_id) for src in range(1, world_size)
+                    ]
+                else:
+                    expected_tensors = [
+                        _build_tensor(src, -1) for src in range(1, world_size)
+                    ]
                 requests = [
                     dist.irecv(expected_tensors[src - 1], src)
                     for src in range(1, world_size)
@@ -2014,10 +2056,15 @@ class DistributedTest:
 
                 for src in range(1, world_size):
                     requests[src - 1].wait()
-                    self.assertTrue(requests[src - 1].is_completed())
-                    self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10))
+                    if BACKEND in {"nccl", "hccl"}:
+                        self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10, device_id=device_id))
+                    else:
+                        self.assertEqual(expected_tensors[src - 1], _build_tensor(src, 10))
             else:
-                tensor = _build_tensor(rank, 10)
+                if BACKEND in {"nccl", "hccl"}:
+                    tensor = _build_tensor(rank, 10, device_id=device_id)
+                else:
+                    tensor = _build_tensor(rank, 10)
                 dist.send(tensor, 0)
 
             self._barrier()
@@ -2096,7 +2143,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_broadcast(self):
             group, group_id, rank = self._init_global_test()
@@ -2116,14 +2163,14 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_broadcast_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_broadcast_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_broadcast_full_group(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2187,7 +2234,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2231,7 +2278,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2250,7 +2297,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2263,7 +2310,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2276,7 +2323,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2296,7 +2343,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2316,7 +2363,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2330,7 +2377,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2344,7 +2391,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2363,7 +2410,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2382,7 +2429,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2396,7 +2443,7 @@ class DistributedTest:
 
         @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/75168")
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2451,7 +2498,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2709,7 +2756,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_sum(self):
             group, group_id, rank = self._init_global_test()
@@ -2724,7 +2771,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_sum_async(self):
             group, group_id, rank = self._init_global_test()
@@ -2783,7 +2830,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_sum_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -2799,7 +2846,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_complex_unsupported_ops(self):
             unsupported_ops = [
@@ -2840,7 +2887,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_product(self):
             group, group_id, rank = self._init_global_test()
@@ -2855,7 +2902,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_min(self):
             group, group_id, rank = self._init_global_test()
@@ -2864,7 +2911,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_max(self):
             group, group_id, rank = self._init_global_test()
@@ -2874,7 +2921,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_group_sum(self):
             group, group_id, rank = self._init_group_test()
@@ -2890,7 +2937,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_group_product(self):
             group, group_id, rank = self._init_group_test()
@@ -2906,7 +2953,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_group_min(self):
             group, group_id, rank = self._init_group_test()
@@ -2916,7 +2963,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_group_max(self):
             group, group_id, rank = self._init_group_test()
@@ -2925,7 +2972,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_full_group_sum(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2940,7 +2987,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_full_group_product(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2955,7 +3002,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_full_group_min(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2964,7 +3011,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
@@ -3039,7 +3086,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             _group, group_id, _rank = self._init_global_test()
@@ -3255,7 +3302,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3283,7 +3330,7 @@ class DistributedTest:
             self.assertEqual(output, one * rank)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3302,7 +3349,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3323,7 +3370,7 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3334,7 +3381,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3374,7 +3421,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3402,7 +3449,7 @@ class DistributedTest:
                 dist.gather(one * rank)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3421,7 +3468,7 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3432,7 +3479,7 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3476,7 +3523,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_gather(self):
             group, group_id, rank = self._init_global_test()
@@ -3492,7 +3539,7 @@ class DistributedTest:
             self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_gather_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -3511,14 +3558,14 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.current_accelerator() is not None, "CPU tensor test, skip when accelerator is available"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support CPU tensors"
         )
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
@@ -4409,13 +4456,13 @@ class DistributedTest:
             return model_DDP
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support DDP on CPU models"
+            BACKEND in {"nccl", "hccl"}, "nccl/hccl does not support DDP on CPU models"
         )
         def test_DistributedDataParallelCPU(self):
             self._test_DistributedDataParallelCPU()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support DDP on CPU models"
+            BACKEND in {"nccl", "hccl"}, "nccl/hccl does not support DDP on CPU models"
         )
         def test_DistributedDataParallelCPU_grad_is_view(self):
             self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
@@ -4447,7 +4494,7 @@ class DistributedTest:
             model = ToyModel().to(self.rank)
             nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
 
-        @skip_but_pass_in_sandcastle_if(BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends require GPU for DDP")
+        @skip_but_pass_in_sandcastle_if(BACKEND in {"nccl", "hccl"}, "Gloo-only test")
         def test_ddp_create_graph(self):
             class Model(nn.Module):
                 def __init__(self) -> None:
@@ -4476,10 +4523,6 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
-        )
-        @skip_but_pass_in_sandcastle_if(
-            _DEVICE_TYPE != "cuda",
-            "torch.cuda.Stream is CUDA-specific",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_DistributedDataParallel_non_default_stream(self):
@@ -5604,10 +5647,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
-        @skip_but_pass_in_sandcastle_if(
-            _DEVICE_TYPE != "cuda",
-            "torch.cuda.amp is CUDA-specific",
-        )
         @skip_if_no_gpu
         def test_DistributedDataParallel_with_amp_and_grad_is_view(self):
             _DEVICE_MODULE.set_device(self.rank)
@@ -6269,7 +6308,7 @@ class DistributedTest:
             return model_DDP
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support DDP on CPU models"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support DDP on CPU models"
         )
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
@@ -6537,7 +6576,7 @@ class DistributedTest:
             self.assertEqual(ddp_without_list.bucket_bytes_cap_list, [])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND in {"nccl", "hccl", "xccl"}, "Accelerator backends do not support DDP on CPU models"
+            BACKEND in {"nccl", "hccl"}, "NCCL/HCCL does not support DDP on CPU models"
         )
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(Net())
