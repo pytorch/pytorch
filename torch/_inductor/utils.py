@@ -104,24 +104,49 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
+# GPU_TYPES is a static list retained for backward compatibility.
+# It will NOT include PrivateUse1 backends even after they declare
+# is_gpu()=True.  For membership tests use the is_gpu() predicate; for
+# enumeration use _gpu_types() or get_gpu_type().  Several call-sites
+# still iterate GPU_TYPES (grep for "GPU_TYPES") and will silently
+# exclude PrivateUse1 backends until migrated to is_gpu() / _gpu_types().
 GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
-@functools.cache
-def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    if not len(avail_gpus) <= 1:
-        raise AssertionError(
-            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
-        )
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
+def _gpu_types() -> list[str]:
+    """Private: walk the registered DeviceInterface registry and return
+    device-type names for which is_gpu() returns True.  Used only by
+    get_gpu_type() and the GPU_TYPES compatibility shim."""
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    return [
+        d
+        for d, iface in get_registered_device_interfaces()
+        if ":" not in d and iface.is_gpu()
+    ]  # filter "cuda:0"-style indexed entries
 
 
 from torch._dynamo.device_interface import get_interface_for_device
+
+
+@functools.cache
+def get_gpu_type() -> str:
+    avail_gpus = [t for t in _gpu_types() if get_interface_for_device(t).is_available()]
+    if len(avail_gpus) == 1:
+        return avail_gpus[0]
+    # Coexistence disambiguation: PrivateUse1 first, matching the
+    # priority of C++ getAccelerator().  Guard that the accelerator is
+    # actually present and GPU-class; otherwise fall through to the
+    # first available GPU (or "cuda" if none).
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and is_gpu(acc.type) and acc.type in avail_gpus:
+        return acc.type
+    # Fallthrough: return the first available GPU (dict-registration order,
+    # best-effort), or "cuda" if none are available.
+    return avail_gpus[0] if avail_gpus else "cuda"
+
+
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -1087,7 +1112,16 @@ def get_kernel_metadata(
                     return ""
                 shape_annotation = f"{stringify_shape(layout.size)}"
                 stride_annotation = f"{stringify_shape(layout.stride)}"
-                device_annotation = f"{layout.device}"
+                # Under compile-on-one-rank, render the bare device type so this kernel
+                # provenance comment is byte-identical across ranks.
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                device = layout.device
+                device_annotation = (
+                    device.type
+                    if (_coor_enabled() and device is not None)
+                    else f"{device}"
+                )
 
                 return (
                     f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
@@ -1126,16 +1160,13 @@ def get_kernel_metadata(
 
         for node in inductor_nodes:
             formatted_node = node.format_node(include_tensor_metadata=True)
-            if formatted_node is not None and torch.version.hip:
-                # AMDGCN asm strings can contain newlines, which propagate
-                # into format_node() output.  Split so every line gets the
-                # comment prefix; otherwise bare newlines break the wrapper.
-                detailed_metadata.extend(
-                    f"{wrapper.comment}   {line}"
-                    for line in formatted_node.splitlines()
-                )
-            else:
-                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
+            # Asm strings can contain newlines, which propagate into
+            # format_node() output.  Split so every line gets the comment
+            # prefix; otherwise bare newlines break the wrapper.
+            detailed_metadata.extend(
+                f"{wrapper.comment}   {line}"
+                for line in str(formatted_node).splitlines()
+            )
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -3432,7 +3463,12 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 
 def is_gpu(device: str | None) -> bool:
-    return device in GPU_TYPES
+    if device is None:
+        return False
+    try:
+        return get_interface_for_device(device).is_gpu()
+    except NotImplementedError:
+        return False
 
 
 def is_rocm() -> bool:
@@ -3516,7 +3552,11 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
+    try:
+        iface = get_interface_for_device(device)
+    except NotImplementedError:
+        return False
+    return iface.is_gpu() and iface.exposes_streams()
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
@@ -4215,13 +4255,13 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
-    - Control flow nodes (Conditional, WhileLoop)
+    - Control flow nodes (Switch, WhileLoop)
     - Ops with sparse tensor outputs
     """
     from . import ir
 
     # Control flow nodes are cudagraph-unsafe
-    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+    if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
@@ -4520,12 +4560,16 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_package_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(torch.__file__))
+    )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
         "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            "TORCH_CUSTOM_PYTHONPATH",
+            os.pathsep.join((torch_package_root, *sys.path)),
         ),
     }
 
@@ -4714,6 +4758,7 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         [
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
+            torch.ops.aten.sym_size.int,
         ]
     )
 

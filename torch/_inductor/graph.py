@@ -139,6 +139,7 @@ if TYPE_CHECKING:
     CompiledModule = ModuleType | FileBackedGraphModule
 
 from torch._inductor.codecache import output_code_log
+from torch._inductor.utils import is_gpu
 
 
 log = logging.getLogger(__name__)
@@ -505,6 +506,9 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.named_parameters if const_module else {}
         )
         self.torchbind_constants: dict[
+            str, torch._C.ScriptObject | FakeScriptObject
+        ] = {}
+        self.torchbind_replay_objects: dict[
             str, torch._C.ScriptObject | FakeScriptObject
         ] = {}
         self.opaque_value_type_classes: dict[str, type] = {}
@@ -2125,21 +2129,17 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
+                        is_view = n.meta["val"]._is_view() or isinstance(
                             result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
-                        ):
+                        )
+                        if is_view and not (is_output and config.strict_output_strides):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
                                 allow_padding=allow_padding,
                             )
                         else:
-                            # Fix for 0-d tensors: if result size is empty,
-                            # strides should also be empty
                             if len(result.get_size()) == 0 and len(strides) > 0:
                                 strides = []
                             result = ir.ExternKernel.require_exact_strides(
@@ -2595,7 +2595,7 @@ class GraphLowering(torch.fx.Interpreter):
         `cpp_wrapper_cpu.py`).
         """
         self.validate_can_generate_cpp_wrapper()
-        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        has_gpu = any(ir.is_triton(device) for device in self.device_types)
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
         # block normally populates CpuTritonKernelCache, but here it doesn't run.
@@ -2905,7 +2905,7 @@ class GraphLowering(torch.fx.Interpreter):
         # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
         # include the CUDA headers needed to compile the kernel call sites.
         device_type = next(
-            (d for d in self.device_types if d in ("cuda", "xpu")),
+            (d for d in self.device_types if is_gpu(d)),
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 

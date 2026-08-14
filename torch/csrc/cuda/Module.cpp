@@ -868,6 +868,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
 
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
+  py::str annotate_s = "annotate";
   py::str device_free_s = "device_free";
 
   using c10::CachingDeviceAllocator::TraceEntry;
@@ -892,6 +893,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::ANNOTATE:
+        return annotate_s;
     }
     TORCH_CHECK(false, "unreachable");
   };
@@ -1262,6 +1265,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::getUserMetadata();
   });
 
+  m.def("_cuda_annotateMemory", [](size_t ptr, const std::string& metadata) {
+    c10::cuda::CUDACachingAllocator::annotateMemory(
+        reinterpret_cast<void*>(ptr), metadata);
+  });
+
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {
     return at::native::_cudnn_get_conv_benchmark_empty_cache();
   });
@@ -1566,7 +1574,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         for (size_t ptr_int : stale_storages_ptr) {
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
-          if (!ptr_set.count(ptr)) {
+          if (!ptr_set.contains(ptr)) {
             ptrs.push_back(ptr);
             ptr_set.insert(ptr);
           }
@@ -1582,7 +1590,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         std::unordered_set<void*> freed_pointer_set;
         size_t definite_freed_count = 0;
         for (void* ptr : freed_pointers) {
-          if (!allocd_set.count(ptr)) {
+          if (!allocd_set.contains(ptr)) {
             definite_freed_count += 1;
           }
           freed_pointer_set.insert(ptr);
