@@ -1198,9 +1198,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # https://github.com/pytorch/pytorch/issues/192445
     @onlyOn(["cuda"])
     @dtypes(torch.int32, torch.int64)
-    def test_embedding_bag_per_sample_weights_mutated_indices(
-        self, device, dtype
-    ):
+    def test_embedding_bag_per_sample_weights_mutated_indices(self, device, dtype):
         stderr = self.runWithPytorchAPIUsageStderr(f"""\
 #!/usr/bin/env python3
 
