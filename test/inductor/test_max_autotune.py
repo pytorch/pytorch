@@ -215,12 +215,23 @@ class TestMaxAutotune(TestCase):
             "permute",
             "relu",
             "chain",
-            "tile_mismatch",
+            "larger_tile_m",
+            "larger_tile_n",
+            "larger_tile_both",
+            "smaller_tile",
+            "nondivisible_tile",
         ),
     )
     def test_persistent_tma_block_local_reduction_cases(self, case):
+        block = 96 if case == "nondivisible_tile" else 128
+        if case == "nondivisible_tile":
+            groups = 4
+        else:
+            groups = 3 if case.startswith("larger_tile") else 2
+        size = groups * block
+
         def f(a, b):
-            blocked = (a @ b).view(2, 128, 2, 128)
+            blocked = (a @ b).view(groups, block, groups, block)
             if case == "sum":
                 return blocked.sum((1, 3))
             if case == "min":
@@ -241,8 +252,8 @@ class TestMaxAutotune(TestCase):
             return blocked.amax((1, 3))
 
         torch.manual_seed(0)
-        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = torch.randn(size, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, size, device=GPU_TYPE, dtype=torch.bfloat16)
         if case == "nan":
             a[0, 0] = float("nan")
         patches = {
@@ -251,13 +262,42 @@ class TestMaxAutotune(TestCase):
             "triton.enable_persistent_tma_matmul": "1",
             "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
         }
-        if case == "tile_mismatch":
+        stack = contextlib.ExitStack()
+        tile = {
+            "larger_tile_m": (256, 128),
+            "larger_tile_n": (128, 256),
+            "larger_tile_both": (256, 256),
+            "smaller_tile": (64, 128),
+            "nondivisible_tile": (128, 128),
+        }.get(case)
+        if tile is not None:
+            from torch._inductor.heuristics.registry import get_template_heuristic
+
+            heuristic = get_template_heuristic(
+                "triton::mm_persistent_tma", GPU_TYPE, "mm"
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    heuristic,
+                    "mm_configs",
+                    [GemmConfig(*tile, 64, 3, 8)],
+                )
+            )
             patches["test_configs.max_mm_configs"] = 1
-        with config.patch(patches):
+        with stack, config.patch(patches):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
         self.assertEqual(actual, f(a, b))
-        if case in ("sum", "min", "nan", "multiple", "chain"):
+        if case in (
+            "sum",
+            "min",
+            "nan",
+            "multiple",
+            "chain",
+            "larger_tile_m",
+            "larger_tile_n",
+            "larger_tile_both",
+        ):
             FileCheck().check("_block_local_reduction").run(code[0])
         else:
             FileCheck().check_not("_block_local_reduction").run(code[0])
@@ -268,6 +308,8 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(torch.isnan(actual), torch.isnan(f(a, b)))
         elif case == "multiple":
             FileCheck().check("_block_local_reduction_2").run(code[0])
+        elif case.startswith("larger_tile"):
+            FileCheck().check("tl.arange(0, 2)").check("tl.reshape").run(code[0])
 
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
         make_matrix = functools.partial(
@@ -5335,7 +5377,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         def benchmark_choice(choice, _):
             if isinstance(choice, ExternKernelCaller):
                 return 10.0
-            if getattr(choice, "template_local_reduction_block", None) == (128, 128):
+            if getattr(choice, "template_local_reduction_tile", None) == (128, 128):
                 return 0.1
             return 1.0
 
