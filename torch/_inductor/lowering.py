@@ -9418,6 +9418,45 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
     return output
 
 
+@register_lowering(torch._higher_order_ops._fuse_or_err, type_promotion_kind=None)
+def fuse_or_err(
+    subgraph_fn: ir.Subgraph, *operands, fuse_backward=False, _enforce_fusion=True
+):
+    """
+    Lowers a fuse_or_err region by inlining its subgraph into the parent graph
+    (so its ops participate in normal fusion) and, when enforcing, recording the
+    realized operations as a group that Scheduler._verify_fuse_or_err_groups
+    later requires to fuse into a single kernel.
+    """
+    from .graph import FuseOrErrGroup
+
+    hop_node = V.graph.current_node
+    subgraph_nodes = OrderedSet(subgraph_fn.graph_module.graph.nodes)
+    op_watermark = len(V.graph.operations)
+
+    output = process_subgraph_nodes(subgraph_fn.graph_module, list(operands))
+    # Materialize every output leaf so the scheduler can account for all kernels
+    # produced by the region.
+    for value in pytree.tree_leaves(output):
+        if isinstance(value, ir.IRNode):
+            value.realize()
+
+    if _enforce_fusion:
+        # Only count operations that originated from this subgraph. Realizing a
+        # region op can materialize an upstream lazy operand as a side effect;
+        # such ops carry the outer node as their origin, not a subgraph node, so
+        # filtering by origin keeps them out of the region group.
+        region_ops = OrderedSet(
+            op.get_operation_name()
+            for op in V.graph.operations[op_watermark:]
+            if not op.get_origins().isdisjoint(subgraph_nodes)
+        )
+        if region_ops:
+            V.graph.fuse_or_err_groups.append(FuseOrErrGroup(region_ops, hop_node))
+
+    return output
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
