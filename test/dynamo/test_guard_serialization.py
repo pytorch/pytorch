@@ -90,6 +90,28 @@ def keep_kwdefaults(func):
     return wrapper
 
 
+def keep_attribute(func):
+    func.scale_flag = 2.0
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.scale_flag == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_name(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 class DecoratedForwardModule(torch.nn.Module):
     # forward is the wrapper; the undecorated function it closes over has the
     # same __qualname__ but is unreachable from the module, which is what makes
@@ -103,6 +125,18 @@ class DecoratedKwdefaultsForwardModule(torch.nn.Module):
     @keep_kwdefaults
     def forward(self, x, *, scale=2.0):
         return x * scale
+
+
+class DecoratedAttributeForwardModule(torch.nn.Module):
+    @keep_attribute
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedNameForwardModule(torch.nn.Module):
+    @keep_name
+    def forward(self, x):
+        return x * 2
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -531,6 +565,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_fqn_mismatched_function_preserves_kwdefaults(self):
         mod = DecoratedKwdefaultsForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_preserves_attributes(self):
+        mod = DecoratedAttributeForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_preserves_name(self):
+        mod = DecoratedNameForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
         self._test_check_fn(
