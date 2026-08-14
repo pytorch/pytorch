@@ -517,9 +517,11 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
-    # Do not invoke user callbacks while holding _initialization_lock
-    # they may call back into _lazy_call.
-    if is_initialized():
+    # Do not invoke user callbacks while holding _initialization_lock;
+    # they may call back into _lazy_call. The is_initializing check
+    # mirrors _lazy_init: while it drains _queued_calls this thread
+    # already holds the lock, so run reentrant callbacks immediately.
+    if is_initialized() or hasattr(_tls, "is_initializing"):
         callable()
         return
 
