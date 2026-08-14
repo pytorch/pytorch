@@ -58,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCPU,
     onlyCUDA,
     skipMeta,
 )
@@ -73,7 +74,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
-    onlyCPU,
     parametrize,
     run_tests,
     scoped_load_inline,
