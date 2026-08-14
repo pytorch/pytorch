@@ -42,10 +42,12 @@ else:
     pred = model(x)
 ```
 
-## Supported floating-point dtypes
+## Floating-point dtypes
 
-MPS is a float32 backend. Metal Shading Language has no `double` type, so
-`torch.float64` and `torch.complex128` are rejected on the `mps` device:
+The `mps` device supports `torch.float32`, `torch.float16`, `torch.bfloat16`
+and `torch.complex64`. What it does not have is double precision: Metal
+Shading Language has no `double` type, so `torch.float64` and
+`torch.complex128` are rejected:
 
 ```python
 >>> torch.ones(3, dtype=torch.float64, device="mps")
@@ -56,15 +58,14 @@ doesn't support float64. Please use float32 instead.
 This is a dtype restriction, not a missing operator, so
 `PYTORCH_ENABLE_MPS_FALLBACK=1` does not apply to it: the error is raised when
 the tensor is allocated or copied to the device, before any operator is
-dispatched. `torch.float32`, `torch.float16`, `torch.bfloat16` and
-`torch.complex64` are supported.
+dispatched.
 
 Rather than handling the error at each tensor construction site, resolve the
 dtype once, next to the device:
 
 ```python
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-# MPS is float32-only; use the wider dtype only where it is available.
+# MPS has no float64, so use the wider dtype only where it is available.
 float_dtype = torch.float32 if device.type == "mps" else torch.float64
 
 x = torch.ones(3, dtype=float_dtype, device=device)
