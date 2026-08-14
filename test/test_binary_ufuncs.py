@@ -2507,13 +2507,13 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.fmax,
             torch.fmin,
         ):
-            with self.assertRaisesRegex(RuntimeError, ".+not implemented for.+"):
+            with self.assertRaisesRegex(TypeError, ".+not implemented for.+"):
                 torch_op(
                     torch.ones(1, device=device, dtype=dtypes[0]),
                     torch.ones(1, device=device, dtype=dtypes[1]),
                 )
 
-            with self.assertRaisesRegex(RuntimeError, ".+not implemented for.+"):
+            with self.assertRaisesRegex(TypeError, ".+not implemented for.+"):
                 torch_op(
                     torch.ones(1, device=device, dtype=dtypes[1]),
                     torch.ones(1, device=device, dtype=dtypes[0]),

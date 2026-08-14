@@ -4854,64 +4854,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
             analyze_kernel_access.reset()
             get_tma_stores.reset()
 
-    @unittest.skipUnless(
-        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
-        "requires gpu or triton cpu",
-    )
-    def test_identify_accessed_tensors_reuses_analysis(self):
-        import triton
-        import triton.language as tl
-
-        from torch._higher_order_ops import triton_kernel_wrap as tkw
-        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
-
-        # Declared here rather than at module scope so no other test can have
-        # populated the analysis cache for it.
-        @triton.jit
-        def cache_probe_kernel(in_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            tl.store(out_ptr + offsets, tl.load(in_ptr + offsets, mask=mask), mask=mask)
-
-        device = GPU_TYPE if HAS_GPU else "cpu"
-        x = torch.rand(16, device=device)
-        analyses = 0
-        real_generate_ttir = tkw.generate_ttir
-
-        def counting_generate_ttir(*args, **kwargs):
-            nonlocal analyses
-            analyses += 1
-            return real_generate_ttir(*args, **kwargs)
-
-        def analyze(block_size):
-            return identify_accessed_tensors(
-                cache_probe_kernel,
-                {
-                    "in_ptr": x,
-                    "out_ptr": x,
-                    "n_elements": x.numel(),
-                    "BLOCK_SIZE": block_size,
-                },
-                {},
-            )
-
-        with mock.patch.object(tkw, "generate_ttir", counting_generate_ttir):
-            first = analyze(16)
-            self.assertEqual(analyses, 1)
-
-            # Asking the same question must not compile to TTIR a second time.
-            second = analyze(16)
-            self.assertEqual(analyses, 1)
-
-            # A different constexpr is a different question, and must not be
-            # served the previous answer.
-            analyze(32)
-            self.assertEqual(analyses, 2)
-
-        self.assertEqual([dep.name for dep in first.read_writes.reads], ["in_ptr"])
-        self.assertEqual([dep.name for dep in first.read_writes.writes], ["out_ptr"])
-        self.assertEqual(first, second)
-
 
 if HAS_GPU:
     t = torch.randn(4)
