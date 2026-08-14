@@ -38,9 +38,8 @@ driver, so kernels build on GPU-less machines. The arch is per-COMPILE
 state: CuTeDSL takes a --gpu-arch option, which outranks CUTE_DSL_ARCH
 (base_dsl/dsl.py prefers compile_options.gpu_arch over envar.arch), and
 Triton gets a fixed-target driver per export. So a single pool serves
-every (point, arch) job -- verified by exporting three arches from one
-process and getting three distinct objects. Multiple archs still nest
-under <out-dir>/<arch>/ to keep each tree independently linkable.
+every (point, arch) job. Multiple archs still nest under
+<out-dir>/<arch>/ to keep each tree independently linkable.
 CuTeDSL needs one warmup compile per process for this to work; see
 tools/native_aot/cutedsl_warmup.py.
 
@@ -181,6 +180,24 @@ def _json_normal(value):
     return value
 
 
+def _effective_arch(arch: str | None, tc: toolchains.Toolchain) -> str | None:
+    """The arch the artifacts are really compiled for: the explicit one if
+    given, else whatever the toolchain's own env var selects
+    (Toolchain.ARCH_ENV_VAR, e.g. CUTE_DSL_ARCH).
+
+    Resolving it on BOTH sides -- recorded in the sidecar, recomputed by
+    the skip check -- is what makes a flat --out-dir safe across runs that
+    set only that variable:
+
+        CUTE_DSL_ARCH=sm_90a  export.py --out-dir build/native_aot
+        CUTE_DSL_ARCH=sm_100a export.py --out-dir build/native_aot
+
+    Comparing the raw --arch value would leave both runs at None, so the
+    second matches on spec alone, skips every point, and the sm_90a
+    objects stay on disk behind a sidecar the caller reads as sm_100a."""
+    return arch or (os.getenv(tc.ARCH_ENV_VAR) if tc.ARCH_ENV_VAR else None)
+
+
 def export_point(
     op_pkg: str, kernel_module: str, point: dict, out_dir: str, arch: str | None = None
 ) -> str:
@@ -223,7 +240,7 @@ def export_point(
         "prefix": prefix,
         "kind": tc.kind,
         "spec": point,
-        "arch": arch,
+        "arch": _effective_arch(arch, tc),
         # The declaration lives at a path fixed by construction, so it needs
         # no threading through the job tuple.
         "sources": source_closure(os.path.join(OPS_DIR, op_pkg, "aot.py")),
@@ -272,15 +289,25 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     return jobs
 
 
+# Every "this tree is inconsistent" error ends the same way. `spin clean`
+# does clear the default --out-dir (build/ sits above .gitignore's
+# NOT-CLEAN-FILES marker), but it takes the whole build tree with it, so
+# name the surgical command first.
+_CLEAN_HINT = (
+    "run `rm -rf {d}` and re-export (`spin clean` also clears it, "
+    "along with the rest of the build tree)"
+)
+
+
 def _read_sidecar(path: str) -> dict:
     """A sidecar's JSON. Unreadable sidecars are fatal.
 
     The sidecar is written LAST, so its presence marks a completed
     export. One that exists but will not parse means the tree is
     corrupted and the .o/.h beside it are of unknown provenance.
-    Re-exporting would just make the directory look consistent again --
-    and --force skips this check, so gen_aot_lib would link artifacts
-    nothing validated.
+    Re-exporting would just make the directory look consistent again.
+    Reached even under --force, via the orphan scan in _collect_jobs, so
+    gen_aot_lib never links artifacts nothing validated.
     """
     try:
         with open(path) as f:
@@ -288,8 +315,8 @@ def _read_sidecar(path: str) -> dict:
     except (OSError, json.JSONDecodeError) as e:
         raise RuntimeError(
             f"{path}: sidecar exists but could not be read ({e}). The "
-            f"artifacts beside it cannot be trusted; delete the directory "
-            f"and re-run the export."
+            f"artifacts beside it cannot be trusted; "
+            f"{_CLEAN_HINT.format(d=os.path.dirname(path))}."
         ) from e
 
 
@@ -318,7 +345,7 @@ def _check_no_orphan_artifacts(out_dir: str, specs=None) -> None:
                 f"{out_dir}: kernel artifacts with no sidecar "
                 f"({', '.join(orphans[:4])}{', ...' if len(orphans) > 4 else ''}). "
                 f"The sidecar is written last, so this is an interrupted or "
-                f"hand-edited export; delete the directory and re-run."
+                f"hand-edited export; {_CLEAN_HINT.format(d=out_dir)}."
             )
         return
     if specs is None:
@@ -335,7 +362,7 @@ def _check_no_orphan_artifacts(out_dir: str, specs=None) -> None:
             f"{out_dir}: sidecars for spec points no longer in the grid "
             f"({', '.join(stale[:4])}{', ...' if len(stale) > 4 else ''}). "
             f"Their kernel objects would still be linked with no launcher "
-            f"referencing them; delete the directory and re-run."
+            f"referencing them; {_CLEAN_HINT.format(d=out_dir)}."
         )
 
 
@@ -368,7 +395,8 @@ def _job_needed(job, force: bool) -> bool:
     `--arch sm_100a` lands in the same directory. Without comparing arch,
     the second run matches the first run's sidecar on spec alone and
     skips every point, leaving sm_100 objects behind a sidecar that
-    claims sm_100a."""
+    claims sm_100a. The comparison goes through _effective_arch so runs
+    that set only the toolchain's arch env var are caught the same way."""
     if force:
         return True
     _, _, point, out_dir, arch = job
@@ -377,13 +405,13 @@ def _job_needed(job, force: bool) -> bool:
         if not fn.endswith(".json"):
             continue
         sc = _read_sidecar(os.path.join(out_dir, fn))
-        if sc.get("spec") == spec and sc.get("arch") == arch:
+        tc = toolchains.get_toolchain(sc.get("kind", "cutedsl"))
+        if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch, tc):
             # The sidecar is the skip marker, but it is not proof the
             # artifacts it describes are still on disk: anything that
             # removes a .o/.h without its .json (a partial clean, an
             # over-eager prune) would otherwise be skipped here and fail
             # much later as a missing include at compile time.
-            tc = toolchains.get_toolchain(sc.get("kind", "cutedsl"))
             prefix = sc.get("prefix", "")
             if any(
                 not os.path.exists(os.path.join(out_dir, prefix + e))
@@ -403,9 +431,9 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
     """TORCH_CUDA_ARCH_LIST -> the sm strings from it that are
     EXPORTABLE_ARCHES, order-preserving and deduplicated.
 
-    "9.0a;10.0a" (or space-separated) -> ["sm_100a"]. Named entries
-    ("Hopper") and +PTX suffixes are not translated -- callers should
-    pass numeric lists (CI does). Dedup matters: "10.0;10.0+PTX" names
+    "9.0a;10.0a" (or space-separated) -> ["sm_100a"]. A +PTX suffix is
+    stripped; named entries ("Hopper") are not translated -- callers
+    should pass numeric lists (CI does). Dedup matters: "10.0;10.0+PTX" names
     one arch twice, and a repeated entry would otherwise read as
     multi-arch downstream (nested artifact layout, --jobs > 1)."""
     out = []
