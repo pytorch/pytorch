@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 importlib.import_module("filelock")
@@ -23,6 +24,8 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 
 
 class XpuBasicTests(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     common = check_model_gpu
     device = "xpu"
 
