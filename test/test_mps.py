@@ -1612,7 +1612,6 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
-    @unittest.skipIf(MACOS_VERSION >= 15.0, "Exercises the pre-macOS-15 gather path")
     def test_matmul_offset_output(self):
         # Contiguous out= views at a nonzero storage offset; macOS < 15 dropped the write.
         a = torch.randn(2, 16, 16, device="mps")
