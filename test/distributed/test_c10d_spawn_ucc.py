@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 
-import os
 import sys
 
 import torch
@@ -12,10 +11,9 @@ if not c10d.is_available() or not c10d.is_ucc_available():
     print("c10d UCC not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from test_c10d_spawn import _torch_dist_nn_available
+from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -31,23 +29,8 @@ from torch.testing._internal.common_utils import (
 # Skip dev-asan as torch + multiprocessing spawn have known issues
 if not TEST_WITH_DEV_DBG_ASAN:
 
-    class TestDistributedNNFunctionsUcc(MultiProcessTestCase):
+    class TestDistributedNNFunctionsUcc(TestDistributedNNFunctions):
         hw_classification = HardwareClassification.ACCELERATOR
-
-        def setUp(self):
-            super().setUp()
-            self._spawn_processes()
-
-        def tearDown(self):
-            super().tearDown()
-            try:
-                os.remove(self.file_name)
-            except OSError:
-                pass
-
-        @property
-        def world_size(self):
-            return 2
 
         def _test_broadcast(self, backend, device):
             store = c10d.FileStore(self.file_name, self.world_size)
