@@ -538,27 +538,11 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
-# sympy Max/Min/Mul are n-ary, but their corresponding Python functions are
-# binary. Reduce so _build_proxy_for_sym_expr can rebuild flattened expressions
-# as nested binary ops. These are module-level (not lambdas) so they have a
-# qualified name and survive FX codegen/pickling when used as a graph node target.
-def _nary_sym_max(*args: Any) -> Any:
-    return functools.reduce(torch.sym_max, args)
-
-
-def _nary_sym_min(*args: Any) -> Any:
-    return functools.reduce(torch.sym_min, args)
-
-
-def _nary_mul(*args: Any) -> Any:
-    return functools.reduce(operator.mul, args)
-
-
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
     Returns a dict mapping sympy types to Python callables
-    (e.g. ``sympy.Mul`` -> ``_nary_mul``, ``sympy.Add`` -> ``torch.sym_sum``).
+    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
     """
     import sympy
 
@@ -569,15 +553,13 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
-        # sympy Max/Min have no operator.* equivalent. Map them to n-ary-safe
-        # wrappers over torch.sym_max/sym_min. Without this,
-        # _build_proxy_for_sym_expr cannot rebuild expressions like Max(1, u2)
-        # that escape a disable_proxy_modes_tracing region (e.g. DTensor shard
-        # propagation size inference).
+        # sympy Max/Min have no operator.* equivalent. Map them to the binary
+        # torch functions; _build_proxy_for_sym_expr reduces flattened n-ary
+        # expressions into binary calls.
         elif v == "maximum":
-            handlers[k] = _nary_sym_max
+            handlers[k] = torch.sym_max
         elif v == "minimum":
-            handlers[k] = _nary_sym_min
+            handlers[k] = torch.sym_min
         # sympy.Pow / PowByNatural map to the interp name "pow_by_natural",
         # which has no operator.* equivalent. sympy canonicalizes x * x into
         # Pow(x, 2), so without this _build_proxy_for_sym_expr cannot rebuild
@@ -590,7 +572,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     # torch.sym_sum handles n-ary integer addition and accepts both
     # sym_sum([a, b, c]) and sym_sum(a, b, c).
     handlers[sympy.Add] = torch.sym_sum
-    handlers[sympy.Mul] = _nary_mul
+    handlers[sympy.Mul] = operator.mul
     return handlers
 
 
@@ -689,6 +671,13 @@ def _build_proxy_for_sym_expr(
     func: OpOverload | None = _sympy_handlers().get(expr.func)  # type: ignore[assignment]
     if not func:
         return None
+
+    if len(args) > 2 and func in (operator.mul, torch.sym_max, torch.sym_min):
+        if out is None:
+            return functools.reduce(func, args)
+        prefix = functools.reduce(func, args[:-1])
+        _sym_register(tracer, func, (prefix, args[-1]), out)
+        return out
 
     if out is None:
         out = func(*args)
