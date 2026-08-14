@@ -10,12 +10,17 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist, Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     device_sleep,
     get_cycles_per_ms,
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
@@ -96,6 +101,8 @@ class Min10:
 
 
 class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
@@ -246,6 +253,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
             both = e4["gpu_total"]
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @unittest.skipIf(
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         f"{device_type} does not support device sleep",

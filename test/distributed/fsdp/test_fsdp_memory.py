@@ -11,6 +11,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -107,6 +108,8 @@ def create_model(with_fsdp, with_checkpoint, model_hidden_dim):
 
 
 class TestFSDPMemory(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 2
