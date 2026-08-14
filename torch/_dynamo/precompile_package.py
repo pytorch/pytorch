@@ -195,10 +195,15 @@ from .source import AttrSource, DictGetItemSource, GlobalSource
 if TYPE_CHECKING:
     import traceback
 
+    from .eval_frame import DynamoStance
     from .types import GuardFilterEntry
 
 
 log = logging.getLogger(__name__)
+
+_SERVING_LOCK = threading.Lock()
+_SERVING_DEPTH = 0
+_SERVING_PRIOR_STANCE: DynamoStance | None = None
 
 # Not a public surface -- see the module docstring. This exists so `from ...
 # import *` in a debugging session pulls the entry points rather than every
@@ -1457,8 +1462,25 @@ def serving() -> Iterator[None]:
     Forbid compilation, so a call the artifact does not cover raises instead of
     quietly recompiling. This is process-wide, not a property of the artifact.
     """
-    with torch.compiler.set_stance("fail_on_recompile"):
+    global _SERVING_DEPTH, _SERVING_PRIOR_STANCE
+
+    from .eval_frame import _set_stance, DynamoStance
+
+    with _SERVING_LOCK:
+        if _SERVING_DEPTH == 0:
+            _SERVING_PRIOR_STANCE = _set_stance(DynamoStance("fail_on_recompile"))
+        _SERVING_DEPTH += 1
+    try:
         yield
+    finally:
+        with _SERVING_LOCK:
+            _SERVING_DEPTH -= 1
+            if _SERVING_DEPTH == 0:
+                prior = _SERVING_PRIOR_STANCE
+                _SERVING_PRIOR_STANCE = None
+                if prior is None:
+                    raise AssertionError("serving stance was not initialized")
+                _set_stance(prior)
 
 
 def _check_artifact_matches(

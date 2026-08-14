@@ -11,12 +11,16 @@ import math
 import math as _precompile_stdlib_alias
 import os
 import pickle
+import queue
 import re
 import sys
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 import torch
+import torch._dynamo.package as dynamo_package
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
@@ -350,6 +354,40 @@ class PrecompileSelfAct(torch.nn.Module):
         y = self.act(x)
         torch._dynamo.graph_break()
         return (y + 1).sum()
+
+
+_SHARED_RACE_SRC = """\
+import torch
+
+
+class SharedBlock(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        y = x * 2
+        torch._dynamo.graph_break()
+        return y * self.scale
+
+
+class ModelOne(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum()
+
+
+class ModelTwo(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum() + 0.0
+"""
 
 
 class PrecompileEmptyGraph(torch.nn.Module):
@@ -2695,6 +2733,167 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # entries are gone, so this is a miss, and fail_on_recompile makes
             # the miss loud instead of letting it recompile.
             self.assertEqual(a(x), want_a)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_concurrent_unload_does_not_clear_a_later_package(self):
+        shared = self._import_module(
+            self._write_module("shared_race", "shared_race", _SHARED_RACE_SRC),
+            "shared_race",
+        )
+        x = torch.randn(3, 4)
+        paths = []
+        for cls, scale in ((shared.ModelOne, 3.0), (shared.ModelTwo, 7.0)):
+            torch._dynamo.reset()
+            session = precompile_capture(cls(scale), backend="eager", dynamic=False)
+            with session as compiled, torch.no_grad():
+                compiled(x)
+            path = self.path(f"concurrent_{cls.__name__}.pt")
+            session.save(path, require_complete=False)
+            paths.append(path)
+
+        torch._dynamo.reset()
+        model_a = shared.ModelOne(3.0)
+        model_b = shared.ModelTwo(7.0)
+        with torch.no_grad():
+            want_b = model_b(x)
+        loaded_a = precompile_load(model_a, paths[0], backend="eager", dynamic=False)
+
+        eval_frame = torch._C._dynamo.eval_frame
+        real_reset = eval_frame._reset_precompile_entries
+        shared_code = shared.SharedBlock.forward.__code__
+        self.assertIn(shared_code, loaded_a._package._installed_precompile_codes)
+        at_shared_reset = threading.Event()
+        allow_reset = threading.Event()
+        b_waiting_for_lock = threading.Event()
+        b_loaded = threading.Event()
+        errors = queue.SimpleQueue()
+        loaded_b = queue.SimpleQueue()
+        unload_thread = None
+        load_thread = None
+
+        class ObservedLock:
+            def __init__(self, lock):
+                self.lock = lock
+
+            def __enter__(self):
+                if threading.current_thread() is load_thread:
+                    b_waiting_for_lock.set()
+                self.lock.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.lock.release()
+
+        def delayed_reset(code):
+            if code is shared_code and threading.current_thread() is unload_thread:
+                at_shared_reset.set()
+                if not allow_reset.wait(10):
+                    raise RuntimeError("timed out waiting to reset precompile entries")
+            real_reset(code)
+
+        def unload_a():
+            try:
+                loaded_a.unload()
+            except Exception as e:
+                errors.put(e)
+
+        def load_b():
+            try:
+                loaded_b.put(
+                    precompile_load(model_b, paths[1], backend="eager", dynamic=False)
+                )
+                b_loaded.set()
+            except Exception as e:
+                errors.put(e)
+
+        observed_lock = ObservedLock(dynamo_package._PACKAGE_INSTALL_LOCK)
+        with (
+            mock.patch.object(dynamo_package, "_PACKAGE_INSTALL_LOCK", observed_lock),
+            mock.patch.object(eval_frame, "_reset_precompile_entries", delayed_reset),
+        ):
+            unload_thread = threading.Thread(target=unload_a)
+            unload_thread.start()
+            try:
+                self.assertTrue(at_shared_reset.wait(10))
+                load_thread = threading.Thread(target=load_b)
+                load_thread.start()
+                self.assertTrue(b_waiting_for_lock.wait(10))
+                self.assertFalse(b_loaded.is_set())
+            finally:
+                allow_reset.set()
+                unload_thread.join(10)
+                if load_thread is not None:
+                    load_thread.join(10)
+
+        self.assertFalse(unload_thread.is_alive())
+        self.assertIsNotNone(load_thread)
+        self.assertFalse(load_thread.is_alive())
+        self.assertTrue(errors.empty())
+        loaded = loaded_b.get_nowait()
+        self.assertTrue(loaded_b.empty())
+        with loaded, torch.no_grad(), serving():
+            self.assertEqual(loaded(x), want_b)
+
+    @torch.compiler.set_stance("default")
+    def test_overlapping_serving_contexts_keep_compilation_disabled(self):
+        torch._dynamo.reset()
+
+        @torch.compile(backend="eager", dynamic=False)
+        def compiled(x):
+            return x + 1
+
+        compiled(torch.randn(2))
+        a_entered = threading.Event()
+        b_entered = threading.Event()
+        a_exited = threading.Event()
+        errors = queue.SimpleQueue()
+        rejected = queue.SimpleQueue()
+
+        def serve_a():
+            try:
+                with serving():
+                    a_entered.set()
+                    if not b_entered.wait(10):
+                        raise RuntimeError("timed out waiting for serving thread")
+                a_exited.set()
+            except Exception as e:
+                errors.put(e)
+
+        def serve_b():
+            try:
+                if not a_entered.wait(10):
+                    raise RuntimeError("timed out waiting for serving thread")
+                with serving():
+                    b_entered.set()
+                    if not a_exited.wait(10):
+                        raise RuntimeError("timed out waiting for serving thread")
+                    try:
+                        compiled(torch.randn(3))
+                    except RuntimeError as e:
+                        rejected.put("fail_on_recompile" in str(e))
+                    else:
+                        rejected.put(False)
+            except Exception as e:
+                errors.put(e)
+
+        a = threading.Thread(target=serve_a)
+        b = threading.Thread(target=serve_b)
+        try:
+            a.start()
+            b.start()
+            a.join(10)
+            b.join(10)
+        finally:
+            a_entered.set()
+            b_entered.set()
+            a_exited.set()
+
+        self.assertFalse(a.is_alive())
+        self.assertFalse(b.is_alive())
+        self.assertTrue(errors.empty())
+        self.assertTrue(rejected.get_nowait())
+        self.assertTrue(rejected.empty())
+        self.assertEqual(torch._dynamo.eval_frame._stance.stance, "default")
 
     def test_example_inputs_drive_the_capture(self):
         # example_inputs is just "run these for me": capture is by execution, so

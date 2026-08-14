@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import copy
 import functools
+import inspect
 import io
 import os
 import pickle
@@ -967,6 +968,27 @@ class TestPrecompile(TestCase):
     @parametrize("name", ["capture", "load_package", "serving"])
     def test_precompile_method_type_hints_resolve(self, name):
         typing.get_type_hints(getattr(torch.compiler.precompile, name))
+
+    @parametrize("name", ["save", "summary", "invariants", "write_invariants"])
+    def test_precompile_session_method_is_documented(self, name):
+        session_type = typing.get_type_hints(torch.compiler.precompile.capture)[
+            "return"
+        ]
+        self.assertIsNotNone(inspect.getdoc(getattr(session_type, name)))
+
+    def test_precompile_session_save_documents_guard_requirements(self):
+        session_type = typing.get_type_hints(torch.compiler.precompile.capture)[
+            "return"
+        ]
+        doc = inspect.getdoc(session_type.save)
+        self.assertIn("require_no_risky_drops", doc)
+        self.assertIn("require_no_dropped_guards", doc)
+
+    @parametrize("name", ["capture", "load_package"])
+    def test_precompile_package_method_documents_guard_filter(self, name):
+        doc = inspect.getdoc(getattr(torch.compiler.precompile, name))
+        self.assertIn("guard_filter_fn", doc)
+        self.assertIn("one boolean per", doc)
 
     def test_backend_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)

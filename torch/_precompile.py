@@ -389,6 +389,8 @@ class _PrecompiledCallable(Protocol):
 
 
 class _PrecompileSession:
+    r"""Execution-driven multi-graph capture returned by :meth:`precompile.capture`."""
+
     def __init__(self, session: Any) -> None:
         self._session = session
 
@@ -407,12 +409,27 @@ class _PrecompileSession:
         self._call(self._session.__exit__, *exc)
 
     def invariants(self) -> tuple[Any, ...]:
+        r"""invariants() -> tuple
+
+        Return the guards that held across every captured variant of each frame.
+        """
         return self._call(self._session.invariants)
 
     def write_invariants(self, path: str) -> None:
+        r"""write_invariants(path) -> None
+
+        Write :meth:`invariants` to ``path`` in a stable, human-readable form.
+
+        Args:
+            path (str): destination file. Parent directories are created as needed.
+        """
         self._call(self._session.write_invariants, path)
 
     def summary(self) -> Any:
+        r"""summary() -> PrecompileSummary
+
+        Return capture coverage, recompilation, and serialized-guard information.
+        """
         return self._call(self._session.summary)
 
     def save(
@@ -423,6 +440,27 @@ class _PrecompileSession:
         require_no_risky_drops: bool = False,
         require_no_dropped_guards: bool = False,
     ) -> Any:
+        r"""save(path, *, require_complete=True, require_no_risky_drops=False, require_no_dropped_guards=False) -> PrecompileSummary
+
+        Write the captured package to ``path`` and return its summary.
+
+        Args:
+            path (str): destination artifact file.
+            require_complete (bool, optional): reject uncovered, bypassed, or truncated
+              frames. Default: ``True``.
+            require_no_risky_drops (bool, optional): reject dropped identity guards on
+              slots whose values deployment configuration can change. Default: ``False``.
+            require_no_dropped_guards (bool, optional): reject every guard that could not
+              be serialized. Default: ``False``.
+
+        Returns:
+            PrecompileSummary: capture coverage and guard information.
+
+        .. warning::
+            Both dropped-guard requirements default to ``False``. Inspect
+            :meth:`summary` and enable the appropriate requirement before deploying an
+            artifact when rebinding a dropped source could change its result.
+        """
         return self._call(
             self._session.save,
             path,
@@ -2840,6 +2878,26 @@ class _PrecompileApi:
         grad mode, so wrap forward-only inference calls in ``torch.no_grad()``. Inspect
         ``summary()`` before saving: identity guards cannot be serialized and are dropped
         by default, while unexercised paths are absent from the artifact.
+
+        Args:
+            fn (Callable): callable to capture.
+            backend (str, optional): ``torch.compile`` backend. Default: ``"inductor"``.
+            guard_filter_fn (Callable, optional): receives a sequence of guard entries and
+              returns one boolean per entry, where ``True`` keeps the guard. The default
+              drops identity guards that cannot be serialized; keeping one makes capture
+              fail. Default: ``None``.
+            recompile_limit (int, optional): maximum variants captured per frame. Default:
+              ``256``.
+            dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.
+              Default: ``None``.
+            example_inputs (Sequence[tuple], optional): positional-argument tuples run
+              automatically under ``torch.no_grad()``. Default: ``None``.
+            invariants (str, optional): file receiving the invariant report after a
+              successful capture. Default: ``None``.
+
+        Returns:
+            _PrecompileSession: session whose context manager yields the callable to
+            exercise and whose ``save()`` method writes the artifact.
         """
         from torch._dynamo.exc import PackageError
         from torch._dynamo.precompile_package import precompile_capture
@@ -2874,6 +2932,22 @@ class _PrecompileApi:
         callable's code objects. The returned callable is therefore also a context manager;
         exiting it, or calling ``unload()``, removes those installed entries and globals.
         The artifact is executable pickle data; only load a package you trust.
+
+        Args:
+            fn (Callable): callable that the artifact was captured from.
+            path (str): artifact file written by :meth:`capture`.
+            backend (str, optional): ``torch.compile`` backend. Default: ``"inductor"``.
+            guard_filter_fn (Callable, optional): guard filter used if an uncovered call is
+              allowed to compile outside :meth:`serving`; it returns one boolean per guard
+              entry. Default: ``None``.
+            recompile_limit (int, optional): recompilation limit outside :meth:`serving`.
+              Default: ``256``.
+            dynamic (bool, optional): dynamic-shape policy forwarded to ``torch.compile``.
+              Default: ``None``.
+
+        Returns:
+            Callable: loaded callable and context manager whose ``unload()`` method
+            removes the package.
         """
         from torch._dynamo.precompile_package import precompile_load
 

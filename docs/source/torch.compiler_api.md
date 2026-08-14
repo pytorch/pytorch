@@ -172,10 +172,25 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    ahead-of-time capture intentionally collects variants rather than treating them as a
    runaway recompilation.
 
+   ``guard_filter_fn`` receives a sequence of guard entries and returns one boolean per
+   entry, with ``True`` keeping that guard. The default drops identity guards that cannot
+   be serialized; a custom filter that keeps one makes capture fail. ``dynamic`` is
+   forwarded to ``torch.compile``. ``invariants`` names a report file written after a
+   successful capture.
+
    The session's ``summary()`` reports graph, frame, coverage, and guard information.
    ``save`` refuses incomplete captures by default; see its error and summary for uncovered,
    bypassed, or truncated frames. The callable and source it reaches must be importable on
    the loading host.
+
+   Save with
+   ``session.save(path, *, require_complete=True, require_no_risky_drops=False,``
+   ``require_no_dropped_guards=False)``. ``require_complete`` rejects missing variants or
+   frames. ``require_no_risky_drops`` rejects dropped identity guards on configuration-like
+   slots, while ``require_no_dropped_guards`` rejects every unserializable guard. Both
+   dropped-guard requirements default to ``False`` because ordinary captures contain
+   identity guards; inspect ``summary().dropped_guards`` and
+   ``summary().risky_dropped_guards`` before choosing the deployment policy.
 
    .. warning::
 
@@ -201,6 +216,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    install its guarded bytecode and compiled backends on ``fn``'s code objects. The
    returned callable is also a context manager; exit it or call ``unload()`` to remove
    the installed entries and globals.
+
+   ``guard_filter_fn``, ``recompile_limit``, and ``dynamic`` configure any uncovered call
+   that is allowed to compile outside ``precompile.serving()``. The filter returns one
+   boolean per guard entry, with ``True`` keeping that guard.
 
    Loading mutates process-global compiler state for the affected code objects. Load one
    artifact per callable/class at a time, and treat the artifact file as trusted input;

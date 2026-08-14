@@ -58,10 +58,12 @@ _CODE_CACHE = WeakIdKeyDictionary()
 # code object -> the live CompilePackages that installed entries on it, and the
 # live CompilePackages that skip_code()d it. Weak on both sides: a package
 # dropped without unloading must not block a later one. A serving process can
-# load and unload from several threads, so mutations are serialized; this makes
-# the registries consistent, not install()/uninstall() atomic.
+# load and unload from several threads, so the complete operations and registry
+# mutations are serialized.
 _PRECOMPILE_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 _SKIP_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+# When both are needed, acquire the operation lock before the registry lock.
+_PACKAGE_INSTALL_LOCK = threading.RLock()
 _INSTALLER_REGISTRY_LOCK = threading.Lock()
 
 
@@ -1034,6 +1036,10 @@ class CompilePackage:
         )
 
     def uninstall(self) -> None:
+        with _PACKAGE_INSTALL_LOCK:
+            self._uninstall()
+
+    def _uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import (
             _debug_get_precompile_entries,
             _reset_precompile_entries,
@@ -1124,17 +1130,18 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        self.uninstall()
-        try:
-            self._install_codes(backends)
-        except Exception:
-            # A half-installed package is worse than an unloaded one: some
-            # frames serve precompiled code and some do not, and because
-            # install() raised, the caller has no handle to undo it. The
-            # expected way to get here is after_deserialization() rejecting an
-            # artifact on a serving host that does not match the capture host.
-            self.uninstall()
-            raise
+        with _PACKAGE_INSTALL_LOCK:
+            self._uninstall()
+            try:
+                self._install_codes(backends)
+            except Exception:
+                # A half-installed package is worse than an unloaded one: some
+                # frames serve precompiled code and some do not, and because
+                # install() raised, the caller has no handle to undo it. The
+                # expected way to get here is after_deserialization() rejecting an
+                # artifact on a serving host that does not match the capture host.
+                self._uninstall()
+                raise
 
     def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
