@@ -236,6 +236,14 @@ runtime_triton_nan_asserts = (
 )
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
+# Skips codegen for range bounds, a subset of scalar_asserts. These are
+# inequalities between a symbol and a constant (e.g. u0 >= 4). This is unsafe
+# because the skipped assertions check expected shape invariants, including
+# hand-written torch._check().
+unsafe_skip_scalar_range_asserts = (
+    os.environ.get("TORCHINDUCTOR_UNSAFE_SKIP_SCALAR_RANGE_ASSERTS") == "1"
+)
+
 # Disable by default in fbcode
 alignment_asserts = (
     os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")

@@ -6767,6 +6767,187 @@ class AOTInductorTestsTemplate:
         with config.patch({"scalar_asserts": False}):
             AOTIRunnerUtil.run_multiple(model, [example_inputs, unexpected_inputs])
 
+    def test_scalar_range_asserts_disabled_drops_inferred_bound(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                return torch.add(ones, c)
+
+        model = Model()
+        nonzero_input = torch.ones(64, device=self.device)
+        width = torch.randn((32,), device=self.device)
+        backed_dim_input = torch.randn((64, 32), device=self.device)
+        # 0/1 specialization floors this dim at 2, and u0 is tied to it.
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, width, backed_dim_input)
+        INFERRED_BOUND = "u0 >= 2"
+
+        _, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+        FileCheck().check(INFERRED_BOUND).run(code)
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_not(INFERRED_BOUND).run(code)
+
+    def test_scalar_range_asserts_disabled_keeps_equality_asserts(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                return torch.add(ones, c)
+
+        model = Model()
+        nonzero_input = torch.ones(8, device=self.device)
+        width = torch.randn((32,), device=self.device)
+        backed_dim_input = torch.randn((8, 32), device=self.device)
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, width, backed_dim_input)
+        EQUALITY_ASSERT = "Eq(u0, s"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+
+        FileCheck().check(EQUALITY_ASSERT).run(code)
+
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        compiled(*example_inputs)
+
+    def test_scalar_range_asserts_disabled_drops_user_check(self):
+        # Input must be dynamic. Against a static one the inferred range
+        # already implies u0 < 10 and ShapeEnv folds the check away.
+        class Model(torch.nn.Module):
+            def forward(self, a):
+                nz = torch.nonzero(a)
+                unbacked = nz.size(0)
+                torch._check(unbacked < 10)
+                return a.new_ones([unbacked])
+
+        model = Model()
+        nonzero_input = torch.ones(8, device=self.device)
+        torch._dynamo.mark_dynamic(nonzero_input, 0)
+        example_inputs = (nonzero_input,)
+        USER_CHECK = "u0 < 10"
+
+        _, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+        FileCheck().check(USER_CHECK).run(code)
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_not(USER_CHECK).run(code)
+
+        # The point of the flag: 16 nonzeros exceeds the dropped bound, and runs.
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        over_the_bound = torch.ones(16, device=self.device)
+        self.assertEqual(compiled(over_the_bound).shape, torch.Size([16]))
+
+    def test_scalar_range_asserts_disabled_keeps_two_sided_inequality(self):
+        # Relates two data-dependent sizes, so ShapeEnv cannot fold it into
+        # var_to_range and it survives as its own assert.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                shorter = torch.nonzero(a).size(0)
+                longer = torch.nonzero(b).size(0)
+                torch._check(shorter <= longer)
+                return a.new_ones([shorter]), b.new_ones([longer])
+
+        model = Model()
+        example_inputs = (
+            torch.ones(4, device=self.device),
+            torch.ones(8, device=self.device),
+        )
+        TWO_SIDED = "Expected u0 <= u1"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check(TWO_SIDED).run(code)
+
+    def test_scalar_range_asserts_disabled_keeps_unbacked_vs_backed_bound(self):
+        # Bounded by a dim the caller declared, so a contract, not a sample.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                count = torch.nonzero(a).size(0)
+                torch._check(count <= b.size(0))
+                return b.new_ones([count])
+
+        model = Model()
+        nonzero_input = torch.ones(4, device=self.device)
+        backed_dim_input = torch.randn((8, 2), device=self.device)
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, backed_dim_input)
+        MIXED_BOUND = r"Expected u\d+ <= s\d+"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(MIXED_BOUND).run(code)
+
+    def test_scalar_range_asserts_disabled_keeps_sum_equality(self):
+        # The jagged total-length contract -- highest-value assert we keep.
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                total = torch.cat([a, b]).size(0)
+                count = torch.nonzero(c).size(0)
+                torch._check(count == total)
+                return c.new_ones([count])
+
+        model = Model()
+        first = torch.randn(4, device=self.device)
+        second = torch.randn(4, device=self.device)
+        torch._dynamo.mark_dynamic(first, 0)
+        torch._dynamo.mark_dynamic(second, 0)
+        example_inputs = (first, second, torch.ones(8, device=self.device))
+        SUM_EQUALITY = r"Expected Eq\(u\d+, s\d+ \+ s\d+\)"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(SUM_EQUALITY).run(code)
+
+    @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
+    def test_scalar_range_asserts_disabled_under_full_runtime_assert(self):
+        # Here asserts arrive as lowered aten._assert_scalar args rather than
+        # from var_to_range. It is a JK rollout in fbcode, so flipping it must
+        # not silently un-drop these bounds.
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                return torch.add(ones, c)
+
+        model = Model()
+        nonzero_input = torch.ones(64, device=self.device)
+        width = torch.randn((32,), device=self.device)
+        backed_dim_input = torch.randn((64, 32), device=self.device)
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, width, backed_dim_input)
+        INFERRED_BOUND = "u0 >= 2"
+
+        _, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+        FileCheck().check(INFERRED_BOUND).run(code)
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_not(INFERRED_BOUND).run(code)
+
     def test_multi_input_nonzero_slice_shared_dim(self):
         # Regression: when multiple inputs share a dynamic batch dim and are
         # sliced with the same nonzero result, the generated C++ guard code
