@@ -3,11 +3,13 @@
 import torch
 from torch.nn import functional as F
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import HardwareClassification, TestCase, run_tests
 from torch.testing import FileCheck
 import io
 
 class TestMetalRewritePass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def validate_transformed_module(
             # To please flake

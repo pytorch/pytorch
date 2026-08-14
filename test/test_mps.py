@@ -27,7 +27,8 @@ from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf,
+     HardwareClassification)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -174,6 +175,7 @@ class MpsMemoryLeakCheck:
             raise RuntimeError(msg)
 
 class TestAutocastMPS(TestCase):
+    hw_classification = HardwareClassification.MPS
 
     def test_matmul_autocast(self):
         autocast_tensor_A = torch.rand((8, 8), device="mps")
@@ -380,6 +382,7 @@ class TestAutocastMPS(TestCase):
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
+    hw_classification = HardwareClassification.MPS
     _do_mps_memory_leak_check = True
 
     def __init__(self, method_name='runTest'):
@@ -11433,6 +11436,8 @@ class TestNLLLoss(TestCaseMPS):
 
 
 class TestTopK(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def _test_topk(self, shape, largest):
         cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
         x = cpu_x.detach().clone().to('mps')
@@ -11484,6 +11489,7 @@ class TestTopK(TestCase):
                 self.assertEqual(ci, mi.cpu())
 
 class TestNNMPS(NNTestCase):
+    hw_classification = HardwareClassification.MPS
 
     def _create_basic_net(self):
         class Layer(nn.Module):
@@ -11972,6 +11978,8 @@ class TestPad(TestCaseMPS):
         self.assertEqual(gi.cpu(), gi_ref)
 
 class TestConv3dChannelsLast3dMPS(NNTestCase):
+    hw_classification = HardwareClassification.MPS
+
     def _run_conv3d_cl3d(self, *, input_shape, Cin, Cout, k, pad, with_bias, dtype, groups=1):
         torch.manual_seed(0)
         m_cpu = nn.Conv3d(Cin, Cout, k, stride=1, padding=pad, bias=with_bias,
@@ -15818,6 +15826,8 @@ class TestRNNMPS(TestCaseMPS):
 
 
 class TestFallbackWarning(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
         out = subprocess.check_output(
@@ -15883,6 +15893,8 @@ if len(w) != 1:
                                        e.output.decode("utf-8"))
 
 class TestNoRegression(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def test_assert_close(self):
         a = torch.ones(1, device="mps")
         b = torch.zeros(1, device="mps")
@@ -16673,6 +16685,7 @@ class TestConsistency(TestCaseMPS):
 
 
 class TestErrorInputs(TestCase):
+    hw_classification = HardwareClassification.MPS
     _ignore_not_implemented_error = True
 
     @ops(
@@ -16774,6 +16787,8 @@ class TestErrorInputs(TestCase):
 
 
 class TestComplex(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def test_conj_imag(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184379
         # MPS copy ignored the neg bit, so `.imag` on a conjugate view returned
@@ -16840,6 +16855,7 @@ class TestComplex(TestCase):
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
+    hw_classification = HardwareClassification.MPS
     exact_dtype = True
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
