@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import copy
 import datetime
 import functools
 import unittest
@@ -59,6 +60,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     skipIfXpu,
@@ -67,6 +69,26 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+def _copy_tests(source_cls, target_cls, selected):
+    for name, value in source_cls.__dict__.items():
+        if not name.startswith("test_"):
+            continue
+        if not selected(name):
+            setattr(target_cls, name, None)
+            continue
+
+        @functools.wraps(value)
+        def new_test(self, value=value):
+            return value(self)
+
+        new_test.__dict__ = copy.deepcopy(value.__dict__)
+        setattr(target_cls, name, new_test)
+
+
+def _test_name_in(name, roots):
+    return any(name == root or name.startswith(f"{root}_") for root in roots)
 
 
 # Opaque custom op so torch.compile traces the coalescing manager into the graph
@@ -93,6 +115,8 @@ def _(inp, world_size, group_name):
 
 
 class TestBucketingTrace(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_hinted_unbacked_chunked_fake_inputs(self, *, hint=None):
         fake_mode = FakeTensorMode(
             allow_non_fake_inputs=True,
@@ -224,6 +248,8 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
 
 
 class TestSimpleOverlap(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_preserves_fake_dep_ordering(self):
         class FakeBuffer:
             def __init__(self, name):
@@ -279,9 +305,7 @@ class TestSimpleOverlap(torch._dynamo.test_case.TestCase):
             )
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-@instantiate_parametrized_tests
-class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+class _CollectivesMultiProcTemplate(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
@@ -1171,13 +1195,48 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(cnt.frame_count, 1)
 
 
-@instantiate_parametrized_tests
 @requires_accelerator_dist_backend(["nccl", "xccl"])
-@unittest.skipIf(
-    not torch.accelerator.is_available(),
-    "No accelerator is available",
+class TestCollectivesMultiProcGeneric(_CollectivesMultiProcTemplate):
+    hw_classification = HardwareClassification.GENERIC
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestCollectivesMultiProcAccelerator(_CollectivesMultiProcTemplate):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestCollectivesMultiProcCUDA(_CollectivesMultiProcTemplate):
+    hw_classification = HardwareClassification.CUDA
+
+
+_MULTIPROC_GENERIC_TESTS = {"test_c10d_functional_tagged_pt2_compliant"}
+_MULTIPROC_CUDA_TESTS = {
+    "test_allreduce_inductor_cudagraph_trees",
+    "test_coalescing_manager_reduce_overhead",
+}
+instantiate_parametrized_tests(_CollectivesMultiProcTemplate)
+_copy_tests(
+    _CollectivesMultiProcTemplate,
+    TestCollectivesMultiProcGeneric,
+    lambda name: _test_name_in(name, _MULTIPROC_GENERIC_TESTS),
 )
-class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
+_copy_tests(
+    _CollectivesMultiProcTemplate,
+    TestCollectivesMultiProcAccelerator,
+    lambda name: not _test_name_in(
+        name, _MULTIPROC_GENERIC_TESTS | _MULTIPROC_CUDA_TESTS
+    ),
+)
+_copy_tests(
+    _CollectivesMultiProcTemplate,
+    TestCollectivesMultiProcCUDA,
+    lambda name: _test_name_in(name, _MULTIPROC_CUDA_TESTS),
+)
+del _CollectivesMultiProcTemplate
+
+
+class _CollectivesInductorTemplate(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
     """
@@ -2707,7 +2766,56 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
-class TestSyncDecisionCrossRanks(MultiProcessTestCase):
+@unittest.skipIf(not torch.accelerator.is_available(), "No accelerator is available")
+class TestCollectivesInductorGeneric(_CollectivesInductorTemplate):
+    hw_classification = HardwareClassification.GENERIC
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not torch.accelerator.is_available(), "No accelerator is available")
+class TestCollectivesInductorAccelerator(_CollectivesInductorTemplate):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not torch.accelerator.is_available(), "No accelerator is available")
+class TestCollectivesInductorCUDA(_CollectivesInductorTemplate):
+    hw_classification = HardwareClassification.CUDA
+
+
+_INDUCTOR_GENERIC_TESTS = {"test_meta"}
+_INDUCTOR_CUDA_TESTS = {
+    "test_all_gather_bucket",
+    "test_all_gather_bucket_copy_cat_fusion",
+    "test_all_gather_bucket_path",
+    "test_reduce_scatter_bucket",
+    "test_dedup_reduce_scatter",
+    "test_all_reduce_bucket",
+    "test_all_gather_bucket_multidtype",
+    "test_reorder_peak_memory_bucketed",
+}
+instantiate_parametrized_tests(_CollectivesInductorTemplate)
+_copy_tests(
+    _CollectivesInductorTemplate,
+    TestCollectivesInductorGeneric,
+    lambda name: _test_name_in(name, _INDUCTOR_GENERIC_TESTS),
+)
+_copy_tests(
+    _CollectivesInductorTemplate,
+    TestCollectivesInductorAccelerator,
+    lambda name: not _test_name_in(
+        name, _INDUCTOR_GENERIC_TESTS | _INDUCTOR_CUDA_TESTS
+    ),
+)
+_copy_tests(
+    _CollectivesInductorTemplate,
+    TestCollectivesInductorCUDA,
+    lambda name: _test_name_in(name, _INDUCTOR_CUDA_TESTS),
+)
+del _CollectivesInductorTemplate
+
+
+class _SyncDecisionCrossRanksTemplate(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -3918,6 +4026,47 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             compiled(x, w, group_size, group_name)
 
 
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestSyncDecisionCrossRanksAccelerator(_SyncDecisionCrossRanksTemplate):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestSyncDecisionCrossRanksCUDA(_SyncDecisionCrossRanksTemplate):
+    hw_classification = HardwareClassification.CUDA
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestSyncDecisionCrossRanksCPU(_SyncDecisionCrossRanksTemplate):
+    hw_classification = HardwareClassification.CPU
+
+
+_SYNC_ACCELERATOR_TESTS = {
+    "test_sync_decision_cross_ranks",
+    "test_sync_decision_cross_ranks_different_inputs_skips_sync",
+    "test_sync_decision_cross_ranks_different_node_order",
+    "test_sync_decision_cross_ranks_invalid_node_error",
+    "test_align_runtime_estimations_across_all_distributed_ranks",
+}
+_SYNC_CPU_TESTS = {"test_regression_use_nccl_estimate_with_gloo"}
+_copy_tests(
+    _SyncDecisionCrossRanksTemplate,
+    TestSyncDecisionCrossRanksAccelerator,
+    _SYNC_ACCELERATOR_TESTS.__contains__,
+)
+_copy_tests(
+    _SyncDecisionCrossRanksTemplate,
+    TestSyncDecisionCrossRanksCUDA,
+    lambda name: name not in _SYNC_ACCELERATOR_TESTS | _SYNC_CPU_TESTS,
+)
+_copy_tests(
+    _SyncDecisionCrossRanksTemplate,
+    TestSyncDecisionCrossRanksCPU,
+    _SYNC_CPU_TESTS.__contains__,
+)
+del _SyncDecisionCrossRanksTemplate
+
+
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
     """Unit tests for Node-typed group_name handling in bucketing.
 
@@ -3925,6 +4074,8 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
     their group_name as an FX Node reference rather than a string literal.
     These tests verify the resolution helpers work correctly.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_graph_with_pg_node(self, group_name_str: str):
         class MockPG:
@@ -4019,6 +4170,8 @@ def _build_graph_with_duplicate_rs(
 
 
 class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         if not c10d.is_initialized():
