@@ -901,31 +901,33 @@ class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
     The fast path instead calls ``combine_fn`` directly on the last-axis-batched
     args, leaving the combine subgraph clean. This is only sound when ``combine_fn``
     is genuinely elementwise, so that treating the trailing batch axis as an ordinary
-    data axis is a no-op. A dim-sensitive combine (e.g. one calling ``transpose``)
-    still passes the frontend pointwise gate but would be silently miscomputed by the
-    direct call. We therefore restrict the fast path to tracing (compile), where a
-    non-elementwise combine fails loudly in the pointwise lowering; in eager we defer
-    to the always-correct base re-vmap path, which vmaps over the real batch axis.
+    data axis is a no-op. The frontend pointwise gate does not guarantee that: a
+    dim-sensitive combine (e.g. one calling ``transpose``) still passes the gate but
+    would be silently miscomputed by the direct call. We therefore restrict the fast
+    path to tracing (compile), where a non-elementwise combine fails loudly in the
+    pointwise lowering; in eager we defer to the always-correct base re-vmap path,
+    which vmaps over the real batch axis. The fast path also requires every argument
+    to be batched at the trailing axis; a still-unbatched arg (e.g. an unbatched
+    additional_input in eager) likewise falls back to the base re-vmap path.
     """
 
     def __call__(self, *args: Any) -> Any:
         # Only take the fast path under tracing (all args batched at -1). In eager the
         # base re-vmap path is correct for any combine_fn; the fast path is a
         # compile-only optimization to keep the Inductor combine subgraph elementwise.
-        if get_proxy_mode() is None or not all(
-            bdim is not None for bdim in self.in_dims
-        ):
+        if get_proxy_mode() is None or any(bdim is None for bdim in self.in_dims):
             return super().__call__(*args)
         outputs = self.combine_fn(*args)
-        # All inputs are batched at -1 and combine_fn is elementwise, so every
-        # output leaf is batched at -1 too.
+        # Every input is batched at -1 and, since the fast path only runs under
+        # compile where a non-elementwise combine_fn fails at lowering, combine_fn
+        # is elementwise here -- so every output leaf carries the batch axis at -1.
         out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
-        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
-            raise RuntimeError(
-                "associative_scan under vmap requires the combine_fn outputs to keep "
-                "the same batched arguments as its xs inputs, because the outputs are "
-                "fed back as inputs on later scan levels. Here they diverge: expected "
-                f"output batch dims {self.expected_out_dims} but got {out_dims}."
+        # Mirror the base wrapper's cross-step consistency guard: out_dims must not
+        # change between scan steps.
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
             )
         self.out_dims = out_dims
         return outputs
@@ -953,32 +955,27 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     xs_in_dims, additional_in_dims = in_dims
     xs_move_dims = _batch_dims_as_last_for_scan(xs_in_dims)
     additional_move_dims = _batch_dims_as_last_for_scan(additional_in_dims)
-    # combine_fn is called with (lhs xs leaves, rhs xs leaves, additional_inputs),
-    # so the xs batch-dim markers must be duplicated. See generic_associative_scan.
-    after_move_dims = (*xs_move_dims, *xs_move_dims, *additional_move_dims)
+    batch_size = interpreter.batch_size()
 
     with interpreter.lower():
         # generic_associative_scan feeds combine_fn outputs back as the left-hand
-        # args on later levels, reusing after_move_dims; that is only valid if the
-        # outputs keep the same batch dims as xs. expected_out_dims makes the wrapper
-        # raise a clear error otherwise instead of silently mismatching downstream.
+        # args on later scan levels, so every output leaf must carry the same batch
+        # dim as its xs leaf. Thus expand every unbatched xs leaf to the batch size.
+        reconciled_xs = [
+            x.unsqueeze(-1).expand(*x.shape, batch_size) if xd is None else x
+            for x, xd in zip(unbatched_xs, xs_move_dims)
+        ]
+        xs_run_dims = tuple(-1 for _ in unbatched_xs)
+        run_move_dims = (*xs_run_dims, *xs_run_dims, *additional_move_dims)
+
         wrapper = _PointwiseVmapCombineFnWrapper(
-            combine_fn,
-            after_move_dims,
-            interpreter.batch_size(),
-            interpreter.randomness(),
-            expected_out_dims=xs_move_dims,
-            op_name="associative_scan",
+            combine_fn, run_move_dims, batch_size, interpreter.randomness()
         )
         unwrapped_out = associative_scan_op(
-            wrapper, unbatched_xs, unbatched_additional_inputs
+            wrapper, reconciled_xs, unbatched_additional_inputs
         )
 
-    out_dims = wrapper.out_dims
-    if out_dims is None:
-        # Scan was a no-op (scan length < 2): the combine_fn is never called, so
-        # outputs alias xs one-to-one and their batch dims equal the xs batch dims.
-        out_dims = xs_move_dims
+    out_dims = tuple(-1 for _ in unwrapped_out)
     # wrap_batched matches bdims against the output container; associative_scan_op
     # returns a list, so pass a tuple to align with the tuple out_dims.
     return wrap_batched(tuple(unwrapped_out), out_dims, interpreter.level())
