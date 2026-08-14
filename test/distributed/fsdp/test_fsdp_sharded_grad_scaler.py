@@ -77,7 +77,7 @@ class TestShardGradScaler(TestCase):
     def test_grad_scaling(self):
         pg = DummyProcessGroup(0, 1)
         scaler = ShardedGradScaler(
-            device=device_type, init_scale=2.0, process_group=pg, enabled=True
+            device="cpu", init_scale=2.0, process_group=pg, enabled=True
         )
         t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cpu")
         t1 = torch.full((1,), 8.0, dtype=torch.float32, device="cpu")
@@ -92,7 +92,7 @@ class TestShardGradScaler(TestCase):
     def test_scaling_unscaling_sparse(self):
         pg = DummyProcessGroup(0, 1)
         scaler = ShardedGradScaler(
-            device=device_type, init_scale=2.0, process_group=pg, enabled=True
+            device="cpu", init_scale=2.0, process_group=pg, enabled=True
         )
         inv_scale = torch.full((1,), 0.5, dtype=torch.float, device="cpu")
         found_inf = torch.full((1,), 0, dtype=torch.float, device="cpu")
@@ -136,7 +136,7 @@ class TestShardGradScaler(TestCase):
     def test_inf_gradients_skip_optim_step(self):
         pg = DummyProcessGroup(0, 1)
         scaler = ShardedGradScaler(
-            device=device_type, init_scale=2.0, process_group=pg, enabled=True
+            device="cpu", init_scale=2.0, process_group=pg, enabled=True
         )
         loss = torch.full((1,), 4.0, dtype=torch.float32, device="cpu")
         t0 = torch.tensor([float("inf")], dtype=torch.float32, device="cpu")
