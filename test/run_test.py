@@ -113,6 +113,9 @@ TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
+# Process-level counterpart to NUM_PYTEST_RERUNS: how many times a failing test
+# is retried in a fresh process before it is called a consistent failure.
+NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
 IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
@@ -872,7 +875,7 @@ def run_test_retries(
             print_to_file(
                 "Test succeeded in new process, continuing with the rest of the tests"
             )
-        elif num_failures[current_failure] >= 3:
+        elif num_failures[current_failure] > NUM_PROCESS_RETRIES:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
@@ -897,8 +900,12 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
+    consistent_failures = [
+        x[1:-1] for x in num_failures if num_failures[x] > NUM_PROCESS_RETRIES
+    ]
+    flaky_failures = [
+        x[1:-1] for x in num_failures if 0 < num_failures[x] <= NUM_PROCESS_RETRIES
+    ]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
