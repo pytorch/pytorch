@@ -14,9 +14,7 @@ import torch._inductor.config
 from torch._environment import is_fbcode
 from torch._inductor.cpp_builder import _ensure_mingw_cudart_import_lib
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
 @dataclass
@@ -77,7 +75,7 @@ class WindowsCrossCompilationTestFramework:
     def create_compile_test(cls, config: ModelTestConfig):
         """Create a compile test method for a model configuration."""
 
-        def compile_test(self, device):
+        def compile_test(self):
             if platform.system() == "Windows":
                 raise unittest.SkipTest(
                     "This test should run on Linux for cross-compilation"
@@ -91,9 +89,11 @@ class WindowsCrossCompilationTestFramework:
             with torch.no_grad():
                 # Windows cross-compilation is only used for GPU.
                 # AOTI for CPU should be able to work as native compilation on Windows.
+                device = GPU_TYPE
                 model = config.model_class().to(device=device)
                 example_inputs = config.example_inputs
 
+                # Inputs should already be on GPU_TYPE but ensure they are
                 example_inputs = tuple(inp.to(device) for inp in example_inputs)
 
                 # Export the model
@@ -131,7 +131,7 @@ class WindowsCrossCompilationTestFramework:
     def create_load_test(cls, config: ModelTestConfig):
         """Create a load test method for a model configuration."""
 
-        def load_test(self, device):
+        def load_test(self):
             if platform.system() != "Windows":
                 raise unittest.SkipTest("This test should run on Windows")
 
@@ -151,9 +151,13 @@ class WindowsCrossCompilationTestFramework:
             with torch.no_grad():
                 # Windows cross-compilation is only used for GPU.
                 # AOTI for CPU should be able to work as native compilation on Windows.
+                device = GPU_TYPE
+
+                # Create original model for comparison
                 original_model = config.model_class().to(device=device)
                 example_inputs = config.example_inputs
 
+                # Inputs should already be on GPU_TYPE but ensure they are
                 example_inputs = tuple(inp.to(device) for inp in example_inputs)
 
                 # Load the compiled package
@@ -203,6 +207,7 @@ def auto_generate_tests(test_class):
         )
         compile_method.__name__ = compile_method_name
         compile_method.__doc__ = f"Step 1: Cross-compile {model_name} model on Linux"
+        compile_method = requires_gpu()(compile_method)
         setattr(test_class, compile_method_name, compile_method)
 
         # Create load test method
@@ -210,6 +215,7 @@ def auto_generate_tests(test_class):
         load_method = WindowsCrossCompilationTestFramework.create_load_test(config)
         load_method.__name__ = load_method_name
         load_method.__doc__ = f"Step 2: Load and test {model_name} model on Windows"
+        load_method = requires_gpu()(load_method)
         setattr(test_class, load_method_name, load_method)
 
     return test_class
@@ -223,8 +229,6 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
     Define test methods that return ModelTestConfig, and the decorator
     will auto-generate compile/load test methods.
     """
-
-    hw_classification = HardwareClassification.CUDA
 
     def _define_simple(self):
         """Define the Simple model and its test configuration."""
@@ -247,7 +251,7 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
         return ModelTestConfig(
             name="simple",
             model_class=Simple,
-            example_inputs=(torch.randn(8, 10),),
+            example_inputs=(torch.randn(8, 10, device=GPU_TYPE),),
             dynamic_shapes={"x": {0: torch.export.Dim("batch", min=1, max=1024)}},
         )
 
@@ -273,7 +277,7 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
         return ModelTestConfig(
             name="simple_cnn",
             model_class=SimpleCNN,
-            example_inputs=(torch.randn(2, 3, 32, 32),),
+            example_inputs=(torch.randn(2, 3, 32, 32, device=GPU_TYPE),),
             dynamic_shapes={"x": {0: torch.export.Dim("batch", min=1, max=16)}},
             rtol=1e-3,
             atol=1e-3,
@@ -310,22 +314,15 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
         return ModelTestConfig(
             name="transformer",
             model_class=SimpleTransformer,
-            example_inputs=(torch.randn(4, 16, 128),),
+            example_inputs=(torch.randn(4, 16, 128, device=GPU_TYPE),),
             dynamic_shapes={"x": {0: torch.export.Dim("batch", min=1, max=32)}},
             rtol=1e-3,
             atol=1e-3,
         )
 
 
-instantiate_device_type_tests(
-    TestAOTInductorWindowsCrossCompilation, globals(), only_for="cuda"
-)
-
-
 class TestEnsureMingwCudartImportLib(TestCase):
     """Unit tests for _ensure_mingw_cudart_import_lib."""
-
-    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
