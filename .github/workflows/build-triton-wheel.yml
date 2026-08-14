@@ -164,6 +164,9 @@ jobs:
   # One upload job per published package, each gated only on its own builds.
   upload-wheel-triton:
     needs: [build-wheel-cuda, build-wheel-aarch64]
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_upload-triton-wheel.yml
     secrets: inherit
     with:
@@ -172,6 +175,9 @@ jobs:
 
   upload-wheel-rocm:
     needs: build-wheel-rocm
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_upload-triton-wheel.yml
     secrets: inherit
     with:
@@ -179,6 +185,9 @@ jobs:
 
   upload-wheel-xpu:
     needs: [build-wheel-xpu, build-wheel-win]
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_upload-triton-wheel.yml
     secrets: inherit
     with:
