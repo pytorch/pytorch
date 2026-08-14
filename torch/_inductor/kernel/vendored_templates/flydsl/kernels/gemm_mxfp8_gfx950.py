@@ -18,6 +18,8 @@ from flydsl._mlir import ir
 from flydsl._mlir.dialects import llvm, rocdl as _rocdl_ops
 from flydsl.expr import const_expr, range_constexpr, rocdl
 
+from torch.utils._ordered_set import OrderedSet
+
 
 def _permlane_swap(width, old, src):
     """v_permlane{16,32}_swap_b32 -> (new_old, new_src) as i32 IR values.
@@ -63,10 +65,14 @@ class MXFP8GemmParams:
     m_waves: int = 2
     n_waves: int = 2
     group_m: int = 0
+    # Asymmetric LDS: A and B may hold a different number of staged buffers.
+    # None means "same as stages", which reproduces the symmetric kernel.
+    stages_a: int = None
+    stages_b: int = None
 
     def __cache_signature__(self):
         return (
-            "mxfp8_gfx950_v6",
+            "mxfp8_gfx950_v6_asym",
             self.m,
             self.n,
             self.k,
@@ -78,6 +84,8 @@ class MXFP8GemmParams:
             self.m_waves,
             self.n_waves,
             self.group_m,
+            self.stages_a,
+            self.stages_b,
         )
 
 
@@ -97,6 +105,82 @@ class MXFP8GemmDerived:
     a_stage_bytes: int
     b_stage_bytes: int
     smem_bytes: int
+    stages_a: int
+    stages_b: int
+
+
+def mxfp8_pipeline_schedule(k_tiles, stages_a, stages_b, ldg_a_iters, ldg_b_iters):
+    """Program-order DMA schedule for an (stages_a, stages_b) LDS pipeline.
+
+    Returns (main_loop_end, steady_wait, tail_waits, wrap_a, wrap_b).
+
+    A is prefetched da = stages_a - 1 tiles ahead, B is prefetched
+    db = stages_b - 1 tiles ahead. Iteration i issues A(i + da) then B(i + db);
+    the prologue is iterations i in [-max(da, db), 0).
+
+    The main loop always issues both operands so its body is one straight-line
+    block with one wait constant. That means iterations near the end would run
+    off the end of K, so the *tile index* of those loads is wrapped modulo
+    k_tiles: they stay in bounds, land in an LDS buffer no later iteration
+    reads, and are never consumed. Only their vmcnt slot matters, and it is
+    accounted for below. The consequence is that exactly ONE tile is peeled as
+    a drain, instead of max(da, db) of them -- one fully unrolled 32-MFMA
+    epilogue stage instead of a ragged pile of them.
+
+    vmcnt is an in-order counter, so the barrier at the top of iteration kt may
+    leave outstanding exactly the loads issued *after* the producer of the
+    later of A_kt / B_kt. That count is enumerated here rather than given in
+    closed form, because with da != db the "later of the two" is not always
+    the same operand.
+    """
+    da = stages_a - 1
+    db = stages_b - 1
+    deepest = max(da, db)
+    main_loop_end = k_tiles - 1
+    if k_tiles <= deepest:
+        raise ValueError("K must supply more tiles than the deepest prefetch")
+    # A wrapped load must not land on a buffer a later iteration still reads.
+    # Issuing iteration i still has tiles i .. k_tiles-1 to consume, i.e. buffer
+    # offsets 0 .. k_tiles-1-i <= d-1 ahead of it, while the wrapped write sits
+    # d ahead; with d = stages - 1 < stages the two never alias.
+    for d, s in ((da, stages_a), (db, stages_b)):
+        if d >= s:
+            raise ValueError("prefetch distance must be shorter than the buffer count")
+
+    # (kind, live_tile_or_None, issuing_iteration) in program order. A wrapped
+    # load carries None: it occupies a vmcnt slot but produces nothing.
+    events = []
+    for i in range(-deepest, 0):  # prologue
+        for kind, t in (("A", i + da), ("B", i + db)):
+            if t >= 0:
+                events.append((kind, t, i))
+    for i in range(0, main_loop_end):  # steady state: both always issued
+        for kind, t in (("A", i + da), ("B", i + db)):
+            events.append((kind, t if t < k_tiles else None, i))
+    # The drain iteration (kt = k_tiles - 1) issues nothing.
+
+    cost = {"A": ldg_a_iters, "B": ldg_b_iters}
+    pos = {}
+    for idx, (kind, t, _i) in enumerate(events):
+        if t is not None:
+            pos[(kind, t)] = idx
+
+    def wait_at(kt):
+        p = max(pos[("A", kt)], pos[("B", kt)])
+        return sum(cost[kind] for kind, _t, i in events[p + 1 :] if i < kt)
+
+    waits = [wait_at(kt) for kt in range(k_tiles)]
+    steady = OrderedSet(waits[:main_loop_end])
+    if len(steady) != 1:
+        raise ValueError(f"steady-state wait is not uniform: {sorted(steady)}")
+    steady_wait = steady.pop()
+    tail_waits = waits[main_loop_end:]
+    if max(waits) >= 63:
+        raise ValueError("staged pipeline wait count exceeds supported range")
+    # Only emit the runtime wrap on the operand that can actually overrun.
+    wrap_a = (main_loop_end - 1) + da >= k_tiles
+    wrap_b = (main_loop_end - 1) + db >= k_tiles
+    return main_loop_end, steady_wait, tail_waits, wrap_a, wrap_b
 
 
 def mxfp8_gemm_derived(
@@ -107,16 +191,27 @@ def mxfp8_gemm_derived(
     m_waves: int,
     n_waves: int,
     group_m: int = 0,
+    stages_a: int = None,
+    stages_b: int = None,
+    k: int = None,
 ) -> MXFP8GemmDerived:
     """Validate a tile config and return its derived quantities.
 
     Raises ValueError for any config the kernel cannot express. Mirrors
     make_gemm_gfx950_param in the FP16 kernel.
+
+    `k` is optional and only selects the B pipeline depth; leaving it out keeps
+    the result shape-independent, which is what the heuristics validity check
+    wants.
     """
     if block_m <= 0 or block_n <= 0 or block_k <= 0:
         raise ValueError("block_m, block_n, and block_k must be positive")
     if stages < 2:
         raise ValueError("stages must be at least 2 for the staged LDS pipeline")
+    if stages_a is None:
+        stages_a = stages
+    if stages_a < 2 or (stages_b is not None and stages_b < 2):
+        raise ValueError("stages_a and stages_b must each be at least 2")
     if m_waves <= 0 or n_waves <= 0:
         raise ValueError("m_waves and n_waves must be positive")
     if group_m < 0:
@@ -173,15 +268,56 @@ def mxfp8_gemm_derived(
 
     a_stage_bytes = block_m * block_k
     b_stage_bytes = block_n * block_k
-    smem_bytes = stages * (a_stage_bytes + b_stage_bytes)
+
+    if stages_b is None:
+        # Give B one staged buffer more than A when every precondition holds.
+        # B's DMA lands last in program order, so deepening only B is what turns
+        # the K-tile boundary from a full vmcnt(0) drain into a counted wait; A
+        # gains nothing from a third buffer and could not afford one anyway.
+        # Worth +1.235% at 8192x8192x8192 on the champion tile (paired n=16,
+        # t=4.372, p=0.00055).
+        #
+        # Every failure mode falls back to the symmetric depth rather than
+        # raising, because raising would drop a tile config that used to be
+        # valid and a shape whose autotune winner it was would silently fall
+        # back to ATen. The preconditions are the extra buffer fitting in LDS,
+        # K supplying more tiles than the deeper prefetch distance, and the
+        # resulting waitcnt still being expressible; the last two need k, so a
+        # caller that does not know the shape (the heuristics validity check)
+        # gets the symmetric depth and therefore the unchanged validity set.
+        stages_b = stages
+        deeper = stages_a * a_stage_bytes + (stages + 1) * b_stage_bytes
+        # Every check further down that could reject the deeper pipeline has to
+        # be repeated here, or the fallback does not happen and a tile config
+        # that was valid before is lost. The shape-independent waitcnt bound in
+        # particular is looser than the one inside mxfp8_pipeline_schedule and
+        # rejects configs the enumerator accepts.
+        deeper_ok = (
+            k is not None
+            and deeper <= GFX950_LDS_CAPACITY
+            and (max(stages_a, stages + 1) - 2) * ldg_wait_count < 63
+        )
+        if deeper_ok:
+            try:
+                mxfp8_pipeline_schedule(
+                    k // block_k, stages_a, stages + 1, ldg_a_iters, ldg_b_iters
+                )
+            except ValueError:
+                pass
+            else:
+                stages_b = stages + 1
+
+    smem_bytes = stages_a * a_stage_bytes + stages_b * b_stage_bytes
     if smem_bytes > GFX950_LDS_CAPACITY:
         raise ValueError(
             "staged LDS buffers exceed the device shared-memory capacity: "
-            f"stages={stages}, block_m={block_m}, block_n={block_n}, "
-            f"block_k={block_k}, smem_bytes={smem_bytes}, "
+            f"stages_a={stages_a}, stages_b={stages_b}, block_m={block_m}, "
+            f"block_n={block_n}, block_k={block_k}, smem_bytes={smem_bytes}, "
             f"capacity={GFX950_LDS_CAPACITY}"
         )
-    if (stages - 2) * ldg_wait_count >= 63:
+    # The exact wait counts need k_tiles, so the >= 63 check lives in
+    # mxfp8_pipeline_schedule; this is the shape-independent upper bound.
+    if (max(stages_a, stages_b) - 2) * ldg_wait_count >= 63:
         raise ValueError("staged pipeline wait count exceeds supported range")
 
     return MXFP8GemmDerived(
@@ -196,6 +332,8 @@ def mxfp8_gemm_derived(
         a_stage_bytes=a_stage_bytes,
         b_stage_bytes=b_stage_bytes,
         smem_bytes=smem_bytes,
+        stages_a=stages_a,
+        stages_b=stages_b,
     )
 
 
@@ -214,17 +352,41 @@ def make_mxfp8_param_and_validate(m, n, k, out_dtype, gemm_config):
     m_waves = int(gemm_config["BLOCK_M_WARPS"])
     n_waves = int(gemm_config["BLOCK_N_WARPS"])
     group_m = int(gemm_config["GROUP_M"])
+    stages_a = gemm_config.get("STAGES_A")
+    stages_b = gemm_config.get("STAGES_B")
+    stages_a = None if stages_a is None else int(stages_a)
+    stages_b = None if stages_b is None else int(stages_b)
     try:
         derived = mxfp8_gemm_derived(
-            block_m, block_n, block_k, stages, m_waves, n_waves, group_m
+            block_m,
+            block_n,
+            block_k,
+            stages,
+            m_waves,
+            n_waves,
+            group_m,
+            stages_a,
+            stages_b,
+            k=k,
         )
     except Exception:
         return None
     # No boundary predication: the tile must divide the problem exactly.
     if m % block_m or n % block_n or k % block_k:
         return None
-    # The prologue fills stages-1 buffers before the steady-state loop runs.
-    if (k // block_k) < stages:
+    # The prologue fills max(stages_a, stages_b) - 1 buffers before the
+    # steady-state loop runs.
+    if (k // block_k) <= max(derived.stages_a, derived.stages_b) - 1:
+        return None
+    try:
+        mxfp8_pipeline_schedule(
+            k // block_k,
+            derived.stages_a,
+            derived.stages_b,
+            derived.ldg_a_iters,
+            derived.ldg_b_iters,
+        )
+    except Exception:
         return None
     del derived
     return MXFP8GemmParams(
@@ -239,16 +401,21 @@ def make_mxfp8_param_and_validate(m, n, k, out_dtype, gemm_config):
         m_waves=m_waves,
         n_waves=n_waves,
         group_m=group_m,
+        stages_a=stages_a,
+        stages_b=stages_b,
     )
 
 
 def make_mxfp8_gemm_kernel_name(param: MXFP8GemmParams) -> str:
+    sa = param.stages if param.stages_a is None else param.stages_a
+    sb = param.stages if param.stages_b is None else param.stages_b
     return (
         "mxfp8_scaled_mm_gfx950"
         f"_{param.out_dtype}"
         f"_bm{param.block_m}_bn{param.block_n}_bk{param.block_k}"
         f"_s{param.stages}_mw{param.m_waves}_nw{param.n_waves}"
         f"_g{param.group_m}"
+        f"_sa{sa}_sb{sb}"
     )
 
 
@@ -277,19 +444,46 @@ def make_mxfp8_scaled_mm_gfx950(
     m_waves: int = 2,
     n_waves: int = 2,
     group_m: int = 0,
+    stages_a: int = None,
+    stages_b: int = None,
 ):
     """Build a tiled gfx950 MXFP8 scaled GEMM launcher for one tile config."""
     if m <= 0 or n <= 0 or k <= 0:
         raise ValueError("m, n, and k must be positive")
-    d = mxfp8_gemm_derived(block_m, block_n, block_k, stages, m_waves, n_waves, group_m)
+    d = mxfp8_gemm_derived(
+        block_m,
+        block_n,
+        block_k,
+        stages,
+        m_waves,
+        n_waves,
+        group_m,
+        stages_a,
+        stages_b,
+        k=k,
+    )
+    stages_a = d.stages_a
+    stages_b = d.stages_b
+    prefetch_a = stages_a - 1
+    prefetch_b = stages_b - 1
+    prologue_tiles = max(prefetch_a, prefetch_b)
     if m % block_m or n % block_n or k % block_k:
         raise ValueError(
             f"shape must be divisible by the tile: {m}x{n}x{k} vs "
             f"{block_m}x{block_n}x{block_k}"
         )
     k_tiles = k // block_k
-    if k_tiles < stages:
-        raise ValueError("K must supply at least `stages` tiles for the pipeline")
+    if k_tiles <= prologue_tiles:
+        raise ValueError("K must supply more tiles than the deepest prefetch")
+    (
+        main_loop_end,
+        steady_wait,
+        tail_waits,
+        wrap_a,
+        wrap_b,
+    ) = mxfp8_pipeline_schedule(
+        k_tiles, stages_a, stages_b, d.ldg_a_iters, d.ldg_b_iters
+    )
 
     if out_dtype == "bfloat16":
         out_elem = fx.BFloat16
@@ -305,7 +499,6 @@ def make_mxfp8_scaled_mm_gfx950(
     tiles_m = m // block_m
     tiles_n = n // block_n
     grid_size = tiles_m * tiles_n
-    main_loop_end = k_tiles - (stages - 1)
     # Group consecutive workgroups into GROUP_M rows of the N sweep so their B
     # tiles stay hot in L2. Only exact groupings are used, which keeps the
     # index math free of a runtime min.
@@ -366,8 +559,8 @@ def make_mxfp8_scaled_mm_gfx950(
 
         @fx.struct
         class SharedStorage:
-            a: fx.Array[fx.Float8E4M3FN, stages * block_m * block_k, 16]
-            b: fx.Array[fx.Float8E4M3FN, stages * block_n * block_k, 16]
+            a: fx.Array[fx.Float8E4M3FN, stages_a * block_m * block_k, 16]
+            b: fx.Array[fx.Float8E4M3FN, stages_b * block_n * block_k, 16]
 
         storage = fx.SharedAllocator().allocate(SharedStorage).peek()
         smem_a = storage.a.ptr
@@ -638,17 +831,26 @@ def make_mxfp8_scaled_mm_gfx950(
                 w0, w1 = _permlane_swap(16, t1, t1)
                 for lane_word in (u0, u1, w0, w1):
                     lane_word = fx.Int32(lane_word)
-                    byte = (lane_word >> (scale_group * fx.Int32(8))) & fx.Int32(0xFF)
-                    words.append(byte * fx.Int32(0x01010101))
+                    # The scaled MFMA reads exactly one byte of its 32-bit scale
+                    # operand, selected by opsel, and ignores the other three.
+                    # The atom above sets opsel 0 for both operands, so the byte
+                    # read is byte 0 -- which is where this shift already lands
+                    # the E8M0 exponent. Masking off the upper bytes and then
+                    # replicating the byte across the word are therefore both
+                    # dead, and dropping them shortens the dependency chain from
+                    # the scale load to the MFMA. Verified by placing the byte at
+                    # slot 1 with the other three zeroed: opsel 1 reproduces the
+                    # reference bit for bit, opsel 0 returns garbage.
+                    words.append(lane_word >> (scale_group * fx.Int32(8)))
             return words
 
-        def load_fragments(stage):
+        def load_fragments(stage_a, stage_b):
             sA_stage = fx.make_view(
-                smem_a + stage * fx.Int32(block_m * block_k),
+                smem_a + stage_a * fx.Int32(block_m * block_k),
                 a_lds_layout,
             )
             sB_stage = fx.make_view(
-                smem_b + stage * fx.Int32(block_n * block_k),
+                smem_b + stage_b * fx.Int32(block_n * block_k),
                 b_lds_layout,
             )
             thr_sA = thr_copy_A.partition_S(sA_stage)
@@ -740,18 +942,28 @@ def make_mxfp8_scaled_mm_gfx950(
                             sb_words[ni],
                         )
 
-        # Prologue: fill stages-1 buffers so the steady-state loop always has a
-        # landed tile to consume.
-        for stage in range_constexpr(stages - 1):
-            async_load_b(stage, fx.Int32(stage))
-            async_load_a(stage, fx.Int32(stage))
+        # Prologue: iterations i in [-prologue_tiles, 0) of the same schedule
+        # the steady state runs, so the vmcnt ordering is uniform from tile 0
+        # on. A is filled prefetch_a deep, B prefetch_b deep, and issue order
+        # is A-before-B: with prefetch_a < prefetch_b the A load is the later
+        # of the two a tile waits on, so putting it first leaves B's loads
+        # outstanding across the barrier instead of forcing a full drain.
+        # Reversing this order collapses steady_wait back to 0.
+        for i in range_constexpr(-prologue_tiles, 0):
+            if const_expr(0 <= i + prefetch_a):
+                ta = i + prefetch_a
+                async_load_a(ta, fx.Int32(ta % stages_a))
+            if const_expr(0 <= i + prefetch_b):
+                tb = i + prefetch_b
+                async_load_b(tb, fx.Int32(tb % stages_b))
         rocdl.sched_barrier(0)
 
-        steady_wait = (stages - 2) * d.ldg_wait_count
         for kt in range(0, main_loop_end, 1):
             k_tile = fx.Int32(kt)
-            cur = k_tile % fx.Int32(stages)
-            write = (cur + fx.Int32(stages - 1)) % fx.Int32(stages)
+            cur_a = k_tile % fx.Int32(stages_a)
+            cur_b = k_tile % fx.Int32(stages_b)
+            write_a = (k_tile + fx.Int32(prefetch_a)) % fx.Int32(stages_a)
+            write_b = (k_tile + fx.Int32(prefetch_b)) % fx.Int32(stages_b)
             __barrier(steady_wait)
 
             # A direct-to-LDS load is a VMEM op that writes LDS, so the compiler
@@ -762,19 +974,43 @@ def make_mxfp8_scaled_mm_gfx950(
             # was measured against the reverse on 12 tile configs spanning
             # 1 to 16 waves per CU and won 11 of 12 (the twelfth was a tie),
             # by 2% to 53%, so it is fixed rather than searched.
-            def _mid(cur=cur, k_tile=k_tile, write=write):
-                load_fragments(cur)
-                async_load_b(k_tile + fx.Int32(stages - 1), write)
-                async_load_a(k_tile + fx.Int32(stages - 1), write)
+            # Both operands are issued on every trip, unconditionally, so the
+            # body stays one straight-line block with one wait constant. The
+            # last prefetch_b - 1 trips would address tile k_tiles or beyond;
+            # the tile index is wrapped instead. The buffer tensors are built
+            # with max_size=True and have no hardware bounds clamp, so the
+            # wrap is what keeps the address in range. The wrapped tile lands
+            # in LDS buffer (kt + prefetch_b) % stages_b, which no remaining
+            # iteration reads (see mxfp8_pipeline_schedule), and its vmcnt
+            # slot is accounted for by the enumerator.
+            def _mid(
+                cur_a=cur_a,
+                cur_b=cur_b,
+                k_tile=k_tile,
+                write_a=write_a,
+                write_b=write_b,
+            ):
+                load_fragments(cur_a, cur_b)
+                ta = k_tile + fx.Int32(prefetch_a)
+                if const_expr(wrap_a):
+                    ta = ta % fx.Int32(k_tiles)
+                async_load_a(ta, write_a)
+                tb = k_tile + fx.Int32(prefetch_b)
+                if const_expr(wrap_b):
+                    tb = tb % fx.Int32(k_tiles)
+                async_load_b(tb, write_b)
 
             mma_stage(k_tile, _mid)
 
-        # Drain: consume the buffers still in flight, walking vmcnt down to 0.
-        for s in range_constexpr(stages - 1):
-            k_tile = fx.Int32(main_loop_end + s)
-            cur = k_tile % fx.Int32(stages)
-            __barrier((stages - 2 - s) * d.ldg_wait_count)
-            mma_stage(k_tile, lambda cur=cur: load_fragments(cur))
+        # Drain: exactly one peeled tile, the same shape the symmetric kernel
+        # peels. Everything it consumes is already in flight, so it issues no
+        # loads and only has to walk vmcnt down.
+        kt = main_loop_end
+        k_tile = fx.Int32(kt)
+        cur_a = fx.Int32(kt % stages_a)
+        cur_b = fx.Int32(kt % stages_b)
+        __barrier(tail_waits[0])
+        mma_stage(k_tile, lambda: load_fragments(cur_a, cur_b))
 
         frag_C_out = fx.make_fragment_like(frag_C, out_elem)
         frag_C_out.store(frag_C.load().to(out_elem))
@@ -794,6 +1030,8 @@ def make_mxfp8_scaled_mm_gfx950(
             m_waves=m_waves,
             n_waves=n_waves,
             group_m=group_m,
+            stages_a=stages_a,
+            stages_b=stages_b,
         )
     )
 
