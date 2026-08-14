@@ -13,8 +13,12 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 
 
 try:
@@ -54,6 +58,9 @@ def mock_compare_config_prefer_larger_XBLOCK(
 
 
 class TestCoordinateDescentTuner(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @requires_capabilities(Capability.lib.triton)
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)
@@ -67,6 +74,7 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_no_neighbors(self):
         """
         Test the case that there is no available neighbor values for a field.
@@ -82,6 +90,7 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 1, str(best_config))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_get_neighbour_values(self):
         tuner = CoordescTuner()
 
@@ -90,23 +99,7 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_values("num_warps", 2, radius=2)
         self.assertEqual(set(neighbours), {1, 4, 8})
 
-    def test_persistent_reduction(self):
-        def f(x):
-            return x / x.sum(dim=-1, keepdim=True)
-
-        with mock.patch.object(
-            CoordescTuner, "compare_config", mock_compare_config_prefer_larger_XBLOCK
-        ):
-            x = torch.ones(2, 256).to(GPU_TYPE)
-            expected = f(x)
-            # the first call get correct result when cache miss. Don't know why yet
-            _ = torch.compile(f)(x)
-            actual = torch.compile(f)(x)
-            self.assertTrue(
-                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
-                lambda msg: f"{msg}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
+    @requires_capabilities(Capability.lib.triton)
     def test_value_too_large(self):
         # Simulate a reduction
         size_hints = {"x": 2**20, "y": 2**20}
@@ -119,6 +112,7 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
         self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_native_matmul_block_numel_limit(self):
         tuner = CoordescTuner(is_native_matmul=True)
 
@@ -146,6 +140,7 @@ class TestCoordinateDescentTuner(TestCase):
             )
         )
 
+    @requires_capabilities(Capability.lib.triton)
     def test_native_matmul_rejects_invalid_neighbours(self):
         tuner = CoordescTuner(
             is_native_matmul=True,
@@ -164,6 +159,7 @@ class TestCoordinateDescentTuner(TestCase):
                     TRITON_MAX_TENSOR_NUMEL,
                 )
 
+    @requires_capabilities(Capability.lib.triton)
     def test_native_matmul_persistent_uses_rblock_hint_for_limit(self):
         tuner = CoordescTuner(
             is_native_matmul=True,
@@ -187,6 +183,7 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_configs(valid_config, "XBLOCK")
         self.assertNotIn(32, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
 
+    @requires_capabilities(Capability.lib.triton)
     def test_native_matmul_persistent_uses_min_rblock_for_limit(self):
         size_hints = {"x": 4096, "y": 4096, "r0_": 1}
         tuner = CoordescTuner(
@@ -216,6 +213,7 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_configs(baseline, "XBLOCK")
         self.assertNotIn(512, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
 
+    @requires_capabilities(Capability.lib.triton)
     def test_native_matmul_persistent_uses_meta_rblock_for_limit(self):
         size_hints = {"x": 4096, "y": 4096, "r0_": 64}
         effective_rblock = 1024
@@ -257,6 +255,7 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_configs(baseline, "YBLOCK")
         self.assertNotIn(64, [cfg.kwargs["YBLOCK"] for cfg in neighbours])
 
+    @requires_capabilities(Capability.lib.triton)
     def test_combo_tunable_fields_flow_into_tunable_fields(self):
         """``inductor_meta["combo_coordesc_field_order"]`` must be
         prepended to ``tunable_fields`` so combo-kernel per-subkernel
@@ -276,6 +275,7 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(fields[:3], ["XBLOCK_0", "YBLOCK_0", "XBLOCK_1"])
         self.assertIn("XBLOCK", fields)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_value_too_large_combo_field_limits(self):
         tuner = CoordescTuner(
             size_hints={"x": 2**20, "r0_": 2**20},
@@ -295,6 +295,7 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_large("R0_BLOCK_1", 128))
         self.assertTrue(tuner.value_too_large("R0_BLOCK_1", 256))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_value_limits_from_inductor_meta(self):
         tuner = CoordescTuner(
             size_hints={"x": 1024, "r0_": 1024},
@@ -311,6 +312,7 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(tuner.get_neighbour_values("XBLOCK", 16), [32])
         self.assertEqual(tuner.get_neighbour_values("R0_BLOCK", 64), [128])
 
+    @requires_capabilities(Capability.lib.triton)
     def test_combo_metadata_orders_larger_subkernels_first_for_coordesc(self):
         def make_configs(xblock, yblock):
             return [
@@ -393,6 +395,32 @@ class TestCoordinateDescentTuner(TestCase):
         )
 
 
+class TestCoordinateDescentTunerAccel(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
+    def test_persistent_reduction(self, device):
+        def f(x):
+            return x / x.sum(dim=-1, keepdim=True)
+
+        with mock.patch.object(
+            CoordescTuner, "compare_config", mock_compare_config_prefer_larger_XBLOCK
+        ):
+            x = torch.ones(2, 256).to(device)
+            expected = f(x)
+            # the first call get correct result when cache miss. Don't know why yet
+            _ = torch.compile(f)(x)
+            actual = torch.compile(f)(x)
+            self.assertTrue(
+                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
+                lambda msg: f"{msg}\nExpected:\n{expected}\nActual:\n{actual}",
+            )
+
+
+instantiate_device_type_tests(
+    TestCoordinateDescentTunerAccel, globals(), allow_xpu=True, except_for="cpu"
+)
+
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX:
         run_tests()
