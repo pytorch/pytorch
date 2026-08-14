@@ -1174,8 +1174,9 @@ def analyze_kernel_access(
 # Working out which arguments a user-defined triton kernel touches means
 # compiling it to TTIR and walking the result, which costs ~100ms per kernel.
 # Every pass that functionalizes or lowers a graph containing the kernel asks
-# again: one UMA compile made 56 calls covering 8 distinct kernel signatures,
-# nearly 5s of which was recomputing answers it already had.
+# again: a single compile can make dozens of calls covering only a handful
+# of distinct kernel signatures, spending seconds recomputing answers it
+# already had.
 #
 # The answer depends on what generate_ttir actually feeds Triton, and that is
 # narrower than the arguments: SymInts are replaced by 2, fake tensors and
