@@ -227,6 +227,91 @@ class TestExportJobs(unittest.TestCase):
 
 
 class TestArch(unittest.TestCase):
+    def test_effective_arch_is_per_toolchain(self):
+        # Only kinds that declare an ARCH_ENV_VAR read one, so a kind that
+        # takes its target another way (Triton: an explicit GPUTarget) is
+        # not perturbed by CUTE_DSL_ARCH.
+        import unittest.mock as mock
+
+        cutedsl = toolchains.get_toolchain("cutedsl")
+        no_env = toolchains.Toolchain()
+        self.assertIsNone(no_env.ARCH_ENV_VAR)
+        with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}):
+            self.assertEqual(export._effective_arch(None, cutedsl), "sm_90a")
+            self.assertIsNone(export._effective_arch(None, no_env))
+            # An explicit arch always wins over the env var.
+            self.assertEqual(export._effective_arch("sm_100a", cutedsl), "sm_100a")
+
+    def test_job_skip_sees_the_arch_env_var(self):
+        # Two runs into ONE --out-dir differing only in CUTE_DSL_ARCH. Both
+        # pass arch=None, so comparing the raw value would match on spec
+        # alone and skip the second run -- leaving the first arch's objects
+        # behind a sidecar the caller reads as the second arch.
+        import unittest.mock as mock
+
+        rel = os.path.relpath(
+            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
+            export.REPO,
+        )
+        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
+        with tempfile.TemporaryDirectory() as d:
+            point = {"dtype": "float32", "N": 4096}
+            job = ("fakeop", "aot_kernel.py", point, d, None)
+            _touch_artifacts(d, "x")
+            with open(os.path.join(d, "x.json"), "w") as f:
+                json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "kind": "cutedsl",
+                        "spec": point,
+                        "arch": "sm_90a",
+                        "sources": current,
+                    },
+                    f,
+                )
+            with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}):
+                self.assertFalse(export._job_needed(job, force=False))
+            with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_100a"}):
+                self.assertTrue(export._job_needed(job, force=False))
+            # Env var gone: an on-device export is not the sm_90a one either.
+            with mock.patch.dict(os.environ, {}, clear=True):
+                self.assertTrue(export._job_needed(job, force=False))
+
+    def test_job_skip_rejects_arch_less_sidecar_when_env_set(self):
+        # The reported case, from the other side: a sidecar that recorded no
+        # arch at all (an on-device export) must NOT satisfy a run whose
+        # CUTE_DSL_ARCH names a target, or the env-var run silently inherits
+        # objects built for whatever the builder's GPU was.
+        import unittest.mock as mock
+
+        rel = os.path.relpath(
+            os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
+            export.REPO,
+        )
+        current = {rel: export._file_hash(os.path.join(export.REPO, rel))}
+        with tempfile.TemporaryDirectory() as d:
+            point = {"dtype": "float32", "N": 4096}
+            job = ("fakeop", "aot_kernel.py", point, d, None)
+            _touch_artifacts(d, "x")
+            with open(os.path.join(d, "x.json"), "w") as f:
+                json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "x",
+                        "kind": "cutedsl",
+                        "spec": point,
+                        "arch": None,
+                        "sources": current,
+                    },
+                    f,
+                )
+            with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_100a"}):
+                self.assertTrue(export._job_needed(job, force=False))
+            # ...while a genuine on-device re-run still skips.
+            with mock.patch.dict(os.environ, {}, clear=True):
+                self.assertFalse(export._job_needed(job, force=False))
+
     def test_archs_from_cuda_arch_list(self):
         # TORCH_CUDA_ARCH_LIST -> the EXPORTABLE_ARCHES subset; named,
         # malformed, +PTX and non-exportable entries drop out.
