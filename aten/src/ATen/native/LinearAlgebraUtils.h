@@ -40,7 +40,16 @@ inline void check_mm_shapes(
       ": self.size(1) needs to match mat2.size(0) but got ",
       self.sym_size(1),
       " and ",
-      mat2.sym_size(0));
+      mat2.sym_size(0),
+      " (",
+      self.sym_size(0),
+      "x",
+      self.sym_size(1),
+      " and ",
+      mat2.sym_size(0),
+      "x",
+      mat2.sym_size(1),
+      ")");
 }
 
 inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
