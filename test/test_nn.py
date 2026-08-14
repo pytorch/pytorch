@@ -49,7 +49,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta
+    skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -16092,13 +16092,17 @@ class TestNNCUDA(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test('bidirectional', [True, False])
     @parametrize_test('mode', ['RNN', 'LSTM', 'GRU'])
-    def test_error_RNN_seq_len_zero(self, device, mode, bidirectional):
+    def test_error_RNN_seq_len_zero(self, mode, bidirectional):
         # checking error message when RNN has seq_len = 0
-        input = torch.ones(0, 10, 5, device=device)
-        rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional).to(device)
+        for device in get_all_device_types():
+            input = torch.ones(0, 10, 5)
+            rnn = getattr(nn, mode)(5, 6, bidirectional=bidirectional)
+            if device == 'cuda':
+                rnn.cuda()
+                input = input.cuda()
 
-        with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
-            rnn(input)
+            with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
+                rnn(input)
 
     @skipCUDAIfNoCudnn
     @parametrize_test('train', [True, False])
