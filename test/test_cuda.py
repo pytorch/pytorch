@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -626,11 +627,6 @@ print(t.is_pinned())
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_out_of_memory(self):
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
-            self.skipTest(
-                "TestCuda.test_out_of_memory: OOM tensor flag is False on ROCm "
-                "expandable segments (7.14+)"
-            )
         tensor = torch.zeros(1024, device="cuda")
 
         oom_regex = (
@@ -686,10 +682,9 @@ print(t.is_pinned())
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_set_per_process_memory_fraction(self):
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
+        if TEST_WITH_ROCM and getRocmVersion() == (7, 14) and EXPANDABLE_SEGMENTS:
             self.skipTest(
-                "ROCm 7.14+ expandable segments reports OOM below the expected "
-                "per-process memory fraction limit"
+                "ROCm 7.14 expandable segments OOM regression; fixed in ROCm 10.0"
             )
 
         torch.cuda.empty_cache()
@@ -9509,10 +9504,9 @@ class TestMemPool(TestCase):
           1. Default pool -- OOM recovery releases cached blocks, succeeds.
           2. use_mem_pool -- same recovery should work (the fix).
         """
-        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and EXPANDABLE_SEGMENTS:
+        if TEST_WITH_ROCM and getRocmVersion() == (7, 14) and EXPANDABLE_SEGMENTS:
             self.skipTest(
-                "ROCm 7.14+ expandable segments OOMs before mempool cached "
-                "blocks can be recovered"
+                "ROCm 7.14 expandable segments OOM recovery regression; fixed in ROCm 10.0"
             )
 
         MB = 1024 * 1024
