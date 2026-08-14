@@ -1160,16 +1160,13 @@ def get_kernel_metadata(
 
         for node in inductor_nodes:
             formatted_node = node.format_node(include_tensor_metadata=True)
-            if formatted_node is not None and torch.version.hip:
-                # AMDGCN asm strings can contain newlines, which propagate
-                # into format_node() output.  Split so every line gets the
-                # comment prefix; otherwise bare newlines break the wrapper.
-                detailed_metadata.extend(
-                    f"{wrapper.comment}   {line}"
-                    for line in formatted_node.splitlines()
-                )
-            else:
-                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
+            # Asm strings can contain newlines, which propagate into
+            # format_node() output.  Split so every line gets the comment
+            # prefix; otherwise bare newlines break the wrapper.
+            detailed_metadata.extend(
+                f"{wrapper.comment}   {line}"
+                for line in str(formatted_node).splitlines()
+            )
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -3823,22 +3820,6 @@ def remove_unaligned_input_idxs(
 
 
 def expr_fits_within_32bit(e: sympy.Expr) -> bool:
-    """Check if an expression fits within 32-bit integer range.
-
-    Answers are memoized per SizeVarAllocator - the query costs ~265us and the
-    same expressions come back repeatedly - see
-    SizeVarAllocator.expr_fits_within_32bit.
-
-    NOTE: This function intentionally does not install guards. Callers are
-    responsible for guarding (e.g. via check_leq) when they decide to use
-    32-bit indexing based on this result.
-    """
-    from .virtualized import V
-
-    return V.graph.sizevars.expr_fits_within_32bit(e)
-
-
-def expr_fits_within_32bit_uncached(e: sympy.Expr) -> bool:
     """Check if an expression fits within 32-bit integer range.
 
     NOTE: This function intentionally does not install guards. Callers are
