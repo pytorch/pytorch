@@ -803,7 +803,7 @@ def dynamo_timed(
 
     cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
-        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        wc_name = waitcounter_name_override or key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
@@ -1053,7 +1053,7 @@ def identity(x: T) -> T:
     return x
 
 
-def hashable(x: Any) -> bool:
+def hashable(x: object) -> bool:
     try:
         hash(x)
         return True
@@ -1238,7 +1238,7 @@ if sys.version_info >= (3, 14):
     _builtin_final_typing_classes += (typing.Union,)
 
 
-def is_typing(value: Any) -> bool:
+def is_typing(value: object) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
@@ -1256,7 +1256,7 @@ def is_typing(value: Any) -> bool:
     )
 
 
-def is_numpy_int_type(value: Any) -> bool:
+def is_numpy_int_type(value: object) -> bool:
     if not np:
         return False
 
@@ -1275,7 +1275,7 @@ def is_numpy_int_type(value: Any) -> bool:
     )
 
 
-def is_numpy_float_type(value: Any) -> bool:
+def is_numpy_float_type(value: object) -> bool:
     if not np:
         return False
 
@@ -1340,7 +1340,7 @@ def lazily_unpack(
     iterable: VariableTracker,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+    from .variables.object_protocol import generic_getiter, pyiter_next
 
     if isinstance(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
@@ -1349,7 +1349,7 @@ def lazily_unpack(
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -1386,7 +1386,7 @@ def allow_lru_cache_wrapper_trace_without_warning(
     _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
 
 
-def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: object) -> bool:
     return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
@@ -2468,18 +2468,37 @@ def chromium_event_timed(
             chromium_event_log._reset_to_state(*reset_state)
 
 
+# (id(scope), name) -> the token of whichever hook currently owns that
+# binding. A value comparison isn't enough here: CompilePackage.install() can
+# re-materialize a name like __builtins_dict__ with the *same* object a
+# pre-reset hook already installed, so an identity-of-value check would still
+# let the stale hook delete it. A token makes ownership explicit instead.
+_cleanup_owners: dict[tuple[int, str], object] = {}
+
+
 @dataclasses.dataclass
 class CleanupHook:
     """Remove a global variable when hook is called"""
 
     scope: dict[str, Any]
     name: str
+    token: object = dataclasses.field(compare=False, repr=False)
 
     def __call__(self, *args: Any) -> None:
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
-        del self.scope[self.name]
+        # Hooks fire when the owning code object is collected, which can happen
+        # after something else has taken over this name -- CompilePackage.install()
+        # reinstalls precompiled state under names a pre-reset compile still
+        # owns. Only clean up while nothing has claimed the name out from under us.
+        key = (id(self.scope), self.name)
+        if _cleanup_owners.pop(key, None) is not self.token:
+            return
+        # During interpreter shutdown the scope's module __dict__ may already
+        # have been cleared, so the name can be gone. Use pop to avoid a
+        # KeyError surfacing as an "Exception ignored in weakref callback".
+        self.scope.pop(self.name, None)
 
     @staticmethod
     def create(scope: dict[str, Any], name: str, val: Any) -> CleanupHook:
@@ -2487,7 +2506,16 @@ class CleanupHook:
             raise AssertionError(f"Name {name!r} already exists in scope")
         CleanupManager.count += 1
         scope[name] = val
-        return CleanupHook(scope, name)
+        token = object()
+        _cleanup_owners[(id(scope), name)] = token
+        return CleanupHook(scope, name, token)
+
+    @staticmethod
+    def disown(scope: dict[str, Any], name: str) -> None:
+        """Invalidate whichever hook currently owns (scope, name), so that if
+        its code object outlives this call, firing later is a no-op instead of
+        deleting a binding something else has since taken over."""
+        _cleanup_owners.pop((id(scope), name), None)
 
 
 class CleanupManager(ExactWeakKeyDictionary):
@@ -2738,20 +2766,25 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
     return None
 
 
-def getfile(obj: Any) -> str | None:
+def getfile(obj: object) -> str | None:
     try:
-        return inspect.getfile(obj)
+        # inspect.getfile is typed to accept only a narrow union of callable
+        # and module-like objects, but at runtime it accepts any object and
+        # raises TypeError for unsupported ones, which this function catches.
+        return inspect.getfile(obj)  # type: ignore[arg-type]
     except (TypeError, OSError):
         return None
 
 
-def is_namedtuple(obj: Any) -> bool:
+def is_namedtuple(obj: object) -> bool:
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
     return is_namedtuple_cls(type(obj))
 
 
-def is_namedtuple_cls(cls: Any) -> bool:
+def is_namedtuple_cls(cls: object) -> bool:
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
+    if not isinstance(cls, type):
+        return False
     try:
         if issubclass(cls, tuple):
             module = getattr(cls, "__module__", None)
@@ -2909,7 +2942,7 @@ if has_triton_package():
 """
 
 
-def is_safe_constant(v: Any) -> bool:
+def is_safe_constant(v: object) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(
@@ -2937,7 +2970,7 @@ def common_constants() -> set[int]:
     }
 
 
-def is_torch_sym(value: Any) -> TypeGuard[torch.SymBool | torch.SymInt]:
+def is_torch_sym(value: object) -> TypeGuard[torch.SymBool | torch.SymInt]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -2976,10 +3009,11 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
+    from .variables.lazy import ComputedLazyConstantVariable
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized():
+        if not arg.is_realized() and not isinstance(arg, ComputedLazyConstantVariable):
             # Find if the arg would be realized as SymNodeVariable later on. If yes,
             # realize it and specialize. Else return the arg.
 
@@ -3301,6 +3335,55 @@ def raise_args_mismatch(
         tx,
         args=[msg_str],
     )
+
+
+def check_positional(
+    tx: InstructionTranslatorBase,
+    funcname: str,
+    nargs: int,
+    min_args: int,
+    max_args: int,
+) -> None:
+    # Mirrors CPython _PyArg_CheckPositional (Python/getargs.c): enforce
+    # min_args <= nargs <= max_args with CPython's exact TypeError text. Used
+    # for METH_FASTCALL methods, whose positional count MethodFlags (derived
+    # from ml_flags) cannot check.
+    from torch._dynamo.exc import raise_type_error
+
+    if nargs < min_args:
+        rel = "" if min_args == max_args else "at least "
+        s = "" if min_args == 1 else "s"
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{min_args} argument{s}, got {nargs}"
+        )
+    if nargs > max_args:
+        rel = "" if min_args == max_args else "at most "
+        s = "" if max_args == 1 else "s"
+        raise_type_error(
+            tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}"
+        )
+
+
+def no_positional(
+    tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoPositional (Python/getargs.c).
+    from torch._dynamo.exc import raise_type_error
+
+    if args:
+        raise_type_error(tx, f"{funcname}() takes no positional arguments")
+
+
+def no_keywords(
+    tx: InstructionTranslatorBase, funcname: str, kwargs: dict[str, VariableTracker]
+) -> None:
+    # Mirrors CPython _PyArg_NoKeywords / _PyArg_NoKwnames (Python/getargs.c).
+    # For methods reached via tp_methods, MethodFlags already rejects kwargs;
+    # use this only where MethodFlags does not run (e.g. tp_init constructors).
+    from torch._dynamo.exc import raise_type_error
+
+    if kwargs:
+        raise_type_error(tx, f"{funcname}() takes no keyword arguments")
 
 
 def iter_contains(
@@ -3979,6 +4062,32 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> bool:
+    """True if ``target`` is a custom op whose ``register_fake`` ran earlier in
+    this trace -- i.e. its ``_abstract_fn`` has a pending (not-yet-applied)
+    attribute mutation. Distinguishes an op defined+register_fake'd inside the
+    compiled function (recoverable via graph break) from a genuinely
+    unregistered op (should hard-error with actionable guidance).
+
+    Only detects the ``CustomOpDef.register_fake`` method form (a tracked
+    pending ``_abstract_fn`` store on ``tx.output.side_effects``); other forms
+    (e.g. an op with no ``CustomOpDef``, or a definition inside a HOP body whose
+    mutation lives in a subtracer) fall through to the hard error, preserving
+    pre-existing behavior."""
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    from torch._library.custom_ops import _maybe_get_opdef
+
+    opdef = _maybe_get_opdef(target)
+    if opdef is None:
+        return False
+    side_effects = tx.output.side_effects
+    vt = side_effects.id_to_variable.get(id(opdef))
+    if vt is None:
+        return False
+    return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4046,7 +4155,10 @@ def _get_fake_value_impl(
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
-        if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
+        if (
+            is_lazy_module(nnmodule)
+            and inspect.getattr_static(nnmodule, "_initialize_hook", None) is not None
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -4192,21 +4304,51 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
-        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
+        elif "no fake impl registered" in str(cause) and _custom_op_fake_impl_pending(
+            tx, node.target
+        ):
+            # A custom op was defined and register_fake'd inside the compiled
+            # function, then called. Under nested graph breaks Dynamo traces
+            # into the inlined op definition, so register_fake's mutation of
+            # _abstract_fn is recorded as a pending side effect rather than run
+            # eagerly; it is not yet applied to the real op when the op is called
+            # here, so its fake kernel raises "no fake impl registered". (Without
+            # nested graph breaks the definition graph-breaks and the op is fully
+            # registered before the call, so this path is not hit.) Graph break:
+            # the definition (and register_fake) run eagerly and the op call
+            # itself falls back to eager -- it is not captured into the resumed
+            # graph. Unlike the generic RuntimeError below this is recoverable,
+            # so do NOT wrap it as a hard TorchRuntimeError.
+            # NB: gated on a pending _abstract_fn mutation so a genuinely
+            # unregistered op still hard-errors below with actionable guidance.
+            unimplemented(
+                gb_type="Custom op missing fake impl during tracing",
+                context=f"{node.target}",
+                explanation="A custom operator was defined and register_fake'd "
+                "inside the compiled function, then called before the "
+                "register_fake side effect was applied.",
+                hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
+        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        from .exc import (
+            FakeTensorObservedException,
+            ObservedException,
+            raise_observed_exception,
         )
-        raise AssertionError("should not reachable") from None
+
+        if not node.users:
+            tx.output.graph.erase_node(node)
+        try:
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        except ObservedException as e:
+            raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # type: ignore[unbound-name]
         )
 
     if (
@@ -4426,7 +4568,7 @@ def import_submodule(mod: types.ModuleType) -> None:
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
-def object_has_getattribute(value: Any) -> bool:
+def object_has_getattribute(value: object) -> bool:
     return class_has_getattribute(type(value))
 
 
@@ -4787,7 +4929,7 @@ def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
     return cache_key
 
 
-def is_safe_numpy_wrapper(obj: Any) -> bool:
+def is_safe_numpy_wrapper(obj: object) -> bool:
     return numpy_wrapper_cache_key(obj) is not None
 
 
@@ -4840,14 +4982,14 @@ def _disable_side_effect_safety_checks_for_current_subtracer(
     return fn(*args, **kwargs)
 
 
-def is_utils_checkpoint(obj: Any) -> bool:
+def is_utils_checkpoint(obj: object) -> bool:
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_invoke_subgraph(obj: Any) -> bool:
+def is_invoke_subgraph(obj: object) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
     return obj is invoke_subgraph_placeholder
@@ -5235,7 +5377,7 @@ def get_static_address_type(t: Any) -> StaticInputType | None:
     return None
 
 
-def is_rng_state_getter_or_setter(value: Any) -> bool:
+def is_rng_state_getter_or_setter(value: object) -> bool:
     getters = (
         # The following two functions are not identical, so don't remove anyone!
         torch._C.Generator.get_state,
@@ -5252,7 +5394,7 @@ def is_rng_state_getter_or_setter(value: Any) -> bool:
     return value in (*setters, *getters)
 
 
-def is_tensor_base_attr_getter(value: Any) -> bool:
+def is_tensor_base_attr_getter(value: object) -> bool:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
@@ -5282,7 +5424,7 @@ def is_torch_class(cls: type) -> bool:
     return module is not None and (module == "torch" or module.startswith("torch."))
 
 
-def is_torch_function_object(value: Any) -> bool:
+def is_torch_function_object(value: object) -> bool:
     return hasattr(value, "__torch_function__")
 
 
@@ -5332,10 +5474,13 @@ def to_fake_tensor(
 
 
 # NB: this works for both classes and instances
-def is_frozen_dataclass(value: Any) -> bool:
-    return (
+def is_frozen_dataclass(value: object) -> bool:
+    # value may be either a dataclass instance or a dataclass type; both are
+    # accepted by getattr_static, so the class_has_getattribute call is safe
+    # even though it is annotated to take a type.
+    return bool(
         not object_has_getattribute(value)
-        and not class_has_getattribute(value)
+        and not class_has_getattribute(value)  # type: ignore[arg-type]
         and is_dataclass(value)
         and hasattr(value, "__dataclass_params__")
         and hasattr(value.__dataclass_params__, "frozen")
@@ -5786,7 +5931,6 @@ def _is_tensorify_enabled() -> bool:
     return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
-@torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (
         torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
@@ -5797,9 +5941,31 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     return cm
 
 
-@torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# skip_code the two marker fns above: they are called from compiled bytecode
+# (behind PyCodegen's profiler gate) with the eval-frame callback active, so they
+# must not be traced. skip_code makes the eval-frame hook skip the frame via a
+# static flag with no per-call disable wrapper. Skip recursively (SKIP frame AND
+# callees) so nothing in the marker's dynamic extent is ever traced -- the same
+# guarantee the old @torch._disable_dynamo gave, but for free: unlike a disable
+# wrapper the recursive skip is just a flag with no per-call cost, so there is no
+# reason to leave callees traceable. The C set_code_exec_strategy is used directly
+# because torch._dynamo.disable / .skip cannot be imported at utils import time
+# (circular import).
+_pregraph_marker_skip = torch._C._dynamo.eval_frame._FrameExecStrategy(
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
+)
+torch._C._dynamo.eval_frame.set_code_exec_strategy(
+    record_pregraph_bytecode_enter.__code__, _pregraph_marker_skip
+)
+torch._C._dynamo.eval_frame.set_code_exec_strategy(
+    record_pregraph_bytecode_exit.__code__, _pregraph_marker_skip
+)
+del _pregraph_marker_skip
 
 
 # Active `torch._dynamo.override_cudagraphs` override, set/restored at RUNTIME by
@@ -5832,7 +5998,7 @@ def get_traced_code() -> list[CodeType] | None:
     return TracingContext.get_traced_code()
 
 
-def is_pybind11_enum_member(value: Any) -> bool:
+def is_pybind11_enum_member(value: object) -> bool:
     """Check if value is a pybind11 enum member (with stable hash and eq).
 
     Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,

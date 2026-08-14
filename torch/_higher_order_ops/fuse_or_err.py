@@ -14,9 +14,9 @@ from torch._higher_order_ops.base_hop import (
 class FuseOrErr(BaseHOP):
     """
     HOP wrapping a user closure that, under torch.compile/Inductor, must compile
-    into a single fused kernel. If the region does not collapse into one kernel,
-    Inductor raises with the exact reason. See ``fuse_or_err`` for the
-    user-facing API.
+    into at most one generated kernel. If the region requires multiple kernels,
+    Inductor raises with the captured fusion reason when one is available. See
+    ``fuse_or_err`` for the user-facing API.
 
     The ``_enforce_fusion`` kwarg gates the Inductor check: it is True for the
     forward region and equal to the user's ``fuse_backward`` for the backward
@@ -39,6 +39,24 @@ class FuseOrErr(BaseHOP):
     def _call_Autograd(self, subgraph, *operands, **kwargs):
         return FuseOrErrFunction.apply(self, subgraph, kwargs, *operands)
 
+    def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):
+        unwrapped_operands = ctx.unwrap_tensors(operands)
+        with ctx.redispatch_to_next():
+            functionalized_subgraph = FunctionWithNoFreeVars(
+                ctx.functionalize(subgraph)
+            )
+            out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
+        return ctx.wrap_tensors(out)
+
+    def _call_CompositeExplicitAutograd(
+        self, subgraph, *operands, _enforce_fusion=True, **kwargs
+    ):
+        if _enforce_fusion:
+            raise RuntimeError(
+                "fuse_or_err requires torch.compile with the Inductor backend"
+            )
+        return subgraph(*operands)
+
 
 class FuseOrErrFunction(BaseHOPFunction):
     @staticmethod
@@ -57,7 +75,7 @@ _fuse_or_err = FuseOrErr()
 
 def fuse_or_err(fn: Callable | None = None, *, fuse_backward: bool = False) -> Callable:
     """
-    Require that a closure compiles into a single fused Inductor kernel.
+    Require that a closure compiles into at most one Inductor kernel.
 
     Usage (wrapper or decorator)::
 
@@ -73,12 +91,12 @@ def fuse_or_err(fn: Callable | None = None, *, fuse_backward: bool = False) -> C
         def region(x):
             return x.sin().cos()
 
-    Under ``torch.compile`` the wrapped region is inlined into the graph and, if
-    Inductor does not fuse its materialized ops into a single kernel, compilation
-    raises with the reason the region split. A region that materializes no kernel
-    (e.g. pure views / shape ops) trivially passes -- the contract is "at most one
-    kernel". Outside ``torch.compile`` the closure is called directly, with no
-    fusion check.
+    Under ``torch.compile`` with Inductor, the wrapped region is inlined into the
+    graph and compilation raises if its materialized ops require more than one
+    generated kernel. A region that materializes no kernel (e.g. pure views / shape
+    ops) trivially passes. Other compilation backends raise rather than silently
+    running without enforcing the contract. Outside ``torch.compile`` the closure
+    is called directly, with no kernel check.
 
     The wrapped region takes positional operands; keyword arguments are only
     supported in eager (not under ``torch.compile``).

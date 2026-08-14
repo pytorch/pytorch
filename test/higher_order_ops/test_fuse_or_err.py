@@ -156,17 +156,18 @@ class TestFuseOrErr(TestCase):
         # carried by the fuse_or_err node in the (forward, backward) graphs.
         from functorch.compile import make_boxed_func
         from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.compile_fx import compile_fx
 
         fw_graphs = []
         bw_graphs = []
 
-        def fw_compiler(gm, _):
+        def fw_compiler(gm, example_inputs):
             fw_graphs.append(gm)
-            return make_boxed_func(gm.forward)
+            return make_boxed_func(compile_fx(gm, example_inputs))
 
-        def bw_compiler(gm, _):
+        def bw_compiler(gm, example_inputs):
             bw_graphs.append(gm)
-            return make_boxed_func(gm.forward)
+            return make_boxed_func(compile_fx(gm, example_inputs))
 
         def fn(x):
             return fuse_or_err(lambda a: a.sin().cos(), fuse_backward=fuse_backward)(
@@ -235,6 +236,14 @@ class TestFuseOrErr(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"keyword arguments"):
             torch.compile(fn, backend="inductor", fullgraph=True)(torch.randn(8))
 
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_non_inductor_backend_raises(self, backend):
+        def fn(x):
+            return fuse_or_err(lambda a: a.sin())(x)
+
+        with self.assertRaisesRegex(RuntimeError, r"requires.*Inductor"):
+            torch.compile(fn, backend=backend, fullgraph=True)(torch.randn(8))
+
     @requires_gpu
     def test_upstream_lazy_operand_not_miscounted(self):
         # A region whose op realizes an upstream lazy operand as a side effect
@@ -264,6 +273,23 @@ class TestFuseOrErr(TestCase):
             res = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
         self.assertEqual(ref, res)
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @requires_gpu
+    def test_combo_kernel_partition_raises(self):
+        import torch._inductor.config as inductor_config
+
+        def fn(x, y):
+            return fuse_or_err(lambda a, b: (a.sin(), b.cos()))(x, y)
+
+        x = torch.randn(128, device=GPU_TYPE)
+        y = torch.randn(128, device=GPU_TYPE)
+        with inductor_config.patch(
+            combo_kernels=True,
+            benchmark_combo_kernel=False,
+            combo_kernel_max_num_args=2,
+        ):
+            with self.assertRaisesRegex(RuntimeError, r"combo.*produced 2 kernels"):
+                torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
 
     @requires_gpu
     def test_surfaces_exact_captured_reason(self):
@@ -331,6 +357,40 @@ class TestFuseOrErr(TestCase):
         scheduler._record_no_fuse_reason(FakeNode("op0"), FakeNode("op1"), "kept")
         self.assertEqual(len(scheduler._fuse_or_err_no_fuse_reasons), 1)
 
+    def test_reports_nonadjacent_kernel_reason(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from torch._inductor.scheduler import Scheduler
+
+        class FakeNode:
+            def __init__(self, name):
+                self.name = name
+
+            def get_name(self):
+                return self.name
+
+            def get_nodes(self):
+                return []
+
+        nodes = [FakeNode(name) for name in ("a", "b", "c")]
+        group = SimpleNamespace(
+            op_names=OrderedSet(("op_a", "op_b", "op_c")),
+            hop_node=SimpleNamespace(meta={}),
+        )
+        mapping = dict(zip(group.op_names, nodes))
+        with mock.patch.object(
+            Scheduler,
+            "_fuse_or_err_reason",
+            side_effect=lambda a, b: f"reason {a.get_name()}-{b.get_name()}",
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, r"why a and c did not fuse: reason a-c"
+            ):
+                Scheduler._report_fuse_or_err_failure(
+                    object.__new__(Scheduler), group, OrderedSet(nodes), mapping
+                )
+
     @requires_gpu
     def test_post_fusion_pass_cannot_hide_split(self):
         from torch._inductor import config as inductor_config
@@ -358,6 +418,19 @@ class TestFuseOrErr(TestCase):
             torch.randn(8, device=GPU_TYPE)
         )
         self.assertEqual(res, 8)
+
+    @requires_gpu
+    def test_pure_view_region_passes(self):
+        def fn(x):
+            return fuse_or_err(lambda a: a.view(-1))(x)
+
+        x = torch.randn(2, 4, device=GPU_TYPE)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(res, x.view(-1))
+        self.assertEqual(
+            res.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+        self.assertEqual(metrics.generated_kernel_count, 0)
 
 
 instantiate_parametrized_tests(TestFuseOrErr)

@@ -77,7 +77,6 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
-    skipIfSM103,
     SM100OrLater,
     SM120OrLater,
     SM80OrLater,
@@ -340,12 +339,13 @@ class TestCutlassBackend(TestCase):
         self.assertIsNotNone(cutlass_key())
 
     @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
-    def test_sm103_cutlass_ops_skip_int8_umma(self):
+    @parametrize("arch", ("103", "107"))
+    def test_sm103_and_sm107_cutlass_ops_skip_int8_umma(self, arch):
         from torch.utils import _pytree as pytree
 
         self.assertTrue(try_import_cutlass())
 
-        ops = pytree.tree_flatten(_gen_ops_cached("103", "13.3", "cuda"))[0]
+        ops = pytree.tree_flatten(_gen_ops_cached(arch, "13.3", "cuda"))[0]
         cutlass_ops = [op for op in ops if hasattr(op, "configuration_name")]
         int8_ops = [op for op in cutlass_ops if "s8_s8_s32" in op.configuration_name()]
         self.assertGreater(len(cutlass_ops), 0)
@@ -1302,7 +1302,12 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(True, "int_mm not supported on xpu cutlass backend")
     # TODO: Enable dynamic test cases when dynamic support is added.
     @skipCUDAIf(not SM90OrLater, "need sm_90")
-    @skipIfSM103
+    @skipCUDAIf(
+        torch.version.hip is None
+        and HAS_CUDA
+        and torch.cuda.get_device_capability() in ((10, 3), (10, 7)),
+        "int_mm not supported on SM103 or SM107",
+    )
     @xfailIfSM120OrLater
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -2343,6 +2348,47 @@ class TestCutlassBackend(TestCase):
                 return op(res, *extra_args)
 
         self.run_evt_test(TestModel(), op, shape)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM120OrLater
+    @use_evt_config
+    def test_evt_reshaped_external_read_fusion(self):
+        """
+        Regression test: when an epilogue node reads an external buffer whose
+        shape is a compatible reshape of the GEMM output (e.g. [128, 128, 128]
+        vs the 2D template output [16384, 128] where 128*128 == 16384), the
+        CUTLASS EVT shape propagation used to raise a dimension mismatch:
+            RuntimeError: Dimension mismatch between accum(1, 16384, 128),
+            arg(128, 128, 128).
+        The external read is now normalized to the 2D template shape (valid
+        because the read is contiguous, so the row-major flatten is
+        memory-equivalent), allowing the epilogue to be fused and producing
+        correct results.
+        """
+        torch._dynamo.utils.counters.clear()
+        M, N, K = 16384, 128, 256
+        reshaped = (128, 128, N)  # 128 * 128 == M
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, bias3d):
+                out = a @ b  # (M, N)
+                out = out.reshape(*reshaped)  # (128, 128, N)
+                out = out + bias3d  # external read with the reshaped shape
+                return out.relu()
+
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias3d = torch.randn(*reshaped, device=GPU_TYPE, dtype=torch.float16)
+
+        model = TestModel().to(GPU_TYPE)
+        ref = model(a, b, bias3d)
+        result = torch.compile(model, fullgraph=True)(a, b, bias3d)
+        torch.testing.assert_close(result, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
