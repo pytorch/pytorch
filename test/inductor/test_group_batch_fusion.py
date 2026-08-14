@@ -615,6 +615,40 @@ class TestGroupBatchFusion(TestCase):
 
         self.assertTrue(_has_layout_sensitive_user(linear))
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_skips_view_users(self):
+        # A linear whose output feeds a view that needs the whole row contiguous
+        # (e.g. flattening across rows) would crash on the fused non-contiguous
+        # slice, so it must not be fused while the other pointwise-consumed
+        # linears still are.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_large = torch.nn.Linear(64, 192, bias=False)
+                self.proj_a = torch.nn.Linear(64, 16, bias=False)
+                self.proj_b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.proj_large(x).view(-1)
+                a = torch.sin(self.proj_a(x))
+                b = torch.cos(self.proj_b(x))
+                return large, a, b
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
         """
