@@ -420,12 +420,6 @@ test_python_shard() {
     exit 1
   fi
 
-  # Sleep for 8 hours when running shard 0
-  if [[ "$1" == "1" ]]; then
-    echo "Shard $1 detected: sleeping for 8 hours"
-    sleep 8h
-  fi
-
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
 
@@ -2502,6 +2496,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python_shard "$SHARD_NUMBER"
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # Sleep for 8 hours when running shard 1
+  echo "Shard ${SHARD_NUMBER} detected: sleeping for 8 hours"
+  sleep 8h
   # TODO(temporary): run distributed-single first for faster signal while we
   # validate the split; move to the end once it's proven stable.
   if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
