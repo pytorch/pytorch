@@ -544,6 +544,31 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(eager_result.shape, fake_result.shape)
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    def test_vmap(self):
+        asm_str = "v_add_f32 $0, $1, $2" if torch.version.hip else "add.f32 $0, $1, $2;"
+        constraints = "=v, v, v" if torch.version.hip else "=f,f,f"
+
+        def add(a, b):
+            return inline_asm_elementwise(
+                a, b, asm_str=asm_str, constraints=constraints, dtype=torch.float32
+            )
+
+        bias = torch.randn(64, device="cuda")
+        x = torch.randn(8, 64, device="cuda")
+        # batched vector + unbatched vector
+        self.assertEqual(torch.vmap(add, in_dims=(0, None))(x, bias), x + bias)
+        # batched scalar + unbatched vector: batch dim must not be consumed by
+        # trailing-dim broadcasting
+        y = torch.randn(8, device="cuda")
+        self.assertEqual(torch.vmap(add, in_dims=(0, None))(y, bias), y[:, None] + bias)
+        # non-zero batch dim
+        self.assertEqual(
+            torch.vmap(add, in_dims=(1, None))(x, bias[:8]), x.t() + bias[:8]
+        )
+        # nested vmap down to scalars
+        nested = torch.vmap(torch.vmap(add))(x, x)
+        self.assertEqual(nested, x + x)
+
     @xfailIfNoAcceleratorTriton
     def test_dynamic_shapes(self):
         def fn(x, y):
