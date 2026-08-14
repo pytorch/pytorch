@@ -48,6 +48,11 @@ class FlexGemmOutputLayout:
 
     def codegen_reference(self) -> str:
         """Return this module constant's generated-runtime expression."""
+        module = importlib.import_module(__name__)
+        if getattr(module, self.symbol, None) is not self:
+            raise ValueError(
+                f"FlexGEMM output layout {self.name!r} must be bound as {self.symbol}"
+            )
         return f"flex_gemm_output_layout.{self.symbol}"
 
 
@@ -123,6 +128,12 @@ def transposed_supports_config(config: Any, _axis: int, _group: int) -> bool:
     return not config.swap_ab
 
 
+def transposed_validate_carrier(tensor: Any) -> None:
+    """Require the dense carrier represented by a contiguous output transpose."""
+    if not tensor.is_contiguous():
+        raise ValueError("transposed carrier must be contiguous")
+
+
 BLOCKED_128X4 = FlexGemmOutputLayout(
     symbol="BLOCKED_128X4",
     name="blocked_128x4",
@@ -142,4 +153,5 @@ TRANSPOSED = FlexGemmOutputLayout(
     carrier_ndim=3,
     validate_geometry_fn=validate_any_geometry,
     supports_config_fn=transposed_supports_config,
+    validate_carrier_fn=transposed_validate_carrier,
 )
