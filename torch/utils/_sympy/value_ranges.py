@@ -252,24 +252,12 @@ class ValueRanges(Generic[_T]):
     ) -> ValueRanges[SympyBoolean]: ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
-        if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
-            return self
-        if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
-            return other
-        if self.is_bool != other.is_bool:
-            raise AssertionError((self, other))
-        if self.is_int != other.is_int:
-            raise AssertionError((self, other))
-        if self.is_float != other.is_float:
-            raise AssertionError((self, other))
-        if self.is_bool:
-            return ValueRanges(
-                sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)
-            )
-        else:
-            return ValueRanges(
-                sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper)
-            )
+        # Intersecting costs ~70us, nearly all of it building sympy Max/Min, and
+        # bounds analysis asks for the same intersection over and over: 4835
+        # calls covering 68 distinct pairs on one model. ValueRanges is a frozen
+        # value object and this is a pure function of the two of them, so the
+        # answer can be memoized outright with no invalidation to worry about.
+        return _intersect_value_ranges(self, other)
 
     # Union
     @overload
@@ -426,6 +414,28 @@ class ValueRanges(Generic[_T]):
             for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
         ]
         return ValueRanges(min(products), max(products))
+
+
+@functools.lru_cache(maxsize=4096)
+def _intersect_value_ranges(self: Any, other: Any) -> Any:
+    """Body of ValueRanges.__and__; see the comment there."""
+    if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
+        return self
+    if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
+        return other
+    if self.is_bool != other.is_bool:
+        raise AssertionError((self, other))
+    if self.is_int != other.is_int:
+        raise AssertionError((self, other))
+    if self.is_float != other.is_float:
+        raise AssertionError((self, other))
+    if self.is_bool:
+        return ValueRanges(
+            sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)
+        )
+    return ValueRanges(
+        sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper)
+    )
 
 
 class SymPyValueRangeAnalysis:
