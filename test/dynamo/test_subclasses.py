@@ -3640,8 +3640,8 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         sym_size_int_3: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view_1, 0)
         return (
             clone,  # PlainAOTOutput(idx=0)
@@ -3741,8 +3741,8 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         sym_size_int_3: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view_1, 0)
         return (
             clone,  # PlainAOTOutput(idx=0)
