@@ -23,9 +23,11 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
+    parametrize,
     requires_accelerator,
     requires_cuda,
     requires_xpu,
@@ -1713,6 +1715,57 @@ class <lambda>(torch.nn.Module):
         gm.graph.lint()
 
     @requires_cuda
+    @parametrize("sync_kind", ("wait_stream", "full_barrier"))
+    def test_intervening_sync_updates_event_passthrough(self, sync_kind) -> None:
+        import operator
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        intervening_stream = torch.Stream(device="cuda")
+        consumer_stream = torch.Stream(device="cuda")
+        fork = torch.Event()
+        intervening_event = torch.Event()
+
+        def fn(x) -> torch.Tensor:
+            default_stream = torch.cuda.current_stream()
+            y = x + 1
+            fork.record(default_stream)
+
+            if sync_kind == "wait_stream":
+                intervening_stream.wait_stream(default_stream)
+            else:
+                default_stream.synchronize()
+                intervening_event.record(intervening_stream)
+
+            with consumer_stream:
+                fork.wait()
+                return y * 2
+
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device="cuda"))
+        gm = fw_graphs[0]
+        wrap_all_sync_nodes_with_control_deps(gm)
+        event_waits = []
+        for ctrl in gm.graph.find_nodes(op="call_function", target=control_deps):
+            subgraph = getattr(gm, ctrl.args[1].target)
+            waits = subgraph.graph.find_nodes(
+                op="call_function", target=torch.ops.streams.wait_event.default
+            )
+            if waits:
+                event_waits.append(ctrl)
+
+        consumers = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mul.Tensor
+        )
+        self.assertEqual(len(event_waits), 1)
+        self.assertEqual(len(consumers), 1)
+        self.assertIs(consumers[0].args[0].target, operator.getitem)
+        self.assertIs(consumers[0].args[0].args[0], event_waits[0])
+        gm.graph.lint()
+
+    @requires_cuda
     def test_control_deps_prevents_invalid_reordering(self, device) -> None:
         """
         Test that control_deps creates proper data dependencies that prevent invalid reordering.
@@ -3140,6 +3193,9 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
+
+
+instantiate_parametrized_tests(TestStreams)
 
 
 if __name__ == "__main__":
