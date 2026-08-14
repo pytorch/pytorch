@@ -618,11 +618,63 @@ def _op_namespace(tgt) -> str | None:
     return None
 
 
+# aten ops that return a view of their input (no implicit copy), so the fused
+# non-contiguous layout propagates to their outputs and downstream consumers
+# still matter. view / as_strided additionally require a compatible layout and
+# can fail on the non-contiguous fused output.
+_VIEW_OPS = {
+    aten.view,
+    aten.as_strided,
+    aten.reshape,
+    aten.permute,
+    aten.transpose,
+    aten.slice,
+    aten.split,
+    aten.unsqueeze,
+    aten.squeeze,
+    aten.expand,
+    aten.select,
+}
+
+# Same ops traced as tensor methods (e.g. x.view(-1) is call_method[target="view"]).
+_VIEW_METHODS = {
+    "view",
+    "as_strided",
+    "reshape",
+    "permute",
+    "transpose",
+    "unsqueeze",
+    "squeeze",
+    "expand",
+    "select",
+    "split",
+    "slice",
+}
+
+# view / as_strided additionally require a compatible layout and can crash on
+# the non-contiguous fused output; the rest are layout-preserving and walked.
+_CRASH_VIEW_OPS = {"view", "as_strided"}
+
+
+def _view_op_kind(user: torch.fx.Node) -> str | None:
+    # "crash" for view/as_strided (can fail on non-contiguous), "propagate" for
+    # the other view-producing ops (layout flows through), None otherwise.
+    if user.op == "call_function":
+        packet = getattr(user.target, "overloadpacket", user.target)
+        if packet in _VIEW_OPS:
+            return "crash" if packet in (aten.view, aten.as_strided) else "propagate"
+    if user.op == "call_method" and user.target in _VIEW_METHODS:
+        return "crash" if user.target in _CRASH_VIEW_OPS else "propagate"
+    return None
+
+
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     # A user that can observe the (possibly fused) output layout: the graph
-    # output, stride/contiguity/storage-offset queries, or an opaque custom op
-    # (both OpOverload and OpOverloadPacket call forms). aten ops are excluded
-    # because their layout-sensitive handlers are traced/folded elsewhere.
+    # output, stride/contiguity/storage-offset queries, an opaque custom op
+    # (both OpOverload and OpOverloadPacket call forms), or a view/as_strided
+    # that can fail on the non-contiguous fused output. View-producing ops
+    # (call_function aten.* or call_method x.view(...)) are walked through,
+    # since the layout propagates to their consumers.
     for user in node.users:
         if user.op == "output":
             return True
@@ -633,6 +685,11 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         ):
             return True
         if _op_namespace(user.target) not in (None, "aten"):
+            return True
+        kind = _view_op_kind(user)
+        if kind == "crash":
+            return True
+        if kind == "propagate" and _has_layout_sensitive_user(user):
             return True
     return False
 
