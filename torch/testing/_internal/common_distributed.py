@@ -1303,13 +1303,9 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
+        try:
+            return c10d.get_default_backend_for_device(device)
+        except ValueError:
             return "gloo"
 
     def create_pg(self, device, world_size=None):
@@ -1323,7 +1319,7 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if self.backend(device) != "gloo":
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type
@@ -2099,16 +2095,8 @@ class MultiProcContinuousTest(TestCase):
 
         # Check if the specified backend is available before spawning processes
         backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
-        if backend is not None:
-            backend_checks = {
-                "nccl": c10d.is_nccl_available,
-                "gloo": c10d.is_gloo_available,
-                "mpi": c10d.is_mpi_available,
-                "xccl": c10d.is_xccl_available,
-            }
-            check_fn = backend_checks.get(backend)
-            if check_fn is not None and not check_fn():
-                raise unittest.SkipTest(f"Backend '{backend}' is not available")
+        if backend is not None and not c10d.is_backend_available(backend):
+            raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004
@@ -2244,13 +2232,9 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
 
     @staticmethod
     def backend(device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
+        try:
+            return c10d.get_default_backend_for_device(device)
+        except ValueError:
             return "gloo"
 
     @classmethod
@@ -2282,9 +2266,9 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
         os.environ["TORCHCOMM_SIZE"] = str(world_size)
         os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
         super()._init_pg(rank, world_size, rdvz_file)
-        # Set up accelerator device if using nccl/xccl backend
+        # Set up accelerator device if using a non-gloo backend
         backend = cls.backend_str()
-        if "nccl" in backend or "xccl" in backend:
+        if backend != "gloo":
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device = torch.device(f"{accelerator.type}:{rank}")
