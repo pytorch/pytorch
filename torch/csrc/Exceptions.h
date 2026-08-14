@@ -296,8 +296,8 @@ namespace torch {
 // custom autograd Function case today. It still seems to be needed for the
 // DistEngine; the reproducer is
 //
-//   python test/distributed/rpc/test_tensorpipe_agent.py -k \
-//       test_backward_autograd_engine_error
+//   python test/distributed/rpc/test_tensorpipe_agent.py -k
+//   test_backward_autograd_engine_error
 //
 // See also https://github.com/pytorch/pytorch/pull/34845.
 //
