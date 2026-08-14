@@ -282,8 +282,11 @@ def record_shapeenv_event(
 
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            if not isinstance(args[0], ShapeEnv):
-                raise AssertionError(f"Expected ShapeEnv, got {type(args[0])}")
+            # Narrow shape_env itself, not args[0]: the fast path above binds
+            # it before this check, so narrowing here is what lets the uses
+            # below see a ShapeEnv rather than an untyped positional arg.
+            if not isinstance(shape_env, ShapeEnv):
+                raise AssertionError(f"Expected ShapeEnv, got {type(shape_env)}")
 
             global NEST
 
@@ -297,7 +300,7 @@ def record_shapeenv_event(
                 return r
 
             try:
-                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
+                if not shape_env.should_record_events or shape_env.is_recording:
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #
