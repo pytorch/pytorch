@@ -4630,6 +4630,33 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 serialization_config.save.storage_alignment = storage_alignment_before
 
+    @parametrize("load_mode", ["default", "fake_tensor_mode", "map_location_meta"])
+    def test_load_preserves_storage_sharing(self, load_mode):
+        buf = torch.randn(16)
+        empty = torch.empty(0)
+        sd = {'a': buf[:8], 'b': buf[8:], 'empty': empty, 'empty_int': empty.view(torch.int32)}
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            if load_mode == "fake_tensor_mode":
+                with FakeTensorMode():
+                    sd_loaded = torch.load(f)
+            elif load_mode == "map_location_meta":
+                sd_loaded = torch.load(f, map_location='meta')
+            else:
+                sd_loaded = torch.load(f)
+
+        a, b = sd_loaded['a'].untyped_storage(), sd_loaded['b'].untyped_storage()
+        self.assertEqual(a._cdata, b._cdata)
+        self.assertEqual(a.nbytes(), buf.untyped_storage().nbytes())
+        self.assertEqual(sd_loaded['b'].storage_offset(), 8)
+
+        # A record with no data can be saved under more than one dtype
+        e, e_int = sd_loaded['empty'].untyped_storage(), sd_loaded['empty_int'].untyped_storage()
+        self.assertEqual(e._cdata, e_int._cdata)
+        self.assertEqual(sd_loaded['empty'].dtype, torch.float32)
+        self.assertEqual(sd_loaded['empty_int'].dtype, torch.int32)
 
     @parametrize('path_type', (str, Path))
     @unittest.skipIf(IS_WINDOWS, "TemporaryFileName on windows")

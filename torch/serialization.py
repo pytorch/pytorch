@@ -2175,8 +2175,7 @@ def _load(
             _internal=True,
         )
 
-        if typed_storage._data_ptr() != 0:
-            loaded_storages[key] = typed_storage
+        loaded_storages[key] = typed_storage
 
         return typed_storage
 
@@ -2200,6 +2199,16 @@ def _load(
 
         if key in loaded_storages:
             typed_storage = loaded_storages[key]
+            if typed_storage.dtype != dtype:
+                # torch.save rejects saving allocated data as two different types,
+                # but it cannot detect that for records with no data (empty
+                # storages), so those can come back under several dtypes. Rewrap
+                # rather than rebuild so the record keeps a single storage.
+                typed_storage = torch.storage.TypedStorage(
+                    wrap_storage=typed_storage._untyped_storage,
+                    dtype=dtype,
+                    _internal=True,
+                )
         else:
             nbytes = numel * torch._utils._element_size(dtype)
             typed_storage = load_tensor(
