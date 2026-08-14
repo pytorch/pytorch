@@ -746,15 +746,15 @@ class TestCudaMultiGPU(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _event_wait(self, spin_time_cycles):
+    def _event_wait_impl(self, spin_time_cycles, event_cls):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream()
-        e_tik = torch.cuda.Event(blocking=True, enable_timing=True)
-        e_tok = torch.cuda.Event(blocking=True, enable_timing=True)
+        e_tik = event_cls(blocking=True, enable_timing=True)
+        e_tok = event_cls(blocking=True, enable_timing=True)
 
         e_tik.record(s0)
         torch.cuda._sleep(spin_time_cycles - 10)
-        e_sync = torch.cuda.Event(blocking=True)
+        e_sync = event_cls(blocking=True)
         e_sync.record()
         e_sync.wait(s1)
         with torch.cuda.stream(s1):
@@ -772,6 +772,16 @@ class TestCudaMultiGPU(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
+    def _event_wait(self, spin_time_cycles):
+        return TestCudaMultiGPU._event_wait_impl(
+            self, spin_time_cycles, torch.cuda.Event
+        )
+
+    @staticmethod
+    def _generic_event_wait(self, spin_time_cycles):
+        return TestCudaMultiGPU._event_wait_impl(self, spin_time_cycles, torch.Event)
+
+    @staticmethod
     def _test_stream_event_nogil(self, sync_func, p2c, c2p):
         with torch.cuda.device("cuda:1"):
             c2p.put(0)
@@ -784,6 +794,7 @@ class TestCudaMultiGPU(TestCase):
             TestCudaMultiGPU._stream_synchronize,
             TestCudaMultiGPU._event_synchronize,
             TestCudaMultiGPU._event_wait,
+            TestCudaMultiGPU._generic_event_wait,
         ]:
             p2c = queue.Queue()
             c2p = queue.Queue()
