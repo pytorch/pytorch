@@ -5,8 +5,11 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
+
+#include <optional>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
@@ -66,6 +69,17 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
       const c10::Storage& storage,
       size_t newsize) const {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Accumulation type for the given input dtype on this PrivateUse1 backend.
+  // Returns `std::nullopt` to defer to the CPU accumulation type (PyTorch
+  // default for unregistered / unequipped backends). Override in a subclass
+  // to publish the backend's own accumulation table. Intended to host
+  // similar optional metadata queries in the future (reduce-accumulator
+  // dtype, low-precision intermediate strategy, ...).
+  virtual std::optional<c10::ScalarType> toAccumulateType(
+      c10::ScalarType /*type*/) const {
+    return std::nullopt;
   }
 
 #undef FAIL_PRIVATEUSE1HOOKS_FUNC
