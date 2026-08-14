@@ -3412,16 +3412,18 @@ class TestSDPACudaOnly(NNTestCase):
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
     )
-    @parametrize("q_len,k_len", [(80, 48), (192, 64)])
+    @parametrize("q_len,k_len,head_dim", [(80, 48, 64), (192, 64, 160)])
     def test_mem_efficient_bottom_right_fully_masked_rows(
-        self, device, q_len, k_len
+        self, device, q_len, k_len, head_dim
     ):
+        if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
+            self.skipTest("large head dimensions require SM80 or later")
         torch.manual_seed(42)
         query = torch.randn(
             1,
             2,
             q_len,
-            64,
+            head_dim,
             device=device,
             dtype=torch.float16,
             requires_grad=True,
@@ -3430,7 +3432,7 @@ class TestSDPACudaOnly(NNTestCase):
             1,
             2,
             k_len,
-            64,
+            head_dim,
             device=device,
             dtype=torch.float16,
             requires_grad=True,
@@ -3485,10 +3487,15 @@ class TestSDPACudaOnly(NNTestCase):
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
     )
-    def test_mem_efficient_bottom_right_varlen_fully_masked_rows(self, device):
+    @parametrize("shared_storage_dqdkdv", [False, True])
+    def test_mem_efficient_bottom_right_varlen_fully_masked_rows(
+        self, device, shared_storage_dqdkdv
+    ):
         torch.manual_seed(42)
-        q_lengths = (80, 192)
-        k_lengths = (48, 256)
+        # Equal totals enable shared gradient storage; the first sequence skips
+        # a full query block and the second exercises a partial block.
+        q_lengths = (192, 80, 64)
+        k_lengths = (64, 48, 224)
         query = torch.randn(
             1,
             sum(q_lengths),
@@ -3538,22 +3545,48 @@ class TestSDPACudaOnly(NNTestCase):
             expected, (query, key, value), grad_out, retain_graph=True
         )
 
-        actual = torch.ops.aten._efficient_attention_forward.default(
-            query,
-            key,
-            value,
-            None,
-            cu_seqlens_q,
-            cu_seqlens_k,
-            max(q_lengths),
-            max(k_lengths),
-            0.0,
-            int(CausalVariant.LOWER_RIGHT),
-            True,
-        )[0]
-        actual_grads = torch.autograd.grad(
-            actual, (query, key, value), grad_out
+        actual, logsumexp, seed, offset, max_q, max_k = (
+            torch.ops.aten._efficient_attention_forward.default(
+                query,
+                key,
+                value,
+                None,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max(q_lengths),
+                max(k_lengths),
+                0.0,
+                int(CausalVariant.LOWER_RIGHT),
+                True,
+            )
         )
+        if shared_storage_dqdkdv:
+            # Deterministic mode fills empty allocations with NaNs, exposing
+            # query rows skipped by the backward kernel.
+            with use_deterministic_algorithims(True, warn_only=False):
+                actual_grads = torch.ops.aten._efficient_attention_backward.default(
+                    grad_out,
+                    query,
+                    key,
+                    value,
+                    None,
+                    actual,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_q,
+                    max_k,
+                    logsumexp,
+                    0.0,
+                    seed,
+                    offset,
+                    int(CausalVariant.LOWER_RIGHT),
+                    False,
+                    shared_storage_dqdkdv=True,
+                )[:3]
+        else:
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
 
         self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):

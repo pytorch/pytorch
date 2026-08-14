@@ -475,6 +475,15 @@ _efficient_attention_backward(
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
 
+  // Shared cumulative metadata proves every packed Q/K length matches without
+  // reading sequence lengths from the device.
+  const bool may_have_fully_masked_rows =
+      custom_mask_type ==
+          static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
+      (cu_seqlens_q.has_value()
+           ? !cu_seqlens_q->is_same(*cu_seqlens_k)
+           : max_seqlen_q > max_seqlen_k);
+
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   if (shared_storage_dqdkdv) {
     TORCH_CHECK(
@@ -502,15 +511,12 @@ _efficient_attention_backward(
     grad_k = chunk.select(2, 1);
     grad_v = chunk.select(2, 2);
   } else {
-    const bool may_have_fully_masked_rows =
-        custom_mask_type ==
-            static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
-        (cu_seqlens_q.has_value() || max_seqlen_q > max_seqlen_k);
-    grad_q = may_have_fully_masked_rows
-        ? at::zeros(query.sizes(), query.options())
-        : at::empty(query.sizes(), query.options());
+    grad_q = at::empty(query.sizes(), query.options());
     grad_k = at::empty(key.sizes(), key.options());
     grad_v = at::empty(value.sizes(), value.options());
+  }
+  if (may_have_fully_masked_rows) {
+    grad_q.zero_();
   }
 
   at::Tensor grad_k_expanded = grad_k;
