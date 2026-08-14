@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
 import numpy as np
 
@@ -939,6 +940,62 @@ class TestLinalg(TestCase):
             self.assertIsNotNone(A.grad)
             self.assertEqual(A.grad.shape, A.shape)
             self.assertEqual(A.grad, torch.zeros_like(A))
+
+    @skipIfTorchDynamo("dynamo cannot trace the functorch transforms and autograd.functional used here")
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_det_slogdet_solve_second_order_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192540:
+        # the JVPs of det/slogdet/solve reused the saved non-differentiable LU,
+        # so second derivatives taken through a JVP silently dropped the
+        # A-dependence. Checks forward-over-forward against the autograd
+        # Hessian and classic-API reverse-over-forward against jvp-of-grad,
+        # neither of which routes through the fixed path.
+        # Also covers https://github.com/pytorch/pytorch/issues/192521: under
+        # torch.func the det backward must avoid the SVD-adjugate branch, whose
+        # 1/(S_i^2 - S_j^2) terms are silently wrong for clustered singular
+        # values and NaN for an exact tie.
+        gen = torch.Generator(device=device).manual_seed(0)
+        A = torch.randn(3, 3, generator=gen, device=device, dtype=dtype)
+        A = A + 3 * torch.eye(3, device=device, dtype=dtype)
+        V = torch.randn(3, 3, generator=gen, device=device, dtype=dtype)
+        b = torch.randn(3, generator=gen, device=device, dtype=dtype)
+        c = torch.randn(3, generator=gen, device=device, dtype=dtype)
+        fns = (
+            torch.linalg.det,
+            lambda X: torch.linalg.slogdet(X).logabsdet,
+            lambda X: c @ torch.linalg.solve(X, b),
+        )
+        for f in fns:
+            H = torch.func.jacfwd(torch.func.jacfwd(f))(A)
+            Href = torch.autograd.functional.hessian(f, A)
+            self.assertEqual(H, Href, atol=1e-9, rtol=1e-7)
+            Ag = A.clone().requires_grad_()
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(f(fwAD.make_dual(Ag, V)))[1]
+            g = torch.autograd.grad(tangent, Ag)[0]
+            g_ref = torch.func.jvp(torch.func.grad(f), (A,), (V,))[1]
+            self.assertEqual(g, g_ref, atol=1e-9, rtol=1e-7)
+        # Singular inputs raise in the differentiable recompute instead of
+        # silently returning wrong finite numbers.
+        S = torch.diag(torch.tensor([1.0, 0.0], device=device, dtype=dtype))
+        Vs = torch.eye(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "singular"):
+            torch.func.jvp(lambda X: torch.func.jvp(
+                torch.linalg.det, (X,), (Vs,))[1], (S,), (Vs,))
+        # Q has singular values approx (2, 2 - 9e-16, 1), a tight cluster; the
+        # identity is an exact threefold tie.
+        Q = torch.tensor(
+            [[0.36499817017502284, -1.7968303440068301, -0.66579697838921992],
+             [1.7322951423447641, 0.2662708516337266, -0.36118249842996208],
+             [-0.37828499755800576, -0.82543622292798269, 1.0808549916157837]],
+            device=device, dtype=dtype)
+        for M in (Q, torch.eye(3, device=device, dtype=dtype)):
+            H = torch.func.hessian(torch.linalg.det)(M)
+            self.assertFalse(torch.isnan(H).any())
+            Href = torch.autograd.functional.hessian(torch.linalg.det, M)
+            self.assertEqual(H, Href, atol=1e-9, rtol=1e-7)
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack

@@ -699,11 +699,11 @@ derivatives on complex functions.  However, we still need to
 compute $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$.
 There are two ways you could do this:
 
-    - The first way is to just use the definition of Wirtinger derivatives directly and calculate $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$ by
-      using $\frac{\partial s}{\partial x}$ and $\frac{\partial s}{\partial y}$
-      (which you can compute in the normal way).
-    - The second way is to use the change of variables trick and rewrite $f(z)$ as a two variable function $f(z, z^*)$, and compute
-      the conjugate Wirtinger derivatives by treating $z$ and $z^*$ as independent variables. This is often easier; for example, if the function in question is holomorphic, only $z$ will be used (and $\frac{\partial s}{\partial z^*}$ will be zero).
+- The first way is to just use the definition of Wirtinger derivatives directly and calculate $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$ by
+  using $\frac{\partial s}{\partial x}$ and $\frac{\partial s}{\partial y}$
+  (which you can compute in the normal way).
+- The second way is to use the change of variables trick and rewrite $f(z)$ as a two variable function $f(z, z^*)$, and compute
+  the conjugate Wirtinger derivatives by treating $z$ and $z^*$ as independent variables. This is often easier; for example, if the function in question is holomorphic, only $z$ will be used (and $\frac{\partial s}{\partial z^*}$ will be zero).
 
 Let's consider the function $f(z = x + yj) = c * z = c * (x+yj)$ as an example, where $c \in ℝ$.
 

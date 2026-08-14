@@ -1671,7 +1671,7 @@ def _validate_aten_op_for_sample(
 
     input_shapes = tuple(t.shape for _, t in tensors)
     gt_list = ground_truth if isinstance(ground_truth, list) else [ground_truth]
-    output_shapes = tuple(tuple(gt.shape) for gt in gt_list)
+    output_shapes = tuple(gt.shape for gt in gt_list)
     n_outputs = len(gt_list)
     first_gt = gt_list[0]
 
