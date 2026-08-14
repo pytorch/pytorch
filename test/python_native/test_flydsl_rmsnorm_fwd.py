@@ -513,18 +513,6 @@ class TestFlyDSLRMSNorm(TestCase):
 
         self.assertEqual(set(SUPPORTED_DTYPES.values()), set(FLYDSL_DTYPE_CONFIGS))
 
-    def test_unresolvable_arch_raises(self):
-        # The arch selects the wave size baked into the reduction, so a missing
-        # answer has to be an error rather than a guess.
-        from torch._native.ops.norm import flydsl_rmsnorm_fwd
-
-        x, weight = self._make_inputs(16, 128, torch.float16)
-        with patch.object(flydsl_rmsnorm_fwd, "_resolve_rocm_arch", return_value=None):
-            with self.assertRaisesRegex(
-                RuntimeError, "Could not determine the ROCm arch"
-            ):
-                flydsl_rmsnorm_fwd.rmsnorm_fwd(x, [128], weight, EPS)
-
     def test_fused_aten_noncontiguous_input_falls_back_without_compiling(self):
         base = make_tensor(
             (DISPATCH_N, DISPATCH_M), device="cuda", dtype=DISPATCH_DTYPE

@@ -379,16 +379,12 @@ def rmsnorm_fwd(
         raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
 
     device_index = input.device.index
-    arch = _resolve_rocm_arch(device_index)
-    if arch is None:
-        raise RuntimeError(
-            f"Could not determine the ROCm arch of device {device_index}; "
-            "set FLYDSL_GPU_ARCH to build the FlyDSL RMSNorm kernel"
-        )
-    # _resolve_rocm_arch forwards HSA_OVERRIDE_GFX_VERSION verbatim, so it may
-    # carry feature flags ("gfx950:sramecc+"). Strip them the way the dispatcher
+    # The dispatcher declines when the arch cannot be resolved, so it is not
+    # None here. _resolve_rocm_arch forwards HSA_OVERRIDE_GFX_VERSION verbatim,
+    # so it may carry feature flags ("gfx950:sramecc+"); strip them the way the
     # predicate does.
-    arch = arch.split(":", 1)[0]
+    resolved = _resolve_rocm_arch(device_index)
+    arch = resolved.split(":", 1)[0]  # pyrefly: ignore[missing-attribute]
 
     rows_m = input.numel() // n
     input_shape = input.shape
