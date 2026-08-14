@@ -16,13 +16,6 @@ void MPSGuardImpl::destroyEvent(void* event, const DeviceIndex device_index) con
   at::mps::getMPSEventPool()->releaseEvent(mps_event_id);
 }
 
-namespace {
-MPSStream* streamFromC10Stream(const Stream& stream) {
-  auto stream_id = stream.id();
-  return stream_id == 0 ? getDefaultMPSStream() : getStreamFromPool(stream_id);
-}
-} // namespace
-
 void MPSGuardImpl::record(void** event,
                           const Stream& stream,
                           const DeviceIndex device_index,
@@ -43,13 +36,13 @@ void MPSGuardImpl::record(void** event,
     mps_event_id = at::mps::getMPSEventPool()->acquireEvent(enable_timing);
     *event = (__bridge void*)(intptr_t)(mps_event_id);
   }
-  at::mps::getMPSEventPool()->resetEvent(mps_event_id, streamFromC10Stream(stream), enable_timing);
+  at::mps::getMPSEventPool()->resetEvent(mps_event_id, getStreamByID(stream.id()), enable_timing);
   at::mps::getMPSEventPool()->recordEvent(mps_event_id, true);
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
   auto mps_event_id = (__bridge id_t)(intptr_t)(event);
-  at::mps::getMPSEventPool()->waitForEvent(mps_event_id, /*syncEvent=*/true, streamFromC10Stream(stream));
+  at::mps::getMPSEventPool()->waitForEvent(mps_event_id, /*syncEvent=*/true, getStreamByID(stream.id()));
 }
 
 bool MPSGuardImpl::queryEvent(void* event) const {

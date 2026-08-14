@@ -334,6 +334,10 @@ MPSStream* getStreamFromPool(std::optional<int64_t> stream_id_opt) {
   }
 }
 
+MPSStream* getStreamByID(int64_t stream_id) {
+  return (stream_id == 0) ? at::mps::getDefaultMPSStream() : at::mps::getStreamFromPool(stream_id);
+}
+
 void synchronizeAllMPSStreams(SyncType syncType) {
   auto sync = [syncType](MPSStream* stream) {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
