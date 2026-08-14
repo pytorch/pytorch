@@ -1485,7 +1485,6 @@ class _NestedReductionBase:
             self.check_numeric(g, (x, z))
         self.assertTrue(saw_staged_reduction)
 
-    @inductor_config.patch("fx_graph_cache", False)
     def test_looped_standalone_sub_parent_large_group(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
@@ -1952,10 +1951,12 @@ class _NestedReductionBase:
         self._check_rejected(f, (torch.randn(4, 2048, device=GPU_TYPE),))
 
 
+@inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
     force_persistent_outer_reduction = True
 
 
+@inductor_config.patch("force_disable_caches", True)
 class NestedReductionNonPersistentTest(_NestedReductionBase, TestBase):
     force_persistent_outer_reduction = False
 
