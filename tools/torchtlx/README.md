@@ -70,17 +70,18 @@ torch wheel declares as its Triton dependency**.
 
 `.ci/pytorch/binary_populate_env.sh` defaults to upstream, unchanged:
 `triton~=<ver>` for cuda, `triton-rocm~=<ver>` for rocm. With `FBTRITON=1` it
-emits `fbtriton~=<ver>` for both (one FBTriton wheel carries the nvidia and
-amd backends, so they share a name) and reads the shorthash for nightly
-`+git<sha>` versions from `ci_commit_pins/fbtriton.txt` instead of
-`triton.txt`. XPU is unaffected.
+emits `fbtriton~=<ver>` for both -- one FBTriton wheel carries the nvidia and
+amd backends, so they share a name. XPU is unaffected.
 
-Nothing else is gated. This fork does **not** build FBTriton -- FBTriton
-publishes its own wheels to PyPI, so `install_triton.sh` and
-`build_triton_wheel.py` are left exactly as upstream.
-
-Note that `ci_commit_pins/fbtriton.txt` has no auto-bump job; `nightly.yml`
-only tracks the upstream `triton.txt` pin.
+There is **no FBTriton commit pin**, and nothing to keep up to date. Upstream
+dev builds request `<ver>+git<shorthash>` because CI builds that wheel itself
+from `ci_commit_pins/triton.txt`, so the pin and the wheel version agree by
+construction. This fork does not build FBTriton -- FBTriton publishes its own
+wheels, and has never used a `+git` local version (its dev releases are
+`<ver>.devYYYYMMDD`) -- so requesting one would be unsatisfiable. FBTriton
+therefore uses the plain `~=<ver>` form for dev builds too, and
+`install_triton.sh` / `build_triton_wheel.py` / `nightly.yml` are left exactly
+as upstream.
 
 ### Why the provider is not in `requirements.txt` yet
 
