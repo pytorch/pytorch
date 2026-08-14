@@ -17,6 +17,7 @@ from torch.testing._internal.common_subclass import (
     subclass_db,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
     instantiate_parametrized_tests,
     parametrize,
@@ -39,6 +40,8 @@ parametrize_tensor_cls = parametrize("tensor_cls", [
 
 
 class TestSubclass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_tensor(self, tensor_cls):
         return subclass_db[tensor_cls].create_fn(3)
 
