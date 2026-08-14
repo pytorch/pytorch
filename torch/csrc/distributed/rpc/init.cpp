@@ -33,14 +33,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
-  if (!rpc_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(rpc_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =

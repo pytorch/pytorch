@@ -2870,8 +2870,7 @@ static PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
   }
   const char* msg = "volatile was removed (Variable.volatile is always False)";
   auto r = PyErr_WarnEx(PyExc_UserWarning, msg, 1);
-  if (r != 0)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r == 0);
   Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
@@ -2885,8 +2884,7 @@ static int THPVariable_set_volatile(
     return handle_torch_function_setter(self, "volatile", obj);
   }
   auto r = PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
-  if (r != 0)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r == 0);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

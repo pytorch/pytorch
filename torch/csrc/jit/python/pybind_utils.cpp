@@ -114,10 +114,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 
         if (save_symint) {
           auto py_tensor = py::cast(tensor);
-          if (PyObject_SetAttrString(
-                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) < 0) {
-            throw python_error();
-          }
+          TORCH_CHECK_PYTHON(
+              PyObject_SetAttrString(
+                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) >= 0);
         }
 
         return tensor;
