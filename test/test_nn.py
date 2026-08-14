@@ -7882,7 +7882,6 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    @onlyCUDA
     def test_native_batch_norm_backward_rejects_invalid_saved_stats(
         self, device
     ):
