@@ -127,7 +127,7 @@ inline void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
     }), AT_EXPAND(AT_INTEGRAL_TYPES), kUInt16, kUInt32, kBool);
   } else {
-    TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "check_random_bounds handles only integral, floating-point and boolean types");
   }
 }
 
@@ -188,7 +188,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<in
 
 #define CHECK_NORMAL_TENSOR_STD(std) \
   do { \
-    TORCH_CHECK( \
+    TORCH_CHECK_NOT_IMPLEMENTED( \
       !std.is_complex(), \
       "normal expects standard deviation to be non-complex"); \
     if (std.numel() > 0 && !std.is_meta()) { \
@@ -358,7 +358,7 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, std::optional<Ge
   // TODO: instead of variable name 'sigma', use 'gamma' or 'scale'
   // the variance, squared sigma, is undefined for cauchy distribution
   TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", self.dtype());
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isFloatingType(self.scalar_type()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", self.dtype());
   CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   cauchy_kernel<RNG>()(iter, median, sigma, gen);
