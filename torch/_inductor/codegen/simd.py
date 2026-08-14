@@ -3355,13 +3355,6 @@ class SIMDScheduling(BaseScheduling):
             parent_full_source: _IterationSpace = layout.parent_full_iteration_values(
                 group_reduction_vars
             )
-            sub_parent_source = (
-                layout.sub_parent_iteration_values(
-                    sub_parent_family, sub_parent_stage.factor
-                )
-                if sub_parent_family is not None and sub_parent_stage is not None
-                else None
-            )
             self._codegen_remapped_pointwise(
                 kernel,
                 outer_local_reduction_pointwise,
@@ -3384,7 +3377,6 @@ class SIMDScheduling(BaseScheduling):
             )
             if sub_parent_stage is not None:
                 assert sub_parent_family is not None  # noqa: S101
-                assert sub_parent_source is not None  # noqa: S101
                 assert sub_parent_resolver is not None  # noqa: S101
                 internal_names = OrderedSet.union(
                     *(sn.get_buffer_names() for sn in node.get_nodes())
@@ -3395,13 +3387,26 @@ class SIMDScheduling(BaseScheduling):
                     sub_parent_resolver.materialize(
                         name, required=name in internal_names or name in broadcast_names
                     )
-                self._codegen_remapped_pointwise(
-                    kernel,
-                    sub_parent_stage.epilogue_nodes,
-                    sub_parent_family,
-                    sub_parent_source,
-                    load_resolver=sub_parent_resolver,
+                forwarded_store_names = OrderedSet(
+                    sub_parent_stage.internal_dependency_names
                 )
+                for output_lanes, stage_nodes in sub_parent_stage.output_groups:
+                    for output_lane in range(output_lanes):
+                        sub_parent_source = layout.sub_parent_iteration_values(
+                            sub_parent_family,
+                            sub_parent_stage.factor,
+                            output_lanes,
+                            output_lane,
+                        )
+                        self._codegen_remapped_pointwise(
+                            kernel,
+                            stage_nodes,
+                            sub_parent_family,
+                            sub_parent_source,
+                            load_resolver=sub_parent_resolver,
+                            forwarded_store_names=forwarded_store_names,
+                            masked_forward_names=forwarded_store_names,
+                        )
 
             kernel.codegen_body()
 
