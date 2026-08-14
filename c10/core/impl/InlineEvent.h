@@ -10,17 +10,17 @@ namespace c10::impl {
 /*
  * Note [Event Semantics]
  *
- * event_ is lazily initialized in one of three ways:
+ * `event_` is lazily initialized in one of three ways:
  *   1. on the first record(),
  *   2. via reconstructFromIPCHandle() (importer), or
  *   3. via ipcHandle() (exporter).
  *
  * block(), query(), and synchronize() therefore guard on event_ != nullptr
- * rather than on was_marked_for_recording_, which only tracks whether
+ * rather than on `was_marked_for_recording_`, which only tracks whether
  * record() was called in the current process.
  *
- * The IPC importer calls reconstructFromIPCHandle() to initialize event_
- * and resets flag_ to PYTORCH_DEFAULT to prevent re-export via ipcHandle().
+ * The IPC importer calls reconstructFromIPCHandle() to initialize `event_`
+ * and resets `flag_` to PYTORCH_DEFAULT to prevent re-export via ipcHandle().
  */
 
 template <typename T>
