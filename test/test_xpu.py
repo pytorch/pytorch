@@ -3026,30 +3026,6 @@ if __name__ == "__main__":
         self.assertTrue(torch.all(x == 6.0))
 
 
-def _event_handle_importer_consumer(handle, p2c, c2p):
-    e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
-    c2p.put(0)  # notify parent child is ready
-    p2c.get()  # wait for record in parent
-    e1.synchronize()
-    c2p.put(1)  # notify synchronization is done in child
-
-
-def _event_handle_exporter_consumer(handle, p2c, c2p):
-    stream = torch.xpu.Stream()
-    with stream:
-        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
-        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
-        e1.record()
-        c2p.put(0)
-
-
-def _event_multiprocess_child(event, p2c, c2p):
-    c2p.put(0)  # notify parent child is ready
-    p2c.get()  # wait for record in parent
-    event.synchronize()
-    c2p.put(1)  # notify parent synchronization is done
-
-
 @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
 @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
 @unittest.skipIf(
@@ -3061,6 +3037,30 @@ def _event_multiprocess_child(event, p2c, c2p):
     "XPU IPC events require SYCL compiler 2026.2 or later",
 )
 class TestXPUMultiprocessing(TestCase):
+    @staticmethod
+    def _event_handle_importer_consumer(handle, p2c, c2p):
+        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        e1.synchronize()
+        c2p.put(1)  # notify synchronization is done in child
+
+    @staticmethod
+    def _event_handle_exporter_consumer(handle, p2c, c2p):
+        stream = torch.xpu.Stream()
+        with stream:
+            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+            e1.record()
+            c2p.put(0)
+
+    @staticmethod
+    def _event_multiprocess_child(event, p2c, c2p):
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        event.synchronize()
+        c2p.put(1)  # notify parent synchronization is done
+
     def test_event_handle_importer(self):
         e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
@@ -3069,7 +3069,7 @@ class TestXPUMultiprocessing(TestCase):
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
-            target=_event_handle_importer_consumer,
+            target=TestXPUMultiprocessing._event_handle_importer_consumer,
             args=(e0.ipc_handle(), p2c, c2p),
         )
         p.start()
@@ -3091,7 +3091,7 @@ class TestXPUMultiprocessing(TestCase):
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
-            target=_event_handle_exporter_consumer,
+            target=TestXPUMultiprocessing._event_handle_exporter_consumer,
             args=(e0.ipc_handle(), p2c, c2p),
         )
         p.start()
@@ -3114,7 +3114,7 @@ class TestXPUMultiprocessing(TestCase):
             p2c = ctx.SimpleQueue()
             c2p = ctx.SimpleQueue()
             p = ctx.Process(
-                target=_event_multiprocess_child,
+                target=TestXPUMultiprocessing._event_multiprocess_child,
                 args=(event, p2c, c2p),
             )
             p.start()
