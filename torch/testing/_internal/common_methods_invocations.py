@@ -5540,6 +5540,42 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 
 
+def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
+    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_RANGE
+
+    def make_arg(shape):
+        values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
+        return values.reshape(shape).to(dtype)
+
+    def radix_min_n(k):
+        n_range = _radix_n_range(k)
+        if n_range is None:
+            raise AssertionError(f"missing radix gate for K={k}")
+        return n_range[0]
+
+    device_index = torch.device(device).index
+    if device_index is None:
+        device_index = torch.cuda.current_device()
+    rows = max(256, torch.cuda.get_device_properties(device_index).multi_processor_count)
+
+    register_cases = ((2, _REGISTER_N_RANGE[0]), (16, _REGISTER_N_RANGE[1]))
+    # Cover radix block sizes and non-power-of-two sorts without duplicating
+    # the exhaustive per-K native test matrix.
+    radix_cases = tuple(
+        (K, radix_min_n(K)) for K in (64, 192, 320, 448, 768, 832, 1024)
+    )
+    for K, N in (*register_cases, *radix_cases):
+        yield SampleInput(make_arg((rows, N)).contiguous(), args=(K,))
+
+    nd_rows = (rows + 3) // 4
+    yield SampleInput(
+        make_arg((4, nd_rows, _REGISTER_N_RANGE[0])).contiguous(), args=(8, -1)
+    )
+    yield SampleInput(
+        make_arg((4, nd_rows, radix_min_n(320))).contiguous(), args=(320, -1)
+    )
+
+
 def _topk_deterministic(*args, **kwargs):
     prior = torch.are_deterministic_algorithms_enabled()
     try:
@@ -23087,6 +23123,73 @@ if "flydsl" in dsl_ops_by_dsl:
             ),
         )
     )
+
+    from torch._native.ops.topk.flydsl_impl import (
+        _is_supported_arch as _is_flydsl_topk_supported_arch,
+    )
+
+    _flydsl_topk_skips = (
+        DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
+        DecorateInfo(unittest.skip("topk override requires contiguous input"),
+                     "TestCommon", "test_noncontiguous_samples"),
+        DecorateInfo(unittest.skip("Sample generator allocates on the primary CUDA device"),
+                     "TestCommon", "test_multiple_devices"),
+        DecorateInfo(unittest.skip("torch.topk supports more dtypes than the DSL override"),
+                     "TestCommon", "test_dtypes"),
+        DecorateInfo(unittest.skip("topk override incompatible with FakeTensor"),
+                     "TestFakeTensor"),
+        DecorateInfo(unittest.skip("topk override not introspectable for tag inference"),
+                     "TestTags"),
+        DecorateInfo(unittest.skip("topk override not introspectable for conjugate/negate views"),
+                     "TestMathBits"),
+        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
+                     "TestCommon", "test_out"),
+        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
+                     "TestCommon", "test_out_warning"),
+    )
+    _flydsl_topk_kwargs = dict(
+        dtypes=_dispatch_dtypes((torch.float32,)),
+        dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
+        sample_inputs_func=sample_inputs_flydsl_topk,
+        ref=reference_topk,
+        supports_autograd=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        supports_out=False,
+        supports_cow_input_no_materialize_forward=False,
+        decorators=[
+            DecorateInfo(onlyCUDA),
+            DecorateInfo(
+                skipCUDAIf(
+                    not (
+                        torch.cuda.is_available()
+                        and _is_flydsl_topk_supported_arch(
+                            torch.cuda.current_device()
+                        )
+                    ),
+                    "flydsl topk override requires gfx950",
+                )
+            ),
+        ],
+        skips=_flydsl_topk_skips,
+    )
+    dsl_ops_by_dsl["flydsl"].extend([
+        OpInfo(
+            "topk", op=torch.topk,
+            variant_test_name="flydsl_optimized",
+            skips=_flydsl_topk_skips + (
+                DecorateInfo(unittest.skip("nondeterministic on tied indices by design"),
+                             "TestCommon", "test_variant_consistency_eager"),
+            ),
+            **{k: v for k, v in _flydsl_topk_kwargs.items() if k != "skips"},
+        ),
+        OpInfo(
+            "topk", op=_topk_deterministic,
+            variant_test_name="flydsl_optimized_deterministic",
+            method_variant=_topk_method_deterministic,
+            **_flydsl_topk_kwargs,
+        ),
+    ])
 
 op_db += opinfo.definitions.op_db
 
