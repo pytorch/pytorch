@@ -1817,21 +1817,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
-    def test_weight_norm_empty_tensor(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/191848
-        # weight_norm_cuda was launching kernels on empty tensors, causing an
-        # out-of-bounds memory read. Verify that it handles empty tensors safely.
-        for device in ["cpu"] + (["cuda"] if torch.cuda.is_available() else []):
-            v = torch.empty_strided(
-                (5, 4, 16, 0), (64, 16, 1, 1), dtype=torch.float32, device=device
-            )
-            g = torch.empty_strided(
-                (0, 1, 16, 3), (48, 48, 3, 1), dtype=torch.float32, device=device
-            )
-            w, norms = torch._weight_norm(v, g, 0)
-            self.assertEqual(w.shape, v.shape)
-            self.assertEqual(norms.shape, g.shape)
-
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
@@ -7383,6 +7368,38 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+
+    def test_weight_norm_empty_tensor(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/191848
+        def run_test(v_shape, g_shape, dim):
+            v = torch.empty(v_shape, dtype=torch.float32, device=device, requires_grad=True)
+            g = torch.empty(g_shape, dtype=torch.float32, device=device, requires_grad=True)
+            
+            # Forward pass
+            w, norms = torch._weight_norm(v, g, dim)
+            self.assertEqual(w.shape, v.shape)
+            self.assertEqual(norms.shape, g.shape)
+            
+            # Assert values are zero-filled
+            if norms.numel() > 0:
+                self.assertEqual(norms, torch.zeros_like(norms))
+            
+            # Backward pass
+            grad_w = torch.ones_like(w)
+            w.backward(grad_w)
+            
+            # Assert grad is zero-filled
+            if g.grad is not None and g.grad.numel() > 0:
+                self.assertEqual(g.grad, torch.zeros_like(g.grad))
+
+        # 1. Legitimately-shaped empty case (dim=0)
+        run_test((5, 0), (5, 1), 0)
+        
+        # 2. Legitimately-shaped empty case (dim=-1)
+        run_test((0, 5), (1, 5), 1)
+
+        # 3. Crash reproducer (both 0-element)
+        run_test((5, 4, 16, 0), (0, 1, 16, 3), 0)
 
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)

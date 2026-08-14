@@ -354,6 +354,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   auto norms = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(AccType));
 
   if (v.numel() == 0) {
+    norms.zero_();
     return std::tuple<Tensor, Tensor>{w, norms};
   }
 
@@ -447,6 +448,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
   auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   if (saved_v.numel() == 0) {
+    grad_g.zero_();
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
 
