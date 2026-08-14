@@ -568,7 +568,6 @@
   patterns:
   - '*'
   approved_by:
-  - 8Keep
   - aditvenk
   - AmesingFlank
   - amirafzali
@@ -587,12 +586,12 @@
   - digantdesai
   - dolpm
   - drisspg
-  - echen4096
   - egienvalue
   - fegin
   - frgossen
   - fxdawnn
   - georgehong
+  - haoyuz
   - htyu
   - huydhn
   - IvanKobzarev
@@ -602,7 +601,6 @@
   - jathu
   - jbschlosser
   - jeanschmidt
-  - jijunyan
   - kapilsh
   - karthickai
   - kqfu
@@ -618,23 +616,17 @@
   - sanketpurandare
   - scotts
   - seemethere
-  - sevenEng
-  - shawnxu26
   - SherlockNoMad
-  - shunting314
   - slayton58
   - soulitzer
-  - tianyu-l
-  - tugsbayasgalan
   - tushar00jain
+  - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
   - xmfan
   - ydwu4
   - yushangdi
-  - ZainRizvi
-  - ZixinYang
   - zpcore
   mandatory_checks_name:
   - EasyCLA
