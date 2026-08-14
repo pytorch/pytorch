@@ -9,6 +9,7 @@ import torch._dynamo
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
+    empty_line_normalizer,
     normalize_gm,
 )
 from torch.testing._internal.common_utils import (
@@ -1419,27 +1420,22 @@ backward() with non-leaf tensor
         self.assertEqual(compiled, eager)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            empty_line_normalizer(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False))
+            ),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2, 4]", L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]"):
         l_x_ = L_x_
         l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_mod_parameters_bias_ = L_mod_parameters_bias_
-
         y: "f32[2, 4]" = l_x_.detach();  l_x_ = None
-
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
-
         requires_grad_ = y.requires_grad_();  requires_grad_ = None
-
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
-
         linear: "f32[2, 4]" = torch._C._nn.linear(y, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
         sum_1: "f32[]" = linear.sum();  linear = None
-
         grad = torch.autograd.grad(sum_1, y);  sum_1 = y = None
-
         getitem: "f32[2, 4]" = grad[0];  grad = None
         detach_1: "f32[2, 4]" = getitem.detach();  getitem = None
         return (detach_1,)
