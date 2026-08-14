@@ -645,7 +645,7 @@ class TestPGTransportEdgeCases(TestCase):
     @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
     def test_send_checkpoint_with_cpu_tensors(self, device):
         """Test send_checkpoint with CPU tensors when device is accelerator."""
-        device = torch.device(f"{device_type}:0")
+        device = torch.device(device)
 
         # Create a state dict with CPU tensors
         state_dict = {
