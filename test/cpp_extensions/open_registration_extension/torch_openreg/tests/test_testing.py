@@ -311,7 +311,7 @@ class TestCapabilityGating(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        expected_runs = 3
+        expected_runs = 4
         if cls.executed_count != expected_runs:
             raise AssertionError(
                 f"Capability gating failed! "
@@ -325,6 +325,12 @@ class TestCapabilityGating(TestCase):
                 f"but {cls.setup_count} setups executed."
             )
         super().tearDownClass()
+
+    def test_compile_capability_defaults_to_unsupported(self, device):
+        capabilities = type(self).get_capabilities()
+        self.assertIn(Capability.compile.inductor, capabilities)
+        self.assertFalse(capabilities[Capability.compile.inductor])
+        type(self).executed_count += 1
 
     @requires_capabilities(Capability.lib.triton)
     def test_capability_supported(self, device):

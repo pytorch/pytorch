@@ -354,6 +354,11 @@ class Capability:
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
 
+    class compile:
+        """Device compiler integration capabilities."""
+
+        inductor = "compile.inductor"
+
     class distributed:
         """Distributed runtime capabilities."""
 
@@ -411,6 +416,13 @@ def _device_module_available(device_type: str) -> bool:
         return torch.get_device_module(device_type).is_available()
     except (AttributeError, RuntimeError):
         return False
+
+
+def _inductor_available_for_device(device_type: str) -> bool:
+    return (
+        _device_module_available(device_type)
+        and importlib.util.find_spec("torch._inductor") is not None
+    )
 
 
 class DeviceTypeTestBase(TestCase):
@@ -500,12 +512,15 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def _capabilities(cls) -> dict[type, dict[str, Callable[[], bool]]]:
         return {
+            Capability.compile: {
+                Capability.compile.inductor: lambda: False,
+            },
             Capability.lib: {
                 Capability.lib.safetensors: lambda: importlib.util.find_spec(
                     "safetensors"
                 )
                 is not None,
-            }
+            },
         }
 
     def setUp(self) -> None:
@@ -886,6 +901,11 @@ class CPUTestBase(DeviceTypeTestBase):
                     Capability.attention.flash_attention: lambda: False,
                     Capability.attention.mem_efficient_attention: lambda: False,
                 },
+                Capability.compile: {
+                    Capability.compile.inductor: lambda: _inductor_available_for_device(
+                        cls.device_type
+                    ),
+                },
                 Capability.distributed: {
                     Capability.distributed.backend: lambda: _distributed_backend_available(
                         cls.device_type
@@ -941,6 +961,11 @@ class CUDATestBase(DeviceTypeTestBase):
                 Capability.attention: {
                     Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
                     Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                },
+                Capability.compile: {
+                    Capability.compile.inductor: lambda: _inductor_available_for_device(
+                        cls.device_type
+                    ),
                 },
                 Capability.distributed: {
                     Capability.distributed.backend: lambda: _distributed_backend_available(
@@ -1068,6 +1093,11 @@ class XPUTestBase(DeviceTypeTestBase):
                 Capability.attention: {
                     Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
                     Capability.attention.mem_efficient_attention: lambda: True,
+                },
+                Capability.compile: {
+                    Capability.compile.inductor: lambda: _inductor_available_for_device(
+                        cls.device_type
+                    ),
                 },
                 Capability.distributed: {
                     Capability.distributed.backend: lambda: _distributed_backend_available(
