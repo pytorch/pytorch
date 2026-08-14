@@ -4488,7 +4488,7 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable):
     Uses a ConstantVariable as _base_vt for the underlying constant value.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         from .constant import ConstantVariable
 
         super().__init__(value, **kwargs)

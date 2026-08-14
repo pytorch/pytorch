@@ -157,7 +157,7 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
         return GemmEpilogueCuteDSLOpOverrides._apply_binary_op(
             x,
             min,
-            "cutlass_math.max({a}, {b}, propagate_nan=True)",
+            "cutlass.max({a}, {b})",
             Max,
         )
 
@@ -166,7 +166,7 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
         return GemmEpilogueCuteDSLOpOverrides._apply_binary_op(
             x,
             max,
-            "cutlass_math.min({a}, {b}, propagate_nan=True)",
+            "cutlass.min({a}, {b})",
             Min,
         )
 
@@ -1132,7 +1132,6 @@ class FlexGemmEpilogueEmitter:
             "import cutlass.cute as cute\n"
             "import operator\n"
             "from cutlass._mlir.dialects import math as mlir_math\n"
-            "from cutlass._mlir_helpers import math as cutlass_math\n"
             "from torch._inductor.codegen.cutedsl._inline_asm import (\n"
             "    inline_asm_elementwise_intrinsic,\n"
             ")\n\n"
