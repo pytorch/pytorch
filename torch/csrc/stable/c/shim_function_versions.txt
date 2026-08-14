@@ -5,6 +5,8 @@
 # If a function is not in this file, it was available before 2.10.0.
 # DO NOT EDIT MANUALLY.
 
+AOTIMetalShaderLibraryHandle: TORCH_VERSION_2_10_0
+AOTIMetalShaderLibraryOpaque: TORCH_VERSION_2_10_0
 ParallelFunc: TORCH_VERSION_2_10_0
 StableListHandle: TORCH_VERSION_2_10_0
 StableListOpaque: TORCH_VERSION_2_10_0
@@ -13,6 +15,17 @@ StringOpaque: TORCH_VERSION_2_10_0
 aoti_torch_aten_full: TORCH_VERSION_2_10_0
 aoti_torch_aten_subtract_Tensor: TORCH_VERSION_2_10_0
 aoti_torch_cuda__scaled_grouped_mm: TORCH_VERSION_2_10_0
+aoti_torch_mps_command_block_callback_t: TORCH_VERSION_2_10_0
+aoti_torch_mps_create_shader_library: TORCH_VERSION_2_10_0
+aoti_torch_mps_delete_shader_library: TORCH_VERSION_2_10_0
+aoti_torch_mps_dispatch_array: TORCH_VERSION_2_10_0
+aoti_torch_mps_dispatch_array_with_group_size: TORCH_VERSION_2_10_0
+aoti_torch_mps_dispatch_single: TORCH_VERSION_2_10_0
+aoti_torch_mps_dispatch_single_with_group_size: TORCH_VERSION_2_10_0
+aoti_torch_mps_get_kernel_function: TORCH_VERSION_2_10_0
+aoti_torch_mps_run_command_block: TORCH_VERSION_2_10_0
+aoti_torch_mps_shared_callback: TORCH_VERSION_2_10_0
+aoti_torch_mps_start_encoding: TORCH_VERSION_2_10_0
 torch_c10_cuda_check_msg: TORCH_VERSION_2_10_0
 torch_c10_cuda_free_error_msg: TORCH_VERSION_2_10_0
 torch_call_dispatcher: TORCH_VERSION_2_10_0
@@ -120,3 +133,6 @@ torch_new_generator_handle: TORCH_VERSION_2_13_0
 torch_new_stable_ivalue: TORCH_VERSION_2_13_0
 torch_stream_native_handle: TORCH_VERSION_2_13_0
 torch_has_storage: TORCH_VERSION_2_14_0
+torch_mps_set_arg_bytes: TORCH_VERSION_2_14_0
+torch_tensor_from_pyobject: TORCH_VERSION_2_14_0
+torch_tensor_to_pyobject: TORCH_VERSION_2_14_0
