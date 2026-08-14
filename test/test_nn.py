@@ -8109,6 +8109,164 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    @onlyCUDA
+    def test_layer_norm_gamma_beta_backward_dispatch_bands(self, device):
+        # Only fp32 was covered at M >= 128 before this PR
+        # (test_layer_norm_backwards_eps), and rms_norm had no gamma/beta
+        # backward coverage above M=2 anywhere in the repo. Sweep both the
+        # restored ROCm tile-shape band (M < kGammaBetaTwoPassMinM) and the
+        # two-pass band (M >= kGammaBetaTwoPassMinM) across fp16/bf16/fp32
+        # for both layer_norm and rms_norm.
+        # fp32 uses test_layer_norm_backwards_eps's default tolerances
+        # (atol=1e-4, rtol=1e-5) in the tiled band, but M >= 2048 routes
+        # through a block-parallel reduction whose summation order differs
+        # from the CPU reference's. That noise does not shrink with the
+        # reference magnitude, so near-zero entries need a larger atol;
+        # match the 1e-3 test_layer_norm_gamma_beta_backward_dispatch_boundaries
+        # uses for the same band.
+        tolerances = {
+            torch.float16: (1e-2, 1e-3),
+            torch.bfloat16: (1e-2, 1.6e-2),
+            torch.float32: (1e-4, 1e-5),
+        }
+        eps = 1e-5
+        for op in ("layer_norm", "rms_norm"):
+            for dtype in (torch.float16, torch.bfloat16, torch.float32):
+                for N in (768, 1024):
+                    for M in (128, 192, 1024, 2047, 2048, 4096):
+                        atol, rtol = tolerances[dtype]
+                        if dtype is torch.float32 and M >= 2048:
+                            atol, rtol = 1e-3, 1e-3
+                        msg = f"op={op} dtype={dtype} M={M} N={N}"
+                        x = torch.randn(M, N, dtype=dtype, device=device)
+                        weight = torch.randn(N, dtype=dtype, device=device)
+                        grad_out = torch.randn(M, N, dtype=dtype, device=device)
+                        x_cpu = x.float().cpu()
+                        weight_cpu = weight.float().cpu()
+                        grad_out_cpu = grad_out.float().cpu()
+
+                        if op == "layer_norm":
+                            bias = torch.randn(N, dtype=dtype, device=device)
+                            bias_cpu = bias.float().cpu()
+                            _, mean, rstd = torch.ops.aten.native_layer_norm.default(
+                                x, [N], weight, bias, eps)
+                            _, dgamma, dbeta = torch.ops.aten.native_layer_norm_backward.default(
+                                grad_out, x, [N], mean, rstd, weight, bias, [False, True, True])
+                            _, mean_cpu, rstd_cpu = torch.ops.aten.native_layer_norm.default(
+                                x_cpu, [N], weight_cpu, bias_cpu, eps)
+                            _, dgamma_ref, dbeta_ref = torch.ops.aten.native_layer_norm_backward.default(
+                                grad_out_cpu, x_cpu, [N], mean_cpu, rstd_cpu, weight_cpu, bias_cpu,
+                                [False, True, True])
+                            self.assertEqual(dgamma.float().cpu(), dgamma_ref, msg, atol=atol, rtol=rtol)
+                            self.assertEqual(dbeta.float().cpu(), dbeta_ref, msg, atol=atol, rtol=rtol)
+                        else:
+                            _, rstd = torch.ops.aten._fused_rms_norm.default(x, [N], weight, eps)
+                            _, dgamma = torch.ops.aten._fused_rms_norm_backward.default(
+                                grad_out, x, [N], rstd, weight, [False, True])
+                            # aten::_fused_rms_norm_backward has no CPU kernel, so build the
+                            # reference through the decomposed rms_norm autograd path instead.
+                            x_cpu = x_cpu.requires_grad_(True)
+                            weight_cpu = weight_cpu.requires_grad_(True)
+                            out_cpu = torch.nn.functional.rms_norm(x_cpu, [N], weight_cpu, eps)
+                            out_cpu.backward(grad_out_cpu)
+                            self.assertEqual(dgamma.float().cpu(), weight_cpu.grad, msg, atol=atol, rtol=rtol)
+
+    @onlyCUDA
+    def test_layer_norm_gamma_beta_backward_dispatch_boundaries(self, device):
+        # Pins the M=128 (simple-kernel cutoff), M=2048 (kGammaBetaTwoPassMinM),
+        # and M=65536 (huge-M switch) dispatch boundaries; previously only the
+        # M=65536-ish boundary had any coverage, via a single (131072, 32)
+        # shape in test_layer_norm_backwards_eps.
+        dtype = torch.float32
+        N = 64
+        eps = 1e-5
+        for M in (127, 128, 2047, 2048, 65535, 65536, 65537):
+            x = torch.randn(M, N, dtype=dtype, device=device)
+            weight = torch.randn(N, dtype=dtype, device=device)
+            bias = torch.randn(N, dtype=dtype, device=device)
+            grad_out = torch.randn(M, N, dtype=dtype, device=device)
+
+            _, mean, rstd = torch.ops.aten.native_layer_norm.default(x, [N], weight, bias, eps)
+            _, dgamma, dbeta = torch.ops.aten.native_layer_norm_backward.default(
+                grad_out, x, [N], mean, rstd, weight, bias, [False, True, True])
+
+            x_cpu, weight_cpu, bias_cpu, grad_out_cpu = (t.cpu() for t in (x, weight, bias, grad_out))
+            _, mean_cpu, rstd_cpu = torch.ops.aten.native_layer_norm.default(
+                x_cpu, [N], weight_cpu, bias_cpu, eps)
+            _, dgamma_ref, dbeta_ref = torch.ops.aten.native_layer_norm_backward.default(
+                grad_out_cpu, x_cpu, [N], mean_cpu, rstd_cpu, weight_cpu, bias_cpu, [False, True, True])
+
+            # The two-pass path (M >= kGammaBetaTwoPassMinM == 2048) reduces
+            # over all M rows in a different order than the CPU reference,
+            # so fp32 accumulation noise grows with M; its worst case is
+            # M=65535, just below the huge-M switch. Bump the tolerance for
+            # the whole two-pass/huge-M range rather than only M > 64*1024.
+            atol = 1e-3 if M >= 2048 else 1e-4
+            rtol = 1e-3 if M >= 2048 else 1e-4
+            msg = f"M={M}"
+            self.assertEqual(dgamma.cpu(), dgamma_ref, msg, atol=atol, rtol=rtol)
+            self.assertEqual(dbeta.cpu(), dbeta_ref, msg, atol=atol, rtol=rtol)
+
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    def test_layer_norm_gamma_beta_backward_two_pass_at_huge_M(self, device):
+        # ShouldUseHugeMGammaBetaBackwardKernel gates the huge-M tiled path on
+        # N / warp_size < sm_count / 2; choose N so that predicate is false
+        # and LaunchTwoPassGammaBetaBackwardCUDAKernel actually runs at huge
+        # M, a combination with no in-tree coverage before this PR. N is
+        # derived from device properties since the threshold is arch-dependent.
+        props = torch.cuda.get_device_properties(device)
+        warp_size = getattr(props, "warp_size", 32)
+        N = warp_size * (props.multi_processor_count // 2 + 1)
+        M = 65537
+        dtype = torch.float16
+        eps = 1e-5
+
+        # All M rows identical (so mean/rstd are shared across rows) and dY
+        # constant reduces dgamma/dbeta to a closed form, so correctness can
+        # be checked without a second huge CPU reference tensor at this size.
+        x_row = torch.randn(N, dtype=torch.float32)
+        weight = torch.randn(N, dtype=dtype, device=device)
+        bias = torch.randn(N, dtype=dtype, device=device)
+        x = x_row.to(dtype=dtype, device=device).unsqueeze(0).expand(M, N).contiguous()
+        grad_out = torch.full((M, N), 1.0 / M, dtype=dtype, device=device)
+
+        _, mean, rstd = torch.ops.aten.native_layer_norm.default(x, [N], weight, bias, eps)
+        _, dgamma, dbeta = torch.ops.aten.native_layer_norm_backward.default(
+            grad_out, x, [N], mean, rstd, weight, bias, [False, True, True])
+
+        mean_f = x_row.mean()
+        rstd_f = torch.rsqrt(x_row.var(unbiased=False) + eps)
+        x_hat = (x_row - mean_f) * rstd_f
+        expected_dbeta = torch.ones(N)
+
+        self.assertEqual(dgamma.float().cpu(), x_hat, atol=5e-2, rtol=5e-2)
+        self.assertEqual(dbeta.float().cpu(), expected_dbeta, atol=5e-2, rtol=5e-2)
+
+    @onlyCUDA
+    def test_layer_norm_backward_undefined_gamma(self, device):
+        # Regression test for the crash this PR fixes: gamma.options() used
+        # to throw when gamma (weight) is undefined. F.layer_norm(..., weight=
+        # None, bias=b) with bias.requires_grad=True reaches
+        # LayerNormBackwardKernelImplInternal with an undefined gamma and a
+        # defined dbeta; nn.LayerNorm cannot produce this combination
+        # (elementwise_affine=False also drops bias), so it needs an explicit
+        # F.layer_norm call.
+        eps = 1e-5
+        M, N = 4096, 768
+        x = torch.randn(M, N, dtype=torch.float32, device=device)
+        bias = torch.randn(N, dtype=torch.float32, device=device, requires_grad=True)
+        grad_out = torch.randn(M, N, dtype=torch.float32, device=device)
+
+        out = torch.nn.functional.layer_norm(x, [N], None, bias, eps)
+        out.backward(grad_out)
+
+        bias_cpu = bias.detach().cpu().requires_grad_(True)
+        out_cpu = torch.nn.functional.layer_norm(x.cpu(), [N], None, bias_cpu, eps)
+        out_cpu.backward(grad_out.cpu())
+
+        self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-4, rtol=1e-4)
+
     @onlyCPU
     def test_glu_bfloat16(self, device):
         def test_dtype(fn, input, dtype):
