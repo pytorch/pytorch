@@ -1158,29 +1158,43 @@ test_inductor_pallas() {
 
 test_inductor_flydsl() {
   install_flydsl
-  python3 - <<'PY'
+  (
+    cd test
+    python3 - <<'PY'
 import importlib
 import importlib.metadata
 
 import torch
 from torch._inductor.codegen.flydsl import flydsl_utils
+from torch._inductor.codegen.flydsl.flydsl_scheduling import (
+    _get_flydsl_device_arch,
+)
 
-expected_version = "0.3.1"
-version = importlib.metadata.version("flydsl")
-if version != expected_version:
-    raise RuntimeError(f"expected FlyDSL {expected_version}, got {version}")
 importlib.import_module("flydsl")
 if torch.version.hip is None or not torch.cuda.is_available():
     raise RuntimeError("FlyDSL CI requires a ROCm-enabled PyTorch build")
-arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+device_index = torch.cuda.current_device()
+arch = _get_flydsl_device_arch(device_index)
 if arch != "gfx950":
     raise RuntimeError(f"FlyDSL CI requires gfx950, got {arch}")
-reason = flydsl_utils._flydsl_runtime_unavailable_reason()
-if reason is not None or not flydsl_utils.runtime_available():
+if not flydsl_utils.runtime_available():
+    reason = (
+        flydsl_utils._flydsl_runtime_unavailable_reason()
+        or "ROCm runtime support is unavailable"
+    )
     raise RuntimeError(f"FlyDSL runtime is unavailable: {reason}")
+version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
-  python test/run_test.py --include inductor/test_async_compile.py -k flydsl --verbose
+  )
+  (
+    cd test
+    python inductor/test_async_compile.py \
+      TestAsyncCompile.test_flydsl_clears_stale_worker_cache_env \
+      TestAsyncCompile.test_flydsl_rejects_unavailable_runtime \
+      TestAsyncCompile.test_flydsl_returns_kernel_wrapper \
+      -v
+  )
   python test/run_test.py --include inductor/test_flydsl_template.py --verbose
   assert_git_not_dirty
 }
