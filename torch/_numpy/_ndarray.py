@@ -4,7 +4,7 @@ import builtins
 import math
 import operator
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import ParamSpec, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -19,7 +19,20 @@ from ._normalizations import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
-    from typing import ClassVar
+    from typing import ClassVar, Protocol, TypeAlias
+    from typing_extensions import CapsuleType
+
+    from ._normalizations import Scalar
+
+    _ScalarOrNestedList: TypeAlias = Scalar | list["_ScalarOrNestedList"]
+
+    class _SupportsDLPack(Protocol):
+        def __dlpack__(self, *, stream: int | None = None) -> CapsuleType: ...
+        def __dlpack_device__(self) -> tuple[int, int]: ...
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 # NB: `_funcs` and `_ufuncs` populate their module namespaces dynamically (via
@@ -94,12 +107,10 @@ class Flags:
             raise KeyError(f"No flag key '{key}'")
 
 
-def create_method(
-    fn: Callable[..., object], name: str | None = None
-) -> Callable[..., object]:
+def create_method(fn: Callable[_P, _R], name: str | None = None) -> Callable[_P, _R]:
     name = name or fn.__name__
 
-    def f(*args: object, **kwargs: object) -> object:
+    def f(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
 
     f.__name__ = name
@@ -239,7 +250,11 @@ def _get_bool_depth(s: object) -> tuple[bool, int]:
 
 def _numpy_empty_ellipsis_patch(
     index: object, tensor_ndim: int
-) -> tuple[object, Callable[[ndarray], ndarray], Callable[[object], object]]:
+) -> tuple[
+    tuple[object, ...],
+    Callable[[ndarray], ndarray],
+    Callable[[object], object],
+]:
     """
     Patch for NumPy-compatible ellipsis behavior when ellipsis doesn't match any dimensions.
 
@@ -532,7 +547,7 @@ class ndarray:
         # error out on D > 0 arrays
         self.tensor.fill_(value)
 
-    def tolist(self) -> list[object]:
+    def tolist(self) -> _ScalarOrNestedList:
         return self.tensor.tolist()
 
     def __iter__(self) -> Iterator[ndarray]:
@@ -614,7 +629,7 @@ class ndarray:
         # pyrefly: ignore[missing-attribute]
         _funcs.copyto(self, _funcs.sort(self, axis, kind, order))
 
-    def item(self, *args: int) -> object:
+    def item(self, *args: int) -> Scalar:
         # Mimic NumPy's implementation with three special cases (no arguments,
         # a flat index and a multi-index):
         # https://github.com/numpy/numpy/blob/main/numpy/_core/src/multiarray/methods.c#L702
@@ -622,9 +637,9 @@ class ndarray:
             return self.tensor.item()
         elif len(args) == 1:
             # int argument
-            return self.ravel()[args[0]]
+            return self.ravel()[args[0]].tensor.item()
         else:
-            return self.__getitem__(args)
+            return self.__getitem__(args).tensor.item()
 
     def __getitem__(self, index: object) -> ndarray:
         tensor = self.tensor
@@ -686,7 +701,7 @@ class ndarray:
     take = _funcs.take  # pyrefly: ignore[missing-attribute]
     put = _funcs.put  # pyrefly: ignore[missing-attribute]
 
-    def __dlpack__(self, *, stream: int | None = None) -> object:
+    def __dlpack__(self, *, stream: int | None = None) -> CapsuleType:
         return self.tensor.__dlpack__(stream=stream)
 
     def __dlpack_device__(self) -> tuple[int, int]:
@@ -774,7 +789,7 @@ def ascontiguousarray(
     return arr
 
 
-def from_dlpack(x: object, /) -> ndarray:
+def from_dlpack(x: CapsuleType | _SupportsDLPack, /) -> ndarray:
     t = torch.from_dlpack(x)
     return ndarray(t)
 
