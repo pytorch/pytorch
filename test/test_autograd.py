@@ -6210,7 +6210,7 @@ Done""",
         # real and imag are only implemented for complex tensors.
         y = torch.randn(10, 10, dtype=torch.cfloat)
         imag_key = "imag"
-        self.assertRaises(RuntimeError, lambda: hasattr(x, imag_key))
+        self.assertRaises(TypeError, lambda: hasattr(x, imag_key))
         self.assertTrue(hasattr(y, imag_key))
         keys.remove(imag_key)
 
