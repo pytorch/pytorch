@@ -2870,36 +2870,12 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss.backward()
         self.assertEqual(x.grad, temp)
 
-    @scoped_load_inline
-    def test_custom_op_warning_propagation(self, load_inline):
-        import warnings
-        cpp_source = """
-#include <torch/csrc/Exceptions.h>
-#include <c10/util/Exception.h>
-
-torch::Tensor custom_op_with_warning(const torch::Tensor& x) {
-  TORCH_WARN("Warning from custom C++ op!");
-  return x;
-}
-
-TORCH_LIBRARY(test_custom_op_warning, m) {
-    m.def("custom_op_with_warning", custom_op_with_warning);
-}
-        """
-
-        module = load_inline(
-            name="test_custom_op_warning",
-            cpp_sources=cpp_source,
-            functions="custom_op_with_warning",
-            verbose=True,
-        )
-
-        x = torch.ones(2, 2)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            torch.ops.test_custom_op_warning.custom_op_with_warning(x)
-            self.assertEqual(len(w), 1)
-            self.assertIn("Warning from custom C++ op!", str(w[0].message))
+    def test_torch_ops_warning_propagation(self):
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch.ops.aten.ger.out(x, y, out=out)
 
     # Using a non-existent DSO is a quick way to trigger an OSError,
     # which can be used to not break BC.

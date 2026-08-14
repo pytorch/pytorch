@@ -900,7 +900,7 @@ py::object invokeOperatorFromPython(
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
-  torch::PyWarningHandler warning_handler;
+  HANDLE_TH_ERRORS
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -912,6 +912,7 @@ py::object invokeOperatorFromPython(
   }
 
   return createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 std::optional<py::object> _maybe_handle_torch_function(
