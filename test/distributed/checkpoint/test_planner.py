@@ -48,7 +48,9 @@ from torch.distributed.checkpoint.planner_helpers import (
     _merge_delta_local_plans,
     create_read_items_for_chunk_list,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -103,17 +105,15 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
 
 
 class TestCheckpointableTensorDistributed(DTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
 
-    @property
-    def device_type(self) -> str:
-        return "cpu"
-
     @with_comms
     @with_temp_dir
-    def test_checkpointable_tensor_shard_save_load(self):
+    def test_checkpointable_tensor_shard_save_load(self, device):
         shard_size = 4
         rank = dist.get_rank()
         start = rank * shard_size
@@ -166,6 +166,8 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
 
 
 class TestSavePlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_fake_comms(rank=1, world_size=4)
     def test_local_plan(self):
         tensor = torch.rand(10)
@@ -620,6 +622,8 @@ class TestSavePlan(TestCase):
 
 
 class TestPlannerHelpers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_read_item_from_chunks(self):
         tensor_md = TensorStorageMetadata(
             properties=TensorProperties.create_from_tensor(torch.empty([16])),
@@ -713,6 +717,8 @@ class TestPlannerHelpers(TestCase):
 
 
 class TestValidateGlobalPlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_metadata(self, chunks, size):
         storage = TensorStorageMetadata(
             properties=TensorProperties(dtype=torch.float32),
@@ -739,6 +745,8 @@ class TestValidateGlobalPlan(TestCase):
 
 
 class TestLoadPlanner(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_strict(self):
         original_module = nn.Linear(2, 2)
@@ -789,5 +797,8 @@ class TestLoadPlanner(TestCase):
         self.assertEqual(planner.metadata.version, CURRENT_DCP_VERSION)
 
 
+instantiate_device_type_tests(
+    TestCheckpointableTensorDistributed, globals(), only_for="cpu"
+)
 if __name__ == "__main__":
     run_tests()
