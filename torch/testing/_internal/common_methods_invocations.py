@@ -5547,33 +5547,19 @@ def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
         return values.reshape(shape).to(dtype)
 
-    def radix_min_n(k):
-        n_range = _radix_n_range(k)
+    # M=256 covers the gfx950 occupancy gate.
+    for K in (64, 320, 384, 768, 832, 1024):
+        n_range = _radix_n_range(K)
         if n_range is None:
-            raise AssertionError(f"missing radix gate for K={k}")
-        return n_range[0]
+            raise AssertionError(f"missing radix gate for K={K}")
+        N = n_range[0]
+        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
+        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 
-    device_index = torch.device(device).index
-    if device_index is None:
-        device_index = torch.cuda.current_device()
-    rows = max(256, torch.cuda.get_device_properties(device_index).multi_processor_count)
-
-    register_cases = ((2, _REGISTER_N_RANGE[0]), (16, _REGISTER_N_RANGE[1]))
-    # Cover radix block sizes and non-power-of-two sorts without duplicating
-    # the exhaustive per-K native test matrix.
-    radix_cases = tuple(
-        (K, radix_min_n(K)) for K in (64, 192, 320, 448, 768, 832, 1024)
-    )
-    for K, N in (*register_cases, *radix_cases):
-        yield SampleInput(make_arg((rows, N)).contiguous(), args=(K,))
-
-    nd_rows = (rows + 3) // 4
-    yield SampleInput(
-        make_arg((4, nd_rows, _REGISTER_N_RANGE[0])).contiguous(), args=(8, -1)
-    )
-    yield SampleInput(
-        make_arg((4, nd_rows, radix_min_n(320))).contiguous(), args=(320, -1)
-    )
+    for K, N in ((2, _REGISTER_N_RANGE[0]), (16, _REGISTER_N_RANGE[1])):
+        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 
 
 def _topk_deterministic(*args, **kwargs):
@@ -23156,9 +23142,9 @@ if "flydsl" in dsl_ops_by_dsl:
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=False,
         supports_out=False,
-        supports_cow_input_no_materialize_forward=False,
         decorators=[
             DecorateInfo(onlyCUDA),
+            DecorateInfo(skipIfNoFlyDSL),
             DecorateInfo(
                 skipCUDAIf(
                     not (

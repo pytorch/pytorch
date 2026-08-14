@@ -5,8 +5,6 @@ small fp32, last-dimension, largest+sorted cases; other shapes fall through to
 the existing backends or aten.
 """
 
-# mypy: allow-untyped-defs
-
 from __future__ import annotations
 
 import functools
@@ -34,8 +32,9 @@ _REGISTER_N_RANGE: tuple[int, int] = (1024, 8192)
 # A separate row-count gate below handles GPU underutilization.
 # K>1024 exceeds the device workgroup size limit.
 _RADIX_GATE_RANGES = (
-    ((64, 320), (4096, 32768)),
-    ((384, 768), (32768, 131072)),
+    ((64, 256), (8192, 32768)),
+    ((257, 383), (16384, 32768)),
+    ((384, 831), (32768, 131072)),
     ((832, 1024), (32768, 262144)),
 )
 _TOPK_KERNELS = None
@@ -95,8 +94,6 @@ def _eligible(
         return False
     device_index = self.device.index
     if device_index is None or not _is_supported_arch(device_index):
-        return False
-    if any_cow(self):
         return False
     if not largest or not sorted_:
         return False

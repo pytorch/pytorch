@@ -1,8 +1,7 @@
 """FlyDSL fp32 top-K kernel used by the native topk override."""
 
-# mypy: allow-untyped-defs
-
 import math
+from typing import Any, cast, Protocol
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -23,6 +22,16 @@ from flydsl.runtime.device import get_rocm_arch, is_rdna_arch
 import torch
 from torch._native.flydsl.cache import CacheInfo
 from torch._native.instrumentation import instrumented_flydsl_cache
+
+from ._common import any_cow
+
+
+class _CachedCompile(Protocol):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def cache_clear(self) -> None: ...
+
+    def cache_info(self) -> CacheInfo: ...
 
 
 _RADIX_BITS = 8
@@ -632,8 +641,17 @@ def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
     return launch_register_topk
 
 
-def _make_compile_arg(tensor: torch.Tensor):
-    return flyc.from_torch_tensor(tensor).mark_shape_dynamic(0)
+def _read_only(tensor: torch.Tensor) -> Any:
+    if not any_cow(tensor):
+        return tensor
+    from torch._native.const_tensor_wrapper import ConstTensorWrapper
+
+    return ConstTensorWrapper(tensor)
+
+
+def _make_compile_arg(tensor: torch.Tensor, *, read_only: bool = False) -> Any:
+    tensor_arg = _read_only(tensor) if read_only else tensor
+    return flyc.from_torch_tensor(tensor_arg).mark_shape_dynamic(0)
 
 
 @instrumented_flydsl_cache("aten::topk")
@@ -650,7 +668,7 @@ def _compile_register_topk(
     launch = _build_register_topk_module(n, k, rows_per_cta=rows_per_cta)
     return flyc.compile(
         launch,
-        _make_compile_arg(input_2d),
+        _make_compile_arg(input_2d, read_only=True),
         _make_compile_arg(values_2d),
         _make_compile_arg(indices_2d),
         rows_m,
@@ -679,7 +697,7 @@ def RegisterTopKOut(
             flyc.compile_backend_name(),
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
-        compiled(input_2d, values_2d, indices_2d, rows_m, stream)
+        compiled(_read_only(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
 def RegisterTopK(
@@ -706,7 +724,7 @@ def _compile_radix_select_topk(
     launch = _build_radix_select_topk_module(n, k, deterministic)
     return flyc.compile(
         launch,
-        _make_compile_arg(input_2d),
+        _make_compile_arg(input_2d, read_only=True),
         _make_compile_arg(values_2d),
         _make_compile_arg(indices_2d),
         rows_m,
@@ -735,7 +753,7 @@ def RadixSelectTopKOut(
             flyc.compile_backend_name(),
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
-        compiled(input_2d, values_2d, indices_2d, rows_m, stream)
+        compiled(_read_only(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
 def RadixSelectTopK(
@@ -749,13 +767,13 @@ def RadixSelectTopK(
 
 
 def clear_topk_cache() -> None:
-    _compile_register_topk.cache_clear()
-    _compile_radix_select_topk.cache_clear()
+    cast(_CachedCompile, _compile_register_topk).cache_clear()
+    cast(_CachedCompile, _compile_radix_select_topk).cache_clear()
 
 
-def topk_cache_info():
-    register = _compile_register_topk.cache_info()
-    radix = _compile_radix_select_topk.cache_info()
+def topk_cache_info() -> CacheInfo:
+    register = cast(_CachedCompile, _compile_register_topk).cache_info()
+    radix = cast(_CachedCompile, _compile_radix_select_topk).cache_info()
     return CacheInfo(
         register.hits + radix.hits,
         register.misses + radix.misses,

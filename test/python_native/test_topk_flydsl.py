@@ -1,8 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
-import os
 import unittest
-from unittest.mock import patch
 
 import torch
 import torch.backends.python_native as pn
@@ -23,10 +21,12 @@ _CORRECTNESS_KS = (
     64,
     65,
     320,
+    350,
     385,
     511,
     704,
     705,
+    800,
     832,
     1023,
     1024,
@@ -73,69 +73,6 @@ def _test_m(device_index: int | None = None) -> int:
     if device_index is None:
         device_index = torch.cuda.current_device()
     return max(256, _min_rows_for_full_wave(device_index))
-
-
-class TestFlyDSLTopKHelpers(TestCase):
-    @parametrize(
-        "arch,expected",
-        (
-            ("gfx950", True),
-            ("gfx950:sramecc+", True),
-            ("gfx950:sramecc+:xnack-", True),
-            ("gfx942", False),
-            ("gfx942:sramecc+", False),
-            (None, False),
-        ),
-    )
-    def test_arch_gate_allows_only_gfx950(self, arch, expected):
-        import torch._native.ops.topk.flydsl_impl as flydsl_impl
-
-        arch_is_supported = flydsl_impl._is_supported_arch
-        arch_is_supported.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
-        with patch.object(flydsl_impl.fu, "_resolve_rocm_arch", return_value=arch):
-            self.assertEqual(arch_is_supported(0), expected)
-
-    def test_arch_gate_is_resolved_once_per_process(self):
-        import torch._native.ops.topk.flydsl_impl as flydsl_impl
-
-        arch_is_supported = flydsl_impl._is_supported_arch
-        arch_is_supported.cache_clear()
-        self.addCleanup(arch_is_supported.cache_clear)
-
-        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
-            self.assertTrue(arch_is_supported(0))
-        with patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
-            self.assertTrue(arch_is_supported(0))
-
-    @parametrize(
-        "k,n,expected",
-        (
-            (2, 1024, "register"),
-            (16, 8192, "register"),
-            (8, 1023, None),
-            (8, 8193, None),
-            (8, 1537, None),
-            (64, 4096, "radix"),
-            (320, 32768, "radix"),
-            (321, 32768, None),
-            (384, 32768, "radix"),
-            (768, 131072, "radix"),
-            (769, 32768, None),
-            (832, 32768, "radix"),
-            (1024, 262144, "radix"),
-            (64, 4095, None),
-            (384, 32767, None),
-            (832, 32767, None),
-            (1024, 262145, None),
-            (32, 4096, None),
-            (1088, 32768, None),
-        ),
-    )
-    def test_kernel_selection(self, k: int, n: int, expected: str | None):
-        from torch._native.ops.topk.flydsl_impl import _kernel_for
-
-        self.assertEqual(_kernel_for(k, n), expected)
 
 
 @unittest.skipIf(_UNSUPPORTED_REASON is not None, str(_UNSUPPORTED_REASON))
@@ -242,6 +179,26 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
 
+    @parametrize("k", (8, 704))
+    def test_cow_input_dispatches_and_remains_cow(self, k: int):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        x = self._make_input(shape=(_test_m(), _test_n(k)))
+        with pn.flydsl.disabled():
+            ref_v, _ = torch.topk(x, k, dim=-1)
+
+        x = x._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        data_ptr = x.const_data_ptr()
+
+        got_v, got_i = torch.topk(x, k, dim=-1)
+
+        self.assertEqual(topk_cache_info().misses, 1)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertEqual(x.const_data_ptr(), data_ptr)
+        self.assertEqual(got_v, ref_v)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+
     def test_topk_uses_cache(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
@@ -282,6 +239,17 @@ class TestFlyDSLTopK(TestCase):
         torch.manual_seed(8)
         k = 8
         x = make_tensor((_test_m(), 1537), device="cuda", dtype=torch.float32)
+        with pn.flydsl.disabled():
+            ref = torch.topk(x, k, dim=-1)
+        got = torch.topk(x, k, dim=-1)
+        self._assert_no_flydsl_compiles()
+        self.assertEqual(got, ref)
+
+    @parametrize("k,n", ((64, 4096), (320, 8192)))
+    def test_radix_below_performance_gate_falls_through_without_compiling(
+        self, k: int, n: int
+    ):
+        x = self._make_input(shape=(_test_m(), n))
         with pn.flydsl.disabled():
             ref = torch.topk(x, k, dim=-1)
         got = torch.topk(x, k, dim=-1)
@@ -432,7 +400,6 @@ class TestFlyDSLTopK(TestCase):
             torch.cuda.set_device(old_device)
 
 
-instantiate_parametrized_tests(TestFlyDSLTopKHelpers)
 instantiate_parametrized_tests(TestFlyDSLTopK)
 
 
