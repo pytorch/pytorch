@@ -303,11 +303,7 @@ class TestAccelerator(TestCase):
     def test_memory_snapshot(self):
         acc = torch.accelerator.current_accelerator()
         mem_mod = getattr(torch.get_device_module(acc), "memory", None)
-        if (
-            mem_mod is None
-            or not hasattr(mem_mod, "_dump_snapshot")
-            or not hasattr(mem_mod, "_snapshot")
-        ):
+        if mem_mod is None or not hasattr(mem_mod, "_snapshot"):
             self.skipTest("Backend doesn't support memory snapshots")
         snapshot_path = os.path.join(tempfile.gettempdir(), "test_snapshot.pickle")
         torch.accelerator.memory._record_memory_history(max_entries=100)

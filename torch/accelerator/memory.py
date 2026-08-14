@@ -1,3 +1,4 @@
+import pickle
 import sys
 from collections import OrderedDict
 from typing import Any
@@ -309,19 +310,15 @@ def _dump_snapshot(
     filename: str = "dump_snapshot.pickle", augment_with_fx_traces: bool = False
 ) -> None:
     r"""Save a pickled snapshot of the current :ref:`accelerator<accelerators>` memory state.
-
     This is a no-op if the current accelerator does not support memory snapshots.
-
     Args:
         filename (str, optional): Path to write the snapshot to.
             Default: ``"dump_snapshot.pickle"``.
         augment_with_fx_traces (bool, optional): if True, augment stack traces
             with FX graph information. Default: ``False``.
     """
-    acc = torch.accelerator.current_accelerator()
-    if acc is None:
+    snapshot = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
+    if not snapshot:
         return
-    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
-    if mem_mod is None or not hasattr(mem_mod, "_dump_snapshot"):
-        return
-    mem_mod._dump_snapshot(filename, augment_with_fx_traces=augment_with_fx_traces)
+    with open(filename, "wb") as f:
+        pickle.dump(snapshot, f)
