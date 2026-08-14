@@ -337,7 +337,10 @@ def validate_runtime_local_reduce(
         return
     check_matrix("local_reduce_out", local_reduce_out)
     if plan.output_layout is FlexGemmOutputStorageLayout.TRANSPOSED:
-        check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
+        if not local_reduce_out.is_contiguous():
+            raise NotImplementedError(
+                "FlexGEMM transposed local-reduce output must be contiguous"
+            )
         validate_local_reduce_out_shape(
             local_reduce_out.shape,
             transposed_carrier_shape(
