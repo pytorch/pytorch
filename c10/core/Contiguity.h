@@ -35,12 +35,12 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 // Return a SymBool with underlying symbolic expression that represents
 // contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
 // or symbolic True.
-inline static c10::SymBool _compute_contiguous_sym(
+// Proves contiguity without guarding. If this returns true the tensor is
+// contiguous indeed; false means only that we could not prove it here.
+inline static bool _contiguous_or_false_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
     const c10::SymInt& numel) {
-  // If this return true, the tensor is contiguous indeed. Otherwise it could be
-  // either.
   auto is_contiguous_or_false = [&]() {
     if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
       return true;
@@ -76,14 +76,16 @@ inline static c10::SymBool _compute_contiguous_sym(
     }
     return true;
   };
+  return is_contiguous_or_false();
+}
 
-  // We try to minimize creating large symbolic expressions when not needed to
-  // avoid symbolic evaluation perf issues.
-  if (is_contiguous_or_false()) {
-    return c10::SymBool(true);
-  }
-
-  // Build a single expression that represents contiguity and return it.
+// Builds the symbolic predicate for contiguity. Only worth doing when the
+// answer cannot be had more cheaply: for hinted shapes the caller evaluates
+// concretely instead, and building this expression would be thrown away.
+inline static c10::SymBool _contiguous_expr_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides,
+    const c10::SymInt& numel) {
   c10::SymBool is_empty = sym_eq(numel, 0);
   c10::SymBool is_contiguous_cond = true;
 
@@ -95,6 +97,18 @@ inline static c10::SymBool _compute_contiguous_sym(
     expected_stride = expected_stride * size_d;
   }
   return is_contiguous_cond.sym_or(is_empty);
+}
+
+inline static c10::SymBool _compute_contiguous_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides,
+    const c10::SymInt& numel) {
+  // We try to minimize creating large symbolic expressions when not needed to
+  // avoid symbolic evaluation perf issues.
+  if (_contiguous_or_false_sym(sizes, strides, numel)) {
+    return c10::SymBool(true);
+  }
+  return _contiguous_expr_sym(sizes, strides, numel);
 }
 
 // When T is SymInt this function may throw a data dependent error.
