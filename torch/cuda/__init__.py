@@ -20,7 +20,7 @@ import threading
 import traceback
 import warnings
 from collections.abc import Callable
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
@@ -783,6 +783,11 @@ def get_device_capability(device: Device = None) -> tuple[int, int]:
     return prop.major, prop.minor
 
 
+@cache
+def _get_device_properties_cached(device: int) -> _CudaDeviceProperties:
+    return _get_device_properties(device)  # type: ignore[name-defined]
+
+
 # pyrefly: ignore [not-a-type]
 def get_device_properties(device: Device = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
@@ -800,7 +805,7 @@ def get_device_properties(device: Device = None) -> _CudaDeviceProperties:
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
-    return _get_device_properties(device)  # type: ignore[name-defined]
+    return _get_device_properties_cached(device)
 
 
 def can_device_access_peer(device: Device, peer_device: Device) -> bool:
