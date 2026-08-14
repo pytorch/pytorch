@@ -55,17 +55,18 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
 )
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
     E4M3_MAX_POS,
     e4m3_type,
-    flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
+    requires_capabilities,
     skipCPUIf,
     skipCUDAIf,
     skipMPSIf,
@@ -73,6 +74,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
+    HardwareClassification,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -83,7 +85,6 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, HAS_MPS
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
@@ -107,6 +108,8 @@ def setUpModule():
     global _PRIOR_FP32_MATMUL_PRECISION
     _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
     torch.set_float32_matmul_precision("high")
+    if TEST_ON_XPU:
+        torch._C._set_onednn_allow_tf32(True)
 
 
 def tearDownModule():
@@ -279,22 +282,12 @@ class DeviceConfig:
 
 
 device_configs = {}
-# Tests are skipped when no device is supported, so CPU as default is safe
-test_device = ("cpu",)
-if HAS_GPU:
-    if TEST_ON_CUDA:
-        if TEST_ON_CPU:
-            test_device = (
-                "cuda",
-                "cpu",
-            )
-        else:
-            test_device = ("cuda",)
-    elif TEST_ON_XPU:
-        torch._C._set_onednn_allow_tf32(True)
-        test_device = ("xpu",)
-elif HAS_MPS:
-    test_device = ("mps",)
+
+# flex_attention is supported only on specific device/platform combinations.
+# Rather than selecting a single device to run tests on, we allow all devices
+# and use @requires_capabilities(Capability.attention.flex_attention) to skip
+# per-device at runtime.
+supported_platform = requires_capabilities(Capability.attention.flex_attention)
 
 
 class SubstringSet:
@@ -589,8 +582,10 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@large_tensor_test_class("2GB", device=test_device[0])
+@large_tensor_test_class("2GB")
 class TestFlexAttention(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         skipCPUIf(
@@ -1482,6 +1477,7 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(score_mod, dtype, device=device)
         self.run_test_with_paged_attention(score_mod, dtype, device=device)
 
+    @supported_platform
     @running_on_a100_only
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -1498,6 +1494,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, device, B, H, 64, D, B, H, 64, D)
 
+    @supported_platform
     @running_on_a100_only
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
@@ -2778,7 +2775,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 for grad, input_name in zip(grads, input_names):
                     self.assertIsNotNone(
                         grad,
-                        lambda msg: f"{msg}\n{input_name} should receive gradients in {description}",
+                        lambda msg: (
+                            f"{msg}\n{input_name} should receive gradients in {description}"
+                        ),
                     )
 
     @supported_platform
@@ -3555,7 +3554,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @skip_on_cpu
     @supported_platform
-    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    @requires_capabilities(Capability.dtype.fp8)
     @skip_on_mps  # requires PLATFORM_SUPPORTS_FP8
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
@@ -3586,7 +3585,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @skip_on_cpu
     @supported_platform
-    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    @requires_capabilities(Capability.dtype.fp8)
     @skip_on_mps  # requires PLATFORM_SUPPORTS_FP8
     def test_mixed_dtypes_sqnr_per_head(self, device):
         query_ref = torch.testing.make_tensor(
@@ -4335,7 +4334,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertEqual(
                 out_stride_order,
                 query_stride_order,
-                lambda msg: f"{msg}\nStride order mismatch: out {out_stride_order}, query {query_stride_order}",
+                lambda msg: (
+                    f"{msg}\nStride order mismatch: out {out_stride_order}, query {query_stride_order}"
+                ),
             )
 
     @supported_platform
@@ -4401,7 +4402,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.assertEqual(
                     input_stride_order,
                     orig_stride_order,
-                    lambda msg: f"{msg}\nMode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+                    lambda msg: (
+                        f"{msg}\nMode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}."
+                    ),
                 )
 
     @supported_platform
@@ -4912,6 +4915,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(decode_out.shape, (1, 2, 64, 64))
         torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
 
+    @supported_platform
     def test_unbacked_flex_decoding_eligibility_falls_back(self, device):
         from torch._inductor.kernel.flex.flex_decoding import _use_flex_decoding
         from torch._inductor.sizevars import SizeVarAllocator
@@ -4941,6 +4945,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
             )
 
+    @supported_platform
     def test_backward_fake_symbolic_query_key_batch_metadata(self, device):
         from torch._dynamo.source import LocalSource
         from torch._higher_order_ops.flex_attention import (
@@ -6544,6 +6549,7 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             compiled_flex(q, k, v)
 
+    @supported_platform
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "detected only one GPU")
     def test_device_cuda_1(self, device):
         class TestModule(torch.nn.Module):
@@ -6909,9 +6915,10 @@ class GraphModule(torch.nn.Module):
         q, k, v = [torch.randn(2, 2, 128, 16, device=device) for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
 
+    @supported_platform
     @unittest.skipIf(
-        not has_triton() or not HAS_WARP_SPEC,
-        reason="FBCODE Triton is required for this test",
+        not HAS_WARP_SPEC,
+        reason="Warp specialization is required for this test",
     )
     def test_triton_template_warp_specialization(self, device):
         def make_tensor():
@@ -7265,6 +7272,8 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
 
@@ -8034,7 +8043,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(
             result.shape,
             expected_shape,
-            lambda msg: f"{msg}\nExpected output shape {expected_shape}, but got {result.shape}",
+            lambda msg: (
+                f"{msg}\nExpected output shape {expected_shape}, but got {result.shape}"
+            ),
         )
 
     @supported_platform
@@ -8601,7 +8612,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             if original_value is None:
                 self.assertIsNone(
                     reconstructed_value,
-                    lambda msg: f"{msg}\nTensor attribute {attr_name} should be None but got {reconstructed_value}",
+                    lambda msg: (
+                        f"{msg}\nTensor attribute {attr_name} should be None but got {reconstructed_value}"
+                    ),
                 )
             else:
                 self.assertIsInstance(
@@ -8611,7 +8624,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 )
                 self.assertTrue(
                     torch.equal(original_value, reconstructed_value),
-                    lambda msg: f"{msg}\nTensor attribute {attr_name} not equal after reconstruction",
+                    lambda msg: (
+                        f"{msg}\nTensor attribute {attr_name} not equal after reconstruction"
+                    ),
                 )
 
         # Verify all context attributes are equal (using _CONTEXT_ATTRS)
@@ -8622,7 +8637,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertEqual(
                 original_value,
                 reconstructed_value,
-                lambda msg: f"{msg}\nContext attribute {attr_name} not equal after reconstruction",
+                lambda msg: (
+                    f"{msg}\nContext attribute {attr_name} not equal after reconstruction"
+                ),
             )
 
     @supported_platform
@@ -8696,23 +8713,31 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             if isinstance(original_value, torch.Tensor):
                 self.assertTrue(
                     torch.equal(original_value, reconstructed_value),
-                    lambda msg: f"{msg}\nTensor attribute {attr_name} not equal after reconstruction",
+                    lambda msg: (
+                        f"{msg}\nTensor attribute {attr_name} not equal after reconstruction"
+                    ),
                 )
             elif original_value is None:
                 self.assertIsNone(
                     reconstructed_value,
-                    lambda msg: f"{msg}\nAttribute {attr_name} should be None but got {reconstructed_value}",
+                    lambda msg: (
+                        f"{msg}\nAttribute {attr_name} should be None but got {reconstructed_value}"
+                    ),
                 )
             else:
                 self.assertEqual(
                     original_value,
                     reconstructed_value,
-                    lambda msg: f"{msg}\nAttribute {attr_name} not equal after reconstruction",
+                    lambda msg: (
+                        f"{msg}\nAttribute {attr_name} not equal after reconstruction"
+                    ),
                 )
 
 
-@large_tensor_test_class("2GB", device=test_device[0])
+@large_tensor_test_class("2GB")
 class TestPagedAttention(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         skipCPUIf(
@@ -9226,8 +9251,10 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
-@large_tensor_test_class("2GB", device=test_device[0])
+@large_tensor_test_class("2GB")
 class TestLearnableBiases(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         skipCPUIf(
@@ -9289,8 +9316,10 @@ class TestLearnableBiases(InductorTestCase):
         self.assertLessEqual(
             comp_error,
             (ref_error * fudge_factor),
-            lambda msg: f"{msg}\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
-            f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})",
+            lambda msg: (
+                f"{msg}\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
+                f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})"
+            ),
         )
 
     def _check_outputs_and_grads(
@@ -9316,7 +9345,7 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
-    @skip_on_cpu
+    @supported_platform
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9351,7 +9380,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9385,7 +9413,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9420,7 +9447,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9456,7 +9482,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9489,7 +9514,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9524,7 +9548,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9557,7 +9580,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9594,7 +9616,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9634,7 +9655,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9673,7 +9693,6 @@ class TestLearnableBiases(InductorTestCase):
                 (query, key, value, bias),
             )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9707,7 +9726,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9742,7 +9760,6 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, gate_score),
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9791,7 +9808,6 @@ class TestLearnableBiases(InductorTestCase):
             ],
         )
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9843,7 +9859,6 @@ class TestLearnableBiases(InductorTestCase):
         if not torch.any(bias.grad != 0):
             raise AssertionError("Gradient for bias is 0")
 
-    @skip_on_cpu
     def test_backprop_error_case(self, device):
         @torch.compile()
         def test(x, y):
@@ -9874,7 +9889,6 @@ class TestLearnableBiases(InductorTestCase):
         if not (y.grad.norm() > 0):
             raise AssertionError(f"Expected y.grad.norm() > 0, got {y.grad.norm()}")
 
-    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -9953,17 +9967,14 @@ class TestLearnableBiases(InductorTestCase):
             lambda msg: f"{msg}\nExpected shape {query.shape}, got {out.shape}",
         )
 
-    @skip_on_cpu
     @skip_on_mps  # uses mode="max-autotune-no-cudagraphs"; Triton/CUDA-only
     def test_flex_attention_with_dynamic_max_autotune(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
-    @skip_on_cpu
     @torch._inductor.config.patch("graph_partition", True)
     def test_flex_attention_with_dynamic_max_autotune_graph_partition(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
-    @skip_on_cpu
     def test_flex_attention_logging(self, device):
         from torch._inductor.select_algorithm import get_flex_attention_log_filename
 
@@ -10119,7 +10130,6 @@ class TestLearnableBiases(InductorTestCase):
                         if i > 0:
                             self.assertLessEqual(choices[0]["time"], choice["time"])
 
-    @skip_on_cpu
     def test_inspect_bug(self, device):
         # https://github.com/pytorch/pytorch/issues/139374
         def sliding_window(b, h, q_idx, kv_idx, val):
@@ -10133,8 +10143,6 @@ class TestLearnableBiases(InductorTestCase):
         # checks that the compile is working
         opt_fn(sliding_window2, None, None, 1024, 1024, device=device)
 
-    @supported_platform
-    @skip_on_cpu
     def test_head_bias_req_grad(self, device):
         B, H, S, D = 1, 4, 256, 64
         bias = torch.randn(H, device=device, dtype=torch.float16, requires_grad=True)
@@ -10168,7 +10176,6 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @supported_platform
-    @skip_on_cpu
     def test_comparison_vs_sdpa_with_learnable_bias(self, device):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
@@ -10375,34 +10382,36 @@ class TestLearnableBiases(InductorTestCase):
             flex_error = rmse(flex, gold)
             self.assertTrue(
                 ref_error * 1.2 >= flex_error,
-                lambda msg: f"{msg}\n{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
+                lambda msg: (
+                    f"{msg}\n{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}"
+                ),
             )
 
 
-instantiate_device_type_tests(
-    TestFlexAttention,
-    globals(),
-    only_for=test_device,
-    allow_xpu=True,
-    allow_mps=True,
-)
-instantiate_device_type_tests(
-    TestPagedAttention,
-    globals(),
-    only_for=test_device,
-    allow_xpu=True,
-    allow_mps=True,
-)
-instantiate_device_type_tests(
-    TestBlockMask,
-    globals(),
-    only_for=(test_device[0] if (HAS_GPU or HAS_MPS) else "cuda",),
-    allow_xpu=True,
-    allow_mps=True,
-)
-instantiate_device_type_tests(
-    TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True
-)
+if TEST_ON_CPU and TEST_ON_CUDA:
+    # CUDA + AVX2 CPU: run on both cuda and cpu
+    instantiate_device_type_tests(TestFlexAttention, globals())
+    instantiate_device_type_tests(TestPagedAttention, globals())
+    instantiate_device_type_tests(TestBlockMask, globals(), except_for="cpu")
+    instantiate_device_type_tests(
+        TestLearnableBiases, globals(), allow_xpu=True, except_for="cpu"
+    )
+elif torch.accelerator.is_available():
+    instantiate_device_type_tests(
+        TestFlexAttention, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+    )
+    instantiate_device_type_tests(
+        TestPagedAttention, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+    )
+    instantiate_device_type_tests(
+        TestBlockMask, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+    )
+    instantiate_device_type_tests(
+        TestLearnableBiases, globals(), allow_xpu=True, except_for="cpu"
+    )
+else:
+    instantiate_device_type_tests(TestFlexAttention, globals(), only_for="cpu")
+    instantiate_device_type_tests(TestPagedAttention, globals(), only_for="cpu")
 
 
 if __name__ == "__main__":
