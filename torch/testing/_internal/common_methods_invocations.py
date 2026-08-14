@@ -6854,7 +6854,7 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
         error_out = f"Expected object of scalar type Complex{other_dtype_name} but got scalar type ComplexFloat for argument 'out'"
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
-                     error_type=RuntimeError, error_regex=error_float)
+                     error_type=NotImplementedError, error_regex=error_float)
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=other_dtype)),
                      error_type=RuntimeError, error_regex=error_dtype)

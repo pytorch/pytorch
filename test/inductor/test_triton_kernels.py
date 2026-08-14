@@ -4858,12 +4858,12 @@ class MutationTests(torch._inductor.test_case.TestCase):
         HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
         "requires gpu or triton cpu",
     )
-    def test_identify_accessed_tensors_reuses_analysis(self):
+    def test_launch_analysis_reuses_result(self):
         import triton
         import triton.language as tl
 
         from torch._higher_order_ops import triton_kernel_wrap as tkw
-        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
+        from torch._higher_order_ops.triton_kernel_wrap import analyze_kernel_launch
 
         # Declared here rather than at module scope so no other test can have
         # populated the analysis cache for it.
@@ -4884,7 +4884,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             return real_generate_ttir(*args, **kwargs)
 
         def analyze(block_size):
-            return identify_accessed_tensors(
+            return analyze_kernel_launch(
                 cache_probe_kernel,
                 {
                     "in_ptr": x,
@@ -4908,9 +4908,56 @@ class MutationTests(torch._inductor.test_case.TestCase):
             analyze(32)
             self.assertEqual(analyses, 2)
 
-        self.assertEqual([dep.name for dep in first.read_writes.reads], ["in_ptr"])
-        self.assertEqual([dep.name for dep in first.read_writes.writes], ["out_ptr"])
+        self.assertEqual(first[0], ("out_ptr",))
         self.assertEqual(first, second)
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
+        "requires gpu or triton cpu",
+    )
+    def test_ttir_analysis_depends_on_constexprs(self):
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
+
+        # constexprs are compile-time constants, so they decide whether the
+        # store is in the TTIR at all. This is why the analysis cannot be keyed
+        # on the kernel alone: one kernel object, two different answers, and
+        # serving the wrong one would drop a mutation.
+        @triton.jit
+        def gated_store_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            DO_STORE: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            value = tl.load(in_ptr + offsets, mask=mask)
+            if DO_STORE:
+                tl.store(out_ptr + offsets, value, mask=mask)
+
+        device = GPU_TYPE if HAS_GPU else "cpu"
+        x = torch.rand(16, device=device)
+
+        def writes(do_store):
+            accesses = identify_accessed_tensors(
+                gated_store_kernel,
+                {
+                    "in_ptr": x,
+                    "out_ptr": x,
+                    "n_elements": x.numel(),
+                    "DO_STORE": do_store,
+                    "BLOCK_SIZE": 16,
+                },
+                {},
+            )
+            return [dep.name for dep in accesses.read_writes.writes]
+
+        self.assertEqual(writes(True), ["out_ptr"])
+        self.assertEqual(writes(False), [])
 
 
 if HAS_GPU:
