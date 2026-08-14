@@ -622,38 +622,42 @@ def _op_namespace(tgt) -> str | None:
 # non-contiguous layout propagates to their outputs and downstream consumers
 # still matter. view / as_strided additionally require a compatible layout and
 # can fail on the non-contiguous fused output.
-_VIEW_OPS = {
-    aten.view,
-    aten.as_strided,
-    aten.reshape,
-    aten.permute,
-    aten.transpose,
-    aten.slice,
-    aten.split,
-    aten.unsqueeze,
-    aten.squeeze,
-    aten.expand,
-    aten.select,
-}
+_VIEW_OPS = OrderedSet(
+    [
+        aten.view,
+        aten.as_strided,
+        aten.reshape,
+        aten.permute,
+        aten.transpose,
+        aten.slice,
+        aten.split,
+        aten.unsqueeze,
+        aten.squeeze,
+        aten.expand,
+        aten.select,
+    ]
+)
 
 # Same ops traced as tensor methods (e.g. x.view(-1) is call_method[target="view"]).
-_VIEW_METHODS = {
-    "view",
-    "as_strided",
-    "reshape",
-    "permute",
-    "transpose",
-    "unsqueeze",
-    "squeeze",
-    "expand",
-    "select",
-    "split",
-    "slice",
-}
+_VIEW_METHODS = OrderedSet(
+    [
+        "view",
+        "as_strided",
+        "reshape",
+        "permute",
+        "transpose",
+        "unsqueeze",
+        "squeeze",
+        "expand",
+        "select",
+        "split",
+        "slice",
+    ]
+)
 
 # view / as_strided additionally require a compatible layout and can crash on
 # the non-contiguous fused output; the rest are layout-preserving and walked.
-_CRASH_VIEW_OPS = {"view", "as_strided"}
+_CRASH_VIEW_OPS = OrderedSet(["view", "as_strided"])
 
 
 def _view_op_kind(user: torch.fx.Node) -> str | None:
