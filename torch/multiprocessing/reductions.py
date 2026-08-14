@@ -260,7 +260,7 @@ def reduce_tensor(tensor):
     # still live in the original process. As we cannot make a cudaMalloc allocation
     # to a single storage in one go, this requires us to cache the device pointer for
     # each cudaIpcMemHandle on C++ side to reconstruct types of storages, while keep
-    # the old ones alives.
+    # the old ones alive.
     # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
     # This is fine, because all we need to do is to save our position in the allocation,
