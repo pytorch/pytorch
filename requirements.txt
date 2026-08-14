@@ -6,6 +6,16 @@
 # Install / Development extra requirements
 build[uv]  # for building sdist and wheel
 expecttest>=0.3.0
+# Triton provider: this fork runs on FBTriton (facebookexperimental/triton),
+# which is where torchTLX lives. It is absent here only because no published
+# fbtriton wheel carries torchTLX yet -- that needs >=3.8, and the TLX
+# Inductor registry landed after release/3.7.x was cut. Once such a wheel
+# ships, listing it here:
+#     fbtriton>=3.8 ; platform_system == "Linux"
+# is the right path for anyone who just wants to *use* torchTLX. Note it
+# cannot also cover contributors who build FBTriton from a checkout: that
+# installs as the `triton` distribution (setup.py defaults TRITON_WHEEL_NAME
+# to "triton"). tools/torchtlx/bringup.py sets up either path.
 filelock
 fsspec>=0.8.5
 hypothesis

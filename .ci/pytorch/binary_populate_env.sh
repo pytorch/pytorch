@@ -74,21 +74,34 @@ export PYTORCH_BUILD_NUMBER=1
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.15'"
 
+# Opt-in only, matching .ci/docker/common/install_triton.sh: torchTLX needs
+# FBTriton, but the default stays upstream triton / triton-rocm. FBTriton
+# publishes one wheel carrying both the nvidia and amd backends, so cuda and
+# rocm share the "fbtriton" name and pin file.
+TRITON_PIN_FILE="$PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt"
+TRITON_CUDA_PKG="triton"
+TRITON_ROCM_PKG="triton-rocm"
+if [[ -n "${FBTRITON:-}" && "${FBTRITON}" != "0" ]]; then
+    TRITON_PIN_FILE="$PYTORCH_ROOT/.ci/docker/ci_commit_pins/fbtriton.txt"
+    TRITON_CUDA_PKG="fbtriton"
+    TRITON_ROCM_PKG="fbtriton"
+fi
+
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* && ! "$PYTORCH_BUILD_VERSION" =~ .*rocm.* ]]; then
-  TRITON_REQUIREMENT="triton~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+  TRITON_REQUIREMENT="${TRITON_CUDA_PKG}~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
   if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
-      TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
-      TRITON_REQUIREMENT="triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+      TRITON_SHORTHASH=$(cut -c1-8 ${TRITON_PIN_FILE})
+      TRITON_REQUIREMENT="${TRITON_CUDA_PKG}==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
   fi
   export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
 fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" ]]; then
-    TRITON_REQUIREMENT="triton-rocm~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+    TRITON_REQUIREMENT="${TRITON_ROCM_PKG}~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
-        TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
-        TRITON_REQUIREMENT="triton-rocm==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+        TRITON_SHORTHASH=$(cut -c1-8 ${TRITON_PIN_FILE})
+        TRITON_REQUIREMENT="${TRITON_ROCM_PKG}==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
     fi
     if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
