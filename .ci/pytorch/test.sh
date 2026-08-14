@@ -1156,6 +1156,35 @@ test_inductor_pallas() {
   assert_git_not_dirty
 }
 
+test_inductor_flydsl() {
+  install_flydsl
+  python3 - <<'PY'
+import importlib
+import importlib.metadata
+
+import torch
+from torch._inductor.codegen.flydsl import flydsl_utils
+
+expected_version = "0.3.1"
+version = importlib.metadata.version("flydsl")
+if version != expected_version:
+    raise RuntimeError(f"expected FlyDSL {expected_version}, got {version}")
+importlib.import_module("flydsl")
+if torch.version.hip is None or not torch.cuda.is_available():
+    raise RuntimeError("FlyDSL CI requires a ROCm-enabled PyTorch build")
+arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+if arch != "gfx950":
+    raise RuntimeError(f"FlyDSL CI requires gfx950, got {arch}")
+reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+if reason is not None or not flydsl_utils.runtime_available():
+    raise RuntimeError(f"FlyDSL runtime is unavailable: {reason}")
+print(f"FlyDSL {version} runtime available on {arch}")
+PY
+  python test/run_test.py --include inductor/test_async_compile.py -k flydsl --verbose
+  python test/run_test.py --include inductor/test_flydsl_template.py --verbose
+  assert_git_not_dirty
+}
+
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
@@ -2402,6 +2431,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-flydsl* ]]; then
+  test_inductor_flydsl
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
   test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then

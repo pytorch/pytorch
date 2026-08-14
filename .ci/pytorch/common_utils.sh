@@ -381,6 +381,12 @@ function install_cutlass_dsl() {
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
+function install_flydsl() {
+  echo "Installing FlyDSL from PyPI..."
+  pip_install --only-binary=:all: flydsl==0.3.1
+  echo "FlyDSL installation complete."
+}
+
 function install_nvmath() {
   echo "Installing nvmath-python from PyPI..."
   pip_install nvmath-python
