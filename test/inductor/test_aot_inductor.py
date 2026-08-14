@@ -247,8 +247,6 @@ def get_triton_grid_info(kernel, total_elements, src_code):
 
 
 class AOTInductorTestsTemplate:
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
     def test_simple(self, embed_kernel_binary, max_autotune):
