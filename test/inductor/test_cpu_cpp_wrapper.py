@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: cpu inductor"]
+import itertools
 import sys
 import unittest
 from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
@@ -17,6 +19,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device, HAS_CPU
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -47,6 +50,69 @@ RUN_CPU = (
     and not IS_MACOS
     and has_cpp_wrapper_for_device("cpu")
 )
+
+
+class TestIntArrayVarCodegen(InductorTestCase):
+    """`codegen_int_array_var` must never return a variable whose declaration was
+    written into a different buffer than the caller's -- that emits
+    `use of undeclared identifier int_array_N` into the generated wrapper."""
+
+    @staticmethod
+    def _make_wrapper():
+        # Build the instance without __init__, which needs a full graph context.
+        # Only the int-array bookkeeping is exercised here.
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+
+        wrapper = object.__new__(CppWrapperCpu)
+        wrapper.codegen_int_array_var_cache = {}
+        wrapper.int_array_id = itertools.count()
+        wrapper.declared_int_array_vars = OrderedSet()
+        return wrapper
+
+    def test_unbound_writeline_is_not_cached(self):
+        wrapper = self._make_wrapper()
+        lines = []
+
+        def writeline(line):
+            lines.append(line)
+
+        # A plain callable exposes no stable object to key the cache on, and
+        # CPython recycles the addresses of short-lived ones. Seed the entry that
+        # a since-freed callable sharing this address would have left behind; the
+        # declaration it names lives in a buffer this caller cannot see.
+        wrapper.codegen_int_array_var_cache[
+            ("{1000L, }", id(writeline), False, None)
+        ] = "int_array_stale"
+
+        var = wrapper.codegen_int_array_var("{1000L, }", writeline)
+
+        self.assertNotEqual(var, "int_array_stale")
+        self.assertTrue(
+            any(var in line for line in lines),
+            f"{var} was returned without a declaration in the caller's buffer: {lines}",
+        )
+
+    def test_bound_writeline_is_still_cached(self):
+        wrapper = self._make_wrapper()
+        buf = IndentedBuffer()
+
+        first = wrapper.codegen_int_array_var("{1000L, }", buf.writeline)
+        second = wrapper.codegen_int_array_var("{1000L, }", buf.writeline)
+
+        # A bound method keys on its owner, which is stable, so the declaration is
+        # reused rather than duplicated.
+        self.assertEqual(first, second)
+        self.assertEqual(buf.getvalue().count(f"{first}[]"), 1)
+
+    def test_distinct_buffers_each_get_a_declaration(self):
+        wrapper = self._make_wrapper()
+        buf_a, buf_b = IndentedBuffer(), IndentedBuffer()
+
+        var_a = wrapper.codegen_int_array_var("{1000L, }", buf_a.writeline)
+        var_b = wrapper.codegen_int_array_var("{1000L, }", buf_b.writeline)
+
+        self.assertIn(f"{var_a}[]", buf_a.getvalue())
+        self.assertIn(f"{var_b}[]", buf_b.getvalue())
 
 
 class CppWrapperTemplate:

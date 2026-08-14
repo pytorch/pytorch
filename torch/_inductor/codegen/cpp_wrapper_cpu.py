@@ -2405,12 +2405,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> str:
         # Use id(graph) for caching to avoid circular references
         # Bound methods have transient IDs, so we use the ID of the bound object instead.
-        writeline_id = (
-            id(writeline.__self__) if hasattr(writeline, "__self__") else id(writeline)
-        )
+        owner = getattr(writeline, "__self__", None)
+        if owner is None:
+            # `writeline` is a plain callable (closure/partial), not a bound method, so
+            # there is no stable object to key on -- id(writeline) belongs to a
+            # short-lived object whose address CPython recycles. Reusing a cached
+            # variable across two such callables emits the reference into one buffer
+            # while its `int64_t int_array_N[] = ...` declaration went into another,
+            # producing "use of undeclared identifier" in the generated code. Skip the
+            # cache instead: re-emitting a declaration is harmless, omitting one is not.
+            return self._codegen_int_array_var_impl(
+                int_array, writeline, known_statically
+            )
         cache_key = (
             int_array,
-            writeline_id,
+            id(owner),
             known_statically,
             id(graph) if graph else None,
         )
