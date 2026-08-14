@@ -92,6 +92,15 @@ def _is_fake_tensor_same(
     be supplied by users of this function."""
 
     def is_intlist_same(new, old):
+        # sym_eq builds a symbolic conjunction and statically_known_true then
+        # evaluates it, which is a lot of work for the common case where the
+        # two sizes/strides are the very same objects. Identity, or equality
+        # between concrete ints, already implies equality.
+        if len(new) == len(old) and all(
+            a is b or (type(a) is int and type(b) is int and a == b)
+            for a, b in zip(new, old)
+        ):
+            return True
         return statically_known_true(sym_eq(new, old))
 
     if type(new) is not type(old):
