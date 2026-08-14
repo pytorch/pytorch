@@ -972,24 +972,23 @@ bool Context::allowFP16ReductionCPU() const {
   return allow_fp16_reduction_cpu;
 }
 
+// Plain bools, like the ~67 other user-facing toggles on Context
+// (enabled_cudnn, _deterministic_algorithms, allow_tf32_cudnn, ...): set
+// rarely from Python, read per op call, publishing no data of their own.
 bool Context::allowNativeAot() const {
-  // Relaxed: an independent on/off flag consulted per op call; no data
-  // is published under it (the stub registration has its own fences).
-  return allow_native_aot.load(std::memory_order_relaxed);
+  return allow_native_aot;
 }
 
 void Context::setAllowNativeAot(bool b) {
-  allow_native_aot.store(b, std::memory_order_relaxed);
+  allow_native_aot = b;
 }
 
 bool Context::maskUnconditionalNativeAot() const {
-  // Relaxed for the same reason as allowNativeAot: an independent flag read
-  // per op call, publishing no data.
-  return mask_unconditional_native_aot.load(std::memory_order_relaxed);
+  return mask_unconditional_native_aot;
 }
 
 void Context::setMaskUnconditionalNativeAot(bool b) {
-  mask_unconditional_native_aot.store(b, std::memory_order_relaxed);
+  mask_unconditional_native_aot = b;
 }
 
 void Context::setAllowFP16ReductionCPU(bool b) {
