@@ -418,7 +418,7 @@ kernel void conv_weight_to_koc(
       (int64_t)output_channel * params.input_channels_per_group + input_channel;
   const int64_t tap_stride =
       (int64_t)params.input_channels_per_group * params.output_channels;
-  for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
+  for (uint kernel_width_index = 0; kernel_width_index < params.kernel_width;
        ++kernel_width_index) {
     destination_row[kernel_width_index * tap_stride] =
         source_row[(int64_t)kernel_width_index * params.width_stride];
