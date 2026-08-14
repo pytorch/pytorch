@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
