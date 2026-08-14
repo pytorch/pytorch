@@ -9,15 +9,16 @@ static bool has_xpu() {
 
 TEST(XPUEventTest, IPCSupport) {
   if (!has_xpu()) {
-    return;
+    GTEST_SKIP() << "XPU not available, skipping test";
   }
 
 #if SYCL_COMPILER_VERSION >= 20260200
-  if (!c10::xpu::get_raw_device(c10::xpu::current_device())
-           .has(sycl::aspect::ext_oneapi_ipc_event)) {
+  auto& device = c10::xpu::get_raw_device(c10::xpu::current_device());
+  if (!device.has(sycl::aspect::ext_oneapi_per_event_profiling) ||
+      !device.has(sycl::aspect::ext_oneapi_ipc_event)) {
     c10::xpu::XPUEvent event0(false, true);
     EXPECT_THROW(event0.record(), c10::Error);
-    return;
+    GTEST_SKIP() << "XPU IPC not supported, skipping test";
   }
   c10::xpu::XPUEvent event0(true, true);
   EXPECT_THROW(event0.record(), c10::Error);
