@@ -14,7 +14,6 @@
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
 #include <c10/util/TypeCast.h>
-#include <c10/util/env.h>
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -857,10 +856,11 @@ static void conv1d_matmul_forward(const Tensor& input_t,
     col_tiles += c10::metal::ceil_div(regions[i].out_cols, int64_t(64));
   }
 
-  // hosts without MetalPerformancePrimitives run the simdgroup_matrix twin;
-  // the env knob forces it on newer hosts to proxy-validate that fallback
-  static const bool force_simd = c10::utils::check_env("PYTORCH_MPS_CONV1D_FORCE_SIMD") == true;
-  const bool use_mpp = at::mps::has_mpp() && !force_simd;
+  // Hosts without MetalPerformancePrimitives run the simdgroup_matrix twin.
+  // Pre-Apple9 GPUs miscompute the cooperative matmul for long activations so they
+  // always take the twin.
+  static const bool is_apple9_plus = at::mps::is_apple_family_or_newer(at::mps::AppleGPUFamily::APPLE_9_PLUS);
+  const bool use_mpp = at::mps::has_mpp() && is_apple9_plus;
   const auto tile = conv1d_matmul_tile(og, cg, k, groups, outW, src.size(0));
   const int bm = use_mpp ? tile.first : std::min(tile.first, 64);
   const int nsg = tile.second;
