@@ -32,6 +32,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/operators_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/packedtensoraccessor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/privateuse1_from_blob_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/privateuse1_from_blob_optout_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reportMemoryUsage_test.cpp
