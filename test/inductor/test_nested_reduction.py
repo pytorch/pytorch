@@ -10,7 +10,11 @@ from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwis
 from torch._inductor import metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    is_nvidia_sm100_or_later,
+    run_and_get_code,
+)
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
@@ -2856,9 +2860,17 @@ class _InternalsBase:
     @skipIfRocm
     @skipIfXpu(msg="MXFP8 inline asm requires CUDA")
     def test_rmsnorm_mxfp8_scale_swizzle_kernel_form(self):
-        if torch.cuda.get_device_capability() < (10, 0):
-            self.skipTest("cvt_e8m0_rceil lowering requires SM100+")
-
+        if is_nvidia_sm100_or_later():
+            # SM100+ lowers cvt_e8m0_rceil to the PTX instruction; assert it is
+            # emitted exactly once.
+            extra_checks = FileCheck().check_count(
+                "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
+            )
+        else:
+            # Non-SM100 devices (XPU, older CUDA, ROCm, CPU) use the software
+            # fallback, which fuses the e8m0 conversion via bit manipulation;
+            # verify it still compiles into a single kernel.
+            extra_checks = None
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,
             128,
@@ -2866,9 +2878,7 @@ class _InternalsBase:
             num_outputs=2,
             meta_num_load=self.looped_or_persistent(3, 2),
             min_rblock=32,
-            extra_checks=FileCheck().check_count(
-                "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
-            ),
+            extra_checks=extra_checks,
         )
 
     def assert_standalone_nvfp4_inline_asm_kernel_form(
