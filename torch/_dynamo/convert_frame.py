@@ -45,6 +45,7 @@ import time
 import traceback
 import types
 import typing
+import unittest
 import unittest.mock as mock
 import weakref
 from dataclasses import dataclass
@@ -2176,6 +2177,7 @@ def _compile(
                     ShortenTraceback,
                     PackageError,
                     ResumePrologueTracingError,
+                    unittest.SkipTest,
                 ),
             ):
                 raise
