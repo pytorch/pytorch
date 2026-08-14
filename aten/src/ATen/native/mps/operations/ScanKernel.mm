@@ -156,7 +156,7 @@ static void scan_tiny_innermost_mps_impl(const Tensor& input, const Tensor& outp
                   static_cast<uint32_t>(n_scans),
                   static_cast<uint32_t>(rows_per_tg));
       [enc dispatchThreads:MTLSizeMake(tg * num_tg, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -196,7 +196,7 @@ static void scan_multiblock_mps_impl(const Tensor& input, const Tensor& output, 
       [enc setComputePipelineState:reducePSO];
       mtl_setArgs(enc, input, block_sums, axis_size, block_size, num_blocks);
       [enc dispatchThreads:MTLSizeMake(tg * num_blocks, n_scans, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(reducePSO, mpsStream);
+      getMPSProfiler().endProfileKernel(reducePSO, SyncType::NONE, mpsStream);
 
       // The carry pass computes each block's exclusive prefix inline from the
       // (cached) block_sums, so no separate block-sum scan pass is needed.
@@ -205,7 +205,7 @@ static void scan_multiblock_mps_impl(const Tensor& input, const Tensor& output, 
       [enc setComputePipelineState:carryPSO];
       mtl_setArgs(enc, input, output, block_sums, axis_size, block_size, num_blocks);
       [enc dispatchThreads:MTLSizeMake(tg * num_blocks, n_scans, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(carryPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(carryPSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -249,7 +249,7 @@ static void scan_decoupled_mps_impl(const Tensor& input, const Tensor& output, c
                   static_cast<uint32_t>(axis_size),
                   static_cast<uint32_t>(num_tiles));
       [enc dispatchThreads:MTLSizeMake(tg * total_tiles, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -307,7 +307,7 @@ static void scan_strided_decoupled_mps_impl(const Tensor& input,
                   static_cast<uint32_t>(axis_size),
                   static_cast<uint32_t>(num_tiles));
       [enc dispatchThreads:MTLSizeMake(tg * total_tiles, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -373,21 +373,21 @@ static void scan_strided_multiblock_mps_impl(const Tensor& input,
       [enc setComputePipelineState:reducePSO];
       mtl_setArgs(enc, input, block_sums, axis_size, n_irows, stride_blocks, block_size, num_blocks, n_orows);
       [enc dispatchThreads:MTLSizeMake(tg, grid_y, grid_z) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(reducePSO, mpsStream);
+      getMPSProfiler().endProfileKernel(reducePSO, SyncType::NONE, mpsStream);
 
       auto sumsPSO = lib.getPipelineStateForFunc(sums_name);
       getMPSProfiler().beginProfileKernel(sumsPSO, op_name, {block_sums}, mpsStream);
       [enc setComputePipelineState:sumsPSO];
       mtl_setArgs(enc, block_sums, num_blocks);
       [enc dispatchThreads:MTLSizeMake(256, n_scans, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-      getMPSProfiler().endProfileKernel(sumsPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(sumsPSO, SyncType::NONE, mpsStream);
 
       auto carryPSO = lib.getPipelineStateForFunc(carry_name);
       getMPSProfiler().beginProfileKernel(carryPSO, op_name, {input, output}, mpsStream);
       [enc setComputePipelineState:carryPSO];
       mtl_setArgs(enc, input, output, block_sums, axis_size, n_irows, stride_blocks, block_size, num_blocks, n_orows);
       [enc dispatchThreads:MTLSizeMake(tg, grid_y, grid_z) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(carryPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(carryPSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -441,14 +441,14 @@ static void scan_vec_multiblock_mps_impl(const Tensor& input,
       [enc setComputePipelineState:reducePSO];
       mtl_setArgs(enc, input, block_sums, axis_size, block_size, num_blocks, n_orows);
       [enc dispatchThreads:MTLSizeMake(tg, grid_y, grid_z) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(reducePSO, mpsStream);
+      getMPSProfiler().endProfileKernel(reducePSO, SyncType::NONE, mpsStream);
 
       auto carryPSO = lib.getPipelineStateForFunc(carry_name);
       getMPSProfiler().beginProfileKernel(carryPSO, op_name, {input, output}, mpsStream);
       [enc setComputePipelineState:carryPSO];
       mtl_setArgs(enc, input, output, block_sums, axis_size, block_size, num_blocks, n_orows);
       [enc dispatchThreads:MTLSizeMake(tg, grid_y, grid_z) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(carryPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(carryPSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -485,7 +485,7 @@ static void scan_innermost_transposed_mps_impl(const Tensor& input, const Tensor
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, input, output, axis_size, n_cols, stride_blocks);
       [enc dispatchThreads:MTLSizeMake(tg, grid_y, grid_z) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -687,7 +687,7 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
                   threadsPerThreadgroup:MTLSizeMake(thread_group_size, 1, 1)];
       }
 
-      getMPSProfiler().endProfileKernel(scanPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(scanPSO, SyncType::NONE, mpsStream);
     }
   });
 
@@ -787,7 +787,7 @@ static void scan_with_indices_mps_impl(const Tensor& self,
                   threadsPerThreadgroup:MTLSizeMake(thread_group_size, 1, 1)];
       }
 
-      getMPSProfiler().endProfileKernel(scanPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(scanPSO, SyncType::NONE, mpsStream);
     }
   });
 

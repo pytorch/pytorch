@@ -74,7 +74,7 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                          commandBuffer:commandBuffer
                           sourceArrays:@[ inputNDArray, weightNDArray, biasNDArray ]
                       destinationArray:outNDArray];
-        getMPSProfiler().endProfileKernel(kernel, mpsStream);
+        getMPSProfiler().endProfileKernel(kernel, SyncType::NONE, mpsStream);
       } else {
         auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
           return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2] autorelease];
@@ -85,7 +85,7 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                          commandBuffer:commandBuffer
                           sourceArrays:@[ inputNDArray, weightNDArray ]
                       destinationArray:outNDArray];
-        getMPSProfiler().endProfileKernel(kernel, mpsStream);
+        getMPSProfiler().endProfileKernel(kernel, SyncType::NONE, mpsStream);
       }
     }
   });

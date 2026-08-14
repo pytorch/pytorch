@@ -245,7 +245,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
     // check if graph execution profiling is enabled
     if (isGraphProfilingEnabled) {
       // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
-      profiler.endProfileKernel(mpsGraph, this, _syncType);
+      profiler.endProfileKernel(mpsGraph, _syncType, this);
     } else {
       synchronize(_syncType);
     }

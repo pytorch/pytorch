@@ -329,7 +329,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, sorted_values, mask);
       mtl_dispatch1DJob(encoder, pso, numel);
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
 
@@ -362,7 +362,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, sorted_values, mask, scan, unique_values, bound_pos);
         mtl_dispatch1DJob(encoder, pso, numel);
-        getMPSProfiler().endProfileKernel(pso, stream);
+        getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
       }
 
       if (return_counts) {
@@ -371,7 +371,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, bound_pos, counts, static_cast<uint64_t>(num_unique), static_cast<uint64_t>(numel));
         mtl_dispatch1DJob(encoder, pso, num_unique);
-        getMPSProfiler().endProfileKernel(pso, stream);
+        getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
       }
 
       // For the sorted case we scatter via the sort permutation. For
@@ -383,7 +383,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, sort_idx, scan, inverse);
         mtl_dispatch1DJob(encoder, pso, numel);
-        getMPSProfiler().endProfileKernel(pso, stream);
+        getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
       }
     }
   });

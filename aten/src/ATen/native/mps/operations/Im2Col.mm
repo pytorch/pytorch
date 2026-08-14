@@ -106,7 +106,7 @@ static void im2col_out_mps_template(Tensor& output,
       });
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-      getMPSProfiler().endProfileKernel(im2colPSO, stream);
+      getMPSProfiler().endProfileKernel(im2colPSO, SyncType::NONE, stream);
     }
   });
   if (!batched_input) {

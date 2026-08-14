@@ -141,7 +141,7 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
           [computeEncoder setComputePipelineState:pipeline_state];
           mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
           mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-          getMPSProfiler().endProfileKernel(pipeline_state, stream);
+          getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
         }
       });
     }

@@ -142,7 +142,7 @@ Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output
       mps::mtl_setArgs(computeEncoder, repeat, cumsum, result, repeat.stride(0));
       mps::mtl_dispatch1DJob(computeEncoder, pipelineState, repeat.size(0));
 
-      getMPSProfiler().endProfileKernel(pipelineState, mpsStream);
+      getMPSProfiler().endProfileKernel(pipelineState, SyncType::NONE, mpsStream);
     }
   });
   return result;

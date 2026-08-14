@@ -206,7 +206,7 @@ void encode_gemv_launch(at::mps::MPSStream* stream,
   mtl_setArgs(enc, mat, vec, out, dims, bias, alpha_beta);
   [enc dispatchThreadgroups:MTLSizeMake(launch.num_groups, 1, 1)
       threadsPerThreadgroup:MTLSizeMake(launch.threads_per_tg, 1, 1)];
-  getMPSProfiler().endProfileKernel(launch.pso, stream);
+  getMPSProfiler().endProfileKernel(launch.pso, SyncType::NONE, stream);
 }
 
 // Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
@@ -345,7 +345,7 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self_, other_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO, stream);
+      getMPSProfiler().endProfileKernel(matmulPSO, SyncType::NONE, stream);
     }
   });
   return output;
@@ -416,7 +416,7 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
       mtl_setArgs(computeEncoder, self, mat2, result, strides, sizes);
       [computeEncoder dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
                      threadsPerThreadgroup:threads_per_threadgroup];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
   return result;
@@ -458,7 +458,7 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
 
       mtl_setArgs(computeEncoder, batch1_, batch2_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO, stream);
+      getMPSProfiler().endProfileKernel(matmulPSO, SyncType::NONE, stream);
     }
   });
   return output;
@@ -506,7 +506,7 @@ Tensor& do_metal_addmm(const Tensor& self,
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self_, other_, output, bias_, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO, stream);
+      getMPSProfiler().endProfileKernel(matmulPSO, SyncType::NONE, stream);
     }
   });
   return output;
@@ -584,7 +584,7 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
       mtl_setArgs(computeEncoder, batch1_, batch2_, output, bias_expanded, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
-      getMPSProfiler().endProfileKernel(matmulPSO, stream);
+      getMPSProfiler().endProfileKernel(matmulPSO, SyncType::NONE, stream);
     }
   });
 
@@ -1727,7 +1727,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                   rightHandSideMatrix:rightHandSideMatrix
                        solutionMatrix:solutionMatrix];
       }
-      getMPSProfiler().endProfileKernel(filter, mpsStream);
+      getMPSProfiler().endProfileKernel(filter, SyncType::NONE, mpsStream);
     }
   });
   return out;
@@ -1763,7 +1763,7 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, perm, pivots, params);
       mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 }
@@ -1934,7 +1934,7 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
       NSUInteger num_threads = threads_per_group * num_batches;
       [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
                  threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 
@@ -2076,7 +2076,7 @@ static void svd_kernel_mps(const Tensor& A,
       const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
       NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
       [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
 
@@ -2185,7 +2185,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
       const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
       NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
       [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
 
@@ -2269,7 +2269,7 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
       mtl_setArgs(compute_encoder, A, tau, params, v_work);
       [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
 }

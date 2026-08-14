@@ -488,7 +488,7 @@ static void launch_max_pool_kernel(const Tensor& input,
       mtl_setArgs(computeEncoder, input, output, indices_opt, params);
 
       mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
-      getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(maxPoolPSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -596,7 +596,7 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
       mtl_setArgs(computeEncoder, grad_input, grad_output, indices, params);
 
       mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
-      getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(maxPoolPSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -701,7 +701,7 @@ static void max_unpool_out_mps_template(const Tensor& input,
       mtl_setArgs(computeEncoder, output, input, indices, params, mpsStream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO, mpsStream);
+      getMPSProfiler().endProfileKernel(PSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -880,7 +880,7 @@ static void avg_pool_out_mps_template(const Tensor& output,
       mtl_setArgs(computeEncoder, input, output, params);
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO, mpsStream);
+      getMPSProfiler().endProfileKernel(PSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -939,7 +939,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
       mtl_setArgs(computeEncoder, grad_input, grad_output, params);
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO, mpsStream);
+      getMPSProfiler().endProfileKernel(PSO, SyncType::NONE, mpsStream);
     }
   });
 }

@@ -64,7 +64,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
                        static_cast<uint32_t>(dim));
       }
       mtl_dispatch1DJob(computeEncoder, crossPSO, numThreads);
-      getMPSProfiler().endProfileKernel(crossPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(crossPSO, SyncType::NONE, mpsStream);
     }
   });
 }

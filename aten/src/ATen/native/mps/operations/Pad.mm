@@ -374,7 +374,7 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
       mtl_setArgs(encoder, input, output_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
           threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
   if (output_needs_copy) {
@@ -418,7 +418,7 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
       mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
           threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
-      getMPSProfiler().endProfileKernel(pso, stream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, stream);
     }
   });
   if (grad_input_needs_copy) {

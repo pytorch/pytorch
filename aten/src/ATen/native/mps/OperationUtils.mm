@@ -1210,7 +1210,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         }
       }
 
-      getMPSProfiler().endProfileKernel(cplState, mpsStream);
+      getMPSProfiler().endProfileKernel(cplState, SyncType::NONE, mpsStream);
     });
   }
 }
@@ -1251,7 +1251,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
         mtl_setBytes(computeEncoder, size_outtype, 2);
         mtl_dispatch1DJob(computeEncoder, cplState, numel);
       }
-      getMPSProfiler().endProfileKernel(cplState, mpsStream);
+      getMPSProfiler().endProfileKernel(cplState, SyncType::NONE, mpsStream);
     });
   }
 }
@@ -1579,7 +1579,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
             dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel();
         mtl_dispatch1DJob(computeEncoder, binaryPSO, dispatch_n);
       }
-      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(binaryPSO, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -1675,7 +1675,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
                        types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
-      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(binaryPSO, SyncType::NONE, mpsStream);
     }
   });
 }

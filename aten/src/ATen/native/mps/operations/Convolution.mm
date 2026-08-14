@@ -143,7 +143,7 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, source, output, dimensions);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline, stream);
+      getMPSProfiler().endProfileKernel(pipeline, SyncType::NONE, stream);
     }
   });
   return output;
@@ -181,7 +181,7 @@ static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
       mtl_setArgs(encoder, weight, output, params);
       [encoder dispatchThreads:MTLSizeMake(output_channels, input_channels_per_group, kernel_depth * kernel_height)
           threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(output_channels, 256), 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline, stream);
+      getMPSProfiler().endProfileKernel(pipeline, SyncType::NONE, stream);
     }
   });
   return output;
@@ -259,7 +259,7 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pipeline,
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, activation, weights, output, params, bias ? *bias : activation);
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads_per_threadgroup];
-      getMPSProfiler().endProfileKernel(pipeline, stream);
+      getMPSProfiler().endProfileKernel(pipeline, SyncType::NONE, stream);
     }
   });
 }

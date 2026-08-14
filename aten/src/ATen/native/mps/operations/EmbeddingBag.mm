@@ -131,7 +131,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
                   stream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 
@@ -243,7 +243,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
                        params);
 
       mps::mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 
@@ -290,7 +290,7 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
       mps::mtl_setArgs(computeEncoder, output_grad, weight, indices, offset2bag, per_sample_weights_grad, params);
 
       mps::mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 

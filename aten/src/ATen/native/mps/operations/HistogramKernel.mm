@@ -137,7 +137,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
-      getMPSProfiler().endProfileKernel(histogramPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(histogramPSO, SyncType::NONE, mpsStream);
     }
   });
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});

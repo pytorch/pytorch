@@ -200,7 +200,7 @@ TORCH_IMPL_FUNC(glu_out_mps)(const Tensor& self, const int64_t dim, const Tensor
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, output, self, L);
         mtl_dispatch2DJob(computeEncoder, pso, L, outer);
-        getMPSProfiler().endProfileKernel(pso, mpsStream);
+        getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
       }
     });
     return;
@@ -252,7 +252,7 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& input, int
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, grad_input, input, grad_output, L);
         mtl_dispatch2DJob(computeEncoder, pso, L, outer);
-        getMPSProfiler().endProfileKernel(pso, mpsStream);
+        getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
       }
     });
     return grad_input;
@@ -291,7 +291,7 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& input, int
                      I_byte_offset,
                      static_cast<uint32_t>(iter_ref.ndim()));
       mtl_dispatch1DJob(computeEncoder, pso, iter_ref.numel());
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
   return grad_input;

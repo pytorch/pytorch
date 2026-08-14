@@ -346,7 +346,7 @@ void MPSProfiler::beginProfileGPUInterval(const void* handle, MPSStream* stream)
   addProfilerScheduledHandler(opInfo, stream);
 }
 
-void MPSProfiler::endProfileKernel(const void* handle, MPSStream* stream, SyncType syncType) {
+void MPSProfiler::endProfileKernel(const void* handle, SyncType syncType, MPSStream* stream) {
   // only do profiling if operation execution profiling or logging are enabled
   if (!isOperationProfilingEnabled()) {
     return;
@@ -386,9 +386,9 @@ uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
                                        const OptionalTensorRef srcTensor,
                                        const OptionalTensorRef dstTensor,
                                        size_t length,
-                                       MPSStream* stream,
                                        bool isNonBlocking,
-                                       bool usesBlitter) {
+                                       bool usesBlitter,
+                                       MPSStream* stream) {
   if (!isCopyProfilingEnabled()) {
     return 0;
   }
@@ -437,7 +437,7 @@ void MPSProfiler::addProfilerScheduledHandler(BaseInfo& info, MPSStream* stream)
   const SignpostTypes signpostType = getSignpostType(info.type);
   const os_signpost_id_t intervalSignpostId = info.intervalSignpostId;
 
-  MPSStream* profileStream = stream ? stream : getDefaultMPSStream();
+  MPSStream* profileStream = stream ? stream : getCurrentMPSStream();
   // NOTE: the following block isn't thread-safe
   [profileStream->commandBuffer() addScheduledHandler:^(id<MTLCommandBuffer> cb) {
     // begin the interval once scheduling has completed (if INCLUDE_SCHEDULE_INTERVAL flag is disabled)
@@ -476,7 +476,7 @@ void MPSProfiler::addProfilerCompletedHandler(BaseInfo& info, SyncType syncType,
   info.eventSignpostId = 0;
   hasPendingCompletionHandlers = true;
 
-  MPSStream* profileStream = stream ? stream : getDefaultMPSStream();
+  MPSStream* profileStream = stream ? stream : getCurrentMPSStream();
   // NOTE: the following block isn't thread-safe
   [profileStream->commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
     CFTimeInterval gpuTime = cb.GPUEndTime > cb.GPUStartTime ? (cb.GPUEndTime - cb.GPUStartTime) * 1000.0 : 0.;

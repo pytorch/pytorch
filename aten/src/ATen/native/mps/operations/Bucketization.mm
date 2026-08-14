@@ -65,7 +65,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadGroupSize];
 
-      getMPSProfiler().endProfileKernel(bucketizationPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(bucketizationPSO, SyncType::NONE, mpsStream);
     }
   });
 }

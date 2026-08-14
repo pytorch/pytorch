@@ -87,7 +87,7 @@ static void group_norm_forward(const Tensor& X,
       mtl_setArgs(compute_encoder, Y, mean, rstd, X, gamma_opt, beta_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 }
@@ -157,7 +157,7 @@ static void group_norm_backward_x(const Tensor& dY,
       mtl_setArgs(compute_encoder, dX, dY, X, mean, rstd, gamma_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 }
@@ -204,7 +204,7 @@ static void group_norm_backward_affine(const Tensor& dY,
       mtl_setArgs(compute_encoder, dgamma, dbeta, dY, X, mean, rstd, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(C, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+      getMPSProfiler().endProfileKernel(pipeline_state, SyncType::NONE, stream);
     }
   });
 }

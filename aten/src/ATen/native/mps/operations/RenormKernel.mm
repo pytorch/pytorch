@@ -52,7 +52,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       mtl_setArgs(computeEncoder, norm, factor, maxnorm.to<float>());
       mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
-      getMPSProfiler().endProfileKernel(renormPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(renormPSO, SyncType::NONE, mpsStream);
     }
   });
   at::mul_outf(self, factor, const_cast<Tensor&>(out));

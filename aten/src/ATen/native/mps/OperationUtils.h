@@ -758,7 +758,7 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
 
-      getMPSProfiler().endProfileKernel(cplState, mpsStream);
+      getMPSProfiler().endProfileKernel(cplState, SyncType::NONE, mpsStream);
     });
   }
 }
@@ -849,7 +849,7 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
             computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
-      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(binaryPSO, SyncType::NONE, mpsStream);
     }
   });
 }

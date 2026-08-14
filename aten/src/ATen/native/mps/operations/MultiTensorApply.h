@@ -284,7 +284,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
       }
 
-      getMPSProfiler().endProfileKernel(fusedOptimizerPSO, mpsStream);
+      getMPSProfiler().endProfileKernel(fusedOptimizerPSO, SyncType::NONE, mpsStream);
     }
   });
 }

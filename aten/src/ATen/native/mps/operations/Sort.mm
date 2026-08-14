@@ -215,21 +215,21 @@ static void sort_radix(const Tensor& input,
           [enc setComputePipelineState:count_scan_pso];
           mtl_setArgs(enc, k_in, histograms, dims, descending);
           [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-          getMPSProfiler().endProfileKernel(count_scan_pso, mpsStream);
+          getMPSProfiler().endProfileKernel(count_scan_pso, SyncType::NONE, mpsStream);
         } else {
           getMPSProfiler().beginProfileKernel(count_pso, count_kernel, {k_in}, mpsStream);
           [enc setComputePipelineState:count_pso];
           mtl_setArgs(enc, k_in, histograms, dims, descending);
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1)
               threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-          getMPSProfiler().endProfileKernel(count_pso, mpsStream);
+          getMPSProfiler().endProfileKernel(count_pso, SyncType::NONE, mpsStream);
 
           if (!use_fused_scan) {
             getMPSProfiler().beginProfileKernel(scan_pso, "radix_scan", {histograms}, mpsStream);
             [enc setComputePipelineState:scan_pso];
             mtl_setArgs(enc, histograms, n_entries);
             [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
-            getMPSProfiler().endProfileKernel(scan_pso, mpsStream);
+            getMPSProfiler().endProfileKernel(scan_pso, SyncType::NONE, mpsStream);
           }
         }
 
@@ -246,7 +246,7 @@ static void sort_radix(const Tensor& input,
           mtl_setArgs(enc, k_in, i_in, k_out_buf, i_out_buf, histograms, dims, flags);
         }
         [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-        getMPSProfiler().endProfileKernel(pso, mpsStream);
+        getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
 
         ping = !ping;
       }
@@ -296,7 +296,7 @@ static void sort_single_block(const Tensor& input,
         mtl_setArgs(enc, input, values, indices, sort_size, strides, descending);
       }
       [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -380,7 +380,7 @@ static void sort_multi_block(const Tensor& input,
       [enc setComputePipelineState:block_pso];
       mtl_setArgs(enc, work_in, buf_v0, buf_i0, sort_size, std::array<int64_t, 2>{stride_sort, stride_seg}, descending);
       [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-      getMPSProfiler().endProfileKernel(block_pso, mpsStream);
+      getMPSProfiler().endProfileKernel(block_pso, SyncType::NONE, mpsStream);
 
       // Stage 2: pairwise merge passes, doubling run length each round
       if (n_blocks > 1) {
@@ -408,7 +408,7 @@ static void sort_multi_block(const Tensor& input,
             mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc);
           }
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-          getMPSProfiler().endProfileKernel(pso, mpsStream);
+          getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
         }
       }
     }
@@ -572,7 +572,7 @@ static void median_sort_gather(const Tensor& in_l, const Tensor& out_vals, const
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, sorted_vals, sorted_idxs, out_vals, out_idxs, static_cast<uint32_t>(sort_size), ignore_nan);
       mtl_dispatch1DJob(enc, pso, n_rows);
-      getMPSProfiler().endProfileKernel(pso, mpsStream);
+      getMPSProfiler().endProfileKernel(pso, SyncType::NONE, mpsStream);
     }
   });
 }
@@ -664,7 +664,7 @@ static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool 
         mtl_setArgs(enc, out_val, state, hist, numel, first, last, ignore_nan);
         mtl_dispatch1DJob(enc, pick_pso, 1);
       }
-      getMPSProfiler().endProfileKernel(hist_pso, mpsStream);
+      getMPSProfiler().endProfileKernel(hist_pso, SyncType::NONE, mpsStream);
     }
   });
 }
