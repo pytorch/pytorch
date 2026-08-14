@@ -75,7 +75,9 @@ from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
+    DisablePointwiseLoop,
     DisableReduction,
+    EnablePointwiseLoop,
     EnableReduction,
     NodeScheduleEntry,
     NodeScheduleMarker,
@@ -541,7 +543,19 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.features = features
         self.mutations = features.get_mutations()
         self.body = IndentedBuffer()
-        self.indexing_code = IndentedBuffer()
+        self._reduction_indexing_code = IndentedBuffer()
+        self.indexing_code = self._reduction_indexing_code
+
+        # Pointwise-specific sections for polyhedral fusion
+        self.pointwise_indexing_code = IndentedBuffer()
+        self.pointwise_loads = IndentedBuffer()
+        self.pointwise_compute = IndentedBuffer()
+        self.pointwise_stores = IndentedBuffer()
+        # Store references to parent class buffers
+        self._reduction_loads = self.loads
+        self._reduction_compute = self.compute
+        self._reduction_stores = self.stores
+
         self.numels = {
             prefix: V.graph.sizevars.simplify(val) for prefix, val in tiling.items()
         }
@@ -567,6 +581,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
         self.is_native_matmul = False
+        self.pointwise_loop_numel: sympy.Expr | None = None
         if config.triton.native_matmul:
             for node in self.features.node_schedule:
                 if (
@@ -790,28 +805,65 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
-    def disable_reduction(self) -> contextlib.AbstractContextManager[None]:
+    @contextlib.contextmanager
+    def use_pointwise_sections(self):
+        """Context manager to route codegen to pointwise-specific sections."""
+        saved_indexing = self.indexing_code
+        saved_loads = self.loads
+        saved_compute = self.compute
+        saved_stores = self.stores
+        saved_cse = self.cse
+
+        self.indexing_code = self.pointwise_indexing_code
+        self.loads = self.pointwise_loads
+        self.compute = self.pointwise_compute
+        self.stores = self.pointwise_stores
+        self.cse = saved_cse.scoped_copy()
+
+        try:
+            yield
+        finally:
+            self.indexing_code = saved_indexing
+            self.loads = saved_loads
+            self.compute = saved_compute
+            self.stores = saved_stores
+            self.cse = saved_cse
+
+    def _disable_reduction(self):
+        """Disable reduction mode (called when entering DisableReduction section)"""
+        if not self.features.is_reduction():
+            if self.inside_reduction:
+                raise AssertionError("expected not self.inside_reduction")
+            return
+
         should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
+        if should_flush:
+            # calling codegen_body() will flush all the pending buffers
+            # and write out a reduction loop
+            self.codegen_body()
+        self.inside_reduction = False
+
+    def _enable_reduction(self):
+        """Re-enable reduction mode (called when exiting DisableReduction section)"""
+        if not self.features.is_reduction():
+            return
+
+        should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
+        if should_flush:
+            # flush out any code before opening the next loop
+            self.codegen_body()
+        self.inside_reduction = True
+
+    def disable_reduction(self) -> contextlib.AbstractContextManager[None]:
+        """Legacy context manager wrapper for backward compatibility"""
 
         @contextlib.contextmanager
         def ctx():
-            if not self.features.is_reduction():
-                if self.inside_reduction:
-                    raise AssertionError("expected not self.inside_reduction")
-                yield
-                return
-            if should_flush:
-                # calling codegen_body() will flush all the pending buffers
-                # and write out a reduction loop
-                self.codegen_body()
-            self.inside_reduction = False
+            self._disable_reduction()
             try:
                 yield
-                if should_flush:
-                    # flush out any code before opening the next loop
-                    self.codegen_body()
             finally:
-                self.inside_reduction = True
+                self._enable_reduction()
 
         return ctx()
 
@@ -828,7 +880,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     @staticmethod
     def _split_iteration_ranges(
-        groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
+        groups: Iterable[sympy.Expr],
+        lengths: Sequence[Sequence[sympy.Expr]],
+        allow_partial: bool = False,
     ) -> tuple[
         list[list[sympy.Expr]], list[list[Callable[[list[sympy.Expr]], sympy.Expr]]]
     ]:
@@ -963,15 +1017,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
-            # Non-unit leftover extents mean the node's iteration space does not
-            # tile onto the kernel groups -- e.g. fusing an epilogue whose row
-            # count is a strict sub-multiple of a template's tiling ([s, N] into
-            # [K*s, N]). Raise CantSplit (consistent with the divisibility exits
-            # in add_range above) so callers like is_compatible and
-            # Scheduler.speedup_by_fusion skip this fusion and fall back to
-            # unfused codegen instead of hard-failing the whole compile.
-            raise CantSplit(remaining, lengths)
+        if allow_partial:
+            if not all(V.graph.sizevars.statically_known_leq(1, s) for s in remaining):
+                raise AssertionError(
+                    f"over-allocated iteration space: remaining={remaining}, "
+                    f"groups may be smaller than node ranges"
+                )
+        else:
+            if not all(
+                V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
+            ):
+                raise CantSplit(remaining, lengths)
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1030,14 +1086,22 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Create a dictionary mapping each range tree prefix to its total number of elements
         tiling = {rt.prefix: rt.numel for rt in self.range_trees}
 
-        # If we're not inside a reduction loop, set all reduction dimensions to 1
-        # This effectively disables reduction dimensions when not needed
         if not self.inside_reduction:
             for prefix in tiling:
                 if prefix_is_reduction(prefix):
                     tiling[prefix] = sympy.S.One
 
-        # Extract the values from the tiling dictionary to create groups
+        # pointwise node after DisableReduction needs the
+        # reduction dim set to its actual iteration size
+        if (
+            config.polyhedral_fusion
+            and V.graph.is_inference
+            and self.pointwise_loop_numel is not None
+        ):
+            for prefix in tiling:
+                if prefix_is_reduction(prefix):
+                    tiling[prefix] = self.pointwise_loop_numel
+                    break
         groups = [*tiling.values()]
 
         # Map the kernel's group structure to the node's sizes and set the ranges
@@ -1068,6 +1132,19 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             for x, g in zip(lengths, groups)
         ):
             return set_ranges(*lengths)
+
+        if config.polyhedral_fusion and V.graph.is_inference:
+            try:
+                new_ranges, return_getters_groups = cls._split_iteration_ranges(
+                    groups, lengths, allow_partial=True
+                )
+                itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
+                return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
+            except CantSplit:
+                perf_hint_log.debug(
+                    "CantSplit fallback: groups=%s, lengths=%s", groups, lengths
+                )
+                return set_ranges(*lengths)
 
         new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
@@ -2055,6 +2132,7 @@ class SIMDScheduling(BaseScheduling):
     """
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
+    supports_polyhedral: bool = False
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -2230,9 +2308,68 @@ class SIMDScheduling(BaseScheduling):
                     return is_reduction_tiling_valid
                 return True
 
-            if numel1 != numel2:
-                why("nodes numel incompatibility")
-            return numel1 == numel2
+            if numel1 == numel2:
+                return True
+
+            if (
+                config.polyhedral_fusion
+                and V.graph.is_inference
+                and self.supports_polyhedral
+            ):
+                reduction_writes = [
+                    w for w in node2.read_writes.writes if isinstance(w, MemoryDep)
+                ]
+                pointwise_reads = list(node1.read_writes.reads)
+
+                reduction_output_names = OrderedSet([w.name for w in reduction_writes])
+                consuming_reads = [
+                    r
+                    for r in pointwise_reads
+                    if isinstance(r, MemoryDep) and r.name in reduction_output_names
+                ]
+
+                if consuming_reads:
+                    for read_dep in consuming_reads:
+                        write_dep = next(
+                            w for w in reduction_writes if w.name == read_dep.name
+                        )
+
+                        if not self._check_index_compatibility(write_dep, read_dep):
+                            why(
+                                "index incompatibility between reduction output and pointwise consumer"
+                            )
+                            return False
+
+                    reduction_write_dep_names = OrderedSet(
+                        w.name for w in reduction_writes
+                    )
+                    for sn in node1.get_nodes():
+                        _, (sn_numel, sn_rnumel) = sn.group
+                        fits_main = (sn_numel == numel2 and sn_rnumel == rnumel2) or (
+                            sn_numel == numel2 * rnumel2 and sn_rnumel == 1
+                        )
+                        if fits_main:
+                            continue
+                        if sn_rnumel != 1:
+                            why("sub-node has reduction dim, cannot schedule")
+                            return False
+                        sn_reads = [
+                            r
+                            for r in sn.read_writes.reads
+                            if isinstance(r, MemoryDep)
+                            and r.name in reduction_write_dep_names
+                        ]
+                        if not sn_reads:
+                            why(
+                                "sub-node does not read reduction output, "
+                                "cannot place outside reduction"
+                            )
+                            return False
+
+                    return True
+
+            why("nodes numel incompatibility")
+            return False
 
         if not node1.is_reduction() or node2.is_reduction():
             raise AssertionError(
@@ -2244,13 +2381,93 @@ class SIMDScheduling(BaseScheduling):
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
 
+    def _compute_fusion_shift(self, write_dep, read_dep):
+        """Compute the shift vector for fusing a producer write with a consumer read.
+
+        Returns a dict {read_var: shift} or None if fusion is structurally illegal.
+        A shift of 0 on all dims means the consumer's domain is a subset of the
+        producer's and the shared buffer can stay in registers.
+        """
+        write_ranges = write_dep.ranges
+        read_ranges = read_dep.ranges
+        write_vars = list(write_ranges.keys())
+        read_vars = list(read_ranges.keys())
+        sv = V.graph.sizevars
+
+        shift_vector: dict[sympy.Symbol, sympy.Expr] = {}
+
+        for i, write_var in enumerate(write_vars):
+            if write_var not in write_dep.index.free_symbols:
+                continue
+            if i >= len(read_vars):
+                return None
+            read_var = read_vars[i]
+            if read_var not in read_dep.index.free_symbols:
+                return None
+
+            w_bound = write_ranges[write_var]
+            r_bound = read_ranges[read_var]
+
+            if sv.statically_known_leq(r_bound, w_bound):
+                shift_vector[read_var] = sv.simplify(w_bound - r_bound)
+            else:
+                return None
+
+        return shift_vector
+
+    @staticmethod
+    def _is_dense_uniform(dep):
+        """Check that dep has dense, contiguous access with uniform (non-indirect) indexing."""
+        if dep.is_indirect():
+            return False
+        return dep.index.free_symbols <= OrderedSet(dep.var_names)
+
+    def _node_reads_subset_of_reduction(self, node, reduction_write_deps):
+        """Check that all of node's reads from reduction outputs have zero-shift compatibility."""
+        reads = [
+            r
+            for r in node.read_writes.reads
+            if isinstance(r, MemoryDep) and r.name in reduction_write_deps
+        ]
+        if not reads:
+            return False
+        for read_dep in reads:
+            write_dep = reduction_write_deps[read_dep.name]
+            if not self._is_dense_uniform(write_dep) or not self._is_dense_uniform(
+                read_dep
+            ):
+                return False
+            shift = self._compute_fusion_shift(write_dep, read_dep)
+            if shift is None:
+                return False
+        return True
+
+    def _check_index_compatibility(self, write_dep, read_dep):
+        """Boolean wrapper: True if a valid zero-shift fusion exists."""
+        shift = self._compute_fusion_shift(write_dep, read_dep)
+        if shift is None:
+            return False
+
+        # An empty shift means no dimensions were checked (e.g. scalar
+        # reduction output).
+        if len(shift) == 0:
+            return False
+
+        # todo: Shift does not need to be 0 in general.
+        # This check will be removed in next phase of implementation.
+        return all(v == 0 for v in shift.values())
+
     def generate_node_schedule(self, nodes, numel, rnumel):
+        """Order nodes into a linear schedule with reduction/pointwise loop markers."""
         node_schedule: list[Any] = []
         done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        reduction_write_deps: dict[str, MemoryDep] = {}
         current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        all_reduction_names: OrderedSet[str] = OrderedSet()
+        all_reduction_write_deps: dict[str, MemoryDep] = {}
         maybe_split_index: int | None = None
 
         def fits_in_main_body(n):
@@ -2261,7 +2478,19 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_outside_reduction(n):
             _, (node_numel, node_rnumel) = n.group
-            return node_numel == numel and node_rnumel == 1 and rnumel != 1
+            if node_rnumel != 1 or rnumel == 1:
+                return False
+            if node_numel == numel:
+                return True
+            if not (
+                config.polyhedral_fusion
+                and V.graph.is_inference
+                and self.supports_polyhedral
+            ):
+                return False
+            if not (all_reduction_names & n.ancestors):
+                return False
+            return self._node_reads_subset_of_reduction(n, all_reduction_write_deps)
 
         def expect_improved_memory_usage(n):
             for read in n.read_writes.reads:
@@ -2283,6 +2512,11 @@ class SIMDScheduling(BaseScheduling):
                 and not isinstance(n.node.data, ir.Scan)
             ):
                 not_ready_yet_nodes.add(n.get_name())
+                all_reduction_names.add(n.get_name())
+                for w in n.read_writes.writes:
+                    if isinstance(w, MemoryDep):
+                        reduction_write_deps[w.name] = w
+                        all_reduction_write_deps[w.name] = w
             else:  # this node is available within the loop
                 current_loop_buffer_usage.update([x.name for x in n.read_writes.writes])
 
@@ -2300,6 +2534,7 @@ class SIMDScheduling(BaseScheduling):
             yield
             node_schedule.append(EnableReduction)
             not_ready_yet_nodes.clear()
+            reduction_write_deps.clear()
             current_loop_buffer_usage.clear()
 
         def requires_closing_previous_reduction(node, node_schedule):
@@ -2338,13 +2573,53 @@ class SIMDScheduling(BaseScheduling):
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
-                    node_schedule.append(node)
+                    if (
+                        config.polyhedral_fusion
+                        and V.graph.is_inference
+                        and self.supports_polyhedral
+                    ):
+                        _, (node_numel_here, _) = node.group
+                        inner_numel = V.graph.sizevars.simplify(
+                            node_numel_here // numel
+                        )
+                        if not V.graph.sizevars.statically_known_equals(
+                            inner_numel, sympy.S.One
+                        ):
+                            node_schedule.append(EnablePointwiseLoop(inner_numel))
+                            node_schedule.append(node)
+                            node_schedule.append(DisablePointwiseLoop)
+                        else:
+                            node_schedule.append(node)
+                    else:
+                        node_schedule.append(node)
             else:
                 raise NotImplementedError(
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
+        node_schedule = self._batch_pointwise_markers(node_schedule)
         return node_schedule
+
+    @staticmethod
+    def _batch_pointwise_markers(schedule):
+        """Merge consecutive DisablePointwiseLoop/EnablePointwiseLoop pairs.
+
+        Batching shares the CSE scope across consecutive pointwise nodes,
+        eliminating duplicate loads.
+        """
+        result = []
+        i = 0
+        while i < len(schedule):
+            if (
+                i + 1 < len(schedule)
+                and schedule[i] is DisablePointwiseLoop
+                and isinstance(schedule[i + 1], EnablePointwiseLoop)
+            ):
+                i += 2
+            else:
+                result.append(schedule[i])
+                i += 1
+        return result
 
     def codegen_mix_order_reduction(self, node):
         node1, node2 = node.node1, node.node2
@@ -3255,18 +3530,30 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
         with kernel:
-            stack = contextlib.ExitStack()
+            # Use separate ExitStacks for reduction and pointwise contexts
+            # so close() doesn't accidentally close both
+            reduction_stack = contextlib.ExitStack()
+            pointwise_stack = contextlib.ExitStack()
             all_indexing = {}
 
             # First pass to collect indexing and decide inplace updates
             for node in node_schedule:
                 if node is DisableReduction:
-                    stack.enter_context(kernel.disable_reduction())
+                    reduction_stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
-                    stack.close()
+                    reduction_stack.close()
+                    reduction_stack = contextlib.ExitStack()
+                elif isinstance(node, EnablePointwiseLoop):
+                    kernel.pointwise_loop_numel = node.loop_numel
+                    pointwise_stack.enter_context(kernel.use_pointwise_sections())
+                elif node is DisablePointwiseLoop:
+                    pointwise_stack.close()
+                    pointwise_stack = contextlib.ExitStack()
                 else:
                     node.decide_inplace_update()
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node_ranges = node.get_ranges()
+                    index_vars = kernel.split_and_set_ranges(node_ranges)
+
                     all_indexing.update(
                         dict.fromkeys(
                             node._body.indexing_from_args(index_vars).values()
@@ -3275,17 +3562,35 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.finalize_indexing(all_indexing.keys())
 
+            # Clear pointwise buffers before second pass
+            # (first pass may have written to them during split_and_set_ranges)
+            kernel.pointwise_indexing_code.clear()
+            kernel.pointwise_loads.clear()
+            kernel.pointwise_compute.clear()
+            kernel.pointwise_stores.clear()
+
+            # Reset stacks for second pass
+            reduction_stack = contextlib.ExitStack()
+            pointwise_stack = contextlib.ExitStack()
+
             # Second pass to do codegen
             for node in node_schedule:
                 if node is DisableReduction:
-                    stack.enter_context(kernel.disable_reduction())
+                    reduction_stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
-                    stack.close()
+                    reduction_stack.close()
+                    reduction_stack = contextlib.ExitStack()
+                elif isinstance(node, EnablePointwiseLoop):
+                    kernel.pointwise_loop_numel = node.loop_numel
+                    pointwise_stack.enter_context(kernel.use_pointwise_sections())
+                elif node is DisablePointwiseLoop:
+                    pointwise_stack.close()
+                    pointwise_stack = contextlib.ExitStack()
                 else:
-                    # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
                     convert_index_expr_to_value_expr(node._body)
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node_ranges = node.get_ranges()
+                    index_vars = kernel.split_and_set_ranges(node_ranges)
                     node.codegen(index_vars)
 
     def _codegen_single_template(

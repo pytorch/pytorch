@@ -290,6 +290,10 @@ epilogue_fusion_first = False
 # do epilogue fusions for user defined triton kernels
 epilogue_fusion_user_defined_triton_kernel = False
 
+# fuse reduction with pointwise consumers that iterate over a subset of
+# the reduction's dimensions (e.g. RMSNorm + chunk pattern)
+polyhedral_fusion = True
+
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
