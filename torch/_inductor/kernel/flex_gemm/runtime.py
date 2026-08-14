@@ -152,14 +152,9 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
-        if (
-            self.physical_span > 1
-            and self.prepass is None
-            and not self.fragment_reduced
-        ):
+        if self.physical_span > 1 and not self.fragment_reduced:
             raise RuntimeError(
-                "FlexGEMM pair-domain reductions require a prepass or a "
-                "fragment-reduced callback"
+                "FlexGEMM pair-domain reductions require a fragment-reduced callback"
             )
         if self.feeds_main and not (
             self.axis == 1 and self.group <= LOCAL_REDUCE_FRAGMENT_WIDTH
@@ -308,10 +303,6 @@ def flex_gemm_epimod(
                     callable(store_finalize)
                     and len(inspect.signature(store_finalize).parameters) == 2
                 ):
-                    if local_reduce.physical_span > 1:
-                        raise RuntimeError(
-                            "pair-domain local-reduce stores do not support binary finalizers"
-                        )
                     if output_layout is not None:
                         raise RuntimeError(
                             "local-reduce output layouts do not support binary finalizers"
@@ -529,6 +520,16 @@ def gemm_epimod(
         # Layout callbacks predicate logical stores but do not own padded bytes.
         if initialize_local_reduce_out is not None:
             initialize_local_reduce_out.zero_()
+        blockscaled_kwargs = (
+            {}
+            if SFA is None
+            else {
+                "SFA": SFA,
+                "SFB": SFB,
+                "bs_format_a": bs_format_a,
+                "bs_format_b": bs_format_b,
+            }
+        )
         result = epimod(
             a,
             b,
@@ -539,13 +540,10 @@ def gemm_epimod(
             config=None,
             config_constraints=config_constraints,
             tuned=tuned,
-            SFA=SFA,
-            SFB=SFB,
-            bs_format_a=bs_format_a,
-            bs_format_b=bs_format_b,
             concat_layout=(
                 None if main_transform is None else main_transform.concat_layout
             ),
+            **blockscaled_kwargs,
             **operands,
         )
     return result["main" if main_transform is not None else "D"]

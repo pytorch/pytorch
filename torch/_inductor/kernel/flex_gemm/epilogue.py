@@ -48,6 +48,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
     local_reduce_unsupported_tensorssa_error,
+    NESTED_TENSORSSA_PACKED_STORAGE_SPAN,
+    NESTED_TENSORSSA_PHYSICAL_SPAN,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
@@ -163,25 +165,97 @@ class FlexGemmLocalReduceMatch:
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmLocalReduceOutputStorage:
+    """Describe the physical storage selected for a returned local reduction."""
+
+    source: torch.fx.Node
+    layout: FlexGemmOutputLayout
+    nodes: tuple[torch.fx.Node, ...]
+
+
+def match_flex_gemm_local_reduce_output_storage(
+    node: torch.fx.Node,
+) -> FlexGemmLocalReduceOutputStorage | None:
+    """Recognize a supported terminal storage transform for a local reduction."""
+    if node.target is torch.ops.flex_gemm.to_blocked.default:
+        source = node.args[0] if node.args else None
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM output transform: {node.format_node()}"
+            )
+        return FlexGemmLocalReduceOutputStorage(source, BLOCKED_128X4, (node,))
+
+    if node.target is torch.ops.aten.clone.default:
+        if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
+            return None
+        transpose = node.args[0]
+        if not isinstance(transpose, torch.fx.Node) or tuple(transpose.users) != (
+            node,
+        ):
+            return None
+        nodes = (transpose, node)
+    else:
+        transpose = node
+        nodes = (node,)
+
+    if transpose.target not in (
+        torch.ops.aten.t.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.permute.default,
+    ):
+        return None
+    source = transpose.args[0]
+    if not isinstance(source, torch.fx.Node):
+        return None
+
+    source_meta = source.meta.get("val")
+    transpose_meta = transpose.meta.get("val")
+    output_meta = node.meta.get("val")
+    if (
+        not isinstance(source_meta, torch.Tensor)
+        or not isinstance(transpose_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or source_meta.ndim != 2
+        or not statically_known_shape_equal(output_meta.shape, source_meta.shape[::-1])
+        or not statically_known_shape_equal(
+            transpose_meta.stride(), source_meta.stride()[::-1]
+        )
+        or not output_meta.is_contiguous()
+        or not node.users
+        or any(user.op != "output" for user in node.users)
+    ):
+        return None
+    return FlexGemmLocalReduceOutputStorage(source, TRANSPOSED, nodes)
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmLocalReduceStore:
     """Describe a logical reduction value and its returned physical carrier."""
 
     node: torch.fx.Node
-    value_node: torch.fx.Node
-    output_layout: FlexGemmOutputLayout | None = None
-    owned_nodes: tuple[torch.fx.Node, ...] = ()
+    output_storage: FlexGemmLocalReduceOutputStorage | None = None
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.node, torch.fx.Node)
-            or not isinstance(self.value_node, torch.fx.Node)
-            or (
-                self.output_layout is not None
-                and not isinstance(self.output_layout, FlexGemmOutputLayout)
+        storage = self.output_storage
+        if not isinstance(self.node, torch.fx.Node) or (
+            storage is not None
+            and (
+                not isinstance(storage, FlexGemmLocalReduceOutputStorage)
+                or not storage.nodes
+                or storage.nodes[-1] is not self.node
             )
-            or not all(isinstance(node, torch.fx.Node) for node in self.owned_nodes)
         ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
+
+    @property
+    def value_node(self) -> torch.fx.Node:
+        """Return the logical value written through the optional storage transform."""
+        return self.node if self.output_storage is None else self.output_storage.source
+
+    @property
+    def output_layout(self) -> FlexGemmOutputLayout | None:
+        """Return the selected physical storage layout."""
+        return None if self.output_storage is None else self.output_storage.layout
 
 
 @dataclasses.dataclass(frozen=True)
@@ -287,11 +361,14 @@ class FlexGemmOutputPlan:
         """Map terminal wrappers to aliases or backend-owned omissions."""
         rewrites = dict.fromkeys(self.output_storage_nodes, self.output_storage)
         store = None if self.local_reduce is None else self.local_reduce.store
-        if store is not None:
-            rewrites.update(dict.fromkeys(store.owned_nodes))
+        if store is not None and store.output_storage is not None:
+            rewrites.update(dict.fromkeys(store.output_storage.nodes))
         if self.indexed_output is not None:
             rewrites.update(dict.fromkeys(self.indexed_output.owned_nodes))
         return rewrites
+
+
+FlexGemmEpilogueGraph = GemmEpilogueGraph
 
 
 def bind_terminal_output_storage(
@@ -350,7 +427,11 @@ def flex_gemm_indexed_output_store(
     main_output: torch.fx.Node,
     aux: torch.fx.Node,
 ) -> FlexGemmIndexedOutputStore | None:
-    """Match a terminal ``main.gather(1, indices[:, None]).squeeze(1)``."""
+    """Match one terminal row gather.
+
+    Return ``None`` when the graph is not this topology. Raise when a matched
+    gather violates a FlexGEMM legality requirement.
+    """
     main_meta = main_output.meta.get("val")
     aux_meta = aux.meta.get("val")
     if (
@@ -424,47 +505,6 @@ def flex_gemm_indexed_output_store(
     )
 
 
-def contiguous_transpose_output_source(
-    node: torch.fx.Node,
-) -> tuple[torch.fx.Node, tuple[torch.fx.Node, ...]] | None:
-    """Match a terminal two-dimensional transpose materialized contiguously."""
-    if node.target is torch.ops.aten.clone.default:
-        if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
-            return None
-        transpose = node.args[0]
-        if not isinstance(transpose, torch.fx.Node) or tuple(transpose.users) != (
-            node,
-        ):
-            return None
-        owned_nodes = (transpose, node)
-    else:
-        transpose = node
-        owned_nodes = (node,)
-
-    if transpose.target is not torch.ops.aten.permute.default:
-        return None
-    source, permutation = transpose.args
-    if (
-        not isinstance(permutation, (tuple, list))
-        or tuple(permutation) != (1, 0)
-        or not isinstance(source, torch.fx.Node)
-    ):
-        return None
-
-    source_meta = source.meta.get("val")
-    output_meta = node.meta.get("val")
-    if (
-        not isinstance(source_meta, torch.Tensor)
-        or not isinstance(output_meta, torch.Tensor)
-        or source_meta.ndim != 2
-        or not output_meta.is_contiguous()
-        or not statically_known_shape_equal(output_meta.shape, source_meta.shape[::-1])
-        or any(user.op != "output" for user in node.users)
-    ):
-        return None
-    return source, owned_nodes
-
-
 @dataclasses.dataclass
 class FlexGemmLocalReduceAnalysis:
     """Collect grouped TensorSSA layouts and supported local-reduction matches.
@@ -480,7 +520,7 @@ class FlexGemmLocalReduceAnalysis:
         matches: FX values matched to a supported grouped local reduction.
     """
 
-    graph: GemmEpilogueGraph
+    graph: FlexGemmEpilogueGraph
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout] = dataclasses.field(
         default_factory=dict
     )
@@ -508,7 +548,7 @@ class FlexGemmLocalReduceAnalysis:
         """Build shared dependency and reduction state in one topological pass."""
         gemm_shape = tensor_meta_shape(gemm) if gemm is not None else None
         analysis = cls(
-            GemmEpilogueGraph.from_nodes(tuple(graph_module.graph.nodes)),
+            FlexGemmEpilogueGraph.from_nodes(tuple(graph_module.graph.nodes)),
             gemm=gemm,
             gemm_shape=gemm_shape,
         )
@@ -606,15 +646,18 @@ class FlexGemmLocalReduceAnalysis:
             or source_shape is None
             or output_shape is None
             or structural_dim is None
+            or structural_dim.symbolic is not None
             or structural_index is None
+            or structural_index.symbolic is not None
             or structural_dim.value % len(source_shape) != len(source_shape) - 1
         ):
             return False
         storage_span = FlexGemmStructuralInt.from_value(source_shape[-1])
         if (
             storage_span is None
-            or storage_span.value <= 1
-            or fact.physical_span * storage_span.value not in (2, 4)
+            or storage_span.symbolic is not None
+            or storage_span.value != NESTED_TENSORSSA_PACKED_STORAGE_SPAN
+            or fact.physical_span != NESTED_TENSORSSA_PHYSICAL_SPAN
             or not -storage_span.value <= structural_index.value < storage_span.value
         ):
             return False
@@ -740,7 +783,11 @@ class FlexGemmLocalReduceAnalysis:
         fact = self.tensorssa_facts.get(source)
         if fact is None:
             return 1
-        if not fact.complete or fact.storage_span != 1 or fact.physical_span != 2:
+        if (
+            not fact.complete
+            or fact.storage_span != 1
+            or fact.physical_span != NESTED_TENSORSSA_PHYSICAL_SPAN
+        ):
             raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
         return fact.physical_span
 
@@ -1125,20 +1172,8 @@ class FlexGemmLocalReduceAnalysis:
         aux: torch.fx.Node,
     ) -> FlexGemmOutputLocalReducePlan | None:
         """Plan a matched reduction returned through one physical layout."""
-        transposed = contiguous_transpose_output_source(aux)
-        if aux.target is torch.ops.flex_gemm.to_blocked.default:
-            value_node = aux.args[0] if aux.args else None
-            output_layout = BLOCKED_128X4
-            owned_nodes = (aux,)
-        elif transposed is not None:
-            value_node, owned_nodes = transposed
-            output_layout = TRANSPOSED
-        else:
-            value_node = aux
-            output_layout = None
-            owned_nodes = ()
-        if not isinstance(value_node, torch.fx.Node):
-            return None
+        output_storage = match_flex_gemm_local_reduce_output_storage(aux)
+        value_node = aux if output_storage is None else output_storage.source
         match = self.matches.get(value_node) or self.feed_main_plan(value_node)
         output_meta = (
             output.meta.get("val") if isinstance(output, torch.fx.Node) else None
@@ -1166,15 +1201,10 @@ class FlexGemmLocalReduceAnalysis:
         )
         if not statically_known_shape_equal(expected_aux_shape, value_meta.shape):
             return None
-        if output_layout is not None:
-            output_layout.validate_geometry(match.geometry)
+        if output_storage is not None:
+            output_storage.layout.validate_geometry(match.geometry)
         return match.to_plan(
-            store=FlexGemmLocalReduceStore(
-                aux,
-                value_node,
-                output_layout,
-                owned_nodes,
-            ),
+            store=FlexGemmLocalReduceStore(aux, output_storage),
             feeds_main=False,
         )
 
@@ -1271,12 +1301,6 @@ def tuple_output_plan(
             local_reduce=compressed_aux_plan,
             indexed_output=indexed_output,
         )
-    if any(
-        node.target is torch.ops.flex_gemm.to_blocked.default
-        for aux_output in non_indexed_aux_outputs
-        for node in analysis.graph.dependencies.get(aux_output, ())
-    ):
-        raise NotImplementedError("output layout transforms must be returned directly")
     feed_main_plan = analysis.feed_main_output_plan(output, non_indexed_aux_outputs)
     if feed_main_plan is not None:
         return dataclasses.replace(
@@ -1320,6 +1344,23 @@ def output_plan(
     return (
         FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
     )
+
+
+def validate_output_storage_transforms(
+    graph: FlexGemmEpilogueGraph,
+    outputs: FlexGemmOutputPlan,
+) -> None:
+    """Require every storage transform to belong to the output plan."""
+    store = None if outputs.local_reduce is None else outputs.local_reduce.store
+    selected_node = (
+        store.node if store is not None and store.output_storage is not None else None
+    )
+    if any(
+        match_flex_gemm_local_reduce_output_storage(node) is not None
+        and node is not selected_node
+        for node in graph.dependencies
+    ):
+        raise NotImplementedError("output layout transforms must be returned directly")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1487,6 +1528,8 @@ def nested_grouped_main_output_match(
     )
     if not lanes:
         return None
+    if any(match.group != fact.physical_span for _, match in lanes):
+        raise NotImplementedError(FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR)
     select_indices = {node: match.index % fact.physical_span for node, match in lanes}
     layouts = {
         match.layout_node: GroupedTensorSSALayout(1, fact.physical_span)
@@ -1639,6 +1682,7 @@ class FlexGemmEpilogueAnalysis:
         """Analyze reductions and an optional grouped main-output transform."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module, gemm)
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
+        validate_output_storage_transforms(local_reduce.graph, outputs)
         if outputs.indexed_output is not None and outputs.output_storage_nodes:
             raise NotImplementedError(
                 "FlexGEMM indexed outputs do not compose with terminal dtype views"
@@ -1831,7 +1875,7 @@ class FlexGemmEpiModOpOverrides(CuteDSLOpOverrides):
 
     def truediv(self, a: Any, b: Any) -> str:
         a_expr, b_expr = self._binary_exprs(a, b)
-        return f"({a_expr} * epi_math.reciprocal({b_expr}, fast={self.fast_math!r}))"
+        return f"epi_math.divide({a_expr}, {b_expr}, fast={self.fast_math!r})"
 
     @classmethod
     def neg(cls, x: Any) -> str:
@@ -2004,7 +2048,7 @@ class FlexGemmOnlineSoftmaxStateLowering:
         one = f"cute.full_like({source}, 1.0)" if fragmentwise else "1.0"
         return f"({source}, {one})"
 
-    def generated_combine_body(self) -> tuple[str, ...]:
+    def generated_combine_body(self, fast_math: bool) -> tuple[str, ...]:
         """Return the cross-fragment online maximum and sum combine."""
         return (
             "maximum = cute.arch.fmax(lhs[0], rhs[0], nan=True)",
@@ -2012,12 +2056,12 @@ class FlexGemmOnlineSoftmaxStateLowering:
             "lhs_scale = cutlass.select_(",
             "    lhs[0] == maximum,",
             "    one,",
-            "    epi_math.exp(lhs[0] - maximum, fast=True),",
+            f"    epi_math.exp(lhs[0] - maximum, fast={fast_math!r}),",
             ")",
             "rhs_scale = cutlass.select_(",
             "    rhs[0] == maximum,",
             "    one,",
-            "    epi_math.exp(rhs[0] - maximum, fast=True),",
+            f"    epi_math.exp(rhs[0] - maximum, fast={fast_math!r}),",
             ")",
             "return maximum, lhs[1] * lhs_scale + rhs[1] * rhs_scale",
         )
@@ -2143,10 +2187,10 @@ class FlexGemmEpiModReductionSpec:
             return source
         return lowering.lift_value(source, fragmentwise=fragmentwise)
 
-    def generated_combine_body(self) -> tuple[str, ...]:
+    def generated_combine_body(self, fast_math: bool) -> tuple[str, ...]:
         """Return a generated tuple combine, or no body for a built-in combine."""
         lowering = self.state_lowering
-        return () if lowering is None else lowering.generated_combine_body()
+        return () if lowering is None else lowering.generated_combine_body(fast_math)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2455,6 +2499,11 @@ class FlexGemmEpiModEmitter:
                 )
         fragment_reduced = (
             self.local_reduce is not None
+            and self.local_reduce_spec is not None
+            and (
+                self.local_reduce_spec.sink.reduce_planes > 1
+                or self.local_reduce.match.physical_span > 1
+            )
             and not swap_ab
             and self.local_reduce.match.geometry.axis == 1
             and self.local_reduce_prepass is None
@@ -2945,7 +2994,9 @@ class FlexGemmEpiModEmitter:
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         if body:
             body += "\n"
-        combine_lines = () if sink is None else sink.generated_combine_body()
+        combine_lines = (
+            () if sink is None else sink.generated_combine_body(self.fast_math)
+        )
         combine_body = "\n".join(f"    {line}" for line in combine_lines)
         if combine_body:
             combine_body += "\n"
@@ -2971,8 +3022,10 @@ class FlexGemmEpiModEmitter:
         )
         key_payload = (
             f"inline_asm={inline_asm_cache_key()}\n"
-            f"fragmentwise={self.fragmentwise}\n{self.graph_module.code}\n"
-            f"{body}return {{{return_source}}}\n"
+            f"fragmentwise={self.fragmentwise}\n"
+            f"reduce_planes={1 if sink is None else sink.reduce_planes}\n"
+            f"fragment_reduced={self.local_reduce_fragment_reduced}\n"
+            f"{self.graph_module.code}\n{body}return {{{return_source}}}\n"
             f"{combine_body}{finalize_payload}{prepass_payload}"
             f"{self.epilogue_arg_kinds!r}"
         )

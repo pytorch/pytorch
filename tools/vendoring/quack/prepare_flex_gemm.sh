@@ -61,17 +61,27 @@ git -C "$destination" remote add origin "$source_url"
 git -C "$destination" fetch --quiet --no-tags --depth=1 origin "$pinned_sha"
 git -C "$destination" checkout --quiet --detach FETCH_HEAD
 
+declare -A series_patches=()
 patch_count=0
 while IFS= read -r patch_name || [[ -n "$patch_name" ]]; do
     [[ -n "$patch_name" && "$patch_name" != \#* ]] || continue
     [[ "$patch_name" != */* && "$patch_name" == *.patch ]] \
         || die "invalid patch-series entry: $patch_name"
+    [[ -z "${series_patches[$patch_name]+x}" ]] \
+        || die "duplicate patch-series entry: $patch_name"
     patch_file="$PATCHES_DIR/$patch_name"
     [[ -f "$patch_file" ]] || die "patch listed in series not found: $patch_name"
-    git -C "$destination" apply --check --index --unidiff-zero "$patch_file"
+    series_patches[$patch_name]=1
     git -C "$destination" apply --index --unidiff-zero "$patch_file"
     ((patch_count += 1))
 done < "$SERIES_FILE"
+
+shopt -s nullglob
+for patch_file in "$PATCHES_DIR"/*.patch; do
+    patch_name=$(basename "$patch_file")
+    [[ -n "${series_patches[$patch_name]+x}" ]] \
+        || die "patch file missing from series: $patch_name"
+done
 
 git -C "$destination" diff --cached --check
 echo "Prepared external QuACK at $pinned_sha with $patch_count FlexGEMM patches"
