@@ -92,8 +92,8 @@ inline void check_legacy_fn_attr_access(
 void throw_python_error() {
   python_error err;
   err.persist();
-  // NOLINTNEXTLINE(hicpp-exception-baseclass)
-  throw std::move(err);
+  // @allow-raw-throw: persist() must run before unwinding, per the note
+  throw std::move(err); // NOLINT(hicpp-exception-baseclass)
 }
 
 PyObject* materialize_needs_input_grad(THPFunction* self) {

@@ -218,12 +218,9 @@ void THCPStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THCPStreamType.tp_base = THPStreamClass;
   THCPStreamClass = (PyObject*)&THCPStreamType;
-  if (PyType_Ready(&THCPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THCPStreamType) >= 0);
   Py_INCREF(&THCPStreamType);
-  if (PyModule_AddObject(
-          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) >= 0);
 }

@@ -411,6 +411,7 @@ static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
       // already been persisted.
       python_error err;
       err.persist();
+      // @allow-raw-throw: persist() must run before unwinding, per the note
       throw std::move(err);
     }
   });
