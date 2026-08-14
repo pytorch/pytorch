@@ -194,6 +194,25 @@ class TestInductorConfig(TestCase):
             max_autotune_no_cudagraphs_opts.get("triton.cudagraphs", False), False
         )
 
+    def test_aliased_options(self):
+        # cuda.*/xpu.* fields that alias cutlass.* are skipped by
+        # get_config_copy(), but must still be listed and settable via the
+        # torch.compile options path.
+        aliased_key = "cuda.cutlass_max_profiling_configs"
+        self.assertIn(aliased_key, torch._inductor.list_options())
+
+        wrapper = torch._TorchCompileInductorWrapper(
+            "default", {aliased_key: 7}, dynamic=False
+        )
+        self.assertEqual(wrapper.config[aliased_key], 7)
+
+        # Unknown options still raise, and the error lists aliased keys too.
+        with self.assertRaises(RuntimeError) as cm:
+            torch._TorchCompileInductorWrapper(
+                "default", {"not_a_real_option": 1}, dynamic=False
+            )
+        self.assertIn(aliased_key, str(cm.exception))
+
     def test_invalid_backend(self):
         self.assertRaises(
             torch._dynamo.exc.InvalidBackend,
