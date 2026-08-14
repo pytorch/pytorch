@@ -2227,7 +2227,7 @@ except RuntimeError as e:
         out = torch.ops.libtorch_agn_2_13.identity_with_fake_module.default(t)
         self.assertEqual(out, t)
 
-    @skipIfTorchVersionLessThan(2, 12)
+    @skipIfTorchVersionLessThan(2, 13)
     def test_my_exception_what(self, device):
         """Test exception what() handling."""
         import libtorch_agn_2_13 as libtorch_agnostic
