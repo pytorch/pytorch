@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import itertools
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
 
 import yaml
@@ -50,6 +50,7 @@ from torchgen.api.python import (
     dispatch_lambda_return_str,
     has_tensor_options,
     PythonSignature,
+    PythonSignatureAliased,
     PythonSignatureDeprecated,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
@@ -273,6 +274,7 @@ def gen(
     native_yaml_path: str,
     tags_yaml_path: str,
     deprecated_yaml_path: str,
+    python_aliases_yaml_path: str,
     template_path: str,
     *,
     symint: bool = True,
@@ -315,6 +317,19 @@ def gen(
         "torch.nn",
         "python_nn_functions.cpp",
         method=False,
+        symint=symint,
+    )
+
+    foreach_aliases = load_python_module_aliases(
+        functions,
+        python_aliases_yaml_path,
+        module="foreach",
+    )
+    create_python_bindings_for_aliases(
+        fm,
+        foreach_aliases,
+        "torch.foreach",
+        "python_foreach_functions.cpp",
         symint=symint,
     )
 
@@ -405,6 +420,78 @@ def group_filter_overloads(
     return grouped
 
 
+def group_alias_overloads(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+) -> dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]:
+    grouped: dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]] = (
+        defaultdict(list)
+    )
+    for pair in pairs:
+        grouped[BaseOperatorName.parse(pair.signature.name)].append(pair)
+    return grouped
+
+
+def _ops_headers(
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+) -> list[str]:
+    bases = {pair.function.func.name.name.base for pair in overloads}
+    return [f"#include <ATen/ops/{base}.h>" for base in sorted(bases)]
+
+
+def _create_python_bindings(
+    fm: FileManager,
+    grouped: dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
+    module: str | None,
+    filename: str,
+    *,
+    method: bool,
+    symint: bool,
+) -> None:
+    py_methods: list[str] = []
+    ops_headers: list[str] = []
+    py_method_defs: list[str] = []
+    py_forwards: list[str] = []
+
+    for name, overloads in sorted(grouped.items(), key=lambda item: str(item[0])):
+        py_methods.append(
+            method_impl(name, module, overloads, method=method, symint=symint)
+        )
+        py_method_defs.append(method_def(name, module, overloads, method=method))
+        py_forwards.extend(forward_decls(name, overloads, method=method))
+        ops_headers.extend(_ops_headers(overloads))
+
+    fm.write_with_template(
+        filename,
+        filename,
+        lambda: {
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
+            "ops_headers": sorted(set(ops_headers)),
+            "py_forwards": py_forwards,
+            "py_methods": py_methods,
+            "py_method_defs": py_method_defs,
+        },
+    )
+
+
+def create_python_bindings_for_aliases(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    module: str,
+    filename: str,
+    *,
+    symint: bool = True,
+) -> None:
+    _create_python_bindings(
+        fm,
+        group_alias_overloads(pairs),
+        module,
+        filename,
+        method=False,
+        symint=symint,
+    )
+
+
 def create_python_bindings(
     fm: FileManager,
     pairs: Sequence[PythonSignatureNativeFunctionPair],
@@ -416,33 +503,13 @@ def create_python_bindings(
     symint: bool = True,
 ) -> None:
     """Generates Python bindings to ATen functions"""
-    py_methods: list[str] = []
-    ops_headers: list[str] = []
-    py_method_defs: list[str] = []
-    py_forwards: list[str] = []
-
-    grouped = group_filter_overloads(pairs, pred)
-
-    for name in sorted(grouped.keys(), key=str):
-        overloads = grouped[name]
-        py_methods.append(
-            method_impl(name, module, overloads, method=method, symint=symint)
-        )
-        py_method_defs.append(method_def(name, module, overloads, method=method))
-        py_forwards.extend(forward_decls(name, overloads, method=method))
-        ops_headers.append(f"#include <ATen/ops/{name.base}.h>")
-
-    fm.write_with_template(
+    _create_python_bindings(
+        fm,
+        group_filter_overloads(pairs, pred),
+        module,
         filename,
-        filename,
-        lambda: {
-            "generated_comment": "@"
-            + f"generated from {fm.template_dir_for_comments()}/{filename}",
-            "ops_headers": ops_headers,
-            "py_forwards": py_forwards,
-            "py_methods": py_methods,
-            "py_method_defs": py_method_defs,
-        },
+        method=method,
+        symint=symint,
     )
 
 
@@ -583,6 +650,134 @@ def load_signatures(
         pairs, deprecated_yaml_path, method=method, pyi=pyi
     )
     return pairs if skip_deprecated else pairs + deprecated
+
+
+def _alias_target_matches(
+    alias_schema: FunctionSchema,
+    call_args: Sequence[str],
+    target_schema: FunctionSchema,
+) -> bool:
+    alias_args = {arg.name: arg for arg in alias_schema.arguments.flat_all}
+    target_args = target_schema.arguments.flat_all
+    if len(call_args) != len(target_args):
+        return False
+
+    for target_arg, alias_name in zip(target_args, call_args):
+        alias_arg = alias_args[alias_name]
+        if (
+            alias_arg.type != target_arg.type
+            or alias_arg.annotation != target_arg.annotation
+        ):
+            return False
+
+    return len(alias_schema.returns) == len(target_schema.returns) and all(
+        alias_return == target_return
+        for alias_return, target_return in zip(
+            alias_schema.returns, target_schema.returns
+        )
+    )
+
+
+def load_python_module_aliases(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    aliases_yaml_path: str,
+    *,
+    module: str,
+    pyi: bool = False,
+) -> list[PythonSignatureNativeFunctionPair]:
+    grouped: dict[str, list[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    for pair in pairs:
+        if not pair.signature.deprecated:
+            grouped[pair.signature.name].append(pair)
+
+    with open(aliases_yaml_path) as f:
+        aliases = yaml.load(f, Loader=YamlLoader)
+
+    results: list[PythonSignatureNativeFunctionPair] = []
+    for alias in aliases:
+        if alias["module"] != module:
+            continue
+
+        alias_definition = alias["name"]
+        alias_operator, arguments = alias_definition.split("(", 1)
+        alias_name = alias_operator.split(".", 1)[0]
+        parse_operator = alias_operator
+        if alias_name.endswith("_"):
+            # FunctionSchema requires the first argument of an in-place name to
+            # be called self. Normalize only the schema name used for parsing;
+            # the Python signature keeps its public in-place name and arguments.
+            parse_operator = (
+                alias_name.removesuffix("_") + alias_operator[len(alias_name) :]
+            )
+        alias_schema = FunctionSchema.parse(f"{parse_operator}({arguments}")
+        aten_name, call_args = split_name_params(alias["aten"])
+        alias_args = {arg.name for arg in alias_schema.arguments.flat_all}
+        unknown_args = set(call_args) - alias_args
+        if unknown_args:
+            raise RuntimeError(
+                f"Python alias {alias_schema} references unknown arguments "
+                f"{sorted(unknown_args)}"
+            )
+        unused_args = alias_args - set(call_args)
+        duplicate_args = sorted(
+            name for name, count in Counter(call_args).items() if count > 1
+        )
+        if unused_args or duplicate_args:
+            raise RuntimeError(
+                f"Python alias {alias_schema} must forward every argument exactly "
+                f"once; unused arguments: {sorted(unused_args)}, duplicate "
+                f"arguments: {duplicate_args}"
+            )
+
+        matching_pairs = [
+            pair
+            for pair in grouped[aten_name]
+            if _alias_target_matches(alias_schema, call_args, pair.function.func)
+        ]
+        if len(matching_pairs) != 1:
+            targets = "\n".join(f"- {pair.function.func}" for pair in matching_pairs)
+            raise RuntimeError(
+                f"Expected one native target for Python alias {alias_schema}, "
+                f"found {len(matching_pairs)}:\n{targets}"
+            )
+
+        target = matching_pairs[0]
+        return_arg_index = None
+        if (
+            str(target.function.func.name).startswith("_foreach_")
+            and target.function.func.kind() == SchemaKind.inplace
+        ):
+            return_arg_index = next(
+                index
+                for index, argument in enumerate(alias_schema.arguments.flat_all)
+                if argument.name == call_args[0]
+            )
+        python_sig = signature_from_schema(
+            alias_schema,
+            category_override=target.function.category_override,
+            method=False,
+            pyi=pyi,
+        )
+        results.append(
+            PythonSignatureNativeFunctionPair(
+                signature=PythonSignatureAliased(
+                    name=alias_name,
+                    input_args=python_sig.input_args,
+                    input_kwargs=python_sig.input_kwargs,
+                    output_args=python_sig.output_args,
+                    tensor_options_args=python_sig.tensor_options_args,
+                    method=python_sig.method,
+                    returns=python_sig.returns,
+                    alias_schema=alias_schema,
+                    alias_signature=alias_definition,
+                    alias_args_exprs=tuple(call_args),
+                    return_arg_index=return_arg_index,
+                ),
+                function=target.function,
+            )
+        )
+
+    return results
 
 
 def load_deprecated_signatures(
@@ -988,6 +1183,7 @@ if (has_torch_function(self_)) {{
     namespace = (
         {
             "torch": "THPVariableFunctionsModule",
+            "torch.foreach": "THPForeachVariableFunctionsModule",
             "torch.nn": "THPNNVariableFunctionsModule",
             "torch.fft": "THPFFTVariableFunctionsModule",
             "torch.linalg": "THPLinalgVariableFunctionsModule",
@@ -1328,6 +1524,15 @@ def emit_single_dispatch(
         # header comments
         if isinstance(ps, PythonSignatureDeprecated):
             schema_comment = f"// [deprecated] aten::{ps.deprecated_schema}"
+        elif isinstance(ps, PythonSignatureAliased):
+            return_note = (
+                f"; returns argument {ps.return_arg_index}"
+                if ps.return_arg_index is not None
+                else ""
+            )
+            schema_comment = (
+                f"// Python alias {ps.alias_signature}{return_note} -> aten::{f.func}"
+            )
         else:
             schema_comment = f"// aten::{f.func}"
 
@@ -1369,17 +1574,22 @@ def emit_single_dispatch(
             # ref: https://github.com/pytorch/pytorch/pull/118622#pullrequestreview-1904804954
             self_arg = f.func.arguments.self_arg
             return_stmt: str
-            if (
-                str(f.func.name).startswith("_foreach_")
+            return_arg_index = (
+                ps.return_arg_index
+                if isinstance(ps, PythonSignatureAliased)
+                else 0
+                if str(f.func.name).startswith("_foreach_")
                 and f.func.kind() == SchemaKind.inplace
-            ):
+                else None
+            )
+            if return_arg_index is not None:
                 # note(crcrpar): `_foreach_pow.ScalarAndTensor` does NOT have its in-place
                 # variant and it unlikely to have it in the future. Thus it's safe to have the following check.
                 if self_arg is None or not is_tensor_list_type(self_arg.argument.type):
                     raise AssertionError(
                         "Expected self_arg to be a tensor list type for inplace foreach"
                     )
-                return_stmt = """PyObject* self_tensorlist = _r.args[0];
+                return_stmt = f"""PyObject* self_tensorlist = _r.args[{return_arg_index}];
 Py_INCREF(self_tensorlist);
 return self_tensorlist;
 """

@@ -278,28 +278,52 @@ ops_consuming_unbacked_scalars: frozenset[Callable[..., Any]] = frozenset(
         # foreach ops with scalar/alpha arguments
         torch._foreach_add,
         torch._foreach_add_,
+        torch.foreach.add,
+        torch.foreach.add_,
         torch._foreach_sub,
         torch._foreach_sub_,
+        torch.foreach.sub,
+        torch.foreach.sub_,
         torch._foreach_mul,
         torch._foreach_mul_,
+        torch.foreach.mul,
+        torch.foreach.mul_,
         torch._foreach_div,
         torch._foreach_div_,
+        torch.foreach.div,
+        torch.foreach.div_,
         torch._foreach_clamp_max,
         torch._foreach_clamp_max_,
+        torch.foreach.clamp_max,
+        torch.foreach.clamp_max_,
         torch._foreach_clamp_min,
         torch._foreach_clamp_min_,
+        torch.foreach.clamp_min,
+        torch.foreach.clamp_min_,
         torch._foreach_maximum,
         torch._foreach_maximum_,
+        torch.foreach.maximum,
+        torch.foreach.maximum_,
         torch._foreach_minimum,
         torch._foreach_minimum_,
+        torch.foreach.minimum,
+        torch.foreach.minimum_,
         torch._foreach_pow,
         torch._foreach_pow_,
+        torch.foreach.pow,
+        torch.foreach.pow_,
         torch._foreach_lerp,
         torch._foreach_lerp_,
+        torch.foreach.lerp,
+        torch.foreach.lerp_,
         torch._foreach_addcmul,
         torch._foreach_addcmul_,
+        torch.foreach.addcmul,
+        torch.foreach.addcmul_,
         torch._foreach_addcdiv,
         torch._foreach_addcdiv_,
+        torch.foreach.addcdiv,
+        torch.foreach.addcdiv_,
     }
 )
 
@@ -974,6 +998,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"Expected first argument to be callable, got {type(fns[0])}"
                 )
             return _register
+
+        def bind_foreach_args(
+            args: tuple[VariableTracker, ...],
+            kwargs: dict[str, VariableTracker],
+            names: tuple[tuple[str, ...], ...],
+        ) -> list[VariableTracker] | None:
+            if len(args) > len(names):
+                return None
+            valid_names = {name for aliases in names for name in aliases}
+            if not kwargs.keys() <= valid_names:
+                return None
+
+            bound = list(args)
+            for aliases in names[: len(args)]:
+                if any(name in kwargs for name in aliases):
+                    return None
+            for aliases in names[len(args) :]:
+                values = [kwargs[name] for name in aliases if name in kwargs]
+                if len(values) != 1:
+                    return None
+                bound.append(values[0])
+            return bound
 
         from torch.backends.cuda import SDPAParams
 
@@ -1904,9 +1950,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, list(args), kwargs
             )
 
-        @register(torch._foreach_lerp_)
+        @register(torch._foreach_lerp_, torch.foreach.lerp_)
         def handle_inplace_foreach_lerp_scalar(
-            _: Any,
+            fn_var: Any,
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
@@ -1916,22 +1962,31 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # in tensor arguments instead of hitting float() in the native
             # lerp_scalar lowering.  Python scalar weights can use the native
             # foreach op directly, avoiding extra full-size weight tensors.
+            names = (
+                (("inputs",), ("ends",), ("weight",))
+                if fn_var.value is torch.foreach.lerp_
+                else (("self",), ("tensors1",), ("weight",))
+            )
+            bound = bind_foreach_args(
+                args,
+                kwargs,
+                names,
+            )
             if (
                 config.enable_dynamo_decompositions
-                and len(args) == 3
-                and args[2].is_tensor()
-                and not kwargs
+                and bound is not None
+                and bound[2].is_tensor()
             ):
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
-                    list(args),
-                    kwargs,
+                    bound,
+                    {},
                 )
             return None
 
-        @register(torch._foreach_pow)
+        @register(torch._foreach_pow, torch.foreach.pow)
         def handle_foreach_pow_scalar(
-            _: Any,
+            fn_var: Any,
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
@@ -1941,11 +1996,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
-            if len(args) == 2 and args[0].is_tensor() and not kwargs:
+            names = (
+                (("input",), ("exponent",))
+                if fn_var.value is torch.foreach.pow
+                else (("self",), ("exponent",))
+            )
+            bound = bind_foreach_args(
+                args,
+                kwargs,
+                names,
+            )
+            if bound is not None and bound[0].is_tensor():
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_pow_scalar),
-                    list(args),
-                    kwargs,
+                    bound,
+                    {},
                 )
             return None
 
@@ -3627,6 +3692,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         ],
                     )
 
+        if getattr(
+            self.value, "__module__", None
+        ) == "torch.foreach" and self.value.__name__.endswith("_"):
+            return args[0] if args else kwargs["inputs"]
         return tensor_variable
 
     def _call_nonstrict_traceable_function(

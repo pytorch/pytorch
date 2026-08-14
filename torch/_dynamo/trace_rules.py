@@ -2400,6 +2400,12 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
     ],
     TorchInGraphFunctionVariable,
 )
+torch_c_binding_in_graph_functions.update(
+    dict.fromkeys(
+        (f"torch.foreach.{name}" for name in torch.foreach.__all__),
+        TorchInGraphFunctionVariable,
+    )
+)
 
 
 if sys.version_info >= (3, 11):

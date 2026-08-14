@@ -2703,6 +2703,7 @@ from torch import (
     distributed as distributed,
     distributions as distributions,
     fft as fft,
+    foreach as foreach,
     futures as futures,
     hub as hub,
     jit as jit,

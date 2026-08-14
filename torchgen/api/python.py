@@ -511,6 +511,24 @@ class PythonSignatureDeprecated(PythonSignature):
         return None
 
 
+@dataclass(frozen=True)
+class PythonSignatureAliased(PythonSignature):
+    # Parser schema for the Python alias. Its argument names, defaults, and
+    # positional/keyword-only split may differ from the native schema.
+    alias_schema: FunctionSchema
+
+    # Original manifest signature, before any normalization required by
+    # FunctionSchema.
+    alias_signature: str
+
+    # Arguments passed from the public Python signature to the native function.
+    alias_args_exprs: tuple[str, ...]
+
+    # Parser argument returned by the Python binding when the native function
+    # returns void.
+    return_arg_index: int | None
+
+
 # This struct is used to hold the PythonSignature and its corresponding
 # NativeFunction BEFORE grouping base and out-variant functions.
 # Why not store NativeFunction in PythonSignature or construct PythonSignature
@@ -1122,6 +1140,8 @@ def dispatch_lambda_args(
 ) -> tuple[DispatchLambdaArgument, ...]:
     if isinstance(ps, PythonSignatureDeprecated):
         schema = ps.deprecated_schema
+    elif isinstance(ps, PythonSignatureAliased):
+        schema = ps.alias_schema
     else:
         schema = f.func
 
@@ -1244,10 +1264,7 @@ def cpp_dispatch_exprs(
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
     exprs: tuple[str, ...] = ()
-    if not isinstance(python_signature, PythonSignatureDeprecated):
-        # By default the exprs are consistent with the C++ signature.
-        exprs = tuple(a.name for a in cpp_args)
-    else:
+    if isinstance(python_signature, PythonSignatureDeprecated):
         # For deprecated python signature we may need fill in some constants.
         exprs = tuple(
             filter(
@@ -1255,6 +1272,11 @@ def cpp_dispatch_exprs(
                 python_signature.deprecated_args_exprs,
             )
         )
+    elif isinstance(python_signature, PythonSignatureAliased):
+        exprs = python_signature.alias_args_exprs
+    else:
+        # By default the exprs are consistent with the C++ signature.
+        exprs = tuple(a.name for a in cpp_args)
 
     if Variant.method in f.variants:
         exprs = tuple(filter("self".__ne__, exprs))

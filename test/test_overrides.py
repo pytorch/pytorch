@@ -966,7 +966,13 @@ def generate_tensor_like_override_tests(cls):
                 )
 
         # Special case; this doesn't have a schema but takes a list
-        if func is torch.sym_sum:
+        if getattr(func, "__module__", None) == "torch.foreach":
+            args = inspect.getfullargspec(override)
+            nargs = len(args.args)
+            if args.defaults is not None:
+                nargs -= len(args.defaults)
+            func_args.extend([instance_gen()] for _ in range(nargs))
+        elif func is torch.sym_sum:
             func_args.append([TensorLike(), TensorLike()])
         elif func in annotated_args:
             for arg in annotated_args[func]:

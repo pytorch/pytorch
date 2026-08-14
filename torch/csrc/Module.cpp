@@ -66,6 +66,7 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
+#include <torch/csrc/autograd/python_foreach_functions.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
@@ -2605,6 +2606,7 @@ PyObject* initModule() {
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
+  torch::autograd::initForeachFunctions(module);
   torch::autograd::initLinalgFunctions(module);
   torch::autograd::initNestedFunctions(module);
   torch::autograd::initSparseFunctions(module);
@@ -2824,7 +2826,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
+      [](size_t storage_impl_ptr, const std::string& s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);

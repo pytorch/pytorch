@@ -1530,6 +1530,57 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
 
+    ret.update(
+        {
+            torch.foreach.abs: lambda inputs: -1,
+            torch.foreach.acos: lambda inputs: -1,
+            torch.foreach.add: lambda inputs, other, *, alpha=1: -1,
+            torch.foreach.addcdiv: lambda inputs, tensor1s, tensor2s, *, value=1: -1,
+            torch.foreach.addcmul: lambda inputs, tensor1s, tensor2s, *, value=1: -1,
+            torch.foreach.asin: lambda inputs: -1,
+            torch.foreach.atan: lambda inputs: -1,
+            torch.foreach.ceil: lambda inputs: -1,
+            torch.foreach.clamp_max: lambda inputs, max: -1,
+            torch.foreach.clamp_min: lambda inputs, min: -1,
+            torch.foreach.clone: lambda inputs, *, memory_format=None: -1,
+            torch.foreach.cos: lambda inputs: -1,
+            torch.foreach.cosh: lambda inputs: -1,
+            torch.foreach.div: lambda inputs, other: -1,
+            torch.foreach.erf: lambda inputs: -1,
+            torch.foreach.erfc: lambda inputs: -1,
+            torch.foreach.exp: lambda inputs: -1,
+            torch.foreach.expm1: lambda inputs: -1,
+            torch.foreach.floor: lambda inputs: -1,
+            torch.foreach.frac: lambda inputs: -1,
+            torch.foreach.lerp: lambda inputs, ends, weight: -1,
+            torch.foreach.lgamma: lambda inputs: -1,
+            torch.foreach.log: lambda inputs: -1,
+            torch.foreach.log10: lambda inputs: -1,
+            torch.foreach.log1p: lambda inputs: -1,
+            torch.foreach.log2: lambda inputs: -1,
+            torch.foreach.max: lambda inputs: -1,
+            torch.foreach.maximum: lambda inputs, other: -1,
+            torch.foreach.minimum: lambda inputs, other: -1,
+            torch.foreach.mm: lambda inputs, mat2s: -1,
+            torch.foreach.mul: lambda inputs, other: -1,
+            torch.foreach.neg: lambda inputs: -1,
+            torch.foreach.norm: lambda inputs, ord=2, *, dtype=None: -1,
+            torch.foreach.pow: lambda input, exponent: -1,
+            torch.foreach.reciprocal: lambda inputs: -1,
+            torch.foreach.round: lambda inputs: -1,
+            torch.foreach.rsqrt: lambda inputs: -1,
+            torch.foreach.sigmoid: lambda inputs: -1,
+            torch.foreach.sign: lambda inputs: -1,
+            torch.foreach.sin: lambda inputs: -1,
+            torch.foreach.sinh: lambda inputs: -1,
+            torch.foreach.sqrt: lambda inputs: -1,
+            torch.foreach.sub: lambda inputs, other, *, alpha=1: -1,
+            torch.foreach.tan: lambda inputs: -1,
+            torch.foreach.tanh: lambda inputs: -1,
+            torch.foreach.trunc: lambda inputs: -1,
+        }
+    )
+
     privateuse1_backend_name = (
         torch.utils.backend_registration._privateuse1_backend_name
     )
@@ -1543,6 +1594,8 @@ def get_testing_overrides() -> dict[Callable, Callable]:
     ignored = get_ignored_functions()
 
     for k, v in ret.items():
+        if getattr(k, "__module__", None) == "torch.foreach":
+            continue
         # Generate methods like __add__ and add_ by default from add
         names = [
             k.__name__,  # Default method
@@ -1871,6 +1924,7 @@ def _get_overridable_functions() -> tuple[
         ("torch.Tensor", torch.Tensor, dir(torch.Tensor)),
         ("torch.linalg", torch.linalg, dir(torch.linalg)),
         ("torch.fft", torch.fft, dir(torch.fft)),
+        ("torch.foreach", torch.foreach, torch.foreach.__all__),
         ("torch.special", torch.special, dir(torch.special)),
     ]
     for namespace_str, namespace, ns_funcs in tested_namespaces:

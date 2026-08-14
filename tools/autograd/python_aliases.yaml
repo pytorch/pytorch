@@ -1,0 +1,582 @@
+# Non-deprecated Python aliases for native functions.
+# Each entry defines the complete public parser signature and its native call.
+
+- module: foreach
+  name: add.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]
+  aten: _foreach_add(inputs, other)
+
+- module: foreach
+  name: add_.Scalar(Tensor(a!)[] inputs, Scalar other) -> ()
+  aten: _foreach_add_(inputs, other)
+
+- module: foreach
+  name: add.List(Tensor[] inputs, Tensor[] other, *, Scalar alpha=1) -> Tensor[]
+  aten: _foreach_add(inputs, other, alpha)
+
+- module: foreach
+  name: add_.List(Tensor(a!)[] inputs, Tensor[] other, *, Scalar alpha=1) -> ()
+  aten: _foreach_add_(inputs, other, alpha)
+
+- module: foreach
+  name: add.ScalarList(Tensor[] inputs, Scalar[] other) -> Tensor[]
+  aten: _foreach_add(inputs, other)
+
+- module: foreach
+  name: add_.ScalarList(Tensor(a!)[] inputs, Scalar[] other) -> ()
+  aten: _foreach_add_(inputs, other)
+
+- module: foreach
+  name: add.Tensor(Tensor[] inputs, Tensor other, *, Scalar alpha=1) -> Tensor[]
+  aten: _foreach_add(inputs, other, alpha)
+
+- module: foreach
+  name: add_.Tensor(Tensor(a!)[] inputs, Tensor other, *, Scalar alpha=1) -> ()
+  aten: _foreach_add_(inputs, other, alpha)
+
+- module: foreach
+  name: sub.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]
+  aten: _foreach_sub(inputs, other)
+
+- module: foreach
+  name: sub_.Scalar(Tensor(a!)[] inputs, Scalar other) -> ()
+  aten: _foreach_sub_(inputs, other)
+
+- module: foreach
+  name: sub.List(Tensor[] inputs, Tensor[] other, *, Scalar alpha=1) -> Tensor[]
+  aten: _foreach_sub(inputs, other, alpha)
+
+- module: foreach
+  name: sub_.List(Tensor(a!)[] inputs, Tensor[] other, *, Scalar alpha=1) -> ()
+  aten: _foreach_sub_(inputs, other, alpha)
+
+- module: foreach
+  name: sub.ScalarList(Tensor[] inputs, Scalar[] other) -> Tensor[]
+  aten: _foreach_sub(inputs, other)
+
+- module: foreach
+  name: sub_.ScalarList(Tensor(a!)[] inputs, Scalar[] other) -> ()
+  aten: _foreach_sub_(inputs, other)
+
+- module: foreach
+  name: mul.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]
+  aten: _foreach_mul(inputs, other)
+
+- module: foreach
+  name: mul_.Scalar(Tensor(a!)[] inputs, Scalar other) -> ()
+  aten: _foreach_mul_(inputs, other)
+
+- module: foreach
+  name: mul.List(Tensor[] inputs, Tensor[] other) -> Tensor[]
+  aten: _foreach_mul(inputs, other)
+
+- module: foreach
+  name: mul_.List(Tensor(a!)[] inputs, Tensor[] other) -> ()
+  aten: _foreach_mul_(inputs, other)
+
+- module: foreach
+  name: mul.ScalarList(Tensor[] inputs, Scalar[] other) -> Tensor[]
+  aten: _foreach_mul(inputs, other)
+
+- module: foreach
+  name: mul_.ScalarList(Tensor(a!)[] inputs, Scalar[] other) -> ()
+  aten: _foreach_mul_(inputs, other)
+
+- module: foreach
+  name: mul.Tensor(Tensor[] inputs, Tensor other) -> Tensor[]
+  aten: _foreach_mul(inputs, other)
+
+- module: foreach
+  name: mul_.Tensor(Tensor(a!)[] inputs, Tensor other) -> ()
+  aten: _foreach_mul_(inputs, other)
+
+- module: foreach
+  name: div.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]
+  aten: _foreach_div(inputs, other)
+
+- module: foreach
+  name: div_.Scalar(Tensor(a!)[] inputs, Scalar other) -> ()
+  aten: _foreach_div_(inputs, other)
+
+- module: foreach
+  name: div.List(Tensor[] inputs, Tensor[] other) -> Tensor[]
+  aten: _foreach_div(inputs, other)
+
+- module: foreach
+  name: div_.List(Tensor(a!)[] inputs, Tensor[] other) -> ()
+  aten: _foreach_div_(inputs, other)
+
+- module: foreach
+  name: div.ScalarList(Tensor[] inputs, Scalar[] other) -> Tensor[]
+  aten: _foreach_div(inputs, other)
+
+- module: foreach
+  name: div_.ScalarList(Tensor(a!)[] inputs, Scalar[] other) -> ()
+  aten: _foreach_div_(inputs, other)
+
+- module: foreach
+  name: div.Tensor(Tensor[] inputs, Tensor other) -> Tensor[]
+  aten: _foreach_div(inputs, other)
+
+- module: foreach
+  name: div_.Tensor(Tensor(a!)[] inputs, Tensor other) -> ()
+  aten: _foreach_div_(inputs, other)
+
+- module: foreach
+  name: clamp_max.Scalar(Tensor[] inputs, Scalar max) -> Tensor[]
+  aten: _foreach_clamp_max(inputs, max)
+
+- module: foreach
+  name: clamp_max_.Scalar(Tensor(a!)[] inputs, Scalar max) -> ()
+  aten: _foreach_clamp_max_(inputs, max)
+
+- module: foreach
+  name: clamp_max.List(Tensor[] inputs, Tensor[] max) -> Tensor[]
+  aten: _foreach_clamp_max(inputs, max)
+
+- module: foreach
+  name: clamp_max_.List(Tensor(a!)[] inputs, Tensor[] max) -> ()
+  aten: _foreach_clamp_max_(inputs, max)
+
+- module: foreach
+  name: clamp_max.ScalarList(Tensor[] inputs, Scalar[] max) -> Tensor[]
+  aten: _foreach_clamp_max(inputs, max)
+
+- module: foreach
+  name: clamp_max_.ScalarList(Tensor(a!)[] inputs, Scalar[] max) -> ()
+  aten: _foreach_clamp_max_(inputs, max)
+
+- module: foreach
+  name: clamp_min.Scalar(Tensor[] inputs, Scalar min) -> Tensor[]
+  aten: _foreach_clamp_min(inputs, min)
+
+- module: foreach
+  name: clamp_min_.Scalar(Tensor(a!)[] inputs, Scalar min) -> ()
+  aten: _foreach_clamp_min_(inputs, min)
+
+- module: foreach
+  name: clamp_min.List(Tensor[] inputs, Tensor[] min) -> Tensor[]
+  aten: _foreach_clamp_min(inputs, min)
+
+- module: foreach
+  name: clamp_min_.List(Tensor(a!)[] inputs, Tensor[] min) -> ()
+  aten: _foreach_clamp_min_(inputs, min)
+
+- module: foreach
+  name: clamp_min.ScalarList(Tensor[] inputs, Scalar[] min) -> Tensor[]
+  aten: _foreach_clamp_min(inputs, min)
+
+- module: foreach
+  name: clamp_min_.ScalarList(Tensor(a!)[] inputs, Scalar[] min) -> ()
+  aten: _foreach_clamp_min_(inputs, min)
+
+- module: foreach
+  name: maximum.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]
+  aten: _foreach_maximum(inputs, other)
+
+- module: foreach
+  name: maximum_.Scalar(Tensor(a!)[] inputs, Scalar other) -> ()
+  aten: _foreach_maximum_(inputs, other)
+
+- module: foreach
+  name: maximum.List(Tensor[] inputs, Tensor[] other) -> Tensor[]
+  aten: _foreach_maximum(inputs, other)
+
+- module: foreach
+  name: maximum_.List(Tensor(a!)[] inputs, Tensor[] other) -> ()
+  aten: _foreach_maximum_(inputs, other)
+
+- module: foreach
+  name: maximum.ScalarList(Tensor[] inputs, Scalar[] other) -> Tensor[]
+  aten: _foreach_maximum(inputs, other)
+
+- module: foreach
+  name: maximum_.ScalarList(Tensor(a!)[] inputs, Scalar[] other) -> ()
+  aten: _foreach_maximum_(inputs, other)
+
+- module: foreach
+  name: minimum.Scalar(Tensor[] inputs, Scalar other) -> Tensor[]
+  aten: _foreach_minimum(inputs, other)
+
+- module: foreach
+  name: minimum_.Scalar(Tensor(a!)[] inputs, Scalar other) -> ()
+  aten: _foreach_minimum_(inputs, other)
+
+- module: foreach
+  name: minimum.List(Tensor[] inputs, Tensor[] other) -> Tensor[]
+  aten: _foreach_minimum(inputs, other)
+
+- module: foreach
+  name: minimum_.List(Tensor(a!)[] inputs, Tensor[] other) -> ()
+  aten: _foreach_minimum_(inputs, other)
+
+- module: foreach
+  name: minimum.ScalarList(Tensor[] inputs, Scalar[] other) -> Tensor[]
+  aten: _foreach_minimum(inputs, other)
+
+- module: foreach
+  name: minimum_.ScalarList(Tensor(a!)[] inputs, Scalar[] other) -> ()
+  aten: _foreach_minimum_(inputs, other)
+
+- module: foreach
+  name: addcdiv.Scalar(Tensor[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar value=1) -> Tensor[]
+  aten: _foreach_addcdiv(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcdiv.ScalarList(Tensor[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar[] value) -> Tensor[]
+  aten: _foreach_addcdiv(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcdiv.Tensor(Tensor[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Tensor value) -> Tensor[]
+  aten: _foreach_addcdiv(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcdiv_.Scalar(Tensor(a!)[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar value=1) -> ()
+  aten: _foreach_addcdiv_(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcdiv_.ScalarList(Tensor(a!)[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar[] value) -> ()
+  aten: _foreach_addcdiv_(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcdiv_.Tensor(Tensor(a!)[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Tensor value) -> ()
+  aten: _foreach_addcdiv_(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcmul.Scalar(Tensor[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar value=1) -> Tensor[]
+  aten: _foreach_addcmul(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcmul.ScalarList(Tensor[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar[] value) -> Tensor[]
+  aten: _foreach_addcmul(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcmul.Tensor(Tensor[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Tensor value) -> Tensor[]
+  aten: _foreach_addcmul(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcmul_.Scalar(Tensor(a!)[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar value=1) -> ()
+  aten: _foreach_addcmul_(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcmul_.ScalarList(Tensor(a!)[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Scalar[] value) -> ()
+  aten: _foreach_addcmul_(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: addcmul_.Tensor(Tensor(a!)[] inputs, Tensor[] tensor1s, Tensor[] tensor2s, *, Tensor value) -> ()
+  aten: _foreach_addcmul_(inputs, tensor1s, tensor2s, value)
+
+- module: foreach
+  name: abs(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_abs(inputs)
+
+- module: foreach
+  name: abs_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_abs_(inputs)
+
+- module: foreach
+  name: acos(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_acos(inputs)
+
+- module: foreach
+  name: acos_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_acos_(inputs)
+
+- module: foreach
+  name: asin(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_asin(inputs)
+
+- module: foreach
+  name: asin_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_asin_(inputs)
+
+- module: foreach
+  name: atan(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_atan(inputs)
+
+- module: foreach
+  name: atan_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_atan_(inputs)
+
+- module: foreach
+  name: ceil(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_ceil(inputs)
+
+- module: foreach
+  name: ceil_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_ceil_(inputs)
+
+- module: foreach
+  name: cos(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_cos(inputs)
+
+- module: foreach
+  name: cos_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_cos_(inputs)
+
+- module: foreach
+  name: cosh(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_cosh(inputs)
+
+- module: foreach
+  name: cosh_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_cosh_(inputs)
+
+- module: foreach
+  name: erf(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_erf(inputs)
+
+- module: foreach
+  name: erf_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_erf_(inputs)
+
+- module: foreach
+  name: erfc(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_erfc(inputs)
+
+- module: foreach
+  name: erfc_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_erfc_(inputs)
+
+- module: foreach
+  name: exp(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_exp(inputs)
+
+- module: foreach
+  name: exp_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_exp_(inputs)
+
+- module: foreach
+  name: expm1(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_expm1(inputs)
+
+- module: foreach
+  name: expm1_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_expm1_(inputs)
+
+- module: foreach
+  name: floor(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_floor(inputs)
+
+- module: foreach
+  name: floor_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_floor_(inputs)
+
+- module: foreach
+  name: frac(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_frac(inputs)
+
+- module: foreach
+  name: frac_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_frac_(inputs)
+
+- module: foreach
+  name: lerp.List(Tensor[] inputs, Tensor[] ends, Tensor[] weight) -> Tensor[]
+  aten: _foreach_lerp(inputs, ends, weight)
+
+- module: foreach
+  name: lerp_.List(Tensor(a!)[] inputs, Tensor[] ends, Tensor[] weight) -> ()
+  aten: _foreach_lerp_(inputs, ends, weight)
+
+- module: foreach
+  name: lerp.Scalar(Tensor[] inputs, Tensor[] ends, Scalar weight) -> Tensor[]
+  aten: _foreach_lerp(inputs, ends, weight)
+
+- module: foreach
+  name: lerp_.Scalar(Tensor(a!)[] inputs, Tensor[] ends, Scalar weight) -> ()
+  aten: _foreach_lerp_(inputs, ends, weight)
+
+- module: foreach
+  name: lerp.ScalarList(Tensor[] inputs, Tensor[] ends, Scalar[] weight) -> Tensor[]
+  aten: _foreach_lerp(inputs, ends, weight)
+
+- module: foreach
+  name: lerp_.ScalarList(Tensor(a!)[] inputs, Tensor[] ends, Scalar[] weight) -> ()
+  aten: _foreach_lerp_(inputs, ends, weight)
+
+- module: foreach
+  name: lgamma(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_lgamma(inputs)
+
+- module: foreach
+  name: lgamma_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_lgamma_(inputs)
+
+- module: foreach
+  name: log(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_log(inputs)
+
+- module: foreach
+  name: log_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_log_(inputs)
+
+- module: foreach
+  name: log10(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_log10(inputs)
+
+- module: foreach
+  name: log10_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_log10_(inputs)
+
+- module: foreach
+  name: log1p(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_log1p(inputs)
+
+- module: foreach
+  name: log1p_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_log1p_(inputs)
+
+- module: foreach
+  name: log2(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_log2(inputs)
+
+- module: foreach
+  name: log2_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_log2_(inputs)
+
+- module: foreach
+  name: max(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_max(inputs)
+
+- module: foreach
+  name: neg(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_neg(inputs)
+
+- module: foreach
+  name: neg_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_neg_(inputs)
+
+- module: foreach
+  name: norm.Scalar(Tensor[] inputs, Scalar ord=2, *, ScalarType? dtype=None) -> Tensor[]
+  aten: _foreach_norm(inputs, ord, dtype)
+
+- module: foreach
+  name: pow.List(Tensor[] input, Tensor[] exponent) -> Tensor[]
+  aten: _foreach_pow(input, exponent)
+
+- module: foreach
+  name: pow.Scalar(Tensor[] input, Scalar exponent) -> Tensor[]
+  aten: _foreach_pow(input, exponent)
+
+- module: foreach
+  name: pow.ScalarList(Tensor[] input, Scalar[] exponent) -> Tensor[]
+  aten: _foreach_pow(input, exponent)
+
+- module: foreach
+  name: pow.ScalarAndTensor(Scalar input, Tensor[] exponent) -> Tensor[]
+  aten: _foreach_pow(input, exponent)
+
+- module: foreach
+  name: pow_.List(Tensor(a!)[] inputs, Tensor[] exponent) -> ()
+  aten: _foreach_pow_(inputs, exponent)
+
+- module: foreach
+  name: pow_.Scalar(Tensor(a!)[] inputs, Scalar exponent) -> ()
+  aten: _foreach_pow_(inputs, exponent)
+
+- module: foreach
+  name: pow_.ScalarList(Tensor(a!)[] inputs, Scalar[] exponent) -> ()
+  aten: _foreach_pow_(inputs, exponent)
+
+- module: foreach
+  name: reciprocal(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_reciprocal(inputs)
+
+- module: foreach
+  name: reciprocal_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_reciprocal_(inputs)
+
+- module: foreach
+  name: round(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_round(inputs)
+
+- module: foreach
+  name: round_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_round_(inputs)
+
+- module: foreach
+  name: rsqrt(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_rsqrt(inputs)
+
+- module: foreach
+  name: rsqrt_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_rsqrt_(inputs)
+
+- module: foreach
+  name: sigmoid(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_sigmoid(inputs)
+
+- module: foreach
+  name: sigmoid_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_sigmoid_(inputs)
+
+- module: foreach
+  name: sign(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_sign(inputs)
+
+- module: foreach
+  name: sign_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_sign_(inputs)
+
+- module: foreach
+  name: sin(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_sin(inputs)
+
+- module: foreach
+  name: sin_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_sin_(inputs)
+
+- module: foreach
+  name: sinh(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_sinh(inputs)
+
+- module: foreach
+  name: sinh_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_sinh_(inputs)
+
+- module: foreach
+  name: sqrt(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_sqrt(inputs)
+
+- module: foreach
+  name: sqrt_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_sqrt_(inputs)
+
+- module: foreach
+  name: tan(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_tan(inputs)
+
+- module: foreach
+  name: tan_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_tan_(inputs)
+
+- module: foreach
+  name: tanh(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_tanh(inputs)
+
+- module: foreach
+  name: tanh_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_tanh_(inputs)
+
+- module: foreach
+  name: trunc(Tensor[] inputs) -> Tensor[]
+  aten: _foreach_trunc(inputs)
+
+- module: foreach
+  name: trunc_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_trunc_(inputs)
+
+- module: foreach
+  name: zero_(Tensor(a!)[] inputs) -> ()
+  aten: _foreach_zero_(inputs)
+
+- module: foreach
+  name: clone(Tensor[] inputs, *, MemoryFormat? memory_format=None) -> Tensor[]
+  aten: _foreach_clone(inputs, memory_format)
+
+- module: foreach
+  name: copy_(Tensor(a!)[] inputs, Tensor[] srcs, bool non_blocking=False) -> ()
+  aten: _foreach_copy_(inputs, srcs, non_blocking)
+
+- module: foreach
+  name: mm(Tensor[] inputs, Tensor[] mat2s) -> Tensor[]
+  aten: _foreach_mm(inputs, mat2s)
