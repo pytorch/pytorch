@@ -295,10 +295,23 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def hipsparselt_supported_archs():
+    # Keep in sync with hipSparseLtSupportedArchs() in
+    # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
+    # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
+    if ROCM_VERSION >= (7, 14):
+        return ['gfx942', 'gfx950', 'gfx1250']
+    elif ROCM_VERSION >= (7, 12):
+        return ['gfx942', 'gfx950']
+    return []
+
+def evaluate_platform_supports_hipsparselt():
+    return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+            return evaluate_platform_supports_hipsparselt()
         else:
             return (
                 (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
