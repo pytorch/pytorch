@@ -415,6 +415,20 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
                 for _ in d:
                     d.rotate(n)
 
+    # --- deque setattr (deque has no __dict__) ---
+
+    @make_dynamo_test
+    def test_deque_setattr_maxlen_readonly(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.maxlen = 10
+
+    @make_dynamo_test
+    def test_deque_setattr_unknown_attr(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.foo = 1
+
     # --- list re-init (list.__init__) ---
 
     @make_dynamo_test
