@@ -556,8 +556,8 @@ class TORCH_API Context {
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
-  std::atomic<bool> allow_native_aot{true};
-  std::atomic<bool> mask_unconditional_native_aot{false};
+  bool allow_native_aot = true;
+  bool mask_unconditional_native_aot = false;
 
   using Key = std::pair<Float32Backend, Float32Op>;
   std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {

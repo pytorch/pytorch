@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import shutil
 import tempfile
 import unittest
 import unittest.mock as mock
@@ -21,12 +20,30 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 SIDECAR = {
     "prefix": "fakeop_f32_n1024_k8",
+    # Every sidecar records the arch it was compiled for and the kind that
+    # built it; generation reads both rather than defaulting either, so a
+    # fixture missing them is not a sidecar export could have written.
+    "arch": "sm_100a",
+    "kind": "cutedsl",
     "spec": {"dtype": "float32", "N": 1024, "K": 8, "deterministic": False},
     "tensor_args": [
         {"name": "mX", "dynamic_sizes": [0], "dynamic_strides": [0]},
         {"name": "mOut", "dynamic_sizes": [0, 1], "dynamic_strides": [0]},
     ],
 }
+
+
+def _no_device_arch():
+    """Patch out local-device arch detection.
+
+    _effective_arch resolves an unspecified arch to the builder's GPU, so a
+    sidecar written without one is legitimately stale on any CUDA machine.
+    Tests about spec/source matching say nothing about arch and must not
+    depend on whether the runner has a GPU. Imports mock locally to stay
+    self-contained."""
+    import unittest.mock as mock
+
+    return mock.patch.object(export, "_detected_arch", return_value=None)
 
 
 def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
@@ -60,15 +77,17 @@ class TestExportJobs(unittest.TestCase):
                     {
                         "version": export.SIDECAR_VERSION,
                         "prefix": "x",
+                        "kind": "cutedsl",
                         "spec": point,
                         "sources": current,
                     },
                     f,
                 )
-            self.assertFalse(export._job_needed(job, force=False))
-            self.assertTrue(export._job_needed(job, force=True))
-            other = ("fakeop", "aot_kernel.py", {"dtype": "bfloat16"}, d, None)
-            self.assertTrue(export._job_needed(other, force=False))
+            with _no_device_arch():
+                self.assertFalse(export._job_needed(job, force=False))
+                self.assertTrue(export._job_needed(job, force=True))
+                other = ("fakeop", "aot_kernel.py", {"dtype": "bfloat16"}, d, None)
+                self.assertTrue(export._job_needed(other, force=False))
 
     def test_job_skip_survives_json_round_trip(self):
         # Tuple-valued grid fields read back from the sidecar as lists;
@@ -89,6 +108,7 @@ class TestExportJobs(unittest.TestCase):
             sidecar = {
                 "version": export.SIDECAR_VERSION,
                 "prefix": "x",
+                "kind": "cutedsl",
                 "spec": export._json_normal(point),
                 "sources": current,
             }
@@ -96,7 +116,8 @@ class TestExportJobs(unittest.TestCase):
             _touch_artifacts(d, "x")
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(sidecar, f)
-            self.assertFalse(export._job_needed(job, force=False))
+            with _no_device_arch():
+                self.assertFalse(export._job_needed(job, force=False))
 
     def test_run_job_is_module_level(self):
         # The pool pickles the job function by qualified name; a closure
@@ -236,11 +257,91 @@ class TestArch(unittest.TestCase):
         cutedsl = toolchains.get_toolchain("cutedsl")
         no_env = toolchains.Toolchain()
         self.assertIsNone(no_env.ARCH_ENV_VAR)
-        with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}):
+        # _no_device_arch: the last fallback is the builder's GPU, which would
+        # otherwise mask what this test is about.
+        with (
+            mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}),
+            _no_device_arch(),
+        ):
             self.assertEqual(export._effective_arch(None, cutedsl), "sm_90a")
             self.assertIsNone(export._effective_arch(None, no_env))
             # An explicit arch always wins over the env var.
             self.assertEqual(export._effective_arch("sm_100a", cutedsl), "sm_100a")
+        # Precedence below the env var: local device, so an on-device export
+        # still records the arch it compiled for.
+        import unittest.mock as _mock
+
+        with _mock.patch.object(export, "_detected_arch", return_value="sm_100"):
+            self.assertEqual(export._effective_arch(None, cutedsl), "sm_100")
+
+    def test_arch_tag_is_short(self):
+        # The tag lands in every exported C symbol, so its shape is part of
+        # the artifact ABI: one underscore dropped, nothing else.
+        self.assertEqual(export._arch_tag("sm_100a"), "sm100a")
+        self.assertEqual(export._arch_tag("sm_90"), "sm90")
+
+    def test_conflicting_toolchain_arch_vars_are_an_error(self):
+        # With no toolchain named, _effective_arch scans every registered kind
+        # for its arch variable. Two kinds set to DIFFERENT arches have no
+        # single answer, and taking the first would make the artifact tree
+        # depend on registry order -- so it must say so instead.
+        import unittest.mock as mock
+
+        class _Other(toolchains.Toolchain):
+            kind = "other"
+            ARCH_ENV_VAR = "OTHER_DSL_ARCH"
+
+        registry = dict(toolchains.TOOLCHAINS, other=_Other())
+        with (
+            mock.patch.dict(toolchains.TOOLCHAINS, registry, clear=True),
+            mock.patch.dict(
+                os.environ, {"CUTE_DSL_ARCH": "sm_90a", "OTHER_DSL_ARCH": "sm_100a"}
+            ),
+            _no_device_arch(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "conflicting toolchain arch"):
+                export._effective_arch(None)
+            # Agreeing values are not a conflict: there is one answer.
+            with mock.patch.dict(os.environ, {"OTHER_DSL_ARCH": "sm_90a"}):
+                self.assertEqual(export._effective_arch(None), "sm_90a")
+
+    def test_export_prefix_is_arch_qualified(self):
+        # Two arches must not produce the same prefix: the exported symbols
+        # (cute_dsl_<prefix>_wrapper, <prefix>_Kernel_Module_Load) are derived
+        # from it, so an unqualified prefix is a duplicate definition when both
+        # arches link into one libtorch_cuda.
+        import unittest.mock as mock
+
+        seen = []
+
+        class _FakeTc(toolchains.Toolchain):
+            kind = "cutedsl"
+            artifact_exts = (".o", ".h")
+
+            def missing_runtimes(self):
+                return []
+
+            def validate_build_result(self, b):
+                pass
+
+            def export(self, b, out_dir, arch=None):
+                seen.append(b["prefix"])
+                _touch_artifacts(out_dir, b["prefix"])
+                return {"tensor_args": []}
+
+        fake = _FakeTc()
+        with tempfile.TemporaryDirectory() as d:
+            with (
+                mock.patch.object(
+                    export,
+                    "load_builder",
+                    return_value=lambda p: {"prefix": "k", "kind": "cutedsl"},
+                ),
+                mock.patch.object(toolchains, "get_toolchain", return_value=fake),
+            ):
+                for arch in ("sm_90a", "sm_100a"):
+                    export.export_point("fakeop", "aot_kernel.py", {"n": 1}, d, arch)
+        self.assertEqual(seen, ["k__sm90a", "k__sm100a"])
 
     def test_job_skip_sees_the_arch_env_var(self):
         # Two runs into ONE --out-dir differing only in CUTE_DSL_ARCH. Both
@@ -308,21 +409,33 @@ class TestArch(unittest.TestCase):
                 )
             with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_100a"}):
                 self.assertTrue(export._job_needed(job, force=False))
-            # ...while a genuine on-device re-run still skips.
-            with mock.patch.dict(os.environ, {}, clear=True):
-                self.assertFalse(export._job_needed(job, force=False))
+            # ...and where an arch IS resolvable it does not satisfy an
+            # on-device run either: that run knows its arch, the sidecar names
+            # none. _detected_arch patched rather than trusted, so the claim
+            # does not depend on the runner having a GPU.
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch.object(export, "_detected_arch", return_value="sm_100"),
+            ):
+                self.assertTrue(export._job_needed(job, force=False))
+                # Only where no arch can be resolved at all is it a match.
+                with _no_device_arch():
+                    self.assertFalse(export._job_needed(job, force=False))
 
     def test_archs_from_cuda_arch_list(self):
         # TORCH_CUDA_ARCH_LIST -> the EXPORTABLE_ARCHES subset; named,
         # malformed, +PTX and non-exportable entries drop out.
         f = export.archs_from_cuda_arch_list
         self.assertEqual(f("7.5 8.9"), [])
-        self.assertEqual(f("9.0a;10.0a"), ["sm_100a"])
-        self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_100"])
+        # Hopper and Blackwell together: one tree per arch, selected at
+        # runtime by capability.
+        self.assertEqual(f("9.0a;10.0a"), ["sm_90a", "sm_100a"])
+        self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_90", "sm_100"])
         # Both spellings of a CC are separate nvcc targets, and both are
         # exportable: CI passes "10.0a", the wheel builds pass "10.0".
         self.assertEqual(f("10.0"), ["sm_100"])
-        # 10.3 is not exportable while the runtime gate is major-only.
+        # 10.3 stays unexportable -- nothing names it, so shipping it would
+        # only grow wheels (the gate itself is major.minor and would be safe).
         self.assertEqual(f("Hopper 10.3a"), [])
 
     def test_archs_from_cuda_arch_list_dedups(self):
@@ -353,7 +466,14 @@ class TestArch(unittest.TestCase):
             os.makedirs(os.path.join(ops, "fakeop"))
             with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
                 f.write(decl_body)
-            with mock.patch.object(export, "OPS_DIR", ops):
+            # _detected_arch patched: the on-device call below resolves the
+            # directory from it, and an unpatched run would pass only on a
+            # machine with a GPU -- this suite must also pass in the linter
+            # image, which has no built torch at all.
+            with (
+                mock.patch.object(export, "OPS_DIR", ops),
+                mock.patch.object(export, "_detected_arch", return_value="sm_100a"),
+            ):
                 blackwell = export._collect_jobs(None, out, ["sm_100a"])
                 hopper = export._collect_jobs(None, out, ["sm_90a"])
                 on_device = export._collect_jobs(None, out, [None])
@@ -378,32 +498,100 @@ class TestArch(unittest.TestCase):
                     "def cpp_dispatch(spec):\n    return 'true'\n"
                     "def cpp_launch(spec, launch_fn):\n    return launch_fn\n"
                 )
-            with mock.patch.object(export, "OPS_DIR", ops):
+            # _detected_arch patched, not read from the runner: the layout must
+            # be the same shape everywhere, and an unpatched call would make
+            # this test depend on whether the machine has a GPU.
+            with (
+                mock.patch.object(export, "OPS_DIR", ops),
+                mock.patch.object(export, "_detected_arch", return_value="sm_100"),
+            ):
                 multi = export._collect_jobs(None, out, ["sm_90a", "sm_100a"])
                 single = export._collect_jobs(None, out, [None])
         self.assertEqual(len(multi), 2)
         dirs = sorted(os.path.basename(os.path.dirname(j[3])) for j in multi)
         self.assertEqual(dirs, ["sm_100a", "sm_90a"])
         self.assertEqual({j[4] for j in multi}, {"sm_90a", "sm_100a"})
+        # ONE layout: a single arch nests under its own directory too, so
+        # adding an arch to an op is just another directory.
         (sj,) = single
         self.assertEqual(os.path.basename(sj[3]), "fakeop")
+        self.assertEqual(os.path.basename(os.path.dirname(sj[3])), "sm_100")
+        # The job still carries no explicit arch: the compile target stays the
+        # DSL's own device default (which may use arch-conditional features),
+        # only the directory is named.
         self.assertIsNone(sj[4])
 
-    def test_arch_gate_from_declaration_and_sidecars(self):
-        class Pinned(_FakeDecl):
-            ARCHS = ("sm_90a", "sm_100a")
+    def test_by_arch_groups_and_orders_by_capability(self):
+        scs = [
+            {"prefix": "k__sm100a", "arch": "sm_100a"},
+            {"prefix": "k__sm90a", "arch": "sm_90a"},
+            {"prefix": "k2__sm90a", "arch": "sm_90a"},
+        ]
+        groups = gen_aot_lib._by_arch(scs)
+        self.assertEqual(list(groups), [(9, 0), (10, 0)])
+        self.assertEqual(
+            [s["prefix"] for s in groups[(9, 0)]], ["k__sm90a", "k2__sm90a"]
+        )
 
-        # Shipped subset gates on the subset.
-        gate = gen_aot_lib._arch_gate(Pinned, [{"arch": "sm_100a"}])
-        self.assertIn("major == 10", gate)
-        self.assertNotIn("major == 9", gate)
-        # On-device sidecars (no arch) gate on the declaration's ARCHS.
-        gate = gen_aot_lib._arch_gate(Pinned, [{"arch": None}])
-        self.assertIn("major == 9", gate)
-        self.assertIn("major == 10", gate)
-        # Shipped arch outside ARCHS is a packaging error.
-        with self.assertRaisesRegex(RuntimeError, "supports only"):
-            gen_aot_lib._arch_gate(Pinned, [{"arch": "sm_80"}])
+    def test_by_arch_prefers_the_arch_conditional_build(self):
+        # Both are valid on 10.0 hardware; the conditional build is the one the
+        # kernels were written against, and shipping both would otherwise let
+        # directory order decide.
+        for order in (
+            [("sm_100", "p"), ("sm_100a", "c")],
+            [("sm_100a", "c"), ("sm_100", "p")],
+        ):
+            scs = [{"prefix": n, "arch": a} for a, n in order]
+            groups = gen_aot_lib._by_arch(scs)
+            self.assertEqual(list(groups), [(10, 0)])
+            self.assertEqual([s["prefix"] for s in groups[(10, 0)]], ["c"])
+
+    def test_by_arch_rejects_an_arch_less_sidecar(self):
+        # Export names the arch of everything it writes, so this is a tree from
+        # before it did. Rejected rather than grouped: a capability nothing
+        # matches would emit a branch that declines every call in silence.
+        with self.assertRaisesRegex(RuntimeError, "records no arch"):
+            gen_aot_lib._by_arch([{"prefix": "old", "arch": None}])
+
+    def test_dropped_tie_break_candidate_gets_no_launcher(self):
+        # Both spellings of a capability are exportable ("10.0;10.0a"), so the
+        # plain build loses the tie-break -- and a launcher emitted for it would
+        # be defined and never called, i.e. -Wunused-function in an anonymous
+        # namespace, fatal under CI's WERROR.
+        class _Decl:
+            ATEN_OP = "fakeop"
+            DISPATCH_KEY = "CUDA"
+            ARCHS = ("sm_100", "sm_100a")
+
+            @staticmethod
+            def cpp_dispatch(spec):
+                return "true"
+
+            @staticmethod
+            def cpp_launch(spec, launch_fn):
+                return f"{launch_fn}(self, out, at::cuda::getCurrentCUDAStream());"
+
+        def sc(arch):
+            return dict(
+                SIDECAR, prefix=f"fakeop_p__{arch.replace('_', '', 1)}", arch=arch
+            )
+
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _Decl,
+            [sc("sm_100"), sc("sm_100a")],
+            "const at::Tensor & self, const at::Tensor & out",
+        )
+        self.assertIn("launch_fakeop_p__sm100a(", src)
+        self.assertNotIn("launch_fakeop_p__sm100(", src)
+
+    def test_cc_of_and_device_match(self):
+        self.assertEqual(gen_aot_lib._cc_of("sm_90"), (9, 0))
+        self.assertEqual(gen_aot_lib._cc_of("sm_103a"), (10, 3))
+        m = gen_aot_lib._device_match(10, 3)
+        self.assertIn("major == 10", m)
+        self.assertIn("minor == 3", m)
 
 
 class TestSidecarIntegrity(unittest.TestCase):
@@ -415,7 +603,7 @@ class TestSidecarIntegrity(unittest.TestCase):
         # A clean build (or a newly added spec point) has no sidecar and
         # no artifacts; it must export, not fail.
         with tempfile.TemporaryDirectory() as d:
-            export._check_no_orphan_artifacts(d)
+            export._check_no_orphan_artifacts(d, [])
 
     def test_artifacts_without_sidecar_are_fatal(self):
         # An export that died between compiling and writing the sidecar.
@@ -424,14 +612,14 @@ class TestSidecarIntegrity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "k_f32.o"), "w").close()
             with self.assertRaisesRegex(RuntimeError, "no sidecar"):
-                export._check_no_orphan_artifacts(d)
+                export._check_no_orphan_artifacts(d, [])
 
     def test_artifacts_with_sidecar_are_fine(self):
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "k.o"), "w").close()
             with open(os.path.join(d, "k.json"), "w") as f:
-                json.dump({"prefix": "k"}, f)
-            export._check_no_orphan_artifacts(d)
+                json.dump({"prefix": "k", "kind": "cutedsl", "spec": {"N": 1}}, f)
+            export._check_no_orphan_artifacts(d, [{"N": 1}])
 
     def test_unreadable_sidecar_is_fatal(self):
         # Present but unparsable: corruption, not an interrupted run.
@@ -542,8 +730,11 @@ class TestInt32SizeGate(unittest.TestCase):
         # Optional tensor: has_value() guarded, arrow deref.
         self.assertIn("values.has_value()", gate)
         self.assertIn("values->sizes().begin()", gate)
-        # Declines, never truncates.
-        self.assertIn("return false;", gate)
+        # Declines, never truncates -- and does so as ONE guarded statement,
+        # so an oversized dim in any tensor leaves via the same early return.
+        self.assertEqual(gate.count("return false;"), 1)
+        self.assertIn("if (C10_UNLIKELY(", gate)
+        self.assertTrue(gate.rstrip().endswith(")) return false;"), gate)
         # Non-tensor params contribute nothing: a wrongly-included scalar
         # would emit its name in a sizes() probe.
         self.assertNotIn("k.sizes()", gate)
@@ -587,8 +778,14 @@ class TestAotSourceGeneration(unittest.TestCase):
             "launch_fakeop_f32_n1024_k8(self, out, at::cuda::getCurrentCUDAStream());",
             src,
         )
-        # Falls through to false; registers on the generated DispatchStub.
-        self.assertIn("return false;", src)
+        # Falls through to false: the LAST statement of the kernel body, which
+        # is what routes an unmatched call to op.impl. Asserted positionally --
+        # the device gate and the size gate each emit a "return false;" too, so
+        # a substring check here passes even with no fallback at all.
+        body = src.split("bool fakeop_cuda_aot_kernel(", 1)[1]
+        body = body[: body.index("\n}\n")]
+        self.assertTrue(body.rstrip().endswith("return false;"), body[-200:])
+        # Registers on the generated DispatchStub.
         self.assertIn(
             "REGISTER_CUDA_DISPATCH(fakeop_aot_stub, &::fakeop_cuda_aot_kernel)", src
         )
@@ -683,6 +880,59 @@ class TestAotSourceGeneration(unittest.TestCase):
         )
 
 
+class TestMultiCapabilitySelector(unittest.TestCase):
+    """One generated .cpp serves every arch an op shipped for, so its selector
+    is what keeps each artifact on its own hardware. _by_arch's grouping and
+    the absence of dead launchers are covered above; this pins the SHAPE of
+    what gen_op emits from those groups, which an inverted or misplaced gate
+    passes through unchanged."""
+
+    def _body(self):
+        # Deliberately passed newest-first: the emitted order must come from
+        # the capability, not from directory or argument order.
+        s100 = dict(
+            SIDECAR, prefix="fakeop_p__sm100a", arch="sm_100a", spec={"N": 1024, "K": 8}
+        )
+        s90 = dict(
+            SIDECAR, prefix="fakeop_p__sm90a", arch="sm_90a", spec={"N": 1024, "K": 8}
+        )
+        src = gen_aot_lib.gen_op(
+            "fakeop",
+            "CUDA",
+            _FakeDecl,
+            [s100, s90],
+            "const at::Tensor & self, int64_t k, const at::Tensor & out",
+        )
+        body = src.split("bool fakeop_cuda_aot_kernel(", 1)[1]
+        return body[: body.index("\n}\n")]
+
+    def test_properties_read_once_before_any_gate(self):
+        body = self._body()
+        self.assertEqual(body.count("= at::cuda::getCurrentDeviceProperties();"), 1)
+        self.assertLess(body.index("_naot_props ="), body.index("_naot_props->"))
+
+    def test_early_out_accepts_exactly_the_shipped_capabilities(self):
+        body = self._body()
+        accept = next(l for l in body.splitlines() if l.startswith("  if (!(("))
+        self.assertEqual(accept.count("major =="), 2)
+        self.assertIn("major == 9 && _naot_props->minor == 0", accept)
+        self.assertIn("major == 10 && _naot_props->minor == 0", accept)
+
+    def test_each_capability_launches_only_its_own_kernels(self):
+        # The cross pairing is the failure this whole grouping exists to
+        # prevent: loading a module built for other hardware fails inside the
+        # launcher instead of declining to aten.
+        body = self._body()
+        i9 = body.index("_naot_props->major == 9 && _naot_props->minor == 0) {")
+        i10 = body.index("_naot_props->major == 10 && _naot_props->minor == 0) {")
+        self.assertLess(i9, i10)
+        sm90_branch, sm100_branch = body[i9:i10], body[i10:]
+        self.assertIn("launch_fakeop_p__sm90a(", sm90_branch)
+        self.assertNotIn("launch_fakeop_p__sm100a(", sm90_branch)
+        self.assertIn("launch_fakeop_p__sm100a(", sm100_branch)
+        self.assertNotIn("launch_fakeop_p__sm90a(", sm100_branch)
+
+
 class TestReadOnlyInputs(unittest.TestCase):
     # read_only tensor args must go through const_data_ptr in every
     # toolchain's launcher: a mutable data_ptr() materializes
@@ -715,6 +965,17 @@ class TestReadOnlyInputs(unittest.TestCase):
             "toolchains.py",
         ):
             self.assertIn(want, names, f"{want} must invalidate artifacts")
+
+    def test_closure_excludes_the_consumer_tools(self):
+        # Neither can change what an artifact MEANS, and hashing them is
+        # expensive in a way that is easy to miss: every kernel of every arch
+        # re-exports (minutes) for an edit that could not have changed one.
+        # gen_aot_lib.py only reads sidecars; build_stage2.py only decides
+        # whether stage 2 runs and then relinks -- export.py reads the arch
+        # list itself, so the driver passes it nothing kernel-affecting.
+        names = {os.path.basename(p) for p in export.source_closure()}
+        for unwanted in ("gen_aot_lib.py", "build_stage2.py"):
+            self.assertNotIn(unwanted, names)
 
     def test_closure_survives_sys_modules_mutation(self):
         # source_closure hashes files while walking sys.modules, and
@@ -768,16 +1029,24 @@ class TestReadOnlyInputs(unittest.TestCase):
                     {
                         "version": export.SIDECAR_VERSION,
                         "prefix": "x",
+                        "kind": "cutedsl",
                         "spec": point,
                         "sources": current,
                     },
                     f,
                 )
-            self.assertFalse(export._job_needed(job, force=False))
+            with _no_device_arch():
+                self.assertFalse(export._job_needed(job, force=False))
             _touch_artifacts(d, "x")
             with open(os.path.join(d, "x.json"), "w") as f:
                 _json.dump(
-                    {"prefix": "x", "spec": point, "sources": {rel: "0" * 16}}, f
+                    {
+                        "prefix": "x",
+                        "kind": "cutedsl",
+                        "spec": point,
+                        "sources": {rel: "0" * 16},
+                    },
+                    f,
                 )
             self.assertTrue(export._job_needed(job, force=False))
 
@@ -801,9 +1070,13 @@ class TestToolchainRegistry(unittest.TestCase):
         cmake_path = os.path.join(REPO, "caffe2", "CMakeLists.txt")
         with open(cmake_path) as f:
             cmake = f.read()
+        # Exact patterns, not basenames: the depths are the point now that a
+        # multi-arch export nests <arch>/<op>/ under the artifacts root, and
+        # "*/*.o" is a substring of "*/*/*.o" so a basename check would pass
+        # with either depth missing.
         for tc in toolchains.TOOLCHAINS.values():
             for pattern in tc.link_source_globs:
-                self.assertIn(pattern.split("/")[-1], cmake)
+                self.assertIn(f'"${{NATIVE_AOT_ARTIFACTS_DIR}}/{pattern}"', cmake)
 
 
 CUBIN_SIDECAR = {
@@ -841,7 +1114,10 @@ class TestEndToEndGeneration(unittest.TestCase):
         # Artifacts dir with sidecars but no .o (generation is text-only);
         # declaration read from a patched ops dir.
         with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
-            os.makedirs(os.path.join(art, "fakeop"))
+            # Artifacts live at <root>/<arch>/<decl_id>/ -- the one layout,
+            # whatever the arch count.
+            art_op = os.path.join(art, "sm_100a", "fakeop")
+            os.makedirs(art_op)
             rel = os.path.relpath(
                 os.path.join(os.path.dirname(__file__), "..", "native_aot", "decl.py"),
                 export.REPO,
@@ -853,9 +1129,7 @@ class TestEndToEndGeneration(unittest.TestCase):
                 sources=current,
                 version=export.SIDECAR_VERSION,
             )
-            with open(
-                os.path.join(art, "fakeop", SIDECAR["prefix"] + ".json"), "w"
-            ) as f:
+            with open(os.path.join(art_op, SIDECAR["prefix"] + ".json"), "w") as f:
                 json.dump(sidecar, f)
             os.makedirs(os.path.join(ops, "fakeop"))
             with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
@@ -906,7 +1180,6 @@ class TestEndToEndGeneration(unittest.TestCase):
                 sys.argv = argv
 
 
-@unittest.skipIf(shutil.which("zip") is None, "requires the zip CLI")
 class TestWheelPatch(unittest.TestCase):
     LIB = "torch/lib/libtorch_cuda.so"
 
@@ -958,42 +1231,6 @@ class TestWheelPatch(unittest.TestCase):
                 build_stage2.patch_wheel(whl, lib)
 
 
-class TestLauncherCodegen(unittest.TestCase):
-    """CuteDslToolchain.gen_launcher is what puts C++ into the build; these
-    pin the properties that were argued over in review."""
-
-    def _launcher(self, **over):
-        sc = dict(SIDECAR, **over)
-        return toolchains.CuteDslToolchain().gen_launcher(sc)
-
-    def test_read_only_arg_uses_const_data_ptr(self):
-        # A mutable data_ptr() would materialize a copy-on-write input.
-        targs = [dict(SIDECAR["tensor_args"][0], read_only=True)]
-        src = self._launcher(tensor_args=targs)
-        self.assertIn("const_cast<void*>(mX.const_data_ptr())", src)
-        self.assertNotIn("mX.mutable_data_ptr()", src)
-
-    def test_written_arg_uses_mutable_data_ptr(self):
-        src = self._launcher()
-        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
-
-    def test_arg_order_is_tensors_then_scalars_then_stream(self):
-        # Must match the exported wrapper's signature exactly.
-        src = self._launcher(scalar_args=[{"name": "k", "ctype": "int64_t"}])
-        self.assertIn("const at::Tensor& mX, const at::Tensor& mOut, int64_t k", src)
-        self.assertIn("&mX_s, &mOut_s, k", src)
-        self.assertIn("c10::cuda::CUDAStream(stream).stream()", src)
-
-    def test_shape_slots_narrow_and_strides_stay_64bit(self):
-        src = self._launcher()
-        self.assertIn("mX_s.dynamic_shapes[0] = static_cast<int32_t>(mX.size(0));", src)
-        self.assertIn("mX_s.dynamic_strides[0] = mX.stride(0);", src)
-
-    def test_module_load_is_once_per_process(self):
-        src = self._launcher()
-        self.assertIn("c10::call_once", src)
-
-
 class TestDeclarationStaleness(unittest.TestCase):
     def test_source_closure_includes_the_declaration(self):
         # Declarations load by file path and never enter sys.modules, so
@@ -1033,12 +1270,6 @@ class TestStaleGridPointArtifacts(unittest.TestCase):
             with open(os.path.join(tmpdir, "live.json"), "w") as f:
                 json.dump({"prefix": "live", "spec": {"N": 1024}}, f)
             export._check_no_orphan_artifacts(tmpdir, [{"N": 1024}])
-
-    def test_grid_unknown_skips_the_stale_check(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with open(os.path.join(tmpdir, "live.json"), "w") as f:
-                json.dump({"prefix": "live", "spec": {"N": 1024}}, f)
-            export._check_no_orphan_artifacts(tmpdir)
 
 
 class TestShouldRun(unittest.TestCase):  # _no_missing_runtimes helper
@@ -1096,21 +1327,26 @@ class TestShouldRun(unittest.TestCase):  # _no_missing_runtimes helper
         )
 
     def test_skips_when_arch_list_has_no_exportable_arch(self):
+        # 8.0 and 7.5 are below the kernels' floor (TMA, clusters), so nothing
+        # to export. 9.0a IS exportable now, hence not in this list.
         self.assertFalse(
             self._run(
                 {"torch.version.hip is not None": False},
-                {"TORCH_CUDA_ARCH_LIST": "8.0;9.0a"},
+                {"TORCH_CUDA_ARCH_LIST": "7.5;8.0"},
             )
         )
 
-    def test_multi_exportable_arch_is_fatal(self):
-        # Nested per-arch artifacts are walked by neither the generator nor
-        # the CMake globs, so this used to build a kernel-less wheel silently.
-        with self.assertRaisesRegex(RuntimeError, "exportable arches"):
+    def test_multi_exportable_arch_runs(self):
+        # Was fatal while nested per-arch artifacts were walked by neither the
+        # generator nor the CMake globs (a kernel-less wheel, silently). Now
+        # supported end to end: one tree per arch, a per-capability selector,
+        # and link globs at both depths.
+        self.assertTrue(
             self._run(
                 {"torch.version.hip is not None": False},
                 {"TORCH_CUDA_ARCH_LIST": "10.0;10.0a"},
             )
+        )
 
     def test_runs_for_a_single_exportable_arch(self):
         self.assertTrue(
@@ -1161,8 +1397,6 @@ class TestInt32GateTypeClassifier(unittest.TestCase):
 
 class TestGeneratedVersionScript(unittest.TestCase):
     def test_patterns_are_anchored_on_the_kernel_prefix(self):
-        # A bare *_cuda_init would also localize unrelated extern "C"
-        # symbols in torch_cuda.
         with tempfile.TemporaryDirectory() as tmpdir:
             path = gen_aot_lib.write_version_script(tmpdir, ["topk_f32_n1024_k8"])
             with open(path) as f:
@@ -1172,8 +1406,169 @@ class TestGeneratedVersionScript(unittest.TestCase):
         # _function_name/_version in torch_cuda's ABI.
         self.assertIn("topk_f32_n1024_k8_*;", text)
         self.assertIn("_mlir_*topk_f32_n1024_k8*;", text)
-        self.assertNotIn("*_cuda_init;", text)
         self.assertIn("local:", text)
+        # EVERY pattern names the prefix. Asserting the absence of one
+        # hand-picked unanchored pattern ("*_cuda_init;") proved nothing -- it
+        # was never a candidate. This fails for any pattern that would reach
+        # past this kernel's symbols and quietly drop something unrelated out
+        # of torch_cuda's ABI. Indented and ";"-terminated selects the pattern
+        # lines, not the script's own closing "};" or its comment block.
+        patterns = [
+            l.strip()
+            for l in text.splitlines()
+            if l.startswith("    ") and l.strip().endswith(";")
+        ]
+        self.assertTrue(patterns)
+        for p in patterns:
+            self.assertIn("topk_f32_n1024_k8", p, f"unanchored pattern: {p}")
+
+
+class TestEmbeddedSizeReport(unittest.TestCase):
+    """Embedded kernel bytes scale with declarations x precompile points x
+    arches, so an arch added to TORCH_CUDA_ARCH_LIST can grow the wheel by
+    tens of MiB. Nothing else in the build log states it."""
+
+    def test_counts_linked_artifacts_and_skips_headers(self):
+        # Fixture built from the exts registered in THIS tree rather than a
+        # fixed list: which toolchains exist changes along the stack, so a
+        # hardcoded ".cubin" would only hold once Triton has landed.
+        linkable = sorted(toolchains.all_artifact_exts() - {".h"})
+        mib = 1 << 20
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = os.path.join(tmpdir, "sm_100a", "fakeop")
+            os.makedirs(d)
+            for i, e in enumerate(linkable):
+                with open(os.path.join(d, f"k{i}{e}"), "wb") as f:
+                    f.truncate(mib)  # sparse: only the reported size matters
+            # The ABI header and the sidecar feed the compiler and the
+            # generator; neither reaches the shipped library. Deliberately the
+            # biggest file here, so counting it would move the MiB figure.
+            with open(os.path.join(d, "k.h"), "wb") as f:
+                f.truncate(8 * mib)
+            open(os.path.join(d, "k.json"), "w").close()
+            report = build_stage2._artifact_size(tmpdir)
+        self.assertEqual(report, f"{len(linkable)} object(s), {len(linkable)}.0 MiB")
+
+    def test_artifact_exts_are_shared_by_both_sweeps(self):
+        # One notion of "kernel artifact": export's per-directory orphan check
+        # and generation's no-declaration check both ask this, so a new
+        # toolchain cannot be visible to one and invisible to the other.
+        exts = toolchains.all_artifact_exts()
+        for tc in toolchains.TOOLCHAINS.values():
+            for e in tc.artifact_exts:
+                self.assertIn(e, exts)
+
+
+class TestParamListSplitting(unittest.TestCase):
+    """Both the size gate and the covers device read pick parameters out of a
+    rendered C++ signature, so the split has to survive a template argument
+    list that contains a comma."""
+
+    def test_top_level_split_keeps_template_args_intact(self):
+        params = (
+            "const at::Tensor & self, std::array<bool, 3> mask, "
+            "const std::optional<at::Tensor>& out"
+        )
+        self.assertEqual(
+            gen_aot_lib._split_params(params),
+            [
+                "const at::Tensor & self",
+                "std::array<bool, 3> mask",
+                "const std::optional<at::Tensor>& out",
+            ],
+        )
+
+    def test_gate_sees_a_comma_bearing_type_whole(self):
+        # The refusal below exists to stop a guess at an unknown tensor-shaped
+        # type. It can only be honest if it is handed the WHOLE type: split on
+        # every comma, the classifier judges the fragment "at::Tensor>" and
+        # names that in the error, sending the next author after a type that
+        # does not appear in their signature.
+        with self.assertRaisesRegex(RuntimeError, r"std::pair<at::Tensor, at::Tensor>"):
+            gen_aot_lib._int32_size_gate(
+                "const at::Tensor & self, std::pair<at::Tensor, at::Tensor> pr"
+            )
+
+    def test_non_tensor_comma_bearing_type_is_not_gated(self):
+        gate = gen_aot_lib._int32_size_gate(
+            "const at::Tensor & self, std::array<bool, 3> mask, "
+            "const std::optional<at::Tensor>& out"
+        )
+        self.assertIn("self.sizes().begin()", gate)
+        self.assertIn("out.has_value()", gate)
+        self.assertNotIn("mask", gate)
+
+
+class TestSidecarFieldValidation(unittest.TestCase):
+    """Generation reads these fields straight into emitted C++, so a value it
+    cannot use must fail here rather than as a compiler error in a @generated
+    file, or as a wrongly-read field."""
+
+    def _run(self, tmpdir, sc, extra_argv=()):
+        d = os.path.join(tmpdir, "sm_100a", "fakeop")
+        os.makedirs(d)
+        for e in (".o", ".h"):
+            open(os.path.join(d, "k__sm100a" + e), "w").close()
+        with open(os.path.join(d, "k__sm100a.json"), "w") as f:
+            json.dump(sc, f)
+        opsdir = os.path.join(tmpdir, "_ops")
+        os.makedirs(os.path.join(opsdir, "fakeop"))
+        open(os.path.join(opsdir, "fakeop", "aot.py"), "w").close()
+        with (
+            mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+            mock.patch.object(
+                gen_aot_lib.decl, "load_declarations", return_value=[_FakeDecl]
+            ),
+        ):
+            gen_aot_lib.main(["--artifacts-dir", tmpdir, *extra_argv])
+
+    def test_prefix_must_be_a_c_identifier(self):
+        # The prefix names extern "C" entry points and launch_<prefix>.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sc = {
+                "version": export.SIDECAR_VERSION,
+                "prefix": "k-sm100a",
+                "kind": "cutedsl",
+                "arch": "sm_100a",
+                "spec": {"N": 1},
+                "tensor_args": [],
+            }
+            with self.assertRaisesRegex(RuntimeError, "not a C identifier"):
+                self._run(tmpdir, sc)
+
+    def test_schema_version_mismatch_is_not_waivable(self):
+        # --allow-stale exists for artifacts whose SOURCES drifted; those still
+        # describe themselves in a shape this generator reads. A schema bump
+        # may not, so forcing past it would emit from misread fields.
+        for argv in ((), ("--allow-stale",)):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sc = {
+                    "version": export.SIDECAR_VERSION + 1,
+                    "prefix": "k__sm100a",
+                    "kind": "cutedsl",
+                    "arch": "sm_100a",
+                    "spec": {"N": 1},
+                    "tensor_args": [],
+                }
+                with self.assertRaisesRegex(RuntimeError, "sidecar schema version"):
+                    self._run(tmpdir, sc, argv)
+
+    def test_stale_error_names_the_arches_and_a_command_that_fixes_them(self):
+        # A bare `export.py` re-run maintains only the arch it resolves for, so
+        # it leaves other arch trees stale forever: the message has to name the
+        # arches and the --arch invocation, not just say "re-run export".
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sc = {
+                "version": export.SIDECAR_VERSION,
+                "prefix": "k__sm100a",
+                "kind": "cutedsl",
+                "arch": "sm_100a",
+                "spec": {"N": 1},
+                "tensor_args": [],
+                "sources": {"tools/native_aot/decl.py": "0" * 16},
+            }
+            with self.assertRaisesRegex(RuntimeError, r"--arch sm_100a"):
+                self._run(tmpdir, sc)
 
 
 class TestSizeGateIsPerToolchain(unittest.TestCase):
@@ -1285,12 +1680,63 @@ class TestOrphanArtifactSafety(unittest.TestCase):
     regenerate, a .o costs a full export."""
 
     def _art(self, tmpdir):
-        op = os.path.join(tmpdir, "fakeop")
+        """The one layout: kernels at <root>/<arch>/<decl_id>/, and the
+        generated source that covers every arch at <root>/<decl_id>/.
+        Returns both, since orphan handling touches each differently -- the
+        .cpp is regenerable and gets deleted, the kernels never do."""
+        op = os.path.join(tmpdir, "sm_100a", "fakeop")
         os.makedirs(op)
-        for fn in ("k.o", "k.h", "k.json", "aot_fakeop_cuda.cpp"):
+        for fn in ("k.o", "k.h", "k.json"):
             with open(os.path.join(op, fn), "w") as f:
                 f.write("x")
-        return op
+        src = os.path.join(tmpdir, "fakeop")
+        os.makedirs(src)
+        with open(os.path.join(src, "aot_fakeop_cuda.cpp"), "w") as f:
+            f.write("x")
+        return op, src
+
+    def test_same_prefix_from_two_arch_dirs_is_fatal(self):
+        # Prefixes carry their arch, so two arch dirs cannot collide by
+        # construction -- but a copied or renamed tree (rsynced artifacts, a
+        # hand-made sm_100a.bak) puts the same prefix under two arch dirs, and
+        # discovery merges by declaration. Caught here rather than as a
+        # launch_<prefix> redefinition, or the same .o globbed twice, much
+        # later in the build.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for rel in (
+                os.path.join("sm_100a", "fakeop"),
+                os.path.join("sm_100a_copy", "fakeop"),
+            ):
+                d = os.path.join(tmpdir, rel)
+                os.makedirs(d)
+                for fn in ("k__sm100a.o", "k__sm100a.h"):
+                    with open(os.path.join(d, fn), "w") as f:
+                        f.write("x")
+                with open(os.path.join(d, "k__sm100a.json"), "w") as f:
+                    json.dump(
+                        {
+                            "version": export.SIDECAR_VERSION,
+                            "prefix": "k__sm100a",
+                            "arch": "sm_100a",
+                        },
+                        f,
+                    )
+            # The duplicate check runs after a declaration is matched, so
+            # fakeop has to BE declared or discovery takes the orphan path
+            # first. gen_aot_lib imports export inside main(), so patch the
+            # module itself rather than an attribute on gen_aot_lib.
+            opsdir = os.path.join(tmpdir, "_ops")
+            os.makedirs(os.path.join(opsdir, "fakeop"))
+            open(os.path.join(opsdir, "fakeop", "aot.py"), "w").close()
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[_FakeDecl]
+                ),
+                mock.patch.object(export, "sources_current", return_value=True),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "present in both"):
+                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
 
     def test_no_declarations_at_all_leaves_everything_alone(self):
         # A commit earlier in the stack (or a bisect) declares nothing; that
@@ -1299,15 +1745,16 @@ class TestOrphanArtifactSafety(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             tempfile.TemporaryDirectory() as opsdir,
         ):
-            op = self._art(tmpdir)
+            op, src = self._art(tmpdir)
             # An EMPTY ops dir: "declares nothing" must not depend on which
             # commit of the stack is checked out.
             with mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir):
                 gen_aot_lib.main(["--artifacts-dir", tmpdir])
             left = sorted(os.listdir(op))
+            src_left = sorted(os.listdir(src))
         self.assertIn("k.o", left)
         self.assertIn("k.h", left)
-        self.assertIn("aot_fakeop_cuda.cpp", left)
+        self.assertIn("aot_fakeop_cuda.cpp", src_left)
 
     def test_orphan_with_other_declarations_is_fatal_but_keeps_artifacts(self):
         # With declarations present, an unclaimed dir is a real orphan: drop
@@ -1317,7 +1764,7 @@ class TestOrphanArtifactSafety(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             tempfile.TemporaryDirectory() as opsdir,
         ):
-            op = self._art(tmpdir)
+            op, src = self._art(tmpdir)
             # by_id is built by walking OPS_DIR, so declare something there.
             os.makedirs(os.path.join(opsdir, "otherop"))
             open(os.path.join(opsdir, "otherop", "aot.py"), "w").close()
@@ -1330,8 +1777,12 @@ class TestOrphanArtifactSafety(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "no declaration"):
                     gen_aot_lib.main(["--artifacts-dir", tmpdir])
             left = sorted(os.listdir(op))
+            src_left = sorted(os.listdir(src))
         self.assertIn("k.o", left)
-        self.assertNotIn("aot_fakeop_cuda.cpp", left)
+        # The regenerable source is dropped from <root>/<decl_id>/, where it
+        # lives now, so the CMake glob cannot compile it against a stub that
+        # no longer exists.
+        self.assertNotIn("aot_fakeop_cuda.cpp", src_left)
 
 
 class _OtherDecl(_FakeDecl):
@@ -1362,10 +1813,11 @@ class TestMissingArtifacts(unittest.TestCase):
             with open(os.path.join(d, "x.json"), "w") as f:
                 json.dump(sidecar, f)
             _touch_artifacts(d, "x")
-            self.assertFalse(export._job_needed(job, force=False))
+            with _no_device_arch():
+                self.assertFalse(export._job_needed(job, force=False))
 
-            os.remove(os.path.join(d, "x.o"))
-            self.assertTrue(export._job_needed(job, force=False))
+                os.remove(os.path.join(d, "x.o"))
+                self.assertTrue(export._job_needed(job, force=False))
 
     def test_missing_header_also_reexports(self):
         rel = os.path.relpath(
@@ -1381,9 +1833,9 @@ class TestMissingArtifacts(unittest.TestCase):
                     {
                         "version": export.SIDECAR_VERSION,
                         "prefix": "x",
+                        "kind": "cutedsl",
                         "spec": point,
                         "sources": current,
-                        "kind": "cutedsl",
                     },
                     f,
                 )

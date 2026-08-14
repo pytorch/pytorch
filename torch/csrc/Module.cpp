@@ -2794,9 +2794,12 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().allowNativeAot();
   });
 
-  // Private: masks even UNCONDITIONAL declarations, which _set_native_aot_
-  // enabled deliberately cannot reach. Only torch._native's reference
-  // hatch should touch this.
+  // Not a user-facing switch, unlike _set_native_aot_enabled above: this one
+  // masks ops whose declaration is UNCONDITIONAL, i.e. ops whose AOT kernels
+  // ARE the implementation. Its only caller is torch._native's
+  // _unconditional_masked(), which reference computations use to obtain stock
+  // aten values; masking these changes what an op computes, not just how fast
+  // it computes it.
   py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
     at::globalContext().setMaskUnconditionalNativeAot(masked);
   });
