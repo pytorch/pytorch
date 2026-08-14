@@ -2794,6 +2794,17 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().allowNativeAot();
   });
 
+  // Private: masks even UNCONDITIONAL declarations, which _set_native_aot_
+  // enabled deliberately cannot reach. Only torch._native's reference
+  // hatch should touch this.
+  py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
+    at::globalContext().setMaskUnconditionalNativeAot(masked);
+  });
+
+  py_module.def("_get_native_aot_unconditional_masked", []() {
+    return at::globalContext().maskUnconditionalNativeAot();
+  });
+
   py_module.def("_add_cached_tensor", [](const at::Tensor& t) {
     at::caching::add_cached_tensor(t);
   });
