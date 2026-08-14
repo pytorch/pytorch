@@ -286,16 +286,6 @@ class SizeVarAllocator:
         # expressions) and each miss runs sympy substitution plus heuristics,
         # none of which sympy caches. _lru_cache drops the cache whenever
         # replacements change.
-        # Lowering asks whether two sizes are equal over and over: 31k calls
-        # covering a few hundred distinct pairs on one model, a quarter of all
-        # lowering time. Caching statically_known_true does not help, because
-        # the caller has already paid to build the sympy.Eq - constructing a
-        # relational evaluates it, which drags in assumption queries - so the
-        # cache has to sit above that. _lru_cache drops it whenever
-        # replacements change.
-        self._statically_known_equals_cache = self._lru_cache(
-            self._statically_known_equals_uncached
-        )
         self._optimization_hint_cache = self._lru_cache(
             self._optimization_hint_uncached
         )
@@ -564,11 +554,6 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        return self._statically_known_equals_cache(left, right)
-
-    def _statically_known_equals_uncached(
-        self, left: Expr | int, right: Expr | int
-    ) -> bool:
         return self.statically_known_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
     def statically_known_list_equals(
