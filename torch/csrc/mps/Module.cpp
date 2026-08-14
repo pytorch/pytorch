@@ -588,6 +588,19 @@ void initModule(PyObject* module) {
     return py::reinterpret_steal<py::object>(
         THPStorage_Wrap(std::move(host_alias)));
   });
+  // This function is added just to test that `MPSAllocator::waitForEvents`
+  // properly waits for every recorded stream
+  m.def("_mps_allocator_waitForEvents", [](const std::vector<int64_t>& ptrs) {
+    auto* allocator = at::mps::getIMPSAllocator();
+    TORCH_CHECK(allocator, "MPS allocator is not available");
+    std::vector<const void*> buffers;
+    buffers.reserve(ptrs.size());
+    for (const auto ptr : ptrs) {
+      buffers.push_back(reinterpret_cast<const void*>(ptr));
+    }
+    pybind11::gil_scoped_release no_gil;
+    return allocator->waitForEvents(buffers);
+  });
 }
 #endif /* USE_MPS */
 

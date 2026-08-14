@@ -2353,7 +2353,7 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value: Any, reason: str | None = None, **kwargs: Any) -> None:
+    def __init__(self, value: object, reason: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -2423,8 +2423,9 @@ class SkipFunctionVariable(VariableTracker):
         if self.value in (importlib.util.find_spec, importlib.metadata.version) and all(
             a.is_python_constant() for a in args
         ):
+            fn = cast(Callable[..., Any], self.value)
             return VariableTracker.build(
-                tx, self.value(*(a.as_python_constant() for a in args))
+                tx, fn(*(a.as_python_constant() for a in args))
             )
 
         if (
@@ -2432,7 +2433,8 @@ class SkipFunctionVariable(VariableTracker):
             and all(a.is_python_constant() for a in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            result = self.value(
+            fold_fn = cast(Callable[..., Any], self.value)
+            result = fold_fn(
                 *(a.as_python_constant() for a in args),
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
@@ -2546,7 +2548,7 @@ class SkipFunctionVariable(VariableTracker):
             module_or = getattr(self.value, "__module__", None)
             module_name = "<unknown module>" if module_or is None else str(module_or)
             try:
-                path = inspect.getfile(self.value)
+                path = inspect.getfile(cast(Callable[..., Any], self.value))
                 explanation = (
                     f"Dynamo developers have intentionally marked that the function `{qualname}` "
                     f"in file `{path}` should not be traced."
@@ -3340,7 +3342,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 
 class SysFunctionVariable(VariableTracker):
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -3926,7 +3928,7 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
     Skip variable for sparse tensor factory functions with clear messaging regarding lack of support.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         reason = "sparse tensor creation is not supported in torch.compile"
         super().__init__(value, reason=reason, **kwargs)
 
@@ -4005,7 +4007,7 @@ class TritonSetAllocatorVariable(VariableTracker):
     graph so that it executes at the right point at runtime, ordered by
     effect tokens."""
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -4025,7 +4027,8 @@ class TritonSetAllocatorVariable(VariableTracker):
         alloc_fn = args[0].as_python_constant()
 
         # Emit an invoke_leaf_function node so it runs at runtime.
-        set_allocator = self.value
+        # The builder only produces this VT for triton.set_allocator itself.
+        set_allocator = cast(Callable[..., Any], self.value)
 
         def real_impl():
             set_allocator(alloc_fn)

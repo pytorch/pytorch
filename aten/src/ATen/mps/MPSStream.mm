@@ -322,9 +322,16 @@ void initStreamPool() {
 }
 } // namespace
 
-MPSStream* getStreamFromPool() {
+MPSStream* getStreamFromPool(std::optional<int64_t> stream_id_opt) {
   c10::call_once(stream_pool_flag, initStreamPool);
-  return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
+  if (stream_id_opt.has_value()) {
+    auto stream_id = stream_id_opt.value();
+    TORCH_CHECK(stream_id >= 1 && stream_id <= kMPSStreamsPerPool, "stream_id=", stream_id, " not found in pool");
+    return stream_pool[stream_id - 1];
+
+  } else {
+    return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
+  }
 }
 
 void synchronizeAllMPSStreams(SyncType syncType) {
