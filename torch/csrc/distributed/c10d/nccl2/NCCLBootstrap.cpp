@@ -174,6 +174,13 @@ void populateNcclConfigFromHints(
                    << config.nvlinkCentricSched;
     }
 #endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+    else if (key == "hostCftMode" || key == "host_cft_mode") {
+      config.hostCftMode = std::stoi(val);
+      TC_LOG(INFO) << "[comm=" << name
+                   << "] Setting config.hostCftMode=" << config.hostCftMode;
+    }
+#endif
     else {
       TC_LOG(WARNING)
           << "NCCL hint '" << key
