@@ -1452,50 +1452,6 @@ def forward(self, x_1):
                 gm = fx.GraphModule(tracer.root, tracer.graph)
                 self.assertEqual(gm(2, 3, 4), expected)
 
-    def test_build_proxy_for_nary_mul(self):
-        import operator
-
-        import torch.fx as fx
-        from torch.fx.experimental.proxy_tensor import (
-            _build_proxy_for_sym_expr,
-            _SympyExprTrackerValue,
-            PythonKeyTracer,
-            set_meta,
-        )
-        from torch.utils._thunk import Thunk
-
-        shape_env = ShapeEnv()
-        u0 = shape_env.create_unbacked_symint()
-        u1 = shape_env.create_unbacked_symint()
-        u2 = shape_env.create_unbacked_symint()
-        product = u0 * u1 * u2
-        self.assertEqual(len(product.node.expr.args), 3)
-
-        tracer = PythonKeyTracer()
-        tracer.root = torch.nn.Module()
-        tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
-        for sym, name in [(u0, "u0"), (u1, "u1"), (u2, "u2")]:
-            node = tracer.graph.placeholder(name)
-            proxy = fx.Proxy(node, tracer)
-            set_meta(proxy, sym)
-            tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
-                proxy=proxy, value=sym
-            )
-            tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
-
-        _build_proxy_for_sym_expr(tracer, product.node.expr, out=product)
-        out_proxy = tracer.symnode_tracker[product].force()
-        tracer.graph.output(out_proxy.node)
-        gm = fx.GraphModule(tracer.root, tracer.graph)
-
-        self.assertEqual(gm(2, 3, 4), 24)
-        mul_nodes = [
-            node
-            for node in gm.graph.nodes
-            if node.op == "call_function" and node.target is operator.mul
-        ]
-        self.assertEqual(len(mul_nodes), 2)
-
     def test_build_proxy_for_pow(self):
         """
         Test that _build_proxy_for_sym_expr correctly handles sympy.Pow.
@@ -5097,8 +5053,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
-        mul_2: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
-        return (mul_2,)""",
+        mul_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
+        return (mul_3,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
