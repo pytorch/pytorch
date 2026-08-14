@@ -4,6 +4,23 @@ import torch.distributed as dist
 from torch.autograd.function import Function
 
 
+def _is_current_stream_capturing():
+    r"""Return whether the current accelerator's stream is capturing a graph.
+
+    torch.cuda and torch.xpu each expose their own is_current_stream_capturing();
+    there is no unified torch.accelerator equivalent yet, so dispatch on the
+    current accelerator type here instead.
+    """
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return False
+    if accelerator.type == "cuda":
+        return torch.cuda.is_current_stream_capturing()
+    if accelerator.type == "xpu":
+        return torch.xpu.is_current_stream_capturing()
+    return False
+
+
 class SyncBatchNorm(Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -85,10 +102,11 @@ class SyncBatchNorm(Function):
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
-        if not (torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()):
-            # The lines below force a synchronization between CUDA and CPU, because
-            # the shape of the result count_all depends on the values in mask tensor.
-            # Such synchronizations break CUDA Graph capturing.
+        if not _is_current_stream_capturing():
+            # The lines below force a synchronization between the accelerator and
+            # CPU, because the shape of the result count_all depends on the values
+            # in mask tensor. Such synchronizations break graph capturing (CUDA
+            # Graphs, and equivalently XPU graphs).
             # See https://github.com/pytorch/pytorch/issues/78549
             # FIXME: https://github.com/pytorch/pytorch/issues/78656 describes
             # a better longer-term solution.
