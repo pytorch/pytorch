@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     subtest,
@@ -37,6 +38,8 @@ int_bits = {dt: torch.iinfo(dt).bits for dt in all_int_dtypes}
 
 
 class TestStatelessRNGKey(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic_shape_and_dtype(self, device):
         key = random.key(42, device=device)
         self.assertEqual(key.shape, (2,))
@@ -61,6 +64,8 @@ class TestStatelessRNGKey(TestCase):
 
 
 class TestStatelessRNGKeySplit(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic_shape_and_dtype(self, device):
         key = random.key(42, device=device)
         splits = random.split(key, 4)
@@ -185,6 +190,8 @@ class TestStatelessRNGKeySplit(TestCase):
 
 
 class TestStatelessRNGKeyFoldIn(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic_shape_and_dtype(self, device):
         key = random.key(42, device=device)
         result = random.fold_in(key, 7)
@@ -373,6 +380,8 @@ class TestStatelessRNGKeyFoldIn(TestCase):
 
 
 class TestStatelessRNGDistribution(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _gen(self, gen_fn_name, *args, **kwargs):
         return getattr(random, gen_fn_name)(*args, **kwargs)
 
@@ -675,6 +684,8 @@ class TestStatelessRNGDistribution(TestCase):
 
 
 class TestStatelessRNGCompile(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
 
