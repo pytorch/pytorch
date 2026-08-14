@@ -41,7 +41,6 @@ from torch.testing._internal.common_device_type import (
     PYTORCH_CUDA_MEMCHECK,
     skipCPUIf,
     skipCUDAIf,
-    skipCUDAIfRocm,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
@@ -7487,11 +7486,10 @@ torch.cuda.synchronize()
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
-    @skipCUDAIfRocm  # not needed
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
-    @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
+    @skipCPUIf(True, "SDPA Math NT fallback causes failure: see issue #133644")
     @unittest.skipIf(
         "RelWithAssert" in torch.__config__.show(),
         "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
@@ -7503,8 +7501,10 @@ torch.cuda.synchronize()
         d3 = 16
         n_heads = 2
         d_head = d3 // n_heads
-        max_length_1 = 10
-        max_length_2 = 20
+
+        # The offsets below describe sequence lengths [2, 1, 27].
+        max_seqlen = 27
+
         torch.manual_seed(0)
 
         class mha(torch.nn.Module):
@@ -7518,17 +7518,15 @@ torch.cuda.synchronize()
                 value = self.linear(value)
                 if self.use_legacy_api:
                     key = convert_jagged_to_nested_tensor_legacy(
-                        value, offsets, max_length_1
+                        value, offsets, max_seqlen
                     )
                     value = convert_jagged_to_nested_tensor_legacy(
-                        value, offsets, max_length_2
+                        value, offsets, max_seqlen
                     )
                     query = convert_dense_to_nested_tensor_legacy(query)
                 else:
-                    key = convert_jagged_to_nested_tensor(value, offsets, max_length_1)
-                    value = convert_jagged_to_nested_tensor(
-                        value, offsets, max_length_2
-                    )
+                    key = convert_jagged_to_nested_tensor(value, offsets, max_seqlen)
+                    value = convert_jagged_to_nested_tensor(value, offsets, max_seqlen)
                     query = convert_dense_to_nested_tensor(query)
                 q = query.view(bs, -1, n_heads, d_head).transpose(1, 2)
                 k = key.view(bs, -1, n_heads, d_head).transpose(1, 2)
@@ -7557,7 +7555,9 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backward will fail
+
+        # The offsets describe sequence lengths [2, 1, 27], so the cached
+        # maximum sequence length must be 27.
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
@@ -7574,8 +7574,8 @@ torch.cuda.synchronize()
         value_grad = value.grad  # save for comparison later
         self.assertIsNotNone(value_grad)
         # check that max_seqlen is cached properly
-        self.assertEqual(cached_key_max_seqlen, max_length_1)
-        self.assertEqual(cached_value_max_seqlen, max_length_2)
+        self.assertEqual(cached_key_max_seqlen, max_seqlen)
+        self.assertEqual(cached_value_max_seqlen, max_seqlen)
 
         # check if the output is numerically equivalent with the eager mode
         m_eager = mha(use_legacy_api)
