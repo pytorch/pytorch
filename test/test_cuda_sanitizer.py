@@ -7,7 +7,13 @@ import traceback
 import torch
 import torch.cuda._sanitizer as csan
 from torch.cuda._sanitizer import DataPtr, EventId, StreamId
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    NoTest,
+    run_tests,
+    TEST_CUDA,
+    TestCase,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -17,6 +23,8 @@ if not TEST_CUDA:
 
 
 class TestArgumentHandler(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_add(self):
         add_func = torch.ops.aten.add.Tensor
         a = torch.ones(5, 3, device="cuda")
@@ -141,6 +149,8 @@ def event_id(i: int) -> EventId:
 
 
 class TestEventHandler(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.handler = csan.EventHandler()
@@ -396,6 +406,8 @@ class TestEventHandler(TestCase):
 
 
 class TestMessages(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.handler = csan.EventHandler()
