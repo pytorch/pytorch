@@ -1048,6 +1048,23 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
+    def test_mask_mod_bitwise_shift(self):
+        """TensorSSA has no shift operators; codegen must emit MLIR arith
+        shifts or vectorized masks with >>/<< fail to compile (Morton-style
+        bit-manipulation masks)."""
+        seq_len = 512
+
+        def deint_mask(_b, _h, q_idx, kv_idx):
+            x = kv_idx & 0x55555555
+            x = (x | (x >> 1)) & 0x33333333
+            return ((x << 1) >= 0) & (q_idx >= kv_idx)
+
+        block_mask = _create_block_mask_for_device(
+            deint_mask, 2, 4, seq_len, seq_len, device="cuda"
+        )
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, block_mask=block_mask)
+
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
