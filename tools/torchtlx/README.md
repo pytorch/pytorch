@@ -102,18 +102,21 @@ therefore uses the plain `~=<ver>` form for dev builds too, and
 `install_triton.sh` / `build_triton_wheel.py` / `nightly.yml` are left exactly
 as upstream.
 
-### Why the provider is not in `requirements.txt` yet
+### Why the provider is not in `requirements.txt`
 
-Only because no published fbtriton wheel carries torchTLX at the moment. Once
-one ships, `fbtriton>=3.8` belongs in `requirements.txt` and is the natural
-path for anyone who just wants to *use* torchTLX -- no checkout, no build.
+`requirements.txt` is left untouched, so a contributor who has no interest in
+torchTLX never encounters it there. Installing the provider is `bringup.py`'s
+job.
 
-It will not cover everyone, though: a contributor who builds FBTriton from a
-checkout gets the `triton` distribution instead of `fbtriton`, because
-`setup.py` defaults `TRITON_WHEEL_NAME` to `triton`, and one PEP 508
-requirement cannot name both. That is why `doctor` identifies the provider by
-the `+fb` suffix on `triton.__version__` rather than by distribution name --
-that signal is true of both paths.
+Two things would make a requirement line awkward anyway. No published fbtriton
+wheel carries torchTLX yet -- that needs >=3.8, and the TLX Inductor registry
+landed after `release/3.7.x` was cut. And it could not cover everyone even
+then: a contributor who builds FBTriton from a checkout gets the `triton`
+distribution rather than `fbtriton`, because `setup.py` defaults
+`TRITON_WHEEL_NAME` to `triton`, and one PEP 508 requirement cannot name both.
+That is why `doctor` identifies the provider by the `+fb` suffix on
+`triton.__version__` rather than by distribution name -- that signal holds for
+both paths.
 
 ## Enabling TLX
 

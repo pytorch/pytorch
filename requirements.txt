@@ -6,8 +6,6 @@
 # Install / Development extra requirements
 build[uv]  # for building sdist and wheel
 expecttest>=0.3.0
-# No Triton provider is listed here yet; install it with
-# tools/torchtlx/bringup.py. See tools/torchtlx/README.md for why.
 filelock
 fsspec>=0.8.5
 hypothesis

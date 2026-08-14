@@ -82,8 +82,9 @@ def uv_bin() -> str:
     uv = shutil.which("uv")
     if uv is None:
         raise SystemExit(
-            "uv is required (https://docs.astral.sh/uv/). It is in "
-            "requirements.txt, so `pip install -r requirements.txt` provides it."
+            "uv is required (https://docs.astral.sh/uv/). `build[uv]` in "
+            "requirements.txt pulls it in, so `pip install -r requirements.txt` "
+            "is usually enough."
         )
     return uv
 
