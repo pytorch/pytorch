@@ -147,6 +147,12 @@ struct InlineEvent final {
   void reconstructFromIPCHandle(
       const DeviceIndex device_index,
       const std::string& handle_string) {
+    TORCH_CHECK(
+        flag_ & EventFlag::INTERPROCESS,
+        "Event must be created with EventFlag::INTERPROCESS to reconstruct from an IPC handle.");
+    TORCH_CHECK(
+        !event_,
+        "Event has already been initialized; cannot reconstruct from an IPC handle.");
     device_index_ =
         device_index == -1 ? backend_.getDevice().index() : device_index;
     backend_.reconstructEventFromIPCHandle(
@@ -154,9 +160,6 @@ struct InlineEvent final {
     // Backend events are lazily created on first record, so a valid IPC handle
     // implies the event was already recorded in the sender process.
     was_marked_for_recording_ = true;
-    TORCH_CHECK(
-        flag_ & EventFlag::INTERPROCESS,
-        "Event must be created with EventFlag::INTERPROCESS to reconstruct from an IPC handle.");
     // Reset to PYTORCH_DEFAULT to prevent re-export via ipcHandle().
     flag_ = EventFlag::PYTORCH_DEFAULT;
   }
