@@ -55,6 +55,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, variables
 from ..exc import (
+    FakeTensorObservedException,
     ObservedException,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -2238,6 +2239,8 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
                 e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
             raise
         except (Unsupported, ObservedException) as e:
+            if isinstance(e, FakeTensorObservedException):
+                raise
             # Only tag if not already tagged (reports deepest HOP only)
             if hasattr(e, "_hop_name"):
                 raise
@@ -2303,7 +2306,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -3013,17 +3016,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
         _check_all_tensorvariable(additional_inputs_vars)
 
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.associative_scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
-
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
@@ -3289,18 +3281,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 explanation=f"Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
                 hints=[
                     *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
-        # scan_length check
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         _check_all_tensorvariable(init_vars)
@@ -5140,7 +5120,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
