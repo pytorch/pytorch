@@ -29,9 +29,9 @@ struct Conv1dDwParams {
 
 // Source-width shape hint the conv1d conv3d_mpp specializations are compiled
 // with (see CONV3D_MPP_SRCW in Convolution.metal); activations up to this
-// length dispatch without host-side splitting. Oversizing the hint measured
-// free, so the value is plain headroom; length * channels still has to stay
-// inside the int32 addressing the eligibility gates enforce.
+// length dispatch without host-side splitting. Oversizing the hint doesn't cost
+// performance. length * channels still has to stay inside the int32 addressing
+// the eligibility gates enforce.
 C10_METAL_CONSTEXPR int32_t conv1d_mpp_src_width_hint = 1 << 22;
 
 // A region is an interval along the output length, not a 3D tensor subregion.

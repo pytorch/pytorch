@@ -813,9 +813,10 @@ kernel void conv3d_mpp(
 // convolution2d_descriptor. The compiled kernel assumes the activation never
 // exceeds it: a wider source miscomputes silently and -1 (dynamic, as used
 // for channels) miscomputes too, so the host rejects any activation longer
-// than the hint its entry point was built with. Oversizing measured free, so
-// the conv1d block redefines this to the wide header constant; conv3d keeps
-// 16384, which covers its plane extents.
+// than the hint its entry point was built with. Oversizing doesn't cost
+// performance. so the conv1d block redefines this to the wide header constant
+// since conv1d deals with longer length usually, conv3d keeps 16384, which
+// should be more than enough.
 #define CONV3D_MPP_SRCW 16384
 
 #define INSTANTIATE_CONV3D_MPP(                                             \
