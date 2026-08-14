@@ -489,10 +489,15 @@ class ConfigModule(ModuleType):
         config = self._config[name]
         if config.alias is not None:
             # Reset the aliased-to target rather than the alias entry, whose
-            # own user_override is never read.
+            # own user_override is never read. Route the reset through the
+            # target module so its hash/get_dict dirty state is updated too;
+            # otherwise get_hash()/save_config() keep returning the stale value.
             target = self._get_alias_target_entry(config)
             if target is not None:
-                target.user_override.set(_UNSET_SENTINEL)
+                target_module, target_key = target
+                target_module._hash_dirty_var.set(True)
+                target_module._mark_get_dict_dirty(target_key)
+                target_module._config[target_key].user_override.set(_UNSET_SENTINEL)
         else:
             config.user_override.set(_UNSET_SENTINEL)
         config.hide = True
@@ -528,22 +533,30 @@ class ConfigModule(ModuleType):
             return resolved
         raise AttributeError(f"config alias {alias} does not exist")
 
-    def _get_alias_target_entry(self, entry: _ConfigEntry) -> "_ConfigEntry | None":
-        """Resolve the ``_ConfigEntry`` an alias points at, if the target is
-        itself a config entry (rather than a plain module constant)."""
+    def _get_alias_target_entry(
+        self, entry: _ConfigEntry
+    ) -> "tuple[ConfigModule, str] | None":
+        """Resolve the config module and key an alias points at, if the target
+        is itself a config entry (rather than a plain module constant).
+
+        Returns ``(owning_config_module, key)`` so callers can both read the
+        target ``_ConfigEntry`` and mark that module's dirty state.
+        """
         data = self._get_alias_module_and_name(entry)
         if data is None:
             return None
         container, name = data
         if isinstance(container, SubConfigProxy):
-            target_module = container._config
+            owner = container._config
             key = container._prefix + name
         elif isinstance(container, ModuleType) and hasattr(container, "_config"):
-            target_module = container
+            owner = container
             key = name
         else:
             return None
-        return target_module._config.get(key)  # type: ignore[attr-defined]
+        if key not in owner._config:  # type: ignore[attr-defined]
+            return None
+        return owner, key  # type: ignore[return-value]
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:
         data = self._get_alias_module_and_name(entry)

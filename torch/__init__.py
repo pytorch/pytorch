@@ -2940,8 +2940,11 @@ class _TorchCompileInductorWrapper:
             # from get_config_copy() but remain settable by name, so also accept
             # any key present in config._config.
             if attr_name not in current_config and attr_name not in config._config:  # type: ignore[attr-defined]
+                known_options = sorted(
+                    set(current_config.keys()) | set(config._config.keys())  # type: ignore[attr-defined]
+                )
                 raise RuntimeError(
-                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+                    f"Unexpected optimization option {key}, known options are {known_options}"
                 )
             attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
             # Subscriptable generic types don't support isinstance so skip the type
