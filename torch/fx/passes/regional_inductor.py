@@ -10,6 +10,7 @@ _R = TypeVar("_R")
 
 import torch
 from torch.fx._compatibility import compatibility
+from torch.fx.passes.canonicalize import rename_nodes_to_canonical
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,49 @@ def _disable_remat_for_regional_subcompile() -> Iterator[None]:
     # violate remat's contiguous-backward-region assumption.
     with torch._functorch.config.patch(remat_using_tags_for_fwd_loss_bwd_graph=False):
         yield
+
+
+def _canonicalize_region_for_aot_cache(gm: torch.fx.GraphModule) -> None:
+    """Normalize generated names that do not affect regional compilation."""
+    module_refs = [
+        node
+        for node in gm.graph.nodes
+        if node.op in ("get_attr", "call_module") and isinstance(node.target, str)
+    ]
+    submods_by_target: dict[str, torch.fx.GraphModule] = {}
+    for node in gm.graph.find_nodes(op="get_attr"):
+        target = node.target
+        if not isinstance(target, str) or "." in target:
+            continue
+        submodule = gm._modules.get(target)
+        if isinstance(submodule, torch.fx.GraphModule) and not any(
+            ref.target.startswith(f"{target}.") for ref in module_refs
+        ):
+            submods_by_target[target] = submodule
+
+    reserved_targets = set(dir(gm)) - submods_by_target.keys()
+    target_prefix = "__regional_inductor_submodule_"
+    while any(
+        f"{target_prefix}{index}" in reserved_targets
+        for index in range(len(submods_by_target))
+    ):
+        target_prefix = f"_{target_prefix}"
+
+    target_map = {
+        old_target: f"{target_prefix}{index}"
+        for index, old_target in enumerate(submods_by_target)
+    }
+    for old_target in submods_by_target:
+        gm.delete_submodule(old_target)
+    for old_target, submodule in submods_by_target.items():
+        gm.add_submodule(target_map[old_target], submodule)
+    for node in module_refs:
+        if node.target in target_map:
+            node.target = target_map[node.target]
+
+    rename_nodes_to_canonical(gm.graph)
+    gm.graph.lint()
+    gm.recompile()
 
 
 def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModule:
@@ -88,6 +132,8 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
                         f"Invalid inductor config key '{key}' in regional_inductor annotation. "
                         f"Available config keys can be found in torch._inductor.config"
                     )
+
+            _canonicalize_region_for_aot_cache(submod)
 
             with (
                 inductor_config.patch(inductor_options),

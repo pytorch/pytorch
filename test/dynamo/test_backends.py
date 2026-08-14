@@ -526,6 +526,27 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             )
             opt_fn(input)
 
+    def test_torch_function_mode_eager_backend_equality(self):
+        from torch._dynamo.backends.debugging import (
+            make_eager_backend_with_torch_function_modes,
+        )
+
+        mode = torch.overrides.TorchFunctionMode()
+        backend1 = make_eager_backend_with_torch_function_modes([mode])
+        backend2 = make_eager_backend_with_torch_function_modes([mode])
+        other_backend = make_eager_backend_with_torch_function_modes(
+            [torch.overrides.TorchFunctionMode()]
+        )
+
+        self.assertEqual(backend1, backend2)
+        self.assertEqual(hash(backend1), hash(backend2))
+        self.assertNotEqual(backend1, other_backend)
+        wrapper1 = torch._TorchCompileWrapper(backend1, None, None, None)
+        wrapper2 = torch._TorchCompileWrapper(backend2, None, None, None)
+        other_wrapper = torch._TorchCompileWrapper(other_backend, None, None, None)
+        self.assertEqual(wrapper1, wrapper2)
+        self.assertNotEqual(wrapper1, other_wrapper)
+
     def test_cudagraphs_backend_accepts_extra_kwargs(self):
         # Issue #169939: torch.compile(backend="cudagraphs", options=...) used
         # to raise TypeError because CudagraphsBackend.__call__ did not accept

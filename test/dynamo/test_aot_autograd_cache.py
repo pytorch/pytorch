@@ -2471,6 +2471,39 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_regional_inductor_reuses_equivalent_regions(self):
+        import torch.fx.traceback as fx_traceback
+
+        def fn(x, y):
+            with fx_traceback.annotate(
+                {"compile_with_inductor": {"inductor_region": 0}}
+            ):
+                result1 = x * y + 1
+            with fx_traceback.annotate(
+                {"compile_with_inductor": {"inductor_region": 1}}
+            ):
+                result2 = x * y + 1
+            with fx_traceback.annotate(
+                {"compile_with_inductor": {"inductor_region": 2}}
+            ):
+                result3 = x * y + 2
+            return result1 + result2 + result3
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        expected = fn(x, y)
+        compiled_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
+        result = compiled_fn(x, y)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"bundled_autograd_cache": True})
     def test_regional_inductor_with_backward(self):
         """

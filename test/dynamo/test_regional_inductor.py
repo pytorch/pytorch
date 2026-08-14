@@ -19,7 +19,10 @@ from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.fx._graph_pickler import GraphPickler
-from torch.fx.passes.regional_inductor import regional_inductor
+from torch.fx.passes.regional_inductor import (
+    _canonicalize_region_for_aot_cache,
+    regional_inductor,
+)
 from torch.fx.passes.regional_inductor_invoke_subgraph import (
     regional_inductor_invoke_subgraph,
 )
@@ -113,6 +116,56 @@ def aot_eager_regional_inductor(
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 @instantiate_parametrized_tests
 class RegionalInductorTests(torch._inductor.test_case.TestCase):
+    def test_canonicalize_region_graph_module_names(self):
+        child = torch.fx.symbolic_trace(lambda x: x + 1)
+
+        def make_region(child_name):
+            root = torch.nn.Module()
+            root.add_module(child_name, copy.deepcopy(child))
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.get_attr(child_name)
+            graph.output(graph.call_module(child_name, (x,)))
+            return torch.fx.GraphModule(root, graph)
+
+        region1 = make_region("score_mod0")
+        region2 = make_region("score_mod1")
+        self.assertNotEqual(region1.code, region2.code)
+
+        _canonicalize_region_for_aot_cache(region1)
+        _canonicalize_region_for_aot_cache(region2)
+
+        self.assertEqual(region1.code, region2.code)
+        self.assertEqual(tuple(region1._modules), tuple(region2._modules))
+        self.assertEqual(region1(torch.ones(2)), region2(torch.ones(2)))
+
+    def test_canonicalize_region_handles_other_attribute_namespaces(self):
+        root = torch.nn.Module()
+        root.add_module("score_mod0", torch.fx.symbolic_trace(lambda x: x + 1))
+        root.register_buffer("__regional_inductor_submodule_0", torch.ones(1))
+        graph = torch.fx.Graph()
+        score_mod = graph.get_attr("score_mod0")
+        collision = graph.get_attr("__regional_inductor_submodule_0")
+        graph.output((score_mod, collision))
+        region = torch.fx.GraphModule(root, graph)
+
+        _canonicalize_region_for_aot_cache(region)
+
+        self.assertIn("___regional_inductor_submodule_0", region._modules)
+        self.assertIn("__regional_inductor_submodule_0", region._buffers)
+
+    def test_canonicalize_region_ignores_qualified_graph_module_names(self):
+        root = torch.nn.Module()
+        root.inner = torch.nn.Module()
+        root.inner.add_module("score_mod0", torch.fx.symbolic_trace(lambda x: x + 1))
+        graph = torch.fx.Graph()
+        graph.output(graph.get_attr("inner.score_mod0"))
+        region = torch.fx.GraphModule(root, graph)
+
+        _canonicalize_region_for_aot_cache(region)
+
+        self.assertIsInstance(region.inner.score_mod0, torch.fx.GraphModule)
+
     @parametrize("serialize", [False, True])
     def test_simple(self, serialize):
         def fn(x, y):
