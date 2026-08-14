@@ -25,7 +25,6 @@ from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
-from torch._dynamo.device_interface import get_interface_for_device, BackendFeature
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
@@ -513,6 +512,8 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    from torch._dynamo.device_interface import BackendFeature, get_interface_for_device
+
     device_type = match.kwargs["x"].meta["val"].device.type
     iface = get_interface_for_device(device_type)
     return (

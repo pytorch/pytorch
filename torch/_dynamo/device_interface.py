@@ -42,7 +42,7 @@ class BackendFeature(Enum):
     """Framework-wide capability bits for device backends.
 
     Members are split into two tiers inlined as comments below.
-    
+
     Inductor-codegen-tier members are consumed by ``has_backend_feature`` /
     ``V.graph.has_feature``.  Framework-level members (``GPU``,
     ``ONLINE_SOFTMAX``, ...) are consumed via
@@ -53,7 +53,8 @@ class BackendFeature(Enum):
     advertise the members it supports.  Adding a new framework-level member
     requires a PR; semantic changes to an existing member require an RFC.
     """
-    # —— original Inductor codegen capabilities (migrated from common.py) ——
+
+    # -- Inductor codegen capabilities (migrated from _inductor/codegen/common.py) --
     FOREACH = auto()
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
@@ -64,7 +65,7 @@ class BackendFeature(Enum):
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
-    # —— framework-level (incl. eager) capabilities ——
+    # -- framework-level (incl. eager) capabilities --
     GPU = auto()
     ONLINE_SOFTMAX = auto()
 
@@ -435,7 +436,7 @@ class MtiaInterface(DeviceInterface):
 
     @staticmethod
     def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
-        return {BackendFeature.GPU}  # has GPU
+        return {BackendFeature.GPU}
 
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
@@ -591,7 +592,7 @@ class CpuInterface(DeviceInterface):
 
     @staticmethod
     def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
-        return {BackendFeature.FOREACH, BackendFeature.SORT}  # no GPU
+        return {BackendFeature.FOREACH, BackendFeature.SORT}
 
     @staticmethod
     def get_raw_stream(device_idx: Any) -> int:
@@ -646,9 +647,7 @@ class MpsInterface(DeviceInterface):
 
     @staticmethod
     def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
-        return {
-            BackendFeature.GPU,
-        }
+        return {BackendFeature.GPU}
 
     @staticmethod
     def synchronize(device: torch.types.Device = None) -> None:

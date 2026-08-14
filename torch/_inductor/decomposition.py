@@ -1201,8 +1201,7 @@ def masked_scatter(
     mask: torch.Tensor,
     source: torch.Tensor,
 ) -> torch.Tensor:
-    from torch._dynamo.device_interface import BackendFeature
-    from .codegen.common import has_backend_feature
+    from .codegen.common import BackendFeature, has_backend_feature
 
     if has_backend_feature(self.device, BackendFeature.MASKED_SCATTER_WITH_INDEX):
         # This two-step algorithm is the same as eager CUDA, for eager CPU we

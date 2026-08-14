@@ -14,7 +14,6 @@ import sympy
 
 import torch
 import torch._logging
-from torch._dynamo.device_interface import BackendFeature
 
 from ..._prims_common import is_integer_dtype
 from ...utils._ordered_set import OrderedSet
@@ -36,6 +35,7 @@ from ..utils import (
 )
 from ..virtualized import _ops as ops, V
 from .common import (
+    BackendFeature,
     CSEVariable,
     DeferredLine,
     IndentedBuffer,

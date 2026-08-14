@@ -12,7 +12,6 @@ from torch._inductor.codegen.cutlass.python_evt import (
 )
 from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
-from torch._dynamo.device_interface import BackendFeature
 
 from ...._dynamo.utils import counters
 from ... import config
@@ -27,7 +26,7 @@ from ...scheduler import (
 )
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
-from ..common import IndentedBuffer
+from ..common import BackendFeature, IndentedBuffer
 
 
 log = logging.getLogger(__name__)

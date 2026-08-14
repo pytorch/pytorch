@@ -6,7 +6,6 @@ from typing import cast
 
 from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
-from torch._dynamo.device_interface import BackendFeature
 
 from ... import config
 from ...codecache import code_hash, get_path
@@ -20,7 +19,7 @@ from ...scheduler import (
 from ...select_algorithm import PartialRender
 from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
-from ..common import IndentedBuffer
+from ..common import BackendFeature, IndentedBuffer
 
 
 log = logging.getLogger(__name__)
