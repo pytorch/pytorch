@@ -16,7 +16,6 @@ specialized implementations for each hardware backend's unique features.
 """
 
 import inspect
-import logging
 import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
@@ -25,8 +24,6 @@ from typing import Any, Literal
 
 import torch
 from torch.utils._pallas import has_torch_tpu
-
-log = logging.getLogger(__name__)
 
 
 get_cuda_stream: Callable[[int], int] | None
@@ -666,18 +663,19 @@ def _register_interface_for_privateuse1() -> None:
     backend = torch._C._get_privateuse1_backend_name()
     if not backend or backend == "privateuseone":
         return
-    mod = getattr(torch, backend, None)
-    if mod is None or not hasattr(mod, "get_device_interface"):
-        return
+    from torch.utils.backend_registration import _get_custom_mod_func
     try:
-        interface = mod.get_device_interface()
+        get_device_interface_fn = _get_custom_mod_func("get_device_interface")
+        interface = get_device_interface_fn()
         if interface is None or not issubclass(interface, DeviceInterface):
             return
         register_interface_for_device(backend, interface)
-        for i in range(mod.device_count()):
-            register_interface_for_device(f"{backend}:{i}", interface)
-    except Exception:
-        log.warning("Failed to register device interface for %s", backend, exc_info=True)
+        device_count_fn = _get_custom_mod_func("device_count")
+        if device_count_fn is not None:
+            for i in range(device_count_fn()):
+                register_interface_for_device(f"{backend}:{i}", interface)
+    except RuntimeError:
+        pass
 
 
 def init_device_reg() -> None:

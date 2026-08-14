@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock, patch
 
 import torch
+import torch.utils.backend_registration
 from torch._dynamo.device_interface import (
     DeviceInterface,
     get_interface_for_device,
@@ -41,22 +42,43 @@ class TestPrivateuse1DeviceInterface(TestCase):
         mod = MagicMock()
         mod.get_device_interface = get_device_interface_fn
         mod.device_count = device_count_fn
+        _pu1_patch = patch.object(
+            torch._C,
+            "_get_privateuse1_backend_name",
+            return_value="fakebackend",
+        )
+        _pu1_br_patch = patch.object(
+            torch.utils.backend_registration,
+            "_get_privateuse1_backend_name",
+            return_value="fakebackend",
+        )
+        return (
+            _pu1_patch,
+            _pu1_br_patch,
+            patch.object(torch, "fakebackend", mod, create=True),
+        )
+
+    def _patch_no_backend(self, backend_name="privateuseone"):
+        """Patch both _get_privateuse1_backend_name references."""
         return (
             patch.object(
                 torch._C,
                 "_get_privateuse1_backend_name",
-                return_value="fakebackend",
+                return_value=backend_name,
             ),
-            patch.object(torch, "fakebackend", mod, create=True),
+            patch.object(
+                torch.utils.backend_registration,
+                "_get_privateuse1_backend_name",
+                return_value=backend_name,
+            ),
         )
 
     def test_no_backend_registered(self):
         """When no privateuse1 backend is set, get_interface_for_device should
         raise NotImplementedError for the privateuse1 device."""
         self._reset_device_reg()
-        with patch.object(
-            torch._C, "_get_privateuse1_backend_name", return_value="privateuseone"
-        ):
+        p1, p2 = self._patch_no_backend()
+        with p1, p2:
             with self.assertRaises(NotImplementedError):
                 get_interface_for_device("privateuseone")
 
@@ -68,11 +90,11 @@ class TestPrivateuse1DeviceInterface(TestCase):
 
         self._reset_device_reg()
         try:
-            p1, p2 = self._setup_fakebackend(
+            p1, p2, p3 = self._setup_fakebackend(
                 get_device_interface_fn=lambda: DummyInterface,
                 device_count_fn=lambda: 1,
             )
-            with p1, p2:
+            with p1, p2, p3:
                 self.assertIs(get_interface_for_device("fakebackend"), DummyInterface)
                 self.assertIs(
                     get_interface_for_device("fakebackend:0"), DummyInterface
@@ -84,11 +106,8 @@ class TestPrivateuse1DeviceInterface(TestCase):
         """When the backend name is set but no module is registered on torch,
         get_interface_for_device should raise NotImplementedError."""
         self._reset_device_reg()
-        with patch.object(
-            torch._C,
-            "_get_privateuse1_backend_name",
-            return_value="fakebackend",
-        ):
+        p1, p2 = self._patch_no_backend("fakebackend")
+        with p1, p2:
             with patch.object(torch, "fakebackend", None, create=True):
                 with self.assertRaises(NotImplementedError):
                     get_interface_for_device("fakebackend")
@@ -100,11 +119,8 @@ class TestPrivateuse1DeviceInterface(TestCase):
         del mod.get_device_interface
 
         self._reset_device_reg()
-        with patch.object(
-            torch._C,
-            "_get_privateuse1_backend_name",
-            return_value="fakebackend",
-        ):
+        p1, p2 = self._patch_no_backend("fakebackend")
+        with p1, p2:
             with patch.object(torch, "fakebackend", mod, create=True):
                 with self.assertRaises(NotImplementedError):
                     get_interface_for_device("fakebackend")
@@ -113,10 +129,10 @@ class TestPrivateuse1DeviceInterface(TestCase):
         """When get_device_interface returns None,
         get_interface_for_device should raise NotImplementedError."""
         self._reset_device_reg()
-        p1, p2 = self._setup_fakebackend(
+        p1, p2, p3 = self._setup_fakebackend(
             get_device_interface_fn=lambda: None,
         )
-        with p1, p2:
+        with p1, p2, p3:
             with self.assertRaises(NotImplementedError):
                 get_interface_for_device("fakebackend")
 
@@ -125,15 +141,14 @@ class TestPrivateuse1DeviceInterface(TestCase):
         to the caller of get_interface_for_device; it should raise
         NotImplementedError instead."""
         self._reset_device_reg()
-        p1, p2 = self._setup_fakebackend(
+        p1, p2, p3 = self._setup_fakebackend(
             get_device_interface_fn=MagicMock(
                 side_effect=RuntimeError("driver missing")
             ),
         )
-        with p1, p2:
-            with self.assertLogs("torch._dynamo.device_interface", level="WARNING"):
-                with self.assertRaises(NotImplementedError):
-                    get_interface_for_device("fakebackend")
+        with p1, p2, p3:
+            with self.assertRaises(NotImplementedError):
+                get_interface_for_device("fakebackend")
 
     def test_backend_device_count_raises(self):
         """When device_count raises, the main device is already registered
@@ -141,24 +156,23 @@ class TestPrivateuse1DeviceInterface(TestCase):
         DummyInterface = self._make_dummy_interface()
 
         self._reset_device_reg()
-        p1, p2 = self._setup_fakebackend(
+        p1, p2, p3 = self._setup_fakebackend(
             get_device_interface_fn=lambda: DummyInterface,
             device_count_fn=MagicMock(side_effect=RuntimeError("driver error")),
         )
-        with p1, p2:
-            with self.assertLogs("torch._dynamo.device_interface", level="WARNING"):
-                self.assertIs(get_interface_for_device("fakebackend"), DummyInterface)
-                with self.assertRaises(NotImplementedError):
-                    get_interface_for_device("fakebackend:0")
+        with p1, p2, p3:
+            self.assertIs(get_interface_for_device("fakebackend"), DummyInterface)
+            with self.assertRaises(NotImplementedError):
+                get_interface_for_device("fakebackend:0")
 
     def test_backend_returns_non_device_interface(self):
         """When get_device_interface returns a non-DeviceInterface subclass,
         get_interface_for_device should raise NotImplementedError."""
         self._reset_device_reg()
-        p1, p2 = self._setup_fakebackend(
+        p1, p2, p3 = self._setup_fakebackend(
             get_device_interface_fn=lambda: str,  # not a DeviceInterface subclass
         )
-        with p1, p2:
+        with p1, p2, p3:
             with self.assertRaises(NotImplementedError):
                 get_interface_for_device("fakebackend")
 
