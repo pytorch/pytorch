@@ -84,6 +84,7 @@
 #ifdef USE_MEM_EFF_ATTENTION
 #ifndef USE_ROCM
 // MemoryEfficient Attention Specific Imports for CUDA
+#include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
@@ -2027,8 +2028,9 @@ __global__ void rand_uniform_kernel(
 
   const auto [seed, offset] = at::cuda::philox::unpack(rng_engine_inputs);
 
-  const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
-      head_id * (n_queries * n_keys);
+  // See NOTE [Mem-efficient attention dropout RNG offset]
+  const int64_t dropout_seq_start = gemm_kernel_utils::dropout_rng_offset(
+      batch_id, head_id, n_heads, n_queries, n_keys);
   const int64_t query_start_idx = query_idx * n_keys;
 
   curandStatePhilox4_32_10_t curand_state;
@@ -2038,7 +2040,7 @@ __global__ void rand_uniform_kernel(
       offset + dropout_seq_start + query_start_idx,
       &curand_state);
 
-  for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
+  for (int64_t key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
     float4 rand_quad = curand_uniform4(&curand_state);
 
 #pragma unroll

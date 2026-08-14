@@ -979,6 +979,33 @@ class TestAutograd(TestCase):
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
+    @skipIfTorchDynamo("dynamo inlines setup_context, so the value stays live")
+    def test_custom_function_setup_context_releases_return_value(self):
+        class Sentinel:
+            pass
+
+        sentinel_ref = None
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                nonlocal sentinel_ref
+                sentinel = Sentinel()
+                sentinel_ref = weakref.ref(sentinel)
+                return sentinel
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO
+
+        MyFunc.apply(torch.randn(3, requires_grad=True))
+
+        self.assertIsNone(sentinel_ref())
+
     def test_multiple_insert_removal_caching(self):
         torch._C._set_cached_tensors_enabled(True)
         try:

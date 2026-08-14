@@ -623,6 +623,42 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             self.assertIn("tmp0 = cute.make_rmem_tensor(1, cutlass.Float32)", body)
             self.assertIn("tmp2 = cute.TensorSSA(-tmp1, tmp1.shape, tmp1.dtype)", body)
 
+    def test_repeated_captured_load_reuses_generated_fragments(self):
+        import sympy
+
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            ModificationWrapperCuteDSL,
+        )
+
+        buffers = {}
+        for name in ("buf0", "buf1"):
+            buffer = MagicMock()
+            buffer.dtype = torch.float32
+            buffer.get_size.return_value = (16,)
+            buffers[name] = buffer
+        mock_graph = MockGraphHandler(buffers)
+
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_repeated_captured_load",
+                input_nodes=[],
+                output_node=None,
+            )
+            handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
+            with V.set_kernel_handler(kernel):
+                first = handler.load("buf0", sympy.Integer(0))
+                repeated = handler.load("buf0", sympy.Integer(0))
+                different_index = handler.load("buf0", sympy.Integer(1))
+                different_buffer = handler.load("buf1", sympy.Integer(0))
+
+        self.assertIs(first, repeated)
+        self.assertIsNot(first, different_index)
+        self.assertIsNot(first, different_buffer)
+        self.assertEqual(
+            kernel.body.getvalue().count("cute.make_rmem_tensor(1, cutlass.Float32)"),
+            3,
+        )
+
     def test_cutedsl_op_overrides(self):
         """Test the new CuteDSLOpOverrides class."""
         import torch

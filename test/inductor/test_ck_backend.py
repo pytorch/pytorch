@@ -18,6 +18,8 @@ from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocmVersionAtLeast,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
@@ -67,7 +69,11 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        ("CK", "CKTILE", "ATen,CK"),
+        (
+            subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
+            subtest("CKTILE", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
+            "ATen,CK",
+        ),
         name_fn=lambda b: {
             "CK": "standalone_ck",
             "CKTILE": "standalone_cktile",
@@ -128,7 +134,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        ("CK", "ATen,CK"),
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize("autotune_in_subproc", (True,))
@@ -236,7 +242,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        ("CK", "ATen,CK"),
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
@@ -315,7 +321,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        ("CK", "ATen,CK"),
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize(
@@ -467,7 +473,7 @@ class TestCKBackend(TestCase):
     )
     @parametrize(
         "max_autotune_conv_backends",
-        ("CK", "ATEN,CK"),
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATEN,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
@@ -508,7 +514,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        ("CK", "ATen,CK"),
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_precompile_bmm(
