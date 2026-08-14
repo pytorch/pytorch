@@ -3165,10 +3165,6 @@ class Placeholder(enum.Enum):
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
-    # The second entry point emitted for runtime divisibility specialization.
-    RUNTIME_DIVISIBLE_KERNEL_NAME = "RUNTIME_DIVISIBLE_KERNEL_NAME"
-    RUNTIME_DIVISIBLE_DESCRIPTIVE_NAME = "RUNTIME_DIVISIBLE_DESCRIPTIVE_NAME"
-
 
 def pass_execution_and_save(
     func: Callable[..., Any], gm: GraphModule, inp: Sequence[Any], msg: str

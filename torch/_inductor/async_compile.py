@@ -229,8 +229,8 @@ class CompiledTritonKernels:
     """
     In memory cache for storing compiled triton kernels.
 
-    Each triton kernel is keyed by its entry point and source code. Each value
-    stored in the cache is a return value of AsyncCompile.triton().
+    Each triton kernel is keyed by the hash of its source code. Each value stored
+    in the cache is a return value of AsyncCompile.triton().
 
     Currently, the cache stores Future objects, but it should be generalizable for any kernels.
     """
@@ -238,17 +238,17 @@ class CompiledTritonKernels:
     _cache: dict[str, CodeCacheFuture] = {}
 
     @staticmethod
-    def key(kernel_name: str, kernel_src: str):
+    def key(kernel_src: str):
         """
-        Generates a cache key given a Triton entry point and its full source code.
+        Generates a cache key given a triton kernel's full source code.
         This source includes the inductor meta, compilation metadata, the kernel itself, etc.
-        `kernel_src` should be the exact source string passed to async_compile.triton().
+        `kernel_src` should be the exact string passed to async_compile.triton()'s first argument.
         """
-        # A source module can expose multiple differently specialized entry points.
-        return code_hash(kernel_src, extra=torch_key() + kernel_name.encode())
+        # Hashes the kernel source with torch_key into a single hash key
+        return code_hash(kernel_src, extra=torch_key())
 
     @staticmethod
-    def save(kernel_name: str, kernel_src: str, future: CodeCacheFuture):
+    def save(kernel_src: str, future: CodeCacheFuture):
         """
         Saves a compiled triton kernel to the cache.
         TODO: We store a LambdaFuture as that's the callable returned by async_compile.triton,
@@ -257,12 +257,12 @@ class CompiledTritonKernels:
         TODO: Source code here is not just the kernel's source code, but also includes the inductor preamble, etc.
         so it could be less strict.
         """
-        key = CompiledTritonKernels.key(kernel_name, kernel_src)
+        key = CompiledTritonKernels.key(kernel_src)
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
-    def get(kernel_name: str, kernel_src: str) -> CodeCacheFuture | None:
-        key = CompiledTritonKernels.key(kernel_name, kernel_src)
+    def get(kernel_src: str) -> CodeCacheFuture | None:
+        key = CompiledTritonKernels.key(kernel_src)
         return CompiledTritonKernels._cache.get(key, None)
 
     @staticmethod
@@ -270,8 +270,8 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache = {}
 
     @staticmethod
-    def remove_future(kernel_name: str, kernel_src: str) -> None:
-        key = CompiledTritonKernels.key(kernel_name, kernel_src)
+    def remove_future(kernel_src: str) -> None:
+        key = CompiledTritonKernels.key(kernel_src)
 
         # Delete the LambdaFuture if there is one
         if key in CompiledTritonKernels._cache:
@@ -486,12 +486,12 @@ class AsyncCompile:
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
 
-        if (future := CompiledTritonKernels.get(kernel_name, source_code)) is not None:
+        if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
                 # Remove the future now that we've cache hit
-                CompiledTritonKernels.remove_future(kernel_name, source_code)
+                CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
                 return future
@@ -551,22 +551,20 @@ class AsyncCompile:
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
-                CompiledTritonKernels.remove_future(kernel_name, source_code)
+                CompiledTritonKernels.remove_future(source_code)
 
                 kernel.restore_after_unpickle(old_values=None)
 
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
-                    static_triton_bundle_key=CompiledTritonKernels.key(
-                        kernel_name, source_code
-                    ),
+                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
             future = LambdaFuture(get_result, future=task)
-            CompiledTritonKernels.save(kernel_name, source_code, future)
+            CompiledTritonKernels.save(source_code, future)
             return future
         else:
             with dynamo_timed(
@@ -585,9 +583,7 @@ class AsyncCompile:
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
                         warm_cache_only=False,
-                        static_triton_bundle_key=CompiledTritonKernels.key(
-                            kernel_name, source_code
-                        ),
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
                     elapsed_us = (time_ns() - start_ns) // 1000
                     _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
@@ -603,15 +599,6 @@ class AsyncCompile:
 
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
-
-    def triton_multi(
-        self, kernel_names: tuple[str, ...], source_code: str, device_str: str = "cuda"
-    ) -> tuple[Any, ...]:
-        """Compile multiple entry points defined by one Triton source module."""
-        return tuple(
-            self.triton(name, source_code, device_str=device_str)
-            for name in kernel_names
-        )
 
     def runtime_divisible_multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import RuntimeDivisibleMultiKernelCall

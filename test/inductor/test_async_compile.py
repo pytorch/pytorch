@@ -15,11 +15,7 @@ from unittest.mock import Mock, patch
 
 import torch
 from torch._inductor import config
-from torch._inductor.async_compile import (
-    AsyncCompile,
-    CompiledTritonKernels,
-    shutdown_compile_workers,
-)
+from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
@@ -169,13 +165,6 @@ def _forked_daemon_compile_worker(q):
 
 @instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
-    def test_triton_cache_key_includes_entry_point(self):
-        source = "shared source"
-        self.assertNotEqual(
-            CompiledTritonKernels.key("generic", source),
-            CompiledTritonKernels.key("aligned", source),
-        )
-
     def test_flydsl_returns_kernel_wrapper(self):
         source = """
 def test_flydsl_loader_main(value, stream):

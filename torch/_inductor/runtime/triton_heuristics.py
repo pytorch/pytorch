@@ -414,12 +414,7 @@ def check_autotune_cache(
         from torch._inductor.compile_worker import watchdog
 
         watchdog.report_phase(watchdog.Phase.QUERYING_CACHE)
-        cache_filename = filename + inductor_meta.get(
-            "autotune_cache_key_suffix", ""
-        )
-        autotune_cache = AutotuneCache.create(
-            inductor_meta, cache_filename, configs_hash
-        )
+        autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]

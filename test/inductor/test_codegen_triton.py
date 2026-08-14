@@ -39,6 +39,7 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
 )
@@ -248,6 +249,11 @@ def helper(x):
         )
 
         _check_divisibility(
+            (0,),
+            triton_utils.config_of([SizeArg("A", s0)], divisible_by_16_extra=(0,)),
+        )
+
+        _check_divisibility(
             (0, 2, 4, 5, 6),
             triton_utils.config_of(
                 [
@@ -278,7 +284,10 @@ def helper(x):
             V.graph.sizevars.statically_known_multiple_of(s2, 16),
         )
 
-    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.version.hip is None and GPU_TYPE == "cuda",
+        "requires NVIDIA CUDA and Triton",
+    )
     @inductor_config.patch("triton.divisible_by_16", True)
     @inductor_config.patch("triton.unique_kernel_names", False)
     def test_runtime_divisibility_specializes_dynamic_kernel(self):
@@ -305,10 +314,9 @@ def helper(x):
 
         source = "\n".join(code)
         self.assertIn("runtime_divisible_multi_kernel", source)
-        self.assertEqual(source.count("async_compile.triton_multi("), 1)
-        self.assertEqual(source.count("def runtime_divisible_body("), 1)
-        self.assertEqual(source.count("runtime_divisible_triton_meta ="), 1)
-        self.assertEqual(source.count("runtime_divisible_inductor_meta ="), 1)
+        self.assertEqual(source.count("async_compile.triton("), 2)
+        self.assertNotIn("async_compile.triton_multi(", source)
+        self.assertNotIn("runtime_divisible_body", source)
         self.assertEqual(source.count("def triton_"), 2)
 
         unaligned = make_inputs(17, 33, 17)
@@ -321,7 +329,7 @@ def helper(x):
         self.assertEqual(actual, fn(*unaligned))
         source = "\n".join(code)
         self.assertNotIn("runtime_divisible_multi_kernel", source)
-        self.assertNotIn("runtime_divisible_body", source)
+        self.assertEqual(source.count("async_compile.triton("), 1)
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_skips_graph_input_tensor_divisibility_for_cpp_wrapper_jit(self):
