@@ -178,7 +178,7 @@ class Event(torch._C._XpuEventBase):
     def ipc_handle(self) -> bytes:
         r"""Return an IPC handle of this event.
 
-        The event must have been constructed with ``enable_ipc=True``.
+        The event must have been constructed with ``interprocess=True``.
         If not yet recorded, the event is eagerly initialized on the current device.
 
         .. note:: The event reconstructed with :meth:`from_ipc_handle` cannot be re-exported via :meth:`ipc_handle`.
@@ -198,6 +198,9 @@ class Event(torch._C._XpuEventBase):
         Args:
             device (torch.device, int, or str): the device on which to open the handle.
             ipc_handle (bytes): the IPC handle returned by :meth:`ipc_handle`.
+
+        Returns:
+            Event: an event reconstructed from the IPC handle.
         """
         return super().from_ipc_handle(device, ipc_handle)
 
