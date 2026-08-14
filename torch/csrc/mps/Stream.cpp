@@ -39,8 +39,7 @@ static PyObject* THPMPSStream_pynew(
 
   at::mps::MPSStream* stream = (stream_id == -1)
       ? at::mps::getStreamFromPool()
-      : ((stream_id == 0) ? at::mps::getDefaultMPSStream()
-                          : at::mps::getStreamFromPool(stream_id));
+      : at::mps::getStreamByID(stream_id);
   c10::Stream unwrapped = stream->unwrap();
 
   THPMPSStream* self = (THPMPSStream*)ptr.get();
