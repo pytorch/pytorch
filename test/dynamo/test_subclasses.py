@@ -3269,22 +3269,22 @@ class GraphModule(torch.nn.Module):
         tangents_1: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='a')
         tangents_2: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='b')
     ):
-        mul_18: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = None
-        mul_19: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_2, primals_2);  tangents_2 = None
-        mul_20: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_18, primals_1);  mul_18 = None
-        mul_21: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_19, primals_1);  mul_19 = None
-        mul_22: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_20, primals_2);  mul_20 = None
-        mul_23: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_21, primals_2);  mul_21 = primals_2 = None
-        mul_24: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_22, primals_1);  mul_22 = None
-        mul_25: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_23, primals_1);  mul_23 = primals_1 = None
+        mul_16: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = None
+        mul_17: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_2, primals_2);  tangents_2 = None
+        mul_18: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_16, primals_1);  mul_16 = None
+        mul_19: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_17, primals_1);  mul_17 = None
+        mul_20: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_18, primals_2);  mul_18 = None
+        mul_21: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_19, primals_2);  mul_19 = primals_2 = None
+        mul_22: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_20, primals_1);  mul_20 = None
+        mul_23: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_21, primals_1);  mul_21 = primals_1 = None
         return (
             None,  # None
             None,  # None
-            mul_24,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a')
+            mul_22,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a')
             primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=0)
             primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=0)
-            mul_25,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b')
+            mul_23,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b')
             primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=0)
             primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=0)
