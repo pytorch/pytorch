@@ -92,10 +92,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # async_compile forks that many GPU-attached compile workers onto the single
     # visible GPU. That oversubscribes the accelerator scheduler runlist and can
     # thrash/hang a shard until its timeout. Cap the fan-out to a bounded pool of
-    # 16 workers: this still creates a GPU-attached SubprocPool (unlike a single
+    # 8 workers: this still creates a GPU-attached SubprocPool (unlike a single
     # thread, which runs compilation inline with no pool) but bounds the number of
     # concurrent GPU-attached workers below the oversubscription threshold.
-    export TORCHINDUCTOR_COMPILE_THREADS=16
+    export TORCHINDUCTOR_COMPILE_THREADS=8
 fi
 
 export VALGRIND=ON
