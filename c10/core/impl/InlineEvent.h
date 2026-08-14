@@ -155,8 +155,8 @@ struct InlineEvent final {
 
   std::string ipcHandle() {
     TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Event is not an IPC event.");
-    // device_index_ is -1 until the first record(); fall back to the current
-    // device.
+    // See Note [Event Semantics]: event_ may be lazily initialized on the
+    // current device if record() was never called.
     if (device_index_ == -1) {
       device_index_ = backend_.getDevice().index();
     }
