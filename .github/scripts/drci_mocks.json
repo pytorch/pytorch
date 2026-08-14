@@ -1,0 +1,1670 @@
+{
+  "90791 pytorch": {
+    "FAILED": [
+      {
+        "workflowId": 3714206650,
+        "id": 10142872329,
+        "name": "Lint / Test tools",
+        "jobName": "Test tools",
+        "conclusion": "failure",
+        "completed_at": "2022-12-16T15:07:27Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/3714206650/jobs/6297806967",
+        "head_branch": "gh/bdhirsh/356/head",
+        "pr_number": 90791,
+        "head_sha": "70711ab89515aa4515ce60d3c29a04dbdba8e06e",
+        "failure_captures": [
+          "Process completed with exit code 2."
+        ],
+        "failure_line": "##[error]Process completed with exit code 2.",
+        "time": "2022-12-16T15:05:59.491000Z"
+      }
+    ],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": [],
+    "CRCR_L3": [
+      {
+        "workflowId": 3714206650,
+        "id": 10142872093,
+        "name": "Lint / lintrunner",
+        "jobName": "lintrunner",
+        "conclusion": "failure",
+        "completed_at": "2022-12-16T15:05:55Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/3714206650/jobs/6297806783",
+        "head_branch": "gh/bdhirsh/356/head",
+        "pr_number": 90791,
+        "head_sha": "70711ab89515aa4515ce60d3c29a04dbdba8e06e",
+        "failure_captures": [
+          "Process completed with exit code 2."
+        ],
+        "failure_line": "##[error]Process completed with exit code 2.",
+        "time": "2022-12-16T15:05:31.870000Z"
+      }
+    ]
+  },
+  "109999 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 6296353011,
+        "id": 17096400692,
+        "name": "trunk / macos-12-py3-arm64 / build",
+        "jobName": "macos-12-py3-arm64 / build",
+        "conclusion": "failure",
+        "completed_at": "2023-09-25T10:31:43Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6296353011/job/17096400692",
+        "head_branch": "ciflow/trunk/109999",
+        "pr_number": 109999,
+        "head_sha": "735dfcbad2cd9d67782d1a807675beb5d5a1a996",
+        "failure_captures": [
+          "Failure: There is only 5626224KB free space left in /, which is less than the minimum requirement of"
+        ],
+        "failure_line": "Failure: There is only 5626224KB free space left in /, which is less than the minimum requirement of 6291456KB for macOS",
+        "time": "2023-09-25T10:31:22.904509Z"
+      }
+    ],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 6296350393,
+        "id": 17091878852,
+        "name": "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 2, 3, linux.8xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 2, 3, linux.8xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-25T09:20:08Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6296350393/job/17091878852",
+        "head_branch": "update-xla-commit-hash/6296332542-80-1",
+        "pr_number": 109999,
+        "head_sha": "735dfcbad2cd9d67782d1a807675beb5d5a1a996",
+        "failure_captures": [
+          "RuntimeError: distributed/tensor/parallel/test_ddp_2d_parallel 1/1 failed"
+        ],
+        "failure_line": "RuntimeError: distributed/tensor/parallel/test_ddp_2d_parallel 1/1 failed!",
+        "time": "2023-09-25T08:06:13.028666Z"
+      },
+      {
+        "workflowId": 6296350393,
+        "id": 17091509701,
+        "name": "pull / linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)",
+        "jobName": "linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-25T08:57:22Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6296350393/job/17091509701",
+        "head_branch": "update-xla-commit-hash/6296332542-80-1",
+        "pr_number": 109999,
+        "head_sha": "735dfcbad2cd9d67782d1a807675beb5d5a1a996",
+        "failure_captures": [
+          "RuntimeError: distributed/tensor/parallel/test_ddp_2d_parallel 1/1 failed"
+        ],
+        "failure_line": "RuntimeError: distributed/tensor/parallel/test_ddp_2d_parallel 1/1 failed!",
+        "time": "2023-09-25T07:53:54.229597Z"
+      }
+    ],
+    "UNSTABLE": []
+  },
+  "76118 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "100652 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 5249183433,
+        "id": 14204279379,
+        "name": "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-12T23:52:57Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183433/jobs/9481968198",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "",
+          "fail_to_run"
+        ],
+        "failure_line": "fail_to_run",
+        "time": "2023-06-12T22:58:02.149643Z"
+      },
+      {
+        "workflowId": 5249183433,
+        "id": 14204278909,
+        "name": "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-13T00:34:02Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183433/jobs/9481967867",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "",
+          "fail_to_run"
+        ],
+        "failure_line": "fail_to_run",
+        "time": "2023-06-12T22:57:59.592338Z"
+      },
+      {
+        "workflowId": 5249183433,
+        "id": 14204082644,
+        "name": "inductor / linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_torchbench_cpu_accuracy, 1, 1, linux.4xlarge)",
+        "jobName": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_torchbench_cpu_accuracy, 1, 1, linux.4xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-12T23:38:07Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183433/jobs/9481815573",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "sam",
+          "fail_to_run"
+        ],
+        "failure_line": "sam                                fail_to_run",
+        "time": "2023-06-12T22:45:44.981701Z"
+      },
+      {
+        "workflowId": 5249183431,
+        "id": 14204307666,
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (aot_eager_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (aot_eager_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-13T00:06:07Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183431/jobs/9481990225",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "moco",
+          "fail_to_run"
+        ],
+        "failure_line": "moco                               fail_to_run",
+        "time": "2023-06-12T22:59:34.980746Z"
+      },
+      {
+        "workflowId": 5249183431,
+        "id": 14204308144,
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamic_aot_eager_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamic_aot_eager_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-12T23:53:26Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183431/jobs/9481990597",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "moco",
+          "fail_to_run"
+        ],
+        "failure_line": "moco                               fail_to_run",
+        "time": "2023-06-12T22:59:35.761358Z"
+      },
+      {
+        "workflowId": 5249183431,
+        "id": 14204307166,
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamo_eager_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamo_eager_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-13T00:01:23Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183431/jobs/9481989829",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "moco",
+          "fail_to_run"
+        ],
+        "failure_line": "moco                               fail_to_run",
+        "time": "2023-06-12T22:59:33.478075Z"
+      }
+    ],
+    "UNSTABLE": [],
+    "CRCR_L3": [
+      {
+        "workflowId": 5249183433,
+        "id": 14204278817,
+        "name": "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_timm, 2, 2, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_timm, 2, 2, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-12T23:39:10Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5249183433/jobs/9481967795",
+        "head_branch": "ciflow/inductor/100652",
+        "pr_number": 100652,
+        "head_sha": "17a09e69c00f9416f8e9719a311d942df2b5fc42",
+        "failure_captures": [
+          "RuntimeError: CUDA error: uncorrectable ECC error encountered"
+        ],
+        "failure_line": "RuntimeError: CUDA error: uncorrectable ECC error encountered",
+        "time": "2023-06-12T22:57:58.776004Z"
+      }
+    ]
+  },
+  "91340 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "79694 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "105312 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 5573012268,
+        "id": 15091097850,
+        "name": "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-07-17T09:28:11Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5573012268/jobs/10180897824",
+        "head_branch": "ciflow/inductor/105312",
+        "pr_number": 105312,
+        "head_sha": "63e7ebc3f22e0016f2c8dfdf2b43b4ff8d82cab7",
+        "failure_captures": [
+          "",
+          "fail_accuracy"
+        ],
+        "failure_line": "fail_accuracy",
+        "time": "2023-07-17T08:38:06.490291Z"
+      }
+    ],
+    "UNSTABLE": [
+      {
+        "workflowId": 5573012268,
+        "id": 15091097115,
+        "name": "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-07-17T09:44:33Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5573012268/jobs/10180897283",
+        "head_branch": "ciflow/inductor/105312",
+        "pr_number": 105312,
+        "head_sha": "63e7ebc3f22e0016f2c8dfdf2b43b4ff8d82cab7",
+        "failure_captures": [
+          "",
+          "fail_to_run"
+        ],
+        "failure_line": "fail_to_run",
+        "time": "2023-07-17T08:38:03.597806Z"
+      },
+      {
+        "workflowId": 5573011165,
+        "id": 15090345245,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-07-17T09:56:51Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5573011165/jobs/10180312467",
+        "head_branch": "ciflow/trunk/105312",
+        "pr_number": 105312,
+        "head_sha": "63e7ebc3f22e0016f2c8dfdf2b43b4ff8d82cab7",
+        "failure_captures": [
+          "test_nn.py::TestNNDeviceTypeCUDA::test_cross_entropy_large_tensor_reduction_none_cuda"
+        ],
+        "failure_line": "FAILED [0.8205s] test_nn.py::TestNNDeviceTypeCUDA::test_cross_entropy_large_tensor_reduction_none_cuda - torch.cuda.OutOfMemoryError: HIP out of memory. Tried to allocate 16.00 GiB. GPU 0 has a total capacty of 31.98 GiB of which 131062.24 GiB is free. Of the allocated memory 16.00 GiB is allocated by PyTorch, and 3.25 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_HIP_ALLOC_CONF",
+        "time": "2023-07-17T08:10:21.226444Z"
+      }
+    ]
+  },
+  "109584 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 6239358969,
+        "id": 16942099488,
+        "name": "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:18:11Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942099488",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven"
+        ],
+        "failure_line": "FAILED [2.9434s] distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven - RuntimeError: Process 0 exited with error code 10 and exception:",
+        "time": "2023-09-19T21:06:46.334406Z"
+      },
+      {
+        "workflowId": 6239358969,
+        "id": 16942093819,
+        "name": "pull / linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)",
+        "jobName": "linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:14:44Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942093819",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven"
+        ],
+        "failure_line": "FAILED [3.2397s] distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven - RuntimeError: Process 0 exited with error code 10 and exception:",
+        "time": "2023-09-19T21:06:33.334622Z"
+      },
+      {
+        "workflowId": 6305865216,
+        "id": 17121490206,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-26T00:44:35Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6305865216/job/17121490206",
+        "head_branch": "ciflow/trunk/109584",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "RuntimeError: functorch/test_eager_transforms 1/1 failed"
+        ],
+        "failure_line": "RuntimeError: functorch/test_eager_transforms 1/1 failed! Received signal: SIGIOT",
+        "time": "2023-09-26T00:24:11.012573Z"
+      },
+      {
+        "workflowId": 6305865216,
+        "id": 17120709688,
+        "name": "trunk / win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)",
+        "jobName": "win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-25T23:52:29Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6305865216/job/17120709688",
+        "head_branch": "ciflow/trunk/109584",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "test_tensorboard.py::TestTensorBoardNumpy::test_scalar"
+        ],
+        "failure_line": "FAILED [0.0012s] test_tensorboard.py::TestTensorBoardNumpy::test_scalar - Att...",
+        "time": "2023-09-25T23:45:03.011967Z"
+      }
+    ],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 6239358969,
+        "id": 16942102036,
+        "name": "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)",
+        "jobName": "linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:39:54Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942102036",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": null,
+        "failure_line": null,
+        "time": "2023-09-19T21:06:52.334082Z"
+      },
+      {
+        "workflowId": 6239358969,
+        "id": 16942095433,
+        "name": "pull / linux-focal-py3.8-clang10 / test (dynamo, 1, 2, linux.2xlarge)",
+        "jobName": "linux-focal-py3.8-clang10 / test (dynamo, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:39:53Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942095433",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": null,
+        "failure_line": null,
+        "time": "2023-09-19T21:06:37.015307Z"
+      }
+    ],
+    "UNSTABLE": []
+  },
+  "104214 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 5386107383,
+        "id": 14578868938,
+        "name": "pull / linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 3, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 3, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-27T06:25:16Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776474242",
+        "head_branch": "malfet-patch-15",
+        "pr_number": 104214,
+        "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+        "failure_captures": [
+          "test_sparse_semi_structured.py::TestSparseSemiStructuredCUDA::test_mm_sparse_first_NT_cuda_int8"
+        ],
+        "failure_line": "FAILED [0.0133s] test_sparse_semi_structured.py::TestSparseSemiStructuredCUDA::test_mm_sparse_first_NT_cuda_int8 - AssertionError: \"_structured_sparse_linear\" does not match \"two_four_sgemm_cutlass_dispatch_layouts: Combination of row-majorand row-major layouts for input tensors is not supported\"",
+        "time": "2023-06-27T06:15:51.054171Z"
+      }
+    ],
+    "UNSTABLE": []
+  },
+  "105145 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 5546990040,
+        "id": 15025544107,
+        "name": "Lint / lintrunner / linux-job",
+        "jobName": "lintrunner / linux-job",
+        "conclusion": "failure",
+        "completed_at": "2023-07-13T19:39:44Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5546990040/jobs/10128289190",
+        "head_branch": "gh/ezyang/2226/head",
+        "pr_number": 105145,
+        "head_sha": "bef28e5f9fe369ebf607ef6f4cc9bde84b0762e6",
+        "failure_captures": [
+          ">>> Lint for torch/_export/serde/upgrade.py:"
+        ],
+        "failure_line": ">>> Lint for torch/_export/serde/upgrade.py:",
+        "time": "2023-07-13T19:26:27.842524Z"
+      }
+    ],
+    "UNSTABLE": []
+  },
+  "107160 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 5859347753,
+        "id": 15885841715,
+        "name": "pull / linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-08-14T19:50:09Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5859347753/job/15885841715",
+        "head_branch": "gh/mrshenli/385/head",
+        "pr_number": 107160,
+        "head_sha": "1abba7bb35f1562329d0235dedf171790cd162a5",
+        "failure_captures": [
+          "inductor/test_torchinductor.py::TritonCodeGenTests::test_optimize_indexing_dtype_with_constraint"
+        ],
+        "failure_line": "FAILED [0.1966s] inductor/test_torchinductor.py::TritonCodeGenTests::test_optimize_indexing_dtype_with_constraint - torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:",
+        "time": "2023-08-14T19:00:56.524425Z"
+      }
+    ],
+    "UNSTABLE": [
+      {
+        "workflowId": 5860028213,
+        "id": 15887855756,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 1, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 1, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-08-14T22:04:13Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5860028213/job/15887855756",
+        "head_branch": "ciflow/trunk/107160",
+        "pr_number": 107160,
+        "head_sha": "1abba7bb35f1562329d0235dedf171790cd162a5",
+        "failure_captures": [
+          "inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_tanh_cuda_float16"
+        ],
+        "failure_line": "FAILED [0.0914s] inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_tanh_cuda_float16",
+        "time": "2023-08-14T20:14:59.760637Z"
+      },
+      {
+        "workflowId": 5860028213,
+        "id": 15887855946,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 2, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 2, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-08-14T22:10:08Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5860028213/job/15887855946",
+        "head_branch": "ciflow/trunk/107160",
+        "pr_number": 107160,
+        "head_sha": "1abba7bb35f1562329d0235dedf171790cd162a5",
+        "failure_captures": [
+          "profiler/test_profiler.py::TestProfiler::test_kineto_profiler_with_environment_variable"
+        ],
+        "failure_line": "FAILED [6.9686s] profiler/test_profiler.py::TestProfiler::test_kineto_profiler_with_environment_variable - AssertionError: False is not true : Kineto is not working properly with the Dynolog environment variable",
+        "time": "2023-08-14T20:15:00.814152Z"
+      },
+      {
+        "workflowId": 5860028213,
+        "id": 15887856086,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-08-14T23:02:38Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5860028213/job/15887856086",
+        "head_branch": "ciflow/trunk/107160",
+        "pr_number": 107160,
+        "head_sha": "1abba7bb35f1562329d0235dedf171790cd162a5",
+        "failure_captures": [
+          "inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_nn_functional_instance_norm_cuda_float32"
+        ],
+        "failure_line": "FAILED [0.6190s] inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_nn_functional_instance_norm_cuda_float32",
+        "time": "2023-08-14T20:15:00.976758Z"
+      }
+    ]
+  },
+  "110362 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 6372581477,
+        "id": 17297638807,
+        "name": "trunk / macos-12-py3-arm64 / test (default, 2, 3, macos-m1-12)",
+        "jobName": "macos-12-py3-arm64 / test (default, 2, 3, macos-m1-12)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-01T22:18:28Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6372581477/job/17297638807",
+        "head_branch": "ciflow/trunk/110362",
+        "pr_number": 110362,
+        "head_sha": "03f51e36dedf234931006d1db61677b229c9a119",
+        "failure_captures": [
+          "Failure: There is only 4671284KB free space left in /, which is less than the minimum requirement of"
+        ],
+        "failure_line": "Failure: There is only 4671284KB free space left in /, which is less than the minimum requirement of 6291456KB for macOS",
+        "time": "2023-10-01T22:17:53.847751Z"
+      }
+    ],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "109750 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 6254944836,
+        "id": 16985650612,
+        "name": "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-21T01:07:19Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6254944836/job/16985650612",
+        "head_branch": "gh/eellison/544/head",
+        "pr_number": 109750,
+        "head_sha": "6cc5e37592d370a449dac076cf7976bde18238bf",
+        "failure_captures": [
+          "RuntimeError: distributed/test_store 1/1 failed"
+        ],
+        "failure_line": "RuntimeError: distributed/test_store 1/1 failed! Received signal: SIGIOT",
+        "time": "2023-09-21T00:54:52.471611Z"
+      }
+    ],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "104312 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": [
+      {
+        "workflowId": 5395930989,
+        "id": 14611204945,
+        "name": "pull / linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-28T04:11:53Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5395930989/jobs/9801455548",
+        "head_branch": "malfet/be-fix-override-and-pass-by-value",
+        "pr_number": 104312,
+        "head_sha": "d4f67cbf8b98d7b27b6c12f278af9e281e147bd5",
+        "failure_captures": [
+          "FAILED: Build did NOT complete successfully"
+        ],
+        "failure_line": "FAILED: Build did NOT complete successfully (87 packages loaded, 2396 targets configured)",
+        "time": "2023-06-28T04:03:25.058757Z"
+      },
+      {
+        "workflowId": 5395930989,
+        "id": 14611204945,
+        "name": "pull / linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-06-28T04:11:53Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5395930989/jobs/9801455548",
+        "head_branch": "malfet/be-fix-override-and-pass-by-value",
+        "pr_number": 104312,
+        "head_sha": "d4f67cbf8b98d7b27b6c12f278af9e281e147bd5",
+        "failure_captures": [
+          "FAILED: Build did NOT complete successfully"
+        ],
+        "failure_line": "FAILED: Build did NOT complete successfully (87 packages loaded, 2396 targets configured)",
+        "time": "2023-06-28T04:03:25.058757Z"
+      }
+    ]
+  },
+  "110367 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": [
+      {
+        "workflowId": 6425499513,
+        "id": 17448523793,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 1, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 1, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-06T06:37:33Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6425499513/job/17448523793",
+        "head_branch": "ciflow/trunk/110367",
+        "pr_number": 110367,
+        "head_sha": "a606c350ee95304efce156800e6267bab7214ba8",
+        "failure_captures": [
+          "RuntimeError: inductor/test_torchinductor_opinfo 2/3 failed"
+        ],
+        "failure_line": "RuntimeError: inductor/test_torchinductor_opinfo 2/3 failed!",
+        "time": "2023-10-06T06:37:37.639661Z"
+      },
+      {
+        "workflowId": 6425499513,
+        "id": 17448523955,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 2, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 2, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-06T04:17:47Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6425499513/job/17448523955",
+        "head_branch": "ciflow/trunk/110367",
+        "pr_number": 110367,
+        "head_sha": "a606c350ee95304efce156800e6267bab7214ba8",
+        "failure_captures": [
+          "test_quantization.py::TestQuantizePT2EQAT::test_qat_conv_bn_fusion_cuda"
+        ],
+        "failure_line": "FAILED [0.8464s] test_quantization.py::TestQuantizePT2EQAT::test_qat_conv_bn_fusion_cuda - AssertionError",
+        "time": "2023-10-06T04:17:52.788164Z"
+      },
+      {
+        "workflowId": 6425499513,
+        "id": 17448524052,
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-06T04:13:35Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6425499513/job/17448524052",
+        "head_branch": "ciflow/trunk/110367",
+        "pr_number": 110367,
+        "head_sha": "a606c350ee95304efce156800e6267bab7214ba8",
+        "failure_captures": [
+          "test_quantization.py::TestQuantizePT2EQAT::test_qat_conv_bn_relu_fusion_cuda"
+        ],
+        "failure_line": "FAILED [0.8442s] test_quantization.py::TestQuantizePT2EQAT::test_qat_conv_bn_relu_fusion_cuda - AssertionError",
+        "time": "2023-10-06T04:13:43.337948Z"
+      }
+    ]
+  },
+  "111253 pytorch": {
+    "FAILED": [
+      {
+        "workflowId": 6564832369,
+        "id": 17832818997,
+        "runnerName": "i-0174a9901593bb0f0",
+        "name": "pull / linux-focal-cuda12.1-py3.10-gcc9 / test (default, 3, 5, linux.4xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda12.1-py3.10-gcc9 / test (default, 3, 5, linux.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-18T22:03:55Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6564832369/job/17832818997",
+        "head_branch": "gh/jbschlosser/94/head",
+        "pr_number": 111253,
+        "head_sha": "659d5d78b0cb9550dc0c7af7c8e1141e065e49bb",
+        "failure_captures": [
+          "RuntimeError: test_linalg 1/1 failed"
+        ],
+        "failure_line": "RuntimeError: test_linalg 1/1 failed!",
+        "time": "2023-10-18T22:04:01.094875Z"
+      }
+    ],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 6564832369,
+        "id": 17833242308,
+        "runnerName": "i-01d354cb6fe6681df",
+        "name": "pull / linux-focal-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-18T21:19:37Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6564832369/job/17833242308",
+        "head_branch": "gh/jbschlosser/94/head",
+        "pr_number": 111253,
+        "head_sha": "659d5d78b0cb9550dc0c7af7c8e1141e065e49bb",
+        "failure_captures": [
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        ],
+        "failure_line": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "time": "2023-10-18T21:19:43.583330Z"
+      }
+    ],
+    "UNSTABLE": [
+      {
+        "workflowId": 6564834208,
+        "id": 17832822560,
+        "runnerName": "worker-rocm-amd-30",
+        "name": "trunk / linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "jobName": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-18T20:38:47Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6564834208/job/17832822560",
+        "head_branch": "ciflow/trunk/111253",
+        "pr_number": 111253,
+        "head_sha": "659d5d78b0cb9550dc0c7af7c8e1141e065e49bb",
+        "failure_captures": [
+          "inductor/test_max_autotune.py::TestMaxAutotune::test_triton_template_with_epilogues_and_dynamic_shape"
+        ],
+        "failure_line": "FAILED [0.2280s] inductor/test_max_autotune.py::TestMaxAutotune::test_triton_template_with_epilogues_and_dynamic_shape - torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:",
+        "time": "2023-10-18T20:38:52.633176Z"
+      }
+    ]
+  },
+  "111467 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 6565176751,
+        "id": 17834275156,
+        "runnerName": "i-0cfcaeb3070400f78",
+        "name": "pull / linux-focal-cuda12.1-py3.10-gcc9-sm86 / test (default, 2, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda12.1-py3.10-gcc9-sm86 / test (default, 2, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-18T22:01:03Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6565176751/job/17834275156",
+        "head_branch": "maxautotune_big_gpu",
+        "pr_number": 111467,
+        "head_sha": "0e025084edb6468a6226ad02e2a81efec5e40c6c",
+        "failure_captures": [
+          "dynamo/test_activation_checkpointing.py::ActivationCheckpointingViaTagsTests::test_tags_rand"
+        ],
+        "failure_line": "FAILED [0.0405s] dynamo/test_activation_checkpointing.py::ActivationCheckpointingViaTagsTests::test_tags_rand - torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:",
+        "time": "2023-10-18T22:01:11.077583Z"
+      }
+    ],
+    "BROKEN_TRUNK": [
+      {
+        "workflowId": 6565179593,
+        "id": 17833869559,
+        "runnerName": "GitHub Actions 67",
+        "name": "periodic / macos-12-py3-x86-64 / test (default, 3, 4, macos-12)",
+        "jobName": "macos-12-py3-x86-64 / test (default, 3, 4, macos-12)",
+        "conclusion": "failure",
+        "completed_at": "2023-10-18T19:54:50Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6565179593/job/17833869559",
+        "head_branch": "ciflow/periodic/111467",
+        "pr_number": 111467,
+        "head_sha": "0e025084edb6468a6226ad02e2a81efec5e40c6c",
+        "failure_captures": [
+          "dynamo/test_backends.py::MPSNotSupportedTest::test_mps_not_supported"
+        ],
+        "failure_line": "FAILED [0.0229s] dynamo/test_backends.py::MPSNotSupportedTest::test_mps_not_supported - RuntimeError: MPS backend out of memory (MPS allocated: 0 bytes, other allocations: 0 bytes, max allowed: 1.70 GB). Tried to allocate 0 bytes on private pool. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).",
+        "time": "2023-10-18T19:55:10.637751Z"
+      }
+    ],
+    "UNSTABLE": []
+  },
+  "115329 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "115495 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 7250228492,
+        "id": 19756696034,
+        "runnerName": "i-004cb813ba958bd12",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-libtorch-cxx11-abi / libtorch-rocm5_6-shared-with-deps-cxx11-abi-build / build",
+        "jobName": "libtorch-rocm5_6-shared-with-deps-cxx11-abi-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T20:00:37Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250228492/job/19756696034",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py install",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=1",
+          "++ CFLAGS=-Wno-deprecated-declarations",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=' '",
+          "++ CMAKE_ARGS=",
+          "++ mkdir -p build",
+          "++ set -x",
+          "++ [[ shared-with-deps = *\\s\\t\\a\\t\\i\\c* ]]",
+          "++ echo 'Calling setup.py install at Mon 18 Dec 2023 06:48:40 PM UTC'",
+          "+++ date",
+          "++ ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr",
+          "++ export ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr"
+        ],
+        "time": "2023-12-18T20:00:44.305888Z"
+      },
+      {
+        "workflowId": 7250230367,
+        "id": 19756555513,
+        "runnerName": "i-019879fe82f12443f",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-libtorch-pre-cxx11 / libtorch-rocm5_6-shared-with-deps-pre-cxx11-build / build",
+        "jobName": "libtorch-rocm5_6-shared-with-deps-pre-cxx11-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T19:55:51Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250230367/job/19756555513",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py install",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=1",
+          "++ CFLAGS=-Wno-deprecated-declarations",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=' '",
+          "++ CMAKE_ARGS=",
+          "++ mkdir -p build",
+          "++ set -x",
+          "++ [[ shared-with-deps = *\\s\\t\\a\\t\\i\\c* ]]",
+          "++ echo 'Calling setup.py install at Mon Dec 18 18:44:49 UTC 2023'",
+          "+++ date",
+          "++ ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr",
+          "++ export ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr"
+        ],
+        "time": "2023-12-18T19:55:58.023469Z"
+      },
+      {
+        "workflowId": 7250228536,
+        "id": 19754764276,
+        "runnerName": "i-09d622a73b8c88cd6",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-manywheel / manywheel-py3_10-rocm5_6-build / build",
+        "jobName": "manywheel-py3_10-rocm5_6-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T18:50:35Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250228536/job/19754764276",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py bdist_wheel -d /tmp/wheelhouserocm5.6",
+          "++ USE_KINETO=1",
+          "++ USE_RCCL=1",
+          "++ USE_NCCL=1",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=0",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=",
+          "++ CMAKE_ARGS=",
+          "++ echo 'Calling setup.py bdist at Mon Dec 18 17:48:58 UTC 2023'",
+          "+++ date",
+          "++ USE_KINETO=1",
+          "++ USE_NCCL=1",
+          "++ USE_RCCL=1"
+        ],
+        "time": "2023-12-18T18:50:43.023326Z"
+      },
+      {
+        "workflowId": 7250228536,
+        "id": 19754762163,
+        "runnerName": "i-018c62762dd72bb1b",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-manywheel / manywheel-py3_11-rocm5_6-build / build",
+        "jobName": "manywheel-py3_11-rocm5_6-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T18:53:06Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250228536/job/19754762163",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py bdist_wheel -d /tmp/wheelhouserocm5.6",
+          "++ USE_KINETO=1",
+          "++ USE_RCCL=1",
+          "++ USE_NCCL=1",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=0",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=",
+          "++ CMAKE_ARGS=",
+          "++ echo 'Calling setup.py bdist at Mon Dec 18 17:51:44 UTC 2023'",
+          "+++ date",
+          "++ USE_KINETO=1",
+          "++ USE_NCCL=1",
+          "++ USE_RCCL=1"
+        ],
+        "time": "2023-12-18T18:53:12.980107Z"
+      },
+      {
+        "workflowId": 7250228536,
+        "id": 19754762883,
+        "runnerName": "i-0a354f70688bc2ad6",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-manywheel / manywheel-py3_12-rocm5_6-build / build",
+        "jobName": "manywheel-py3_12-rocm5_6-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T18:50:43Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250228536/job/19754762883",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py bdist_wheel -d /tmp/wheelhouserocm5.6",
+          "++ USE_KINETO=1",
+          "++ USE_RCCL=1",
+          "++ USE_NCCL=1",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=0",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=",
+          "++ CMAKE_ARGS=",
+          "++ echo 'Calling setup.py bdist at Mon Dec 18 17:49:17 UTC 2023'",
+          "+++ date",
+          "++ USE_KINETO=1",
+          "++ USE_NCCL=1",
+          "++ USE_RCCL=1"
+        ],
+        "time": "2023-12-18T18:50:50.428277Z"
+      },
+      {
+        "workflowId": 7250228536,
+        "id": 19754768641,
+        "runnerName": "i-06b91bddb74fe92a2",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-manywheel / manywheel-py3_8-rocm5_6-build / build",
+        "jobName": "manywheel-py3_8-rocm5_6-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T18:52:13Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250228536/job/19754768641",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py bdist_wheel -d /tmp/wheelhouserocm5.6",
+          "++ USE_KINETO=1",
+          "++ USE_RCCL=1",
+          "++ USE_NCCL=1",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=0",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=",
+          "++ CMAKE_ARGS=",
+          "++ echo 'Calling setup.py bdist at Mon Dec 18 17:50:34 UTC 2023'",
+          "+++ date",
+          "++ USE_KINETO=1",
+          "++ USE_NCCL=1",
+          "++ USE_RCCL=1"
+        ],
+        "time": "2023-12-18T18:52:20.427385Z"
+      },
+      {
+        "workflowId": 7250228536,
+        "id": 19754767833,
+        "runnerName": "i-0dcf0cd161f9b5640",
+        "authorEmail": "cyyever@outlook.com",
+        "name": "linux-binary-manywheel / manywheel-py3_9-rocm5_6-build / build",
+        "jobName": "manywheel-py3_9-rocm5_6-build / build",
+        "conclusion": "failure",
+        "completed_at": "2023-12-18T18:50:57Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/7250228536/job/19754767833",
+        "head_branch": "ciflow/binaries/115495",
+        "pr_number": 115495,
+        "head_sha": "42426a5dbc61d69de4ee7f6fbac5b69f4c37a9f4",
+        "failure_captures": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_lines": [
+          "../aten/src/ATen/hip/HIPBlas.cpp:1152:63: error: reinterpret_cast from type \u2018const c10::complex<double>*\u2019 to type \u2018hipblasDoubleComplex*\u2019 casts away qualifiers"
+        ],
+        "failure_context": [
+          "++ python setup.py bdist_wheel -d /tmp/wheelhouserocm5.6",
+          "++ USE_KINETO=1",
+          "++ USE_RCCL=1",
+          "++ USE_NCCL=1",
+          "++ BUILD_LIBTORCH_CPU_WITH_DEBUG=0",
+          "++ EXTRA_CAFFE2_CMAKE_FLAGS=",
+          "++ CMAKE_ARGS=",
+          "++ echo 'Calling setup.py bdist at Mon Dec 18 17:49:21 UTC 2023'",
+          "+++ date",
+          "++ USE_KINETO=1",
+          "++ USE_NCCL=1",
+          "++ USE_RCCL=1"
+        ],
+        "time": "2023-12-18T18:51:03.344722Z"
+      }
+    ],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "123104 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 8515429971,
+        "workflowUniqueId": 21257342,
+        "id": 23327273136,
+        "runnerName": "i-08e05e2211d91011c",
+        "authorEmail": "williamwen@meta.com",
+        "name": "linux-binary-conda / conda-py3_8-cuda11_8-build / build",
+        "jobName": "conda-py3_8-cuda11_8-build / build",
+        "conclusion": "failure",
+        "completed_at": "2024-04-02T06:49:52Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/8515429971/job/23327273136",
+        "head_branch": "ciflow/binaries/123104",
+        "pr_number": 123104,
+        "head_sha": "5d5259abca9b3050b5a007d1daa2fc9df722d3e2",
+        "failure_captures": [
+          "##[error]The operation was canceled."
+        ],
+        "failure_lines": [
+          "##[error]The operation was canceled."
+        ],
+        "failure_context": [
+          "+ unset PYTORCH_BUILD_NUMBER",
+          "+ unset PYTORCH_BUILD_VERSION",
+          "+ unset CONDA_BUILD_EXTRA_ARGS",
+          "+ [[ linux-gnu == \\m\\s\\y\\s ]]",
+          "+ rm -rf out_py3.8_cuda11.8_cudnn8.7.0_0_20240402",
+          "+ /opt/conda/bin/conda env remove -yn env_py3.8_cuda11.8_cudnn8.7.0_0_20240402",
+          "+ __conda_exe env remove -yn env_py3.8_cuda11.8_cudnn8.7.0_0_20240402",
+          "+ case \"$cmd\" in",
+          "+ local cmd=env",
+          "+ conda env remove -yn env_py3.8_cuda11.8_cudnn8.7.0_0_20240402",
+          "++ hash -r",
+          "++ '[' -n '' ']'"
+        ],
+        "time": "2024-04-02T06:49:57.476517Z"
+      }
+    ],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": []
+  },
+  "3318 executorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": [
+      {
+        "workflowId": 8821313480,
+        "workflowUniqueId": 89718376,
+        "id": 24225451316,
+        "runnerName": "GitHub Actions 500",
+        "authorEmail": "hsz@meta.com",
+        "name": "Android / test-llama-app / mobile-job (android)",
+        "jobName": "test-llama-app / mobile-job (android)",
+        "conclusion": "failure",
+        "completed_at": "2024-04-24T22:08:50Z",
+        "html_url": "https://github.com/pytorch/executorch/actions/runs/8821313480/job/24225451316",
+        "head_branch": "export-D56530383",
+        "pr_number": 3318,
+        "head_sha": "f712e381c161901b733baa6b1fe7d85dc25404d3",
+        "failure_captures": [
+          "Credentials could not be loaded, please check your action inputs: Could not load credentials from any providers"
+        ],
+        "failure_lines": [
+          "##[error]Credentials could not be loaded, please check your action inputs: Could not load credentials from any providers"
+        ],
+        "failure_context": [],
+        "time": "2024-04-24T22:08:54.311167Z"
+      }
+    ]
+  },
+  "129013 pytorch": {
+    "FAILED": [],
+    "FLAKY": [
+      {
+        "workflowId": 9608925055,
+        "workflowUniqueId": 16521569,
+        "id": 26503589283,
+        "runnerName": "i-0b4cf3673ef88b832",
+        "authorEmail": "chilli@meta.com",
+        "name": "pull / linux-focal-cuda12.1-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda12.1-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:05:36Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608925055/job/26503589283",
+        "head_branch": "gh/chillee/308/head",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_nn_functional_huber_loss_cuda_float16"
+        ],
+        "failure_lines": [
+          "FAILED [2.5768s] inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_nn_functional_huber_loss_cuda_float16 - Exception: Caused by sample input at index 6: SampleInput(input=Tensor[size=(5, 5, 5), device=\"cuda:0\", dtype=torch.float16], args=TensorList[Tensor[size=(5, 5, 5), device=\"cuda:0\", dtype=torch.float16]], kwargs={'reduction': \"'none'\", 'delta': '5.413569582599902'}, broadcasts_input=False, name='')"
+        ],
+        "failure_context": [
+          "+ python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 4 5 --verbose",
+          "+ [[ -z 5 ]]",
+          "+ test_python_shard 4",
+          "+ '[' -n '' ']'",
+          "+ pip install --progress-bar off --no-use-pep517 --user git+https://github.com/pytorch/vision.git@d23a6e1664d20707c11781299611436e1f0c104f",
+          "+ pip_install --no-use-pep517 --user git+https://github.com/pytorch/vision.git@d23a6e1664d20707c11781299611436e1f0c104f",
+          "+ '[' -n '' ']'",
+          "+ orig_preload=",
+          "+ commit=d23a6e1664d20707c11781299611436e1f0c104f",
+          "++ cat .github/ci_commit_pins/vision.txt",
+          "++ get_pinned_commit vision",
+          "+ local commit"
+        ],
+        "time": "2024-06-21T07:05:39.220528Z"
+      },
+      {
+        "workflowId": 9608926327,
+        "workflowUniqueId": 16535519,
+        "id": 26503556555,
+        "runnerName": "i-055d8edaf6f106424",
+        "authorEmail": "chilli@meta.com",
+        "name": "trunk / linux-focal-cuda12.4-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "jobName": "linux-focal-cuda12.4-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:04:02Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926327/job/26503556555",
+        "head_branch": "ciflow/trunk/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_nn_functional_huber_loss_cuda_float16"
+        ],
+        "failure_lines": [
+          "FAILED [2.5808s] inductor/test_torchinductor_opinfo.py::TestInductorOpInfoCUDA::test_comprehensive_nn_functional_huber_loss_cuda_float16 - Exception: Caused by sample input at index 6: SampleInput(input=Tensor[size=(5, 5, 5), device=\"cuda:0\", dtype=torch.float16], args=TensorList[Tensor[size=(5, 5, 5), device=\"cuda:0\", dtype=torch.float16]], kwargs={'reduction': \"'none'\", 'delta': '5.413569582599902'}, broadcasts_input=False, name='')"
+        ],
+        "failure_context": [
+          "+ python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 4 5 --verbose",
+          "+ [[ -z 5 ]]",
+          "+ test_python_shard 4",
+          "+ '[' -n '' ']'",
+          "+ pip install --progress-bar off --no-use-pep517 --user git+https://github.com/pytorch/vision.git@d23a6e1664d20707c11781299611436e1f0c104f",
+          "+ pip_install --no-use-pep517 --user git+https://github.com/pytorch/vision.git@d23a6e1664d20707c11781299611436e1f0c104f",
+          "+ '[' -n '' ']'",
+          "+ orig_preload=",
+          "+ commit=d23a6e1664d20707c11781299611436e1f0c104f",
+          "++ cat .github/ci_commit_pins/vision.txt",
+          "++ get_pinned_commit vision",
+          "+ local commit"
+        ],
+        "time": "2024-06-21T07:04:05.187196Z"
+      }
+    ],
+    "BROKEN_TRUNK": [],
+    "UNSTABLE": [
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503590401,
+        "runnerName": "i-067927857ef40fcfb",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / cuda12.1-py3.10-gcc9-sm86 / test (aot_inductor_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86 / test (aot_inductor_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:38:04Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503590401",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --export-aot-inductor --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 0 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ TORCHINDUCTOR_ABI_COMPATIBLE=1",
+          "+ export TORCHINDUCTOR_ABI_COMPATIBLE=1",
+          "+ [[ aot_inductor_torchbench == *aot_inductor* ]]",
+          "+ [[ aot_inductor_torchbench == *perf* ]]",
+          "+ [[ aot_inductor_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 0 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:38:08.187583Z"
+      },
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503590558,
+        "runnerName": "i-01580f618129c07f0",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / cuda12.1-py3.10-gcc9-sm86 / test (aot_inductor_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86 / test (aot_inductor_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:29Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503590558",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --export-aot-inductor --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 1 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ TORCHINDUCTOR_ABI_COMPATIBLE=1",
+          "+ export TORCHINDUCTOR_ABI_COMPATIBLE=1",
+          "+ [[ aot_inductor_torchbench == *aot_inductor* ]]",
+          "+ [[ aot_inductor_torchbench == *perf* ]]",
+          "+ [[ aot_inductor_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 1 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:41:03.601489Z"
+      },
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503589613,
+        "runnerName": "i-08facd5416dc5e80a",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / cuda12.1-py3.10-gcc9-sm86 / test (dynamic_inductor_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86 / test (dynamic_inductor_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:44Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503589613",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --inductor --dynamic-shapes --dynamic-batch-only --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 0 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ dynamic_inductor_torchbench == *aot_inductor* ]]",
+          "+ [[ dynamic_inductor_torchbench == *perf* ]]",
+          "+ [[ dynamic_inductor_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 0 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=0",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:47.588605Z"
+      },
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503589759,
+        "runnerName": "i-098235cbdc1b99278",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / cuda12.1-py3.10-gcc9-sm86 / test (dynamic_inductor_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86 / test (dynamic_inductor_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:40Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503589759",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --inductor --dynamic-shapes --dynamic-batch-only --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 1 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ dynamic_inductor_torchbench == *aot_inductor* ]]",
+          "+ [[ dynamic_inductor_torchbench == *perf* ]]",
+          "+ [[ dynamic_inductor_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 1 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=1",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:43.810486Z"
+      },
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503588774,
+        "runnerName": "i-0e24275e03efae9ac",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86 / test (inductor_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:33Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503588774",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --inductor --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 0 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ inductor_torchbench == *aot_inductor* ]]",
+          "+ [[ inductor_torchbench == *perf* ]]",
+          "+ [[ inductor_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 0 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=0",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:37.220458Z"
+      },
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503588933,
+        "runnerName": "i-03e49d2b9bb5894e9",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86 / test (inductor_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:34Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503588933",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --inductor --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 1 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ inductor_torchbench == *aot_inductor* ]]",
+          "+ [[ inductor_torchbench == *perf* ]]",
+          "+ [[ inductor_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 1 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=1",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:37.176321Z"
+      },
+      {
+        "workflowId": 9608926069,
+        "workflowUniqueId": 37481293,
+        "id": 26503229397,
+        "runnerName": "pytorch-rocm-hw-36",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor / rocm6.1-py3.8-inductor / test (inductor, 1, 1, linux.rocm.gpu.2, unstable)",
+        "jobName": "rocm6.1-py3.8-inductor / test (inductor, 1, 1, linux.rocm.gpu.2, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T10:51:07Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926069/job/26503229397",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "'Test' "
+        ],
+        "failure_lines": [
+          "##[error]The action 'Test' has timed out after 270 minutes."
+        ],
+        "failure_context": [
+          "+ python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor --verbose",
+          "+ python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose",
+          "+ python tools/dynamo/verify_dynamo.py",
+          "+ test_inductor",
+          "+ '[' -n '' ']'",
+          "+ pip install --progress-bar off --no-use-pep517 --user git+https://github.com/pytorch/vision.git@d23a6e1664d20707c11781299611436e1f0c104f",
+          "+ pip_install --no-use-pep517 --user git+https://github.com/pytorch/vision.git@d23a6e1664d20707c11781299611436e1f0c104f",
+          "+ '[' -n '' ']'",
+          "+ orig_preload=",
+          "+ commit=d23a6e1664d20707c11781299611436e1f0c104f",
+          "++ cat .github/ci_commit_pins/vision.txt",
+          "++ get_pinned_commit vision"
+        ],
+        "time": "2024-06-21T10:51:12.119848Z"
+      },
+      {
+        "workflowId": 9608926071,
+        "workflowUniqueId": 56653708,
+        "id": 26503583185,
+        "runnerName": "i-091f5ea07661f851d",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (aot_eager_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (aot_eager_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:42:13Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926071/job/26503583185",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "curl: (22) The requested URL returned error:"
+        ],
+        "failure_lines": [
+          "curl: (22) The requested URL returned error: 401"
+        ],
+        "failure_context": [],
+        "time": "2024-06-21T07:42:16.221668Z"
+      },
+      {
+        "workflowId": 9608926071,
+        "workflowUniqueId": 56653708,
+        "id": 26503583315,
+        "runnerName": "i-0a6a30fbfd32b050a",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (aot_eager_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (aot_eager_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:58Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926071/job/26503583315",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --backend aot_eager --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 1 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ aot_eager_torchbench == *aot_inductor* ]]",
+          "+ [[ aot_eager_torchbench == *perf* ]]",
+          "+ [[ aot_eager_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 1 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=1",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:38:01.220515Z"
+      },
+      {
+        "workflowId": 9608926071,
+        "workflowUniqueId": 56653708,
+        "id": 26503583911,
+        "runnerName": "i-03015513c525c6f6c",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamic_aot_eager_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamic_aot_eager_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:52Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926071/job/26503583911",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --backend aot_eager --dynamic-shapes --dynamic-batch-only --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 0 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ dynamic_aot_eager_torchbench == *aot_inductor* ]]",
+          "+ [[ dynamic_aot_eager_torchbench == *perf* ]]",
+          "+ [[ dynamic_aot_eager_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 0 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=0",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:56.187159Z"
+      },
+      {
+        "workflowId": 9608926071,
+        "workflowUniqueId": 56653708,
+        "id": 26503584072,
+        "runnerName": "i-022afaa639418ddce",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamic_aot_eager_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamic_aot_eager_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:48Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926071/job/26503584072",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --backend aot_eager --dynamic-shapes --dynamic-batch-only --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 1 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ dynamic_aot_eager_torchbench == *aot_inductor* ]]",
+          "+ [[ dynamic_aot_eager_torchbench == *perf* ]]",
+          "+ [[ dynamic_aot_eager_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 1 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=1",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:51.593138Z"
+      },
+      {
+        "workflowId": 9608926071,
+        "workflowUniqueId": 56653708,
+        "id": 26503582361,
+        "runnerName": "i-083cc5057e6957c52",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamo_eager_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamo_eager_torchbench, 1, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:42:10Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926071/job/26503582361",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "curl: (22) The requested URL returned error:"
+        ],
+        "failure_lines": [
+          "curl: (22) The requested URL returned error: 401"
+        ],
+        "failure_context": [],
+        "time": "2024-06-21T07:42:12.771792Z"
+      },
+      {
+        "workflowId": 9608926071,
+        "workflowUniqueId": 56653708,
+        "id": 26503582520,
+        "runnerName": "i-0604edcbd99c91c69",
+        "authorEmail": "chilli@meta.com",
+        "name": "inductor-periodic / cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamo_eager_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "jobName": "cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks / test (dynamo_eager_torchbench, 2, 2, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2024-06-21T07:37:48Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/9608926071/job/26503582520",
+        "head_branch": "ciflow/inductor/129013",
+        "pr_number": 129013,
+        "head_sha": "be69191f2de2d61d6a825f5a3028c2b173393c95",
+        "head_sha_timestamp": "2024-06-20T15:04:10-07:00",
+        "failure_captures": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_lines": [
+          "ImportError: attempted relative import with no known parent package"
+        ],
+        "failure_context": [
+          "+ python benchmarks/dynamo/torchbench.py --ci --accuracy --timing --explain --backend eager --device cuda --inference --bfloat16 --total-partitions 2 --partition-id 1 --output /var/lib/jenkins/workspace/test/test-reports/inference_torchbench.csv",
+          "+ [[ dynamo_eager_torchbench == *aot_inductor* ]]",
+          "+ [[ dynamo_eager_torchbench == *perf* ]]",
+          "+ [[ dynamo_eager_torchbench == *perf_compare* ]]",
+          "+ partition_flags=(--total-partitions \"$NUM_TEST_SHARDS\" --partition-id \"$shard_id\")",
+          "+ [[ -n 1 ]]",
+          "+ [[ -n 2 ]]",
+          "+ local partition_flags",
+          "+ partition_flags=()",
+          "+ shift",
+          "+ local shard_id=1",
+          "+ shift"
+        ],
+        "time": "2024-06-21T07:37:51.810736Z"
+      }
+    ]
+  },
+  "164660 pytorch": null
+}
