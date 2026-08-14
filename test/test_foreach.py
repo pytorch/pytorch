@@ -243,6 +243,10 @@ class TestForeach(TestCase):
             expect_fastpath = not (
                 noncontiguous or sample.disable_fastpath or div_slowpath
             )
+            # In-place ops return the exact list or tuple passed as input.
+            foreach_input = (
+                tuple(sample.input) if inplace and noncontiguous else sample.input
+            )
             ref_input, ctxmgr = sample.input, nullcontext()
             if inplace:
                 with torch.no_grad():
@@ -251,7 +255,7 @@ class TestForeach(TestCase):
             try:
                 with ctxmgr:
                     actual = func(
-                        [sample.input, *sample.args],
+                        [foreach_input, *sample.args],
                         self.is_cuda,
                         expect_fastpath,
                         **sample.kwargs,
