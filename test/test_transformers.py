@@ -3408,6 +3408,168 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
     @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize("q_len,k_len", [(80, 48), (192, 64)])
+    def test_mem_efficient_bottom_right_fully_masked_rows(
+        self, device, q_len, k_len
+    ):
+        torch.manual_seed(42)
+        query = torch.randn(
+            1,
+            2,
+            q_len,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            2,
+            k_len,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn_like(key, requires_grad=True)
+        grad_out = torch.randn_like(query)
+        mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device).tril(
+            diagonal=k_len - q_len
+        )
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = scaled_dot_product_attention(
+                query, key, value, attn_mask=mask
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        actual = torch.ops.aten._efficient_attention_forward.default(
+            query.transpose(1, 2),
+            key.transpose(1, 2),
+            value.transpose(1, 2),
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.0,
+            int(CausalVariant.LOWER_RIGHT),
+            True,
+        )[0].transpose(1, 2)
+        actual_grads = torch.autograd.grad(
+            actual, (query, key, value), grad_out
+        )
+
+        self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=3e-3, rtol=2e-3)
+
+        fully_masked = q_len - k_len
+        self.assertEqual(
+            actual[:, :, :fully_masked],
+            torch.zeros_like(actual[:, :, :fully_masked]),
+        )
+        self.assertEqual(
+            actual_grads[0][:, :, :fully_masked],
+            torch.zeros_like(actual_grads[0][:, :, :fully_masked]),
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    def test_mem_efficient_bottom_right_varlen_fully_masked_rows(self, device):
+        torch.manual_seed(42)
+        q_lengths = (80, 192)
+        k_lengths = (48, 256)
+        query = torch.randn(
+            1,
+            sum(q_lengths),
+            2,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            sum(k_lengths),
+            2,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn_like(key, requires_grad=True)
+        cu_seqlens_q = torch.tensor(
+            [0, *itertools.accumulate(q_lengths)], device=device, dtype=torch.int32
+        )
+        cu_seqlens_k = torch.tensor(
+            [0, *itertools.accumulate(k_lengths)], device=device, dtype=torch.int32
+        )
+
+        expected_sequences = []
+        q_start = k_start = 0
+        for q_len, k_len in zip(q_lengths, k_lengths):
+            q_end, k_end = q_start + q_len, k_start + k_len
+            mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device).tril(
+                diagonal=k_len - q_len
+            )
+            with sdpa_kernel(SDPBackend.MATH):
+                expected_sequences.append(
+                    scaled_dot_product_attention(
+                        query[:, q_start:q_end].transpose(1, 2),
+                        key[:, k_start:k_end].transpose(1, 2),
+                        value[:, k_start:k_end].transpose(1, 2),
+                        attn_mask=mask,
+                    ).transpose(1, 2)
+                )
+            q_start, k_start = q_end, k_end
+        expected = torch.cat(expected_sequences, dim=1)
+        grad_out = torch.randn_like(expected)
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        actual = torch.ops.aten._efficient_attention_forward.default(
+            query,
+            key,
+            value,
+            None,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max(q_lengths),
+            max(k_lengths),
+            0.0,
+            int(CausalVariant.LOWER_RIGHT),
+            True,
+        )[0]
+        actual_grads = torch.autograd.grad(
+            actual, (query, key, value), grad_out
+        )
+
+        self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=3e-3, rtol=2e-3)
+
+        fully_masked = q_lengths[0] - k_lengths[0]
+        self.assertEqual(
+            actual[:, :fully_masked],
+            torch.zeros_like(actual[:, :fully_masked]),
+        )
+        self.assertEqual(
+            actual_grads[0][:, :fully_masked],
+            torch.zeros_like(actual_grads[0][:, :fully_masked]),
+        )
+
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
         """Zero-head low-level attention should return empty outputs and gradients."""

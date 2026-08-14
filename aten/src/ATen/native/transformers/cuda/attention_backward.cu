@@ -502,7 +502,13 @@ _efficient_attention_backward(
     grad_k = chunk.select(2, 1);
     grad_v = chunk.select(2, 2);
   } else {
-    grad_q = at::empty(query.sizes(), query.options());
+    const bool may_have_fully_masked_rows =
+        custom_mask_type ==
+            static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
+        (cu_seqlens_q.has_value() || max_seqlen_q > max_seqlen_k);
+    grad_q = may_have_fully_masked_rows
+        ? at::zeros(query.sizes(), query.options())
+        : at::empty(query.sizes(), query.options());
     grad_k = at::empty(key.sizes(), key.options());
     grad_v = at::empty(value.sizes(), value.options());
   }
