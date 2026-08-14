@@ -254,7 +254,6 @@ class TestAutocastMPS(TestCase):
                 x = self.relu(self.fc3(x))
                 x = self.relu(self.fc4(x))
                 return self.fc5(x)
-        torch.manual_seed(42)
 
         def helper(model_cpu, model_mps, dtype, iterations, batch_size, atol=3e-4, rtol=1e-5):
             optimizer_cpu = torch.optim.SGD(model_cpu.parameters(), lr=0.01)
@@ -297,7 +296,6 @@ class TestAutocastMPS(TestCase):
         helper(model_cpu, model_mps, torch.bfloat16, iterations=5, batch_size=4)
 
     def test_non_fast_path_amp_unscale(self):
-        torch.manual_seed(42)
 
         class Model(nn.Module):
             def __init__(self):
@@ -713,7 +711,6 @@ class MatmulTest(TestCaseMPS):
     # #177116: K > 2^15 silently wrong on M1/M2 (1st shape triggers fwd, 2nd triggers bwd)
     @parametrize("shape,in_f,out_f", [((122, 40000), 40000, 128), ((32800, 128), 128, 16)])
     def test_linear_large_K(self, shape, in_f, out_f):
-        torch.manual_seed(0)
         x_cpu = torch.randn(*shape, requires_grad=True)
         lin_cpu = nn.Linear(in_f, out_f, bias=False)
         lin_mps = copy.deepcopy(lin_cpu).to("mps")
@@ -5056,7 +5053,6 @@ class TestMPS(TestCaseMPS):
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
 
     def _check_cumulative_op(self, op_name, shape, dim, dtype, noncontig_out=False):
-        torch.manual_seed(0)
         op = getattr(torch, op_name)
         is_int = dtype in (torch.int32, torch.int64)
         if is_int:
@@ -5928,7 +5924,6 @@ class TestMPS(TestCaseMPS):
         to the output dtype. Otherwise the fp32 accumulation done inside the
         sum kernel is immediately discarded by a half/bfloat divide. Seen
         in inductor/test_adaptive_avg_pool2d_low_prec_mps before the fix."""
-        torch.manual_seed(0)
         x_fp32 = torch.randn(4, 3, 7, 7)
         for dtype in (torch.half, torch.bfloat16, torch.complex32):
             if dtype == torch.complex32:
@@ -6034,7 +6029,6 @@ class TestMPS(TestCaseMPS):
 
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
-        torch.manual_seed(42)
         x = torch.rand(3000, 3000, device="mps", dtype=torch.float32)
         ref = x.trace().item()
         for _ in range(2000):
@@ -7954,7 +7948,6 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5))
 
         # Test complex half
-        torch.mps.manual_seed(0)
         x = torch.rand(8, device='mps', dtype=torch.chalf)
         rc_h = x.sqrt()
         rc_f = x.cfloat().sqrt().chalf()
@@ -8830,7 +8823,6 @@ class TestMPS(TestCaseMPS):
         helper(3, 5, 7, 2)  # test scalar index
 
     def test_embedding_dense_backward_strided(self):
-        torch.manual_seed(0)
         weight = torch.randn(8, 5)
         ids0 = torch.randint(0, 8, (3, 4))
         grad0 = torch.randn(3, 4, 5)
@@ -10162,7 +10154,6 @@ class TestMPS(TestCaseMPS):
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
     def test_non_contiguous_sampling_variation(self):
-        torch.manual_seed(42)
         # transpose so it's made non-contiguous
         probs = torch.tensor([[.25, .1], [.25, .1], [.25, .1], [.25, .7]]).T.to("mps")
         samples = {torch.multinomial(probs, 1).flatten()[0].item() for _ in range(200)}
@@ -10361,7 +10352,6 @@ class TestMPS(TestCaseMPS):
     def test_embeddingbag_first_offset_forced_to_zero(self):
         # The user's offsets[0] value is ignored for the first bag; output
         # equals the call with offsets[0]=0.
-        torch.manual_seed(0)
         weight = torch.randn(10, 3)
         emb_a = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
         emb_b = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
@@ -10380,7 +10370,6 @@ class TestMPS(TestCaseMPS):
             out.cpu()  # force sync to surface the deferred kernel error
 
     def test_embeddingbag_valid_offsets_match_cpu(self):
-        torch.manual_seed(0)
         weight = torch.randn(10, 3)
         emb_mps = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum").to("mps")
         emb_cpu = torch.nn.EmbeddingBag.from_pretrained(weight.clone(), mode="sum")
@@ -10616,7 +10605,6 @@ class TestBinaryIteratorConformance(TestCaseMPS):
     @parametrize("shape", _CONFORMANCE_SHAPES)
     def test_simple_add(self, a_dtype, b_dtype, out_dtype, shape):
         ext = _conformance_ext_handle()
-        torch.manual_seed(0)
         a_cpu = _conformance_make_tensor(shape, a_dtype)
         b_cpu = _conformance_make_tensor(shape, b_dtype)
         a = a_cpu.to("mps")
@@ -10641,7 +10629,6 @@ class TestBinaryIteratorConformance(TestCaseMPS):
     @parametrize("shape", _CONFORMANCE_SHAPES)
     def test_simple_ge(self, a_dtype, b_dtype, out_dtype, shape):
         ext = _conformance_ext_handle()
-        torch.manual_seed(0)
         a_cpu = _conformance_make_tensor(shape, a_dtype)
         b_cpu = _conformance_make_tensor(shape, b_dtype)
         a = a_cpu.to("mps")
@@ -10823,7 +10810,6 @@ class TestInnerContiguous(TestCaseMPS):
         (torch.int8, torch.float32),
     ])
     def test_castout(self, device, in_dtype, out_dtype):
-        torch.manual_seed(0)
         for shape in self._SHAPES:
             inner = shape[-1] - 8  # drop the tail so the view is strided
             full = _conformance_make_tensor(shape, in_dtype)
@@ -10846,7 +10832,6 @@ class TestInnerContiguous(TestCaseMPS):
         # offset varies the per-row base alignment to exercise the ladder, and
         # the inner extents span final-chunk byte remainders (inner_bytes % 16)
         # across 0, [4,8) and [8,16) so the partial-tail vector paths are hit.
-        torch.manual_seed(0)
         R, full_w = 24, offset + inner + 8
         src = _conformance_make_tensor((R, inner), dtype)
         buf = _conformance_make_tensor((R, full_w), dtype)
@@ -10861,7 +10846,6 @@ class TestInnerContiguous(TestCaseMPS):
     def test_contiguous_copy(self, device, dtype, offset):
         # Fully contiguous same-dtype clone hits contiguous_byte_copy; offset varies the
         # base byte alignment and n spans sub-16B totals through the vectorized path.
-        torch.manual_seed(0)
         for n in (1, 7, 16, 17, 1000):
             if dtype.is_complex:
                 full = torch.randn(offset + n, dtype=dtype)
@@ -11006,7 +10990,6 @@ class TestLogical(TestCaseMPS):
         # directly, which dropped sub-4-byte offsets to 0 and read the wrong
         # element. The TensorIterator-based path uses `device T*` array indexing
         # which is offset-tolerant.
-        torch.manual_seed(0)
         for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
             # Sliced tensor with a non-aligned start (offset 22 bytes for int8/bool, etc.)
             high = 2 if dtype == torch.bool else 100
@@ -11962,7 +11945,6 @@ class TestPad(TestCaseMPS):
 
 class TestConv3dChannelsLast3dMPS(NNTestCase):
     def _run_conv3d_cl3d(self, *, input_shape, Cin, Cout, k, pad, with_bias, dtype, groups=1):
-        torch.manual_seed(0)
         m_cpu = nn.Conv3d(Cin, Cout, k, stride=1, padding=pad, bias=with_bias,
                           groups=groups, device="cpu")
         x_cpu = torch.randn(*input_shape, device="cpu", requires_grad=True)
@@ -12035,7 +12017,6 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
     # ConvTranspose3d routes through _mps_convolution_impl; fp32 only since
     # the op rejects bf16/fp16 for 3D.
     def test_conv_transpose3d_channels_last_3d(self):
-        torch.manual_seed(0)
         m_cpu = nn.ConvTranspose3d(8, 4, 3, stride=1, padding=1, device="cpu")
         x_cpu = torch.randn(2, 8, 8, 8, 8, device="cpu", requires_grad=True)
 
@@ -12126,7 +12107,6 @@ class TestLinalgMPS(TestCaseMPS):
         # output shapes differ from the other drivers: rank is populated while
         # residuals and singular_values are left empty. Check all four outputs so a
         # CPU->MPS move does not silently change them.
-        torch.manual_seed(0)
         A = torch.randn(6, 4, dtype=dtype)
         B = torch.randn(6, 3, dtype=dtype)
         cpu = torch.linalg.lstsq(A, B)
@@ -12146,7 +12126,6 @@ class TestLinalgMPS(TestCaseMPS):
         (5, 3, (128, 128), True),
     ])
     def test_compute_linear_combination(self, device, dtype, m, n, data, noncontig, out):
-        torch.manual_seed(0)
         coeff_dtype = torch.float32 if dtype.is_complex else dtype  # coeffs are real
         tol = {torch.float16: (2e-2, 2e-2), torch.bfloat16: (5e-2, 5e-2)}.get(dtype, (1e-4, 1e-4))
         coeffs = torch.rand(m, n, dtype=coeff_dtype)
@@ -12167,7 +12146,6 @@ class TestLinalgMPS(TestCaseMPS):
     @dtypes(torch.float32, torch.complex64)
     def test_matrix_exp_invariants(self, device, dtype):
         # Reference-free identities catch systematic MPS bias an MPS-vs-CPU compare misses.
-        torch.manual_seed(0)
         expm = torch.linalg.matrix_exp
 
         for n, batch in [(8, ()), (16, ()), (32, (4,))]:
@@ -12195,7 +12173,6 @@ class TestLinalgMPS(TestCaseMPS):
     @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
     def test_polar_backward(self, device, dtype, shape):
         # Compare A.grad against CPU for the same random output grads gU, gH.
-        torch.manual_seed(0)
         A_cpu = torch.randn(*shape, dtype=dtype, requires_grad=True)
         A_mps = A_cpu.detach().to(device).requires_grad_(True)
         U_cpu, H_cpu = torch.linalg.polar(A_cpu)
@@ -12314,7 +12291,6 @@ class TestLinalgMPS(TestCaseMPS):
         k = q_group * num_groups
         inner_k_tiles = 2
 
-        torch.manual_seed(1)
         a_f32 = torch.rand((m, k), device="mps")
         b_f32 = torch.rand((k, n), device="mps")
 
@@ -12350,7 +12326,6 @@ class TestLinalgMPS(TestCaseMPS):
     @parametrize("k", [32, 64])
     @parametrize("n", [32, 64])
     def test__int8_mm(self, m, k, n):
-        torch.manual_seed(1)
         a_f32 = torch.rand((m, k), device="mps")
         b_f32 = torch.rand((n, k), device="mps")
 
@@ -12386,7 +12361,6 @@ class TestLinalgMPS(TestCaseMPS):
     @parametrize("padding", [0, 3, 4, 7, 8, 15, 16])
     @parametrize("vector_dim", [2, 15, 16, 24])
     def test_loradown_correctness_vs_cpu(self, padding, vector_dim):
-        torch.manual_seed(13)
 
         base_size = 64
         physical_size = base_size + padding
@@ -12425,7 +12399,6 @@ class TestSDPA(TestCaseMPS):
         requires_grad: bool = False
     ):
 
-        torch.manual_seed(1729)
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps", requires_grad=requires_grad)
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
@@ -12505,7 +12478,6 @@ class TestSDPA(TestCaseMPS):
             self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
 
     def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
-        torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
             i = 42 if S > 42 else S // 2
@@ -12550,7 +12522,6 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_sdpa_math_mps_bool_mask_1pass(self, dtype):
-        torch.manual_seed(0)
         q = torch.randn(1, 1, 8, 64, dtype=dtype, device='mps')
         k = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
         v = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
@@ -12587,7 +12558,6 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_additive_mask_vector(self, dtype, s_len):
         # Float additive mask matching the Q dtype should route to the
         # templated vector decode kernel
-        torch.manual_seed(0)
         q = torch.randn(1, 32, 1, 128, dtype=dtype)
         k = torch.randn(1, 2, s_len, 128, dtype=dtype)
         v = torch.randn(1, 2, s_len, 128, dtype=dtype)
@@ -12607,7 +12577,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
     @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
     def test_sdpa_additive_mask_vector_strided(self, dtype, layout, s_len):
-        torch.manual_seed(0)
         batch, NH_kv, q_len, head_dim = 1, 2, 1, 128
         NH_q = NH_kv * 4  # GQA path
         q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
@@ -12639,7 +12608,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("nan_in", ["q", "k"])
     def test_sdpa_nan_propagation(self, dtype, shape, nan_in):
         qL, kL, hd = shape
-        torch.manual_seed(0)
         q = torch.randn(1, 2, qL, hd, dtype=dtype)
         k = torch.randn(1, 2, kL, hd, dtype=dtype)
         v = torch.randn(1, 2, kL, hd, dtype=dtype)
@@ -12697,7 +12665,6 @@ class TestSDPA(TestCaseMPS):
         HS: int = 16,
         requires_grad: bool = False
     ):
-        torch.manual_seed(1729)
         q = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps", requires_grad=requires_grad)
         k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
@@ -12722,7 +12689,6 @@ class TestSDPA(TestCaseMPS):
         L: int = 10,
         HS: int = 16
     ):
-        torch.manual_seed(1729)
         q = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
@@ -12878,7 +12844,6 @@ class TestSDPA(TestCaseMPS):
     ):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
-        torch.manual_seed(1729)
         batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 2
         NH_q = NH_kv * gqa_factor
@@ -12899,7 +12864,6 @@ class TestSDPA(TestCaseMPS):
     ):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
-        torch.manual_seed(1729)
         batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 8
         NH_q = NH_kv * gqa_factor
@@ -12910,7 +12874,6 @@ class TestSDPA(TestCaseMPS):
 
     def test_fast_vector_permuted_inputs_regression(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/181133
-        torch.manual_seed(0)
         B, S, H, D = 84, 3, 3, 64
         dtype = torch.float32
         q = torch.randn(B, S, H, D, dtype=dtype)
@@ -12931,7 +12894,6 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_causal_with_attn_mask_raises(self):
         # Passing both is_causal=True and an explicit attn_mask is ill-defined
         # input and must raise rather than crash
-        torch.manual_seed(0)
         q = torch.randn(1, 2, 4, 64, device="mps")
         k = torch.randn(1, 2, 16, 64, device="mps")
         v = torch.randn(1, 2, 16, 64, device="mps")
@@ -12949,7 +12911,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("head_dim", [64, 80, 128])  # 64, 80, 128 are for the fast kernel
     @parametrize("with_mask", [True, False])
     def test_fast_full_attention(self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool):
-        torch.manual_seed(1729)
         batch = 1
         NH = 2
         q_len = 32  # threshold to trigger full fast attention path
@@ -13040,7 +13001,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("variant", ["plain", "causal", "bool_mask", "float_mask"])
     @parametrize("gqa_factor", [1, 4])
     def test_prefill_attention_correctness_sweep(self, dtype, head_dim, variant, gqa_factor):
-        torch.manual_seed(1729)
         B, NH_kv, qL, kL = 2, 4, 16, 32
         NH_q = NH_kv * gqa_factor
         q, k, v = self._prefill_qkv(B, NH_q, NH_kv, qL, kL, head_dim, "contiguous", dtype)
@@ -13066,7 +13026,6 @@ class TestSDPA(TestCaseMPS):
     )
     @parametrize("is_causal", [False, True])
     def test_prefill_attention_layouts(self, dtype, head_dim, layout, is_causal):
-        torch.manual_seed(1729)
         q, k, v = self._prefill_qkv(
             B=2, NH_q=4, NH_kv=4, qL=16, kL=32, HD=head_dim, layout=layout, dtype=dtype,
         )
@@ -13074,7 +13033,6 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.float16])
     def test_prefill_attention_mixed_layouts(self, dtype):
-        torch.manual_seed(1729)
         B, NH, qL, kL, HD = 2, 4, 16, 32, 64
         q = torch.randn(B, qL, NH, HD, dtype=dtype, device="mps").transpose(1, 2)
         k = torch.randn(NH, B, kL, HD, dtype=dtype, device="mps").permute(1, 0, 2, 3)
@@ -13086,7 +13044,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("head_dim", [64, 128])
     @parametrize("mask_layout", ["broadcast_head", "broadcast_batch", "sliced"])
     def test_prefill_attention_mask_layouts(self, dtype, head_dim, mask_layout):
-        torch.manual_seed(1729)
         B, NH, qL, kL = 2, 4, 16, 32
         q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
         if mask_layout == "broadcast_head":
@@ -13111,7 +13068,6 @@ class TestSDPA(TestCaseMPS):
     )
     @parametrize("is_causal", [False, True])
     def test_prefill_attention_partial_blocks(self, dtype, head_dim, qL, kL, is_causal):
-        torch.manual_seed(1729)
         q, k, v = self._prefill_qkv(
             B=1, NH_q=2, NH_kv=2, qL=qL, kL=kL, HD=head_dim,
             layout="contiguous", dtype=dtype,
@@ -13122,7 +13078,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("gqa_factor", [2, 4, 8])
     @parametrize("is_causal", [False, True])
     def test_prefill_attention_gqa(self, dtype, gqa_factor, is_causal):
-        torch.manual_seed(1729)
         NH_kv = 2
         NH_q = NH_kv * gqa_factor
         q, k, v = self._prefill_qkv(
@@ -13135,7 +13090,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("head_dim", [64, 128])
     @parametrize("is_causal", [False, True])
     def test_prefill_attention_long_kl(self, dtype, head_dim, is_causal):
-        torch.manual_seed(1729)
         q, k, v = self._prefill_qkv(
             B=1, NH_q=4, NH_kv=4, qL=32, kL=1024, HD=head_dim,
             layout="contiguous", dtype=dtype,
@@ -13144,7 +13098,6 @@ class TestSDPA(TestCaseMPS):
         self._run_prefill_test(q, k, v, is_causal=is_causal, tol=tol)
 
     def test_dropout_raises_not_implemented(self):
-        torch.manual_seed(0)
         q = torch.randn(1, 2, 4, 8, device="mps")
         # shouldn't raise
         y_no_drop = F.scaled_dot_product_attention(q, q, q, dropout_p=0.0)
@@ -13158,7 +13111,6 @@ class TestSDPA(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("head_dim", [64, 128])
     def test_prefill_attention_multi_q_blocks(self, dtype, head_dim):
-        torch.manual_seed(1729)
         q, k, v = self._prefill_qkv(
             B=1, NH_q=2, NH_kv=2, qL=128, kL=128, HD=head_dim,
             layout="contiguous", dtype=dtype,
@@ -13173,7 +13125,6 @@ class TestSDPA(TestCaseMPS):
     )
     def test_prefill_attention_fully_masked_rows(self, dtype, head_dim, variant):
         # CPU returns 0 for query rows where every key is masked
-        torch.manual_seed(1729)
         B, NH, qL, kL = 2, 2, 16, 32
         q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
         attn_mask = None
@@ -13209,7 +13160,6 @@ class TestSDPA(TestCaseMPS):
 
     def test_caching_scale(self):
         # TODO remove this test once sdpa_general becomes a metal kernel
-        torch.manual_seed(42)
         q = torch.randn(1, 2, 4, 8, device="mps")
         # first call with default scale (1/sqrt(8) = 0.3536)
         y_default = F.scaled_dot_product_attention(q, q, q)
@@ -14402,7 +14352,6 @@ class TestConvolutionMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("with_bias", [False, True])
     def test_conv3d_precompiled_and_simd_miss(self, dtype, case, with_bias):
-        torch.manual_seed(0)
         if case == "catalog":
             input_shape = (2, 3, 7, 9, 11)
             weight_shape = (8, 3, 3, 3, 3)
@@ -15680,7 +15629,6 @@ class TestRNNMPS(TestCaseMPS):
     # Regression test for https://github.com/pytorch/pytorch/issues/190057:
     # dropout=1.0 produced 0 * inf = NaN between layers.
     def test_lstm_dropout_one(self):
-        torch.manual_seed(0)
         lstm_cpu = nn.LSTM(4, 4, num_layers=2, dropout=1.0)
         x = torch.randn(3, 2, 4)
         out_cpu, _ = lstm_cpu(x)
@@ -15692,7 +15640,6 @@ class TestRNNMPS(TestCaseMPS):
     # backward ignored the inter-layer dropout mask. Resetting the device RNG
     # before every forward pins the mask, making central differences valid.
     def test_lstm_dropout_backward_matches_finite_differences(self):
-        torch.manual_seed(0)
         lstm = nn.LSTM(4, 4, num_layers=2, dropout=0.5).to("mps")
         lstm.train()
 
@@ -15733,7 +15680,6 @@ class TestRNNMPS(TestCaseMPS):
         # The MPS LSTM graph cache key did not include the `train` flag, so a
         # graph built with dropout during train() was reused in eval() at the
         # same input shape, silently applying dropout during inference
-        torch.manual_seed(0)
         lstm = nn.LSTM(
             input_size=2, hidden_size=4, num_layers=2,
             dropout=0.1, batch_first=True,
@@ -16778,7 +16724,6 @@ class TestComplex(TestCase):
         # copy_ into/out-of non-contiguous tensors silently returned un-negated
         # data.
         xforms = [(lambda t: t, "contig"), (lambda t: t.T, "T")]
-        torch.manual_seed(0)
         v_cpu = torch.randn(4, 4)
         v = v_cpu.to("mps")
         for src_xform, src_label in xforms:
