@@ -4727,6 +4727,7 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         [
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
+            torch.ops.aten.sym_size.int,
         ]
     )
 

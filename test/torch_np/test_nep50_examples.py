@@ -207,7 +207,7 @@ class TestCompareToNumpy(TestCase):
 
             try:
                 result = ufunc(scalar, array)
-            except RuntimeError:
+            except RuntimeError, TypeError:
                 # RuntimeError: "bitwise_xor_cpu" not implemented for 'ComplexDouble' etc
                 result = None
 

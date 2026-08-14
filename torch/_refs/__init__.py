@@ -2415,7 +2415,7 @@ def _make_copy_from_view(fn, return_none_on_out_variant=False):
 
 
 @register_decomposition(aten.all)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def all(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -2430,7 +2430,7 @@ def all(
 
 
 @register_decomposition(aten.any)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def any(
     a: TensorLikeType,
     dim: DimsType | None = None,
