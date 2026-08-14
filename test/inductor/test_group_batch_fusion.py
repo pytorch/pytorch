@@ -598,6 +598,23 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
+    def test_batch_linear_lhs_treats_higher_order_ops_as_layout_sensitive(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        graph.call_function(
+            triton_kernel_wrapper_mutation,
+            kwargs={"kwargs": {"input": linear}},
+        )
+
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
         """

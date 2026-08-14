@@ -608,10 +608,10 @@ class BatchLinearLHSFusion(BatchFusion):
 
 
 def _op_namespace(tgt) -> str | None:
-    # Both OpOverload and OpOverloadPacket can appear as call_function targets.
-    # OpOverload exposes .namespace; OpOverloadPacket does not (accessing it
-    # raises), so derive the namespace from the qualified op name ("ns::op").
-    if isinstance(tgt, torch._ops.OpOverload):
+    # OpOverload and HigherOrderOperator expose .namespace; OpOverloadPacket
+    # does not (accessing it raises), so derive its namespace from the
+    # qualified op name ("ns::op").
+    if isinstance(tgt, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
         return tgt.namespace
     if isinstance(tgt, torch._ops.OpOverloadPacket):
         return tgt._qualified_op_name.split("::")[0]
