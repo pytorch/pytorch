@@ -149,6 +149,44 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   return output;
 }
 
+// DHWIO weight copy; ATen's strided permute copy runs well below memory
+// bandwidth for this permutation, 2-4x slower than the flat kernel.
+static Tensor conv3d_weights_to_dhwio(const Tensor& weight) {
+  using namespace mps;
+  const auto output_channels = weight.size(0);
+  const auto input_channels_per_group = weight.size(1);
+  const auto kernel_depth = weight.size(2);
+  const auto kernel_height = weight.size(3);
+  const auto kernel_width = weight.size(4);
+  auto output = at::empty({kernel_depth, kernel_height, kernel_width, input_channels_per_group, output_channels},
+                          weight.options());
+  const ConvWeightPermuteParams params{
+      .output_channels = static_cast<uint32_t>(output_channels),
+      .input_channels_per_group = static_cast<uint32_t>(input_channels_per_group),
+      .kernel_height = static_cast<uint32_t>(kernel_height),
+      .kernel_width = static_cast<uint32_t>(kernel_width),
+      .output_channel_stride = static_cast<uint32_t>(weight.stride(0)),
+      .input_channel_stride = static_cast<uint32_t>(weight.stride(1)),
+      .depth_stride = static_cast<uint32_t>(weight.stride(2)),
+      .height_stride = static_cast<uint32_t>(weight.stride(3)),
+      .width_stride = static_cast<uint32_t>(weight.stride(4)),
+  };
+  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv_weight_to_dhwio_{}", scalarToMetalTypeString(weight)));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pipeline, "conv_weight_to_dhwio", {weight}, stream);
+      [encoder setComputePipelineState:pipeline];
+      mtl_setArgs(encoder, weight, output, params);
+      [encoder dispatchThreads:MTLSizeMake(output_channels, input_channels_per_group, kernel_depth * kernel_height)
+          threadsPerThreadgroup:MTLSizeMake(std::min<int64_t>(output_channels, 256), 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline, stream);
+    }
+  });
+  return output;
+}
+
 struct Conv3dMppSpecialization {
   std::string dtype;
   int kernel_depth, kernel_height, kernel_width;
@@ -270,7 +308,7 @@ static void conv3d_metal_forward(const Tensor& input_t,
   const bool use_mpp = !use_long_index && has_mpp();
 
   const auto activation = conv3d_to_ndhwc(input_t); // NDHWC
-  const auto weights = weight_t.permute({2, 3, 4, 1, 0}).contiguous(); // DHWIO
+  const auto weights = conv3d_weights_to_dhwio(weight_t); // DHWIO
   std::optional<Tensor> bias;
   if (bias_defined) {
     bias = bias_opt->scalar_type() == dtype ? bias_opt->contiguous() : bias_opt->to(dtype).contiguous();
