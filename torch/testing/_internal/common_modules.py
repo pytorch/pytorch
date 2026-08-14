@@ -105,10 +105,10 @@ class modules(_TestParametrizer):
         # Order matters: module_allowlist filters first, then module_overrides adds
         # decorators. This ensures module_overrides only applies to modules that
         # passed the module_allowlist filter.
-        device_cls._apply_module_allowlist(self)
-        device_cls._apply_module_overrides(self)
+        module_info_list = device_cls._apply_module_allowlist(self.module_info_list)
+        module_info_list = device_cls._apply_module_overrides(module_info_list)
 
-        for module_info in self.module_info_list:
+        for module_info in module_info_list:
             dtypes = set(module_info.supported_dtypes(device_cls.device_type))
             if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
