@@ -674,6 +674,48 @@ if HAS_CUDA_AND_TRITON:
             ).check("Manually clone").check("cudagraph_trees_generation_cloning").run(
                 str(exc.exception)
             )
+            self.assertTrue("cudagraph_skips" not in counters["inductor"])
+
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @parametrize("fallback_reason", ("mixed_mutation", "rerecord_limit"))
+        def test_prior_generation_mutated_input_eager_fallback(self, fallback_reason):
+            def produce(x):
+                return x + 1
+
+            def mutate(state, scratch):
+                state.add_(1)
+                if fallback_reason == "mixed_mutation":
+                    scratch.add_(1)
+                return state
+
+            produce = torch.compile(produce, mode="reduce-overhead")
+            mutate = torch.compile(mutate, mode="reduce-overhead")
+            state = produce(torch.randn(4, device="cuda"))
+            scratch = torch.randn_like(state)
+
+            # Register the mutation while the recorded state is still in the
+            # current generation.
+            state = mutate(state, scratch)
+            if fallback_reason == "rerecord_limit":
+                manager = self.get_manager()
+                node = manager.current_node
+                self.assertIsNotNone(node)
+                manager.num_rerecord[node.id][node.wrapped_function.id] = (
+                    torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+                    + 1
+                )
+
+            expected_state = state + 1
+            expected_scratch = scratch + (fallback_reason == "mixed_mutation")
+            state_ptr = state.untyped_storage().data_ptr()
+            torch.compiler.cudagraph_mark_step_begin()
+            state = mutate(state, scratch)
+
+            self.assertEqual(state, expected_state)
+            self.assertEqual(scratch, expected_scratch)
+            self.assertEqual(state.untyped_storage().data_ptr(), state_ptr)
 
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
@@ -697,11 +739,21 @@ if HAS_CUDA_AND_TRITON:
                 state = None
                 for inp in inputs:
                     torch.compiler.cudagraph_mark_step_begin()
+                    prior_state_and_ptr = (
+                        (state, state.untyped_storage().data_ptr())
+                        if state is not None
+                        else None
+                    )
                     expected_state.copy_(expected_state + inp)
                     expected_out = inp + expected_state
                     out, state = compiled(inp, state)
                     self.assertEqual(out, expected_out)
                     self.assertEqual(state, expected_state)
+                    if prior_state_and_ptr is not None:
+                        prior_state, prior_state_ptr = prior_state_and_ptr
+                        self.assertNotEqual(
+                            prior_state.untyped_storage().data_ptr(), prior_state_ptr
+                        )
             self.assertTrue("cudagraph_skips" not in counters["inductor"])
             self.assertEqual(self.get_manager().path_state, ExecutionState.EXECUTION)
 

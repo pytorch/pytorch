@@ -2426,14 +2426,15 @@ class CUDAGraphTreeManager:
 
     def _check_for_mutated_input_from_prior_generation(
         self, function_id: FunctionID, inputs: list[InputType]
-    ) -> None:
+    ) -> bool:
+        """Return whether eager fallback must precede generation teardown."""
         mutated_input_idxs = self.ids_to_funcs[function_id].mutated_input_idxs
         if (
             not mutated_input_idxs
             or self.current_node is None
             or not self.can_start_new_generation()
         ):
-            return
+            return False
 
         is_cuda_graph_recorded_tensor = self._get_cuda_graph_recorded_tensor_checker()
         user_visible_storage_ptrs: OrderedSet[int] = OrderedSet()
@@ -2450,13 +2451,21 @@ class CUDAGraphTreeManager:
                 and is_cuda_graph_recorded_tensor(inp)
                 and inp.untyped_storage().data_ptr() not in user_visible_storage_ptrs
             ):
+                node_id = self._get_node_id()
+                if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+                    self._update_non_cudagraph_managed_mutation(function_id, inputs)
+                if self.non_cudagraph_managed_mutation_hint[node_id][
+                    function_id
+                ] or self.exceed_rerecord_limit(node_id, function_id):
+                    return True
                 raise RuntimeError(
                     "Error: a tensor output of CUDAGraphs from a previous invocation "
                     "is being passed back as a mutated input. Manually clone the tensor "
                     "outside torch.compile() before passing it back, or set "
                     "torch._inductor.config.triton.cudagraph_trees_generation_cloning "
-                    "= 'user_visible'."
+                    "= 'user_visible' before compiling the function."
                 )
+        return False
 
     def new_warmup_node_id(self) -> GraphID:
         return GraphID(next(self.warmup_node_counter))
@@ -2499,7 +2508,8 @@ class CUDAGraphTreeManager:
         # A graph-pool output is safe to mutate only while it remains on the same
         # tree path. At a generation boundary, ending the old path invalidates its
         # storage before an eager fallback or a new recording can consume it.
-        self._check_for_mutated_input_from_prior_generation(function_id, new_inputs)
+        if self._check_for_mutated_input_from_prior_generation(function_id, new_inputs):
+            return self.ids_to_funcs[function_id].model(new_inputs)
 
         # we will try to end the current execution lazily, since
         # we don't want to do unnecessary checking of the existing outputs
