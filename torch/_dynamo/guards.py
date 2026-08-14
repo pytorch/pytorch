@@ -4239,9 +4239,12 @@ class GuardsStatePickler(pickle.Pickler):
         qualname: str,
         argdefs: tuple[object, ...] | None,
         closure: tuple[types.CellType, ...] | None,
+        kwdefaults: dict[str, object] | None = None,
     ) -> types.FunctionType:
         f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+        fn = types.FunctionType(code, f_globals, qualname, argdefs, closure)
+        fn.__kwdefaults__ = kwdefaults
+        return fn
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4401,6 +4404,7 @@ class GuardsStatePickler(pickle.Pickler):
                     obj.__qualname__,
                     obj.__defaults__,
                     obj.__closure__,
+                    obj.__kwdefaults__,
                 )
             if obj.__module__ in sys.modules:
                 f = sys.modules[obj.__module__]
@@ -4425,6 +4429,7 @@ class GuardsStatePickler(pickle.Pickler):
                         obj.__qualname__,
                         obj.__defaults__,
                         obj.__closure__,
+                        obj.__kwdefaults__,
                     )
         elif inspect.ismethod(obj):
             func = obj.__func__
