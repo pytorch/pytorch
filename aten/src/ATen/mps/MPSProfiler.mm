@@ -321,7 +321,7 @@ uint64_t MPSProfiler::beginProfileKernel(const void* handle,
 }
 
 uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& strKey, bool isGraph) {
-  TORCH_WARN("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
+  TORCH_WARN_DEPRECATION("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
   return beginProfileKernel(handle, strKey, isGraph, getCurrentMPSStream());
 }
 
@@ -338,7 +338,7 @@ uint64_t MPSProfiler::beginProfileKernel(const void* handle,
 }
 
 uint64_t MPSProfiler::beginProfileKernel(const void* handle, const std::string& kernelName, const TensorList& tensors) {
-  TORCH_WARN("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
+  TORCH_WARN_DEPRECATION("beginProfileKernel() called without a stream, may end up profiling the wrong stream");
   return beginProfileKernel(handle, kernelName, tensors, getCurrentMPSStream());
 }
 
@@ -357,7 +357,7 @@ void MPSProfiler::beginProfileGPUInterval(const void* handle, MPSStream* stream)
 }
 
 void MPSProfiler::beginProfileGPUInterval(const void* handle) {
-  TORCH_WARN("beginProfileGPUInterval() called without a stream, may end up profiling the wrong stream");
+  TORCH_WARN_DEPRECATION("beginProfileGPUInterval() called without a stream, may end up profiling the wrong stream");
   beginProfileGPUInterval(handle, getCurrentMPSStream());
 }
 
@@ -447,7 +447,7 @@ uint64_t MPSProfiler::beginProfileCopy(const void* srcBuffer,
                                        size_t length,
                                        bool isNonBlocking,
                                        bool usesBlitter) {
-  TORCH_WARN("beginProfileCopy() called without a stream, may end up profiling the wrong stream");
+  TORCH_WARN_DEPRECATION("beginProfileCopy() called without a stream, may end up profiling the wrong stream");
   return beginProfileCopy(
       srcBuffer, dstBuffer, srcTensor, dstTensor, length, getCurrentMPSStream(), isNonBlocking, usesBlitter);
 }
