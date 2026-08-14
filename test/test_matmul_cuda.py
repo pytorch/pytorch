@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionAtLeast,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -120,6 +121,8 @@ def sm_carveout(value: int | None):
         torch._C._set_sm_carveout_experimental(None)
 
 
+# TODO(AIPYTORCH-1024): Re-enable after resolving the ROCm 7.15 timeout.
+@skipIfRocmVersionAtLeast([7, 15])
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -1447,6 +1450,7 @@ class TestMatmulCuda(InductorTestCase):
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
+@skipIfRocmVersionAtLeast([7, 15])
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
