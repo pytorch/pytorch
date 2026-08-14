@@ -798,8 +798,9 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 def imag(a: TensorLikeType) -> TensorLikeType:
     if not isinstance(a, TensorLike):
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
-    torch._check(
-        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    torch._check_type(
+        utils.is_complex_dtype(a.dtype),
+        lambda: "imag only supports complex tensors.",
     )
     return prims.imag(a)
 
@@ -829,7 +830,7 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isposinf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
@@ -843,7 +844,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isneginf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
