@@ -10,6 +10,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TransposeType.h>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 #include <sstream>
 #include <cstring>
@@ -26,6 +27,21 @@
 #endif
 
 namespace at::native {
+
+inline void check_mm_shapes(
+    const Tensor& self,
+    const Tensor& mat2,
+    std::string_view func_name) {
+  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(
+      self.sym_size(1) == mat2.sym_size(0),
+      func_name,
+      ": self.size(1) needs to match mat2.size(0) but got ",
+      self.sym_size(1),
+      " and ",
+      mat2.sym_size(0));
+}
 
 inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
