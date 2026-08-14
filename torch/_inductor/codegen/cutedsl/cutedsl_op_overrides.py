@@ -899,14 +899,27 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_unary_op(x, "(~{x})")
 
     @staticmethod
+    def _shift_op(x: CuteDSLArg, y: CuteDSLArg, py_op: str, op_name: str) -> CuteDSLArg:
+        """TensorSSA lacks __lshift__/__rshift__ (unlike __and__/__or__), so
+        vectorized shifts route through its _apply_op, which handles promotion,
+        scalar splatting, and signedness-aware arith dispatch."""
+        if CuteDSLOpOverrides._is_tensor_like(x) or CuteDSLOpOverrides._is_tensor_like(
+            y
+        ):
+            return CuteDSLOpOverrides._apply_binary_op(
+                x, y, f"{{a}}._apply_op(operator.{op_name}, {{b}})"
+            )
+        return CuteDSLOpOverrides._apply_binary_op(x, y, f"({{a}} {py_op} {{b}})")
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def bitwise_left_shift(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} << {b})")
+        return CuteDSLOpOverrides._shift_op(x, y, "<<", "lshift")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def bitwise_right_shift(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} >> {b})")
+        return CuteDSLOpOverrides._shift_op(x, y, ">>", "rshift")
 
     @staticmethod
     def logical_not(a):

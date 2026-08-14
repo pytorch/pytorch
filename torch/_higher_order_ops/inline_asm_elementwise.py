@@ -43,6 +43,12 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
         pack: Number of elements processed per asm invocation.  When
             ``pack > 1``, the constraint string must list ``pack`` outputs
             and ``pack`` copies of each input.  Requires ``torch.compile``.
+            Register conventions for elements smaller than 32 bits differ by
+            backend: Triton packs them into 32-bit registers, so a 16-bit
+            result uses one ``=r`` output holding ``pack`` halves (e.g.
+            ``add.rn.f16x2``), and per-element ``=h,=h`` outputs are invalid
+            (and currently abort compilation). CuTeDSL backends instead keep
+            one 16-bit register per element, so they use the ``=h,=h`` form.
 
     Returns:
         A tensor with the broadcast shape of the inputs and the given dtype.
