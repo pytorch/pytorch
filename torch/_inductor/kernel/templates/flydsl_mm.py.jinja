@@ -1,0 +1,137 @@
+import contextlib
+import os
+import threading
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    infer_has_k_tail,
+    make_gemm_param_and_validate,
+)
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+    gemm_gfx950,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    ensure_flydsl_cache_dir,
+    run_cached_flydsl,
+)
+
+{{gen_defines()}}
+
+
+_gemm_param = None
+_gemm_param_lock = threading.Lock()
+
+
+def _inductor_tensor_arg(tensor):
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+{{def_kernel("mat1", "mat2")}}
+    output = {{get_output()}}
+    global _gemm_param
+    mat2_nk = mat2.transpose(0, 1)
+    param = _gemm_param
+    if param is None:
+        with _gemm_param_lock:
+            param = _gemm_param
+            if param is None:
+                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+                if USE_HALF_TILE_INTERLEAVED:
+                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+                param = make_gemm_param_and_validate(
+                    GEMM_M,
+                    GEMM_N,
+                    GEMM_K,
+                    {
+                        "dtype_id": GEMM_DTYPE_ID,
+                        "block_m": TILE_M,
+                        "block_n": TILE_N,
+                        "block_k": TILE_K,
+                        "stages": STAGES,
+                        "m_waves": BLOCK_M_WARPS,
+                        "n_waves": BLOCK_N_WARPS,
+                        "group_m": GROUP_M,
+                        "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+                        "has_bias": False,
+                        "has_k_tail": has_k_tail,
+                    },
+                )
+                if param is None:
+                    raise RuntimeError(
+                        f"unsupported FlyDSL GEMM shape/config: M={GEMM_M}, N={GEMM_N}, "
+                        f"K={GEMM_K}, tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
+                    )
+                _gemm_param = param
+    ensure_flydsl_cache_dir()
+    compile_args = (
+        _inductor_tensor_arg(output),
+        _inductor_tensor_arg(mat1),
+        _inductor_tensor_arg(mat2_nk),
+        param,
+        stream,
+    )
+    if os.environ.get("FLYDSL_COMPILE_ONLY"):
+        flyc.compile(gemm_gfx950, *compile_args)
+    else:
+        run_cached_flydsl(
+            gemm_gfx950,
+            *compile_args,
+            constexpr_param=param,
+            compiler=flyc.compile,
+            dispatch_args=(output, mat1, mat2_nk, param, stream),
+        )
+    return output
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    dtype_mat1 = getattr(torch, precompile_dtypes["mat1"])
+    dtype_mat2 = getattr(torch, precompile_dtypes["mat2"])
+    dtype_output = getattr(torch, precompile_dtypes["output"])
+
+    shape_mat1 = tuple(precompile_shapes["mat1"])
+    shape_mat2 = tuple(precompile_shapes["mat2"])
+    shape_output = tuple(precompile_shapes["output"])
+
+    stride_mat1 = tuple(precompile_strides["mat1"])
+    stride_mat2 = tuple(precompile_strides["mat2"])
+    stride_output = tuple(precompile_strides["output"])
+
+    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+
+            def _fake_proxy(shape, stride, dtype):
+                return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
+
+            mat1 = _fake_proxy(shape_mat1, stride_mat1, dtype_mat1)
+            mat2 = _fake_proxy(shape_mat2, stride_mat2, dtype_mat2)
+            output = _fake_proxy(shape_output, stride_output, dtype_output)
+            {{kernel_name}}_main(mat1, mat2, output, stream=0)
