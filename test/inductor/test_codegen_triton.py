@@ -280,6 +280,7 @@ def helper(x):
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @inductor_config.patch("triton.divisible_by_16", True)
+    @inductor_config.patch("triton.unique_kernel_names", False)
     def test_runtime_divisibility_specializes_dynamic_kernel(self):
         from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -304,7 +305,11 @@ def helper(x):
 
         source = "\n".join(code)
         self.assertIn("runtime_divisible_multi_kernel", source)
-        self.assertGreaterEqual(source.count("def triton_"), 2)
+        self.assertEqual(source.count("async_compile.triton_multi("), 1)
+        self.assertEqual(source.count("def runtime_divisible_body("), 1)
+        self.assertEqual(source.count("runtime_divisible_triton_meta ="), 1)
+        self.assertEqual(source.count("runtime_divisible_inductor_meta ="), 1)
+        self.assertEqual(source.count("def triton_"), 2)
 
         unaligned = make_inputs(17, 33, 17)
         self.assertEqual(compiled(*unaligned), fn(*unaligned))

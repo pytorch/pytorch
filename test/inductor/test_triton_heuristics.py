@@ -304,6 +304,23 @@ class TestTritonHeuristics(TestCase):
         self.assertIsNone(autotune_cache)
         self.assertEqual(autotune_cache_info["autotune_cache_state"], "only 1 config")
 
+    def test_check_autotune_cache_key_suffix(self):
+        cfg = triton.Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16)
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.AutotuneCache.create",
+            return_value=None,
+        ) as create:
+            check_autotune_cache(
+                [cfg],
+                "/tmp/kernel.py",
+                {"autotune_cache_key_suffix": ".aligned"},
+                dynamic_scale_rblock_eligible=True,
+            )
+
+        create.assert_called_once()
+        self.assertEqual(create.call_args.args[1], "/tmp/kernel.py.aligned")
+
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])

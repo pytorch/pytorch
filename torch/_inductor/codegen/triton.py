@@ -3332,7 +3332,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: TritonMeta | None = None
         self.runtime_divisible_by_16: tuple[int, ...] = ()
-        self.runtime_divisible_by_16_src: str | None = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -7183,7 +7182,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
 
         self.runtime_divisible_by_16 = ()
-        self.runtime_divisible_by_16_src = None
         code = IndentedBuffer()
 
         size_hints = {}
@@ -7384,6 +7382,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and not V.graph.cpp_wrapper
             and not V.graph.aot_mode
             and not config.triton.autotune_at_compile_time
+            and not config.autotune_lookup_table
             and not config.benchmark_kernel
             and not self.features.is_reduction()
             and not self.is_combo_kernel
@@ -7428,66 +7427,122 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
             ]
 
-        triton_meta_placeholder = "_runtime_divisible_triton_meta"
-        triton_meta_src = (
-            triton_meta_placeholder
-            if self.runtime_divisible_by_16
-            else repr(triton_meta)
-        )
-
         for helper in self.helper_functions:
             code.writeline("")
             code.splice(helper)
 
-        if self.fixed_config:
-            heuristics_line = f"""
+        def heuristics_line(
+            triton_meta_src: str,
+            inductor_meta_src: str,
+        ) -> str:
+            if self.fixed_config:
+                return f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     config={self.fixed_config.config!r},
                     filename=__file__,
                     triton_meta={triton_meta_src},
-                    inductor_meta={inductor_meta!r}
+                    inductor_meta={inductor_meta_src}
                 )
                 @triton.jit
-            """
-        elif self.inside_reduction:
-            reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
-            heuristics_line = f"""
+                """
+            if self.inside_reduction:
+                reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
+                return f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
                     reduction_hint={reduction_hint},
                     filename=__file__,
                     triton_meta={triton_meta_src},
-                    inductor_meta={inductor_meta!r}
+                    inductor_meta={inductor_meta_src}
                 )
                 @triton.jit
-            """
-        else:
+                """
             hint = select_tile_hint(size_hints, signature)
             tile_hint = f"tile_hint=TileHint.{hint.name}," if hint is not None else ""
-            heuristics_line = f"""
+            return f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
                     triton_meta={triton_meta_src},
-                    inductor_meta={inductor_meta!r},
+                    inductor_meta={inductor_meta_src},
                     min_elem_per_thread={self.min_elem_per_thread}
                 )
                 @triton.jit
             """
-        code.splice(heuristics_line)
+
+        def emit_body(kernel_name: str, *, profile: bool = True) -> None:
+            code.writeline(
+                f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
+            )
+            with code.indent():
+                if profile and config.triton.proton_profiling:
+                    code.writeline(f'pl.enter_scope("{kernel_name}")')
+                self.codegen_static_numels(code)
+                for old, new in self.args.aliases():
+                    code.writeline(f"{old} = {new}")
+                code.splice(self.body)
+                if profile and config.triton.proton_profiling:
+                    code.writeline(f'pl.exit_scope("{kernel_name}")')
+
         kernel_name = name or str(Placeholder.KERNEL_NAME)
-        code.writeline(
-            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
-        )
-        with code.indent():
-            if config.triton.proton_profiling:
-                code.writeline(f'pl.enter_scope("{kernel_name}")')
-            self.codegen_static_numels(code)
-            for old, new in self.args.aliases():
-                code.writeline(f"{old} = {new}")
-            code.splice(self.body)
-            if config.triton.proton_profiling:
-                code.writeline(f'pl.exit_scope("{kernel_name}")')
+        if self.runtime_divisible_by_16:
+            aligned_configs = [
+                config_of(
+                    signature,
+                    skip_cpp_wrapper_input_tensor_alignment=True,
+                    divisible_by_16_extra=self.runtime_divisible_by_16,
+                )
+            ]
+            triton_meta_name = "runtime_divisible_triton_meta"
+            inductor_meta_name = "runtime_divisible_inductor_meta"
+            code.writeline(f"{triton_meta_name} = {triton_meta!r}")
+            code.writeline(f"{inductor_meta_name} = {inductor_meta!r}")
+
+            generic_triton_meta = f"{{**{triton_meta_name}}}"
+            aligned_triton_meta = (
+                f"{{**{triton_meta_name}, 'configs': {aligned_configs!r}}}"
+            )
+            generic_inductor_meta = (
+                f"{{**{inductor_meta_name}, "
+                f"'mutated_arg_names': [*{inductor_meta_name}['mutated_arg_names']], "
+                "'autotune_cache_key_suffix': '.generic'}"
+            )
+            aligned_descriptive_name = str(
+                Placeholder.RUNTIME_DIVISIBLE_DESCRIPTIVE_NAME
+            )
+            aligned_inductor_meta = (
+                f"{{**{inductor_meta_name}, "
+                f"'mutated_arg_names': [*{inductor_meta_name}['mutated_arg_names']], "
+                f"'kernel_name': {aligned_descriptive_name!r}, "
+                "'autotune_cache_key_suffix': '.aligned'}"
+            )
+
+            body_name = "runtime_divisible_body"
+            code.writeline("@triton.jit")
+            emit_body(body_name, profile=False)
+            call_args = ", ".join(x.name for x in argdefs)
+            for entry_name, entry_meta, entry_inductor_meta in (
+                (kernel_name, generic_triton_meta, generic_inductor_meta),
+                (
+                    str(Placeholder.RUNTIME_DIVISIBLE_KERNEL_NAME),
+                    aligned_triton_meta,
+                    aligned_inductor_meta,
+                ),
+            ):
+                code.writeline("")
+                code.splice(heuristics_line(entry_meta, entry_inductor_meta))
+                code.writeline(
+                    f"def {entry_name}({', '.join(x.full_name() for x in argdefs)}):"
+                )
+                with code.indent():
+                    if config.triton.proton_profiling:
+                        code.writeline(f'pl.enter_scope("{entry_name}")')
+                    code.writeline(f"{body_name}({call_args})")
+                    if config.triton.proton_profiling:
+                        code.writeline(f'pl.exit_scope("{entry_name}")')
+        else:
+            code.splice(heuristics_line(repr(triton_meta), repr(inductor_meta)))
+            emit_body(kernel_name)
 
         if config.benchmark_kernel:
             code.splice(
@@ -7496,26 +7551,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             )
 
-        src_code = code.getvalue()
-        if self.runtime_divisible_by_16:
-            if src_code.count(triton_meta_placeholder) != 1:
-                raise AssertionError("expected one Triton metadata placeholder")
-            aligned_meta = {
-                **triton_meta,
-                "configs": [
-                    config_of(
-                        signature,
-                        skip_cpp_wrapper_input_tensor_alignment=True,
-                        divisible_by_16_extra=self.runtime_divisible_by_16,
-                    )
-                ],
-            }
-            self.runtime_divisible_by_16_src = src_code.replace(
-                triton_meta_placeholder, repr(aligned_meta)
-            )
-            src_code = src_code.replace(triton_meta_placeholder, repr(triton_meta))
-
-        return src_code
+        return code.getvalue()
 
     @staticmethod
     def _get_persistent_RBLOCK(rnumel):
@@ -8223,9 +8259,10 @@ class TritonScheduling(SIMDScheduling):
         kernel_path,
         get_kernel_metadata,
     ):
-        """Emit kernel to wrapper, with support for external template handlers."""
+        """Emit one source module and its Triton entry points to the wrapper."""
+        is_multi = isinstance(kernel_name, tuple)
         # External template handlers (e.g. Helion) can override kernel emission
-        if kernel.emit_kernel_override(
+        if not is_multi and kernel.emit_kernel_override(
             wrapper,
             src_code,
             kernel_name,
@@ -8241,9 +8278,15 @@ class TritonScheduling(SIMDScheduling):
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
-            async_compile.triton(subs_name, src_code)
+            if is_multi:
+                async_compile.triton_multi(subs_name, src_code)
+            else:
+                async_compile.triton(subs_name, src_code)
 
-        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+        compile_fn = "triton_multi" if is_multi else "triton"
+        compile_wrapper.writeline(
+            f"async_compile.{compile_fn}({subs_name!r}, '''"
+        )
 
         compile_wrapper.splice(src_code, strip=True)
         current_device = V.graph.get_current_device_or_throw()
@@ -8261,39 +8304,90 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         metadata_comment += "\n" + origins + "\n" + detailed_origins
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
+        definition_name = ", ".join(kernel_name) if is_multi else kernel_name
+        wrapper.define_kernel(
+            definition_name, compile_wrapper.getvalue(), metadata_comment
+        )
 
     def define_kernel(self, src_code, node_schedule, kernel):
-        kernel_name = self._define_kernel(src_code, node_schedule, kernel)
-        aligned_src = kernel.runtime_divisible_by_16_src
-        if aligned_src is None:
-            return kernel_name
+        if not kernel.runtime_divisible_by_16:
+            return self._define_kernel(src_code, node_schedule, kernel)
+        return self._define_runtime_divisible_kernel(src_code, node_schedule, kernel)
 
-        aligned_name = self._define_kernel(aligned_src, node_schedule, kernel)
-        return V.graph.wrapper_code.multi_kernel_state.define_runtime_divisible_kernel(
-            (kernel_name, aligned_name), kernel.runtime_divisible_by_16
+    @staticmethod
+    def _next_kernel_name(src_code, node_schedule, wrapper):
+        fused_name = (
+            get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
+            if config.triton.descriptive_names
+            else ""
         )
+        if fused_name:
+            fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
+        kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+        kernel_name = "_".join(
+            ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+        )
+        if config.aot_inductor.model_name_for_generated_files:
+            # Distinguish generated symbols when AOTI compiles multiple submodules.
+            kernel_name = (
+                f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
+            )
+        return kernel_name
+
+    def _define_runtime_divisible_kernel(self, src_code, node_schedule, kernel):
+        wrapper = V.graph.wrapper_code
+        if src_code in wrapper.src_to_kernel:
+            return wrapper.src_to_kernel[src_code]
+        src_key = src_code
+
+        kernel_names = tuple(
+            self._next_kernel_name(src_code, node_schedule, wrapper) for _ in range(2)
+        )
+        subs_names = (
+            kernel_names
+            if config.triton.unique_kernel_names
+            else ("triton_", "triton_aligned_")
+        )
+
+        src_code = src_code.replace(
+            str(Placeholder.RUNTIME_DIVISIBLE_DESCRIPTIVE_NAME), kernel_names[1]
+        )
+        src_code = src_code.replace(
+            str(Placeholder.RUNTIME_DIVISIBLE_KERNEL_NAME), subs_names[1]
+        )
+        src_code = src_code.replace(
+            str(Placeholder.DESCRIPTIVE_NAME), kernel_names[0]
+        )
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_names[0])
+        src_code = src_code.replace("#pragma CMT", "#")
+
+        _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
+        self._emit_kernel_to_wrapper(
+            wrapper,
+            kernel,
+            src_code,
+            kernel_names,
+            subs_names,
+            node_schedule,
+            kernel_path,
+            get_kernel_metadata,
+        )
+
+        dispatcher_name = wrapper.multi_kernel_state.define_runtime_divisible_kernel(
+            kernel_names, kernel.runtime_divisible_by_16
+        )
+        wrapper.src_to_kernel[src_key] = dispatcher_name
+        if metrics.is_metric_table_enabled("kernel_metadata"):
+            for kernel_name in kernel_names:
+                metrics.log_kernel_metadata(kernel_name, kernel_path, src_code)
+        return dispatcher_name
 
     def _define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
-            fused_name = (
-                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
-                if config.triton.descriptive_names
-                else ""
-            )
-            if fused_name:
-                fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
-            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
-            kernel_name = "_".join(
-                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
-            )
-            if config.aot_inductor.model_name_for_generated_files:
-                # When AOTI compiles multiple submodules, we need to use the model name to
-                # distinguish kernel related symbols.
-                kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
+            kernel_name = self._next_kernel_name(src_code, node_schedule, wrapper)
 
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name

@@ -300,6 +300,8 @@ def _parse_kernel_fn_code(kernel_module_code: str) -> str:
     from .wrapper_benchmark import get_triton_kernel
 
     mod = PyCodeCache.load(kernel_module_code)
+    if hasattr(mod, "runtime_divisible_body"):
+        return inspect.getsource(mod.runtime_divisible_body.fn)
     kernel = get_triton_kernel(mod)
     # kernel is a CachingAutotune; kernel.fn is the JITFunction;
     # kernel.fn.fn is the function being decorate by triton.jit
