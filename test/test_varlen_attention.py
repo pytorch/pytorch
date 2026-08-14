@@ -686,6 +686,9 @@ class TestVarlenAttention(NNTestCase):
                 shape.max_seq_len,
                 False,
                 rng_state,
+                None,
+                None,
+                False,
             ),
             test_utils=["test_schema", "test_faketensor"],
         )
@@ -846,78 +849,49 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    def test_cudnn_causal_varlen_unequal_lengths(self, device):
-        """Match Flash bottom-right causality when packed Q/K lengths differ."""
+    def test_cudnn_causal_varlen_requires_shared_cu_seq(self, device):
         _check_cudnn_varlen_supported(device)
-        torch.manual_seed(42)
-        cu_seq_q = torch.tensor([0, 192, 416], device=device, dtype=torch.int32)
-        cu_seq_k = torch.tensor([0, 256, 448], device=device, dtype=torch.int32)
-        q_base = torch.randn(416, 4, 64, device=device, dtype=torch.bfloat16)
-        k_base = torch.randn(448, 4, 64, device=device, dtype=torch.bfloat16)
-        v_base = torch.randn_like(k_base)
-        grad_out = torch.randn_like(q_base)
+        seq_len = 256
+        q = torch.randn(
+            seq_len,
+            4,
+            64,
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        k = torch.randn_like(q, requires_grad=True)
+        v = torch.randn_like(q, requires_grad=True)
+        cu_seq_q = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        cu_seq_k = cu_seq_q.clone()
 
-        with torch.no_grad():
-            torch.ops.aten._cudnn_attention_forward(
-                q_base,
-                k_base,
-                v_base,
-                None,
+        with (
+            _use_cudnn_varlen(True, device),
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_forward",
+                wraps=torch.ops.aten._cudnn_attention_forward,
+            ) as cudnn_forward,
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_backward",
+                wraps=torch.ops.aten._cudnn_attention_backward,
+            ) as cudnn_backward,
+        ):
+            out = varlen_attn(
+                q,
+                k,
+                v,
                 cu_seq_q,
                 cu_seq_k,
-                224,
-                256,
-                True,
-                0.0,
-                False,
-                False,
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
             )
+            torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
 
-        results = {}
-        for use_cudnn in (False, True):
-            q = q_base.clone().requires_grad_()
-            k = k_base.clone().requires_grad_()
-            v = v_base.clone().requires_grad_()
-            with _use_cudnn_varlen(use_cudnn, device):
-                out = varlen_attn(
-                    q,
-                    k,
-                    v,
-                    cu_seq_q,
-                    cu_seq_k,
-                    224,
-                    256,
-                    window_size=(-1, 0),
-                )
-            results[use_cudnn] = (
-                out,
-                *torch.autograd.grad(out, (q, k, v), grad_out),
-            )
-
-        q = q_base.clone().requires_grad_()
-        k = k_base.clone().requires_grad_()
-        v = v_base.clone().requires_grad_()
-        native = torch.ops.aten._cudnn_attention_forward(
-            q,
-            k,
-            v,
-            None,
-            cu_seq_q,
-            cu_seq_k,
-            224,
-            256,
-            True,
-            0.0,
-            False,
-            False,
-            causal_mask_bottom_right=True,
-        )[0]
-        native_result = (native, *torch.autograd.grad(native, (q, k, v), grad_out))
-
-        flash = results[False]
-        for actual in (results[True], native_result):
-            for flash_tensor, actual_tensor in zip(flash, actual):
-                self.assertEqual(flash_tensor, actual_tensor, atol=1e-2, rtol=2e-2)
+        self.assertEqual(cudnn_forward.call_count, 0)
+        self.assertEqual(cudnn_backward.call_count, 0)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(

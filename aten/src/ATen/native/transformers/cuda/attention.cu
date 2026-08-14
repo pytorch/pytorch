@@ -1026,20 +1026,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     bool return_debug_mask,
     std::optional<double> scale,
     const std::optional<Tensor>& seqused_k,
-    const std::optional<Tensor>& block_table,
-    bool causal_mask_bottom_right) {
+    const std::optional<Tensor>& block_table) {
   // TODO(eqy): debug mask support
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
   const bool is_nested = cumulative_sequence_length_q.has_value();
   const bool has_kv_cache = seqused_k.has_value() || block_table.has_value();
-  TORCH_CHECK(
-      !causal_mask_bottom_right || is_nested,
-      "bottom-right causal masking is only supported for cuDNN varlen attention");
-  TORCH_CHECK(
-      !is_causal || !causal_mask_bottom_right,
-      "top-left and bottom-right causal masking cannot both be enabled");
   TORCH_CHECK(
       query.scalar_type() == at::kHalf || query.scalar_type() == at::kBFloat16,
       "cuDNN attention only supports float16 and bfloat16, got ",
@@ -1250,7 +1243,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      softmax_scale/*float scaling_factor*/,
                                      compute_logsumexp/* bool */,
                                      is_causal/* bool */,
-                                     causal_mask_bottom_right,
                                      dropout_p/*double dropout_probability*/,
                                      cum_seq_q,
                                      cum_seq_k,
