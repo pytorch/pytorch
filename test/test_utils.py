@@ -664,14 +664,24 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-from torch.utils.collect_env import get_pretty_env_info
+from torch.utils.collect_env import get_env_info, pretty_str
 
 
 @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
     def test_smoke(self):
-        info_output = get_pretty_env_info()
+        env_info = get_env_info()
+        info_output = pretty_str(env_info)
         self.assertTrue(info_output.count("\n") >= 17)
+
+        rocm_info = pretty_str(
+            env_info._replace(
+                rocm_compiled_version="10.1.0",
+                hip_compiled_version="7.15.26306",
+            )
+        )
+        self.assertIn("ROCm SDK used to build PyTorch: 10.1.0", rocm_info)
+        self.assertIn("HIP used to build PyTorch: 7.15.26306", rocm_info)
 
 
 class TestHipify(TestCase):
