@@ -1612,6 +1612,17 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
+    def test_matmul_offset_output(self):
+        # Contiguous out= views at a nonzero storage offset; macOS < 15 dropped the write.
+        a = torch.randn(2, 16, 16, device="mps")
+        out = torch.zeros(4, 16, 16, device="mps")
+        torch.mm(a[0], a[1], out=out[1])
+        torch.addmm(a[0], a[0], a[1], out=out[2])
+        expected = torch.stack([a[0].cpu() @ a[1].cpu(), a[0].cpu() + a[0].cpu() @ a[1].cpu()])
+        self.assertEqual(out[1:3].cpu(), expected, atol=1e-5, rtol=1e-5)
+        torch.bmm(a, a, out=out.view(2, 2, 16, 16)[1])
+        self.assertEqual(out[2:].cpu(), a.cpu() @ a.cpu(), atol=1e-5, rtol=1e-5)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
         ((1, 64, 12), "inner"),
@@ -16027,7 +16038,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
-        'arange', 'linspace',
+        'arange', 'linspace', 'logspace',
         'special.xlog1py',
 
         # CPU accumulates sequantially, but GPU does in parallel
@@ -17282,6 +17293,23 @@ class TestMetalLibrary(TestCaseMPS):
         kernel = lib.nchw_to_nhwc_float_16_64_false_false
         kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
+
+    def test_conv_weight_to_dhwio_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        oc, ic, kd, kh, kw = 5, 3, 2, 2, 4
+        weight = torch.randn(oc, ic, kd, kh, kw, device="mps")
+        # contiguous, permuted, and width-sliced source strides
+        for source in (
+            weight,
+            weight.permute(2, 3, 4, 1, 0).contiguous().permute(4, 3, 0, 1, 2),
+            torch.randn(oc, ic, kd, kh, 2 * kw, device="mps")[..., ::2],
+        ):
+            destination = torch.empty(kd, kh, kw, ic, oc, dtype=source.dtype, device="mps")
+            params = [oc, ic, kh, kw, *source.stride()]
+            lib.conv_weight_to_dhwio_float(source, destination, params,
+                                           threads=(oc, ic, kd * kh), group_size=(oc, 1, 1), arg_casts="int32")
+            self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
