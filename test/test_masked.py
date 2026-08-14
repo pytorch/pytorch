@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, precisionOverride, skipOps, skip)
+    (instantiate_device_type_tests, ops, precisionOverride)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -298,10 +298,6 @@ class TestMasked(TestCase):
     @suppress_warnings
     @ops(masked_ops_with_non_strided_support)
     @precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-3})
-    @skipOps([
-        # FIXME: scatter_gather_base_kernel_func not implemented for ComplexFloat/ComplexDouble on XPU (sparse_coo inputs)
-        skip('masked.prod', dtypes=[torch.complex64, torch.complex128], device_type='xpu'),
-    ])
     def test_mask_layout(self, layout, device, dtype, op, sample_inputs):
         for sample in sample_inputs:
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
