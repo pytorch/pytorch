@@ -84,7 +84,7 @@ from torchdim import dims
 batch, channel, width, height = dims(4)
 ```
 
-The existing implementation of [Named Tensors](https://docs.pytorch.org/docs/2.8/named_tensor.html) in PyTorch, or [JAX's xmap](https://jax.readthedocs.io/en/latest/notebooks/xmap_tutorial.html) use strings to name dimensions. We call these dimensions _first class_ because they are Python objects.
+The existing implementation of [Named Tensors](https://docs.pytorch.org/docs/2.8/named_tensor.html) in PyTorch, or JAX's xmap, use strings to name dimensions. We call these dimensions *first class* because they are Python objects.
 
 In addition to the normal _positional_ dimensions in a tensor, tensors can also have a separate set of first-class dimensions.
 

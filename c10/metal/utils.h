@@ -361,6 +361,28 @@ inline common_dtype<T, U> div(const T x, const U y) {
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
 }
 
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return ::metal::fma(x, y, z);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return z + mul(x, y);
+}
+
 // Remainder operator
 template <
     typename T,
@@ -544,6 +566,9 @@ inline float2 conj(float2 a) {
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
 //
+// Case 0: Either input is inf
+//  Return inf
+//
 // Case 1: `a == b`
 //   The formula simplifies to `h = a sqrt(2)`.
 //
@@ -555,6 +580,9 @@ inline float2 conj(float2 a) {
 // Case 3: All other cases.
 //   Use `h = a sqrt(1 + r)`.
 inline float hypot(float a_, float b_) {
+  if (::metal::isinf(a_) || ::metal::isinf(b_)) {
+    return INFINITY;
+  }
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 
