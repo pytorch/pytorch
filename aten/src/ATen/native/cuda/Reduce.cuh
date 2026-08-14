@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
@@ -819,9 +819,9 @@ struct ReduceOp {
     if (is_last_block_done) {
       // complete the acquire pattern after atomic
       //
-      // On ROCm, committed stores [CMTSTRS] ensures the producer blocks writes are visbile to global memory.
+      // On ROCm, committed stores [CMTSTRS] ensure the producer blocks' writes are visible to global memory.
       // But the last block (consumer) still needs an acquire fence to invalidate its (non-coherent) L1,
-      // before reading the staging buffer. A single fence here is far cheaper than per-element committed loads.
+      // before reading the staging buffer.
       __threadfence();
       for (auto &v : value) {
         v = ident;
