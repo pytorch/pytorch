@@ -1629,38 +1629,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
 
-    def tp_setattro_impl(
-        self, tx: InstructionTranslatorBase, name: str, val: VariableTracker
-    ) -> bool:
-        """Write `name` through its tp_getset/tp_members setter.
-
-        Returns False if `name` is in neither table, leaving the caller to
-        decide what that means for its type: an instance-dict store for types
-        that have a __dict__, an AttributeError for those that don't.
-
-        A name that is declared but has no setter raises, matching CPython,
-        where a setter-less descriptor rejects the write. Treating it as
-        undeclared instead would shadow the descriptor with an instance-dict
-        entry, so the write would silently succeed and later reads would
-        disagree with whatever internal field the descriptor exposes.
-        """
-        slot = self.lookup_tp_getset_member(name)
-        if slot is None:
-            return False
-        if slot.setter is None:
-            # ref: CPython PyMember_SetOne vs. PyObject_GenericSetAttr, which
-            # word the two cases differently.
-            if isinstance(slot, Member):
-                msg = "readonly attribute"
-            else:
-                msg = (
-                    f"attribute '{name}' of '{self.python_type_name()}' "
-                    "objects is not writable"
-                )
-            raise_observed_exception(AttributeError, tx, args=[msg])
-        slot.setter(self, tx, val)
-        return True
-
     def method_flags_type(self) -> type:
         """Type whose CPython ml_flags define this VT's tp_methods arities
         (see _derive_method_flags). Defaults to python_type(); a VT whose

@@ -456,10 +456,8 @@ class FrameSummaryVariable(VariableTracker):
     def python_type(self) -> type:
         return traceback.FrameSummary
 
-    # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py).
-    # The slots are writable and `line` is a read-only property, but Dynamo
-    # models all four read-only: no setattr path reaches this VT, so declaring
-    # setters would be untested dead code.
+    # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
+    # each slot is exposed as a read-only member_descriptor.
     tp_members = {
         "lineno": Member(getset_build(lambda s: s.frame_summary.lineno)),
         "filename": Member(getset_build(lambda s: s.frame_summary.filename)),
@@ -524,17 +522,9 @@ class TracebackVariable(VariableTracker):
         val: VariableTracker,
     ) -> VariableTracker:
         name = name_var.as_python_constant()
-        # traceback objects have no __dict__, so a name that is not one of the
-        # tp_getset/tp_members entries cannot be stored anywhere.
-        if not self.tp_setattro_impl(tx, name, val):
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"'{self.python_type_name()}' object has no attribute '{name}' "
-                    "and no __dict__ for setting new attributes"
-                ],
-            )
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None and getset.setter is not None:
+            getset.setter(self, tx, val)
         return variables.ConstantVariable.create(None)
 
     def _get_tb_next(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -569,13 +559,12 @@ class TracebackVariable(VariableTracker):
 
     # ref: CPython Objects/traceback.c tb_getsetters. `tb_next` is a getset with
     # getter+setter (tb_next_get / tb_next_set, which runs a reference-cycle
-    # check); `tb_lineno` is a get-only getset. `frame_summary` is deliberately
-    # absent: it is a dynamo-internal field read directly off the VT, and listing
-    # it here would both make traced code see an attribute real tracebacks do not
-    # have and break the audit of these tables against CPython.
+    # check); `tb_lineno` is a get-only getset. `frame_summary` is dynamo-internal
+    # (not a real CPython traceback attribute).
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
         "tb_lineno": GetSet(_get_tb_lineno, None),
+        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
     }
 
     # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
@@ -687,12 +676,14 @@ class ExceptionVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "__setattr__":
             attr = args[0].as_python_constant()
-            # Declared attributes route through their tp_getset/tp_members
-            # setter, which rejects the write if the entry is read-only.
-            if not self.tp_setattro_impl(tx, attr, args[1]):
-                # BaseException has a __dict__, so an undeclared name is just
-                # an arbitrary user attribute; store it via the side effects
-                # table.
+            # Writable attributes route through their tp_getset/tp_members
+            # setter. Anything else becomes a custom instance-dict attribute.
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None and getset.setter is not None:
+                getset.setter(self, tx, args[1])
+            else:
+                # Arbitrary user attribute -> store in the instance __dict__
+                # via the side effects table.
                 se = tx.output.side_effects
                 if not se.is_attribute_mutation(self):
                     se.track_attribute_mutation_new(self)
@@ -835,18 +826,8 @@ class ExceptionVariable(VariableTracker):
         self.args = unpack_iterable(tx, val)
         return variables.ConstantVariable.create(None)
 
-    def _set_class(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
-    ) -> VariableTracker:
-        # object.__class__ is a getset whose setter raises for a non-heap type,
-        # so this is a TypeError rather than the read-only AttributeError.
-        raise_type_error(
-            tx,
-            "__class__ assignment only supported for mutable types or ModuleType subclasses",
-        )
-
     tp_getset = {
-        "__class__": GetSet(getset_build(lambda s: s.exc_type), _set_class),
+        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
         "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
         "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
         "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
@@ -903,32 +884,12 @@ class StopIterationVariable(ExceptionVariable):
         mutation_type: MutationType | None = None,
     ) -> None:
         self.value = args[0] if args else variables.ConstantVariable.create(None)
-        # Set once `value` is written directly. CPython leaves args alone on such
-        # a write, so args[0] no longer reproduces it and reconstruct has to
-        # store it back explicitly.
-        self.value_mutated = False
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def _set_value(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
-    ) -> VariableTracker:
-        self.value = val
-        self.value_mutated = True
-        return variables.ConstantVariable.create(None)
-
-    # ref: StopIteration_members in CPython Objects/exceptions.c, where `value`
-    # is writable (flags 0, not READONLY).
+    # ref: StopIteration_members in CPython Objects/exceptions.c
     tp_members = {
-        "value": Member(getset_read(lambda s: s.value), _set_value),
+        "value": Member(getset_read(lambda s: s.value)),
     }
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        super().reconstruct(codegen)
-        if self.value_mutated:
-            codegen.dup_top()
-            codegen(self.value)
-            codegen.extend_output(codegen.rot_n(2))
-            codegen.store_attr("value")
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -961,42 +922,19 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
                 codegen.store_attr(name)
 
 
-def _kwarg_attr_setter(name: str) -> Callable[..., VariableTracker]:
-    """Setter for a `_kwarg_attrs` entry. These are writable in CPython, and
-    `_KwargAttrExceptionVariable.reconstruct` already replays `_attrs`."""
-
-    def setter(
-        self: "_KwargAttrExceptionVariable",
-        tx: "InstructionTranslatorBase",
-        val: VariableTracker,
-    ) -> VariableTracker:
-        self._attrs[name] = val
-        return variables.ConstantVariable.create(None)
-
-    return setter
-
-
 class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
     tp_members = {
-        "name": Member(
-            getset_read(lambda s: s._attrs["name"]), _kwarg_attr_setter("name")
-        ),
-        "obj": Member(
-            getset_read(lambda s: s._attrs["obj"]), _kwarg_attr_setter("obj")
-        ),
+        "name": Member(getset_read(lambda s: s._attrs["name"])),
+        "obj": Member(getset_read(lambda s: s._attrs["obj"])),
     }
 
 
 class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
-    tp_members = {
-        "name": Member(
-            getset_read(lambda s: s._attrs["name"]), _kwarg_attr_setter("name")
-        )
-    }
+    tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
 
 
 class UnknownVariable(VariableTracker):
