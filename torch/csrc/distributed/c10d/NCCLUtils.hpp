@@ -62,6 +62,15 @@ static_assert(
 #define NCCL_HAS_MAX_P2P_PEERS
 #endif
 
+// `ncclConfig_t::hostCftMode` asks NCCL to create the communicator's CFT
+// (Compute Fabric Transport) logical endpoints during the first
+// `ncclCommWindowRegister`, which is what makes the host-side LE queries
+// (`ncclGetPeerDeviceLeInfo` and friends) usable without first building a
+// `ncclDevComm`. See NCCLSymmetricMemory::get_peer_cft_handle.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
+#define NCCL_HAS_HOST_CFT_MODE
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \

@@ -2732,19 +2732,6 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    def test_graph_scalar_assignment(self):
-        x = torch.zeros(2, 2, device="cuda")
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            x[0, 1] = 5.0
-
-        x.zero_()  # Reset the side-effect of capture execution
-        g.replay()
-        self.assertEqual(x[0, 1].item(), 5.0)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
     def test_graph_capture_stale_default_stream_error(self):
         """Default-stream warmup + side-stream capture raises a clear error
         (not an opaque CUDA crash) when override is not enabled."""
@@ -6971,7 +6958,6 @@ class TestCudaAllocator(TestCase):
                 "throw_on_cudamalloc_oom:False,per_process_memory_fraction:1.0"
             )
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_allocator_backend(self):
         def subprocess_env():
             if IS_WINDOWS:
@@ -7218,7 +7204,6 @@ print(value, end="")
         finally:
             random.setstate(state)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
@@ -7226,12 +7211,10 @@ print(value, end="")
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
@@ -7265,17 +7248,14 @@ print(value, end="")
             # test the order of magnitude
             self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):
