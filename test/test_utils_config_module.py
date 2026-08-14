@@ -557,6 +557,18 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertEqual(config.e_nested_alias_bool, orig)
         self.assertEqual(config.nested.e_bool, orig)
 
+    def test_alias_delattr_marks_target_dirty(self):
+        # delattr on an alias resets the target's user_override; the target
+        # module's hash/get_dict must reflect that reset rather than the stale
+        # pre-delete value. Regression for the target dirty-marking bypass.
+        with config.patch({"nested.e_bool": False}):
+            hash_before = config.get_hash()
+            saved_before = config.save_config()
+            delattr(config, "e_nested_alias_bool")
+            self.assertTrue(config.nested.e_bool)
+            self.assertNotEqual(config.get_hash(), hash_before)
+            self.assertNotEqual(config.save_config(), saved_before)
+
     def test_reference_is_default(self):
         t = config.e_dict
         self.assertTrue(config._is_default("e_dict"))
