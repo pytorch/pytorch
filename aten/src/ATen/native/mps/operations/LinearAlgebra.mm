@@ -904,6 +904,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool check_errors) {
   using namespace mps;
 
+  getCurrentMPSStream()->assertCapturable("linalg.lu_factor");
   TORCH_CHECK((A.scalar_type() == kFloat || A.scalar_type() == kComplexFloat) && LU.scalar_type() == A.scalar_type(),
               "linalg.lu_factor(): MPS supports float32 and complex64 inputs, got ",
               A.scalar_type());
@@ -1051,6 +1052,7 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
 
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   using namespace mps;
+  getCurrentMPSStream()->assertCapturable("linalg.lu_solve");
   TORCH_CHECK(LU.scalar_type() == kFloat || LU.scalar_type() == kComplexFloat,
               "linalg.lu_solve(): MPS only supports float32 and complex64, got ",
               LU.scalar_type());
@@ -1741,6 +1743,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                 bool conjugate = false) {
   using namespace mps;
 
+  getCurrentMPSStream()->assertCapturable("linalg.solve_triangular");
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
   const auto scalar_type = A.scalar_type();
   TORCH_CHECK(scalar_type == kFloat || scalar_type == kComplexFloat,
@@ -2129,6 +2132,7 @@ static void svd_kernel_mps(const Tensor& A,
   // check's mandatory device->host sync, so gating small inputs to CPU was 3-6x
   // slower, not faster.
   if (too_large) {
+    getCurrentMPSStream()->assertCapturable("linalg.svd (CPU fallback path)");
     TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
                     staging_bytes,
                     " > ",
@@ -2266,6 +2270,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   const bool too_small = (batch * n * n < 12288);
 
   if (unsupported_dtype || !fits || too_small) {
+    getCurrentMPSStream()->assertCapturable("linalg.eigh (CPU fallback path)");
     if (!fits) {
       TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
                       2 * staging_bytes,
