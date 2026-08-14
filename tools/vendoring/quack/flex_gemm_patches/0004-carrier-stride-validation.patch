@@ -1,5 +1,5 @@
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index e7e010b1415799d995c47b01e437cc85295137b4..63282b4092a863a0395946a3bfebac82c8b0a9a1 100644
+index 8c50ae0..ccb9743 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -264,0 +265 @@ class GroupedLocalReduceOutputLayout:
@@ -26,3 +26,40 @@ index e7e010b1415799d995c47b01e437cc85295137b4..63282b4092a863a0395946a3bfebac82
 @@ -686,0 +692,2 @@ class GroupedReduceBase(EpiOp):
 +        if self.output_layout.validate_carrier_fn is not None:
 +            self.output_layout.validate_carrier_fn(value)
+diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
+index 3eab38c..0b32183 100644
+--- a/tests/test_grouped_reduce.py
++++ b/tests/test_grouped_reduce.py
+@@ -290,0 +291,32 @@ def test_two_argument_finalizer_rejects_swap_ab():
++def test_output_layout_owns_carrier_stride_contract():
++    """Custom callbacks may interpret strides that dense sinks reject."""
++
++    def tensor_fn(tensor, _transposed):
++        return tensor
++
++    def carrier_shape(batch, rows, cols):
++        return (batch, rows, cols)
++
++    layout = GroupedLocalReduceOutputLayout(
++        "strided",
++        tensor_fn,
++        carrier_shape,
++        carrier_shape,
++        3,
++    )
++    op = GroupedLocalReduce("g", axis=1, group=16, output_layout=layout)
++    carrier = torch.empty(1, 4, 8).transpose(-1, -2)
++    assert carrier.shape == (1, 8, 4)
++    assert carrier.stride(-1) != 1
++    assert op.host_arg_key(carrier)[0] is cutlass.Float32
++    op.host_validate(
++        carrier,
++        m=8,
++        n=64,
++        tile_M=128,
++        tile_N=64,
++        batch=None,
++        varlen_m=False,
++    )
++
++
