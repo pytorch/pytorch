@@ -502,6 +502,16 @@ def gemm_epimod(
         # Layout callbacks predicate logical stores but do not own padded bytes.
         if initialize_local_reduce_out is not None:
             initialize_local_reduce_out.zero_()
+        blockscaled_kwargs = (
+            {}
+            if SFA is None
+            else {
+                "SFA": SFA,
+                "SFB": SFB,
+                "bs_format_a": bs_format_a,
+                "bs_format_b": bs_format_b,
+            }
+        )
         result = epimod(
             a,
             b,
@@ -512,13 +522,10 @@ def gemm_epimod(
             config=None,
             config_constraints=config_constraints,
             tuned=tuned,
-            SFA=SFA,
-            SFB=SFB,
-            bs_format_a=bs_format_a,
-            bs_format_b=bs_format_b,
             concat_layout=(
                 None if main_transform is None else main_transform.concat_layout
             ),
+            **blockscaled_kwargs,
             **operands,
         )
     return result["main" if main_transform is not None else "D"]
