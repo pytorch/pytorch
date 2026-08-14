@@ -47,9 +47,11 @@ jobs:
       fail-fast: false
       matrix:
         include: [
+          { name: "manylinux2_28-builder",          tag: "cuda13.4",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.x86 }}" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda13.4",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
           { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
