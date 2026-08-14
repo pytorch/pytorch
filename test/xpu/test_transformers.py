@@ -7,7 +7,11 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import HardwareClassification, parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+)
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
