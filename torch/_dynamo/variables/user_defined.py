@@ -127,7 +127,7 @@ from .object_protocol import (
     type_disallows_instantiation,
     type_implements_nb_slot,
 )
-from .sets import SetVariable
+from .sets import FrozensetVariable, SetVariable
 
 
 try:
@@ -5010,7 +5010,10 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
 
     def __init__(
-        self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
+        self,
+        value: object,
+        set_vt: SetVariable | FrozensetVariable | None = None,
+        **kwargs: Any,
     ) -> None:
         from .builder import SourcelessBuilder
 
