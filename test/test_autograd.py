@@ -4093,13 +4093,11 @@ class TestAutograd(TestCase):
         leaf.grad_dtype = None  # Allow any dtype
         self.assertIsNone(leaf.grad_dtype)
 
-        # get/set grad_dtype is only allowed on leaf tensors
+        # Non-leaf tensors read grad_dtype from their producing Function's
+        # output metadata, but setting grad_dtype is still limited to leaves.
         non_leaf = leaf * 2
         self.assertFalse(non_leaf.is_leaf)
-        with self.assertRaisesRegex(
-            RuntimeError, "grad_dtype can only be accessed on leaf tensors"
-        ):
-            _ = non_leaf.grad_dtype
+        self.assertEqual(non_leaf.grad_dtype, torch.float32)
         with self.assertRaisesRegex(
             RuntimeError, "grad_dtype can only be set on leaf tensors"
         ):
@@ -4228,6 +4226,7 @@ class TestAutograd(TestCase):
         class Downstream(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
+                Downstream.input_grad_dtype = x.grad_dtype
                 return x.clone()
 
             @staticmethod
@@ -4250,7 +4249,12 @@ class TestAutograd(TestCase):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
         out = DeclareOutput.apply(x, declared)
         self.assertEqual(out.dtype, torch.bfloat16)
-        Downstream.apply(out).sum().backward()
+        self.assertFalse(out.is_leaf)
+        expected_grad_dtype = out.dtype if declared == "unset" else declared
+        self.assertEqual(out.grad_dtype, expected_grad_dtype)
+        downstream_out = Downstream.apply(out)
+        self.assertEqual(Downstream.input_grad_dtype, expected_grad_dtype)
+        downstream_out.sum().backward()
         self.assertEqual(DeclareOutput.seen, expected)
 
     @skipIfTorchDynamo("grad_dtype not supported in compile")
@@ -4274,6 +4278,8 @@ class TestAutograd(TestCase):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
         t1, t2, s = MultiOutput.apply(x)
         self.assertEqual(s, "not a tensor")
+        self.assertEqual(t1.grad_dtype, torch.float64)
+        self.assertEqual(t2.grad_dtype, torch.float32)
         (t1.sum() + t2.sum()).backward()
         self.assertEqual(MultiOutput.seen[0], torch.float64)
         self.assertEqual(MultiOutput.seen[1], torch.float32)
