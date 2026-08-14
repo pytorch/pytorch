@@ -1083,6 +1083,18 @@ def first_slice_copy_with_grad(li: Iterable[Any]) -> list[Any]:
 
 
 # Reports the difference between meta of two tensors in a string
+def _strides_of_non_unit_dims(stride, shape):
+    # Drop strides of dims statically known to be size 1 (their stride is
+    # unobservable). SymInt dims not statically equal to 1 are kept, conservatively.
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if stride is None or shape is None or len(stride) != len(shape):
+        return stride
+    return tuple(
+        st for st, sz in zip(stride, shape) if not statically_known_true(sz == 1)
+    )
+
+
 def diff_tensor_meta(
     meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
 ) -> list[str]:
@@ -1094,8 +1106,14 @@ def diff_tensor_meta(
             continue
         val1 = getattr(meta1, meta_name)
         val2 = getattr(meta2, meta_name)
+        val1_non_unit_dims, val2_non_unit_dims = val1, val2
+        if meta_name == "stride":
+            # The stride of a size-1 dimension is unobservable (there is only one
+            # element along it), so operations may set it arbitrarily.
+            val1_non_unit_dims = _strides_of_non_unit_dims(val1, meta1.shape)
+            val2_non_unit_dims = _strides_of_non_unit_dims(val2, meta2.shape)
         try:
-            if val1 != val2:
+            if val1_non_unit_dims != val2_non_unit_dims:
                 pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
         except GuardOnDataDependentSymNode:
             pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
