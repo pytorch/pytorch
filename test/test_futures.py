@@ -6,7 +6,13 @@ import time
 import torch
 import unittest
 from torch.futures import Future
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase, TemporaryFileName, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    TestCase,
+    TemporaryFileName,
+    run_tests,
+)
 from typing import TypeVar
 
 T = TypeVar("T")
@@ -17,6 +23,8 @@ def add_one(fut):
 
 
 class TestFuture(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_exception(self) -> None:
         # This test is to ensure errors can propagate across futures.
         error_msg = "Intentional Value Error"
