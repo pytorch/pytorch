@@ -13,6 +13,7 @@ import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmPackedTransport,
     INDEXED_OUTPUT_INDICES_ARG_NAME,
     INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
@@ -152,14 +153,9 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
-        if (
-            self.physical_span > 1
-            and self.prepass is None
-            and not self.fragment_reduced
-        ):
+        if self.physical_span > 1 and not self.fragment_reduced:
             raise RuntimeError(
-                "FlexGEMM pair-domain reductions require a prepass or a "
-                "fragment-reduced callback"
+                "FlexGEMM pair-domain reductions require a fragment-reduced callback"
             )
         if self.feeds_main and not (
             self.axis == 1 and self.group <= LOCAL_REDUCE_FRAGMENT_WIDTH
@@ -205,7 +201,7 @@ def flex_gemm_epimod(
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
     fragmentwise: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
-    packed_interleaved_b16x2: bool,
+    packed_transport: FlexGemmPackedTransport | None,
 ):
     """Build and cache a QuACK EpiMod from generated FlexGEMM metadata."""
     epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
@@ -218,7 +214,7 @@ def flex_gemm_epimod(
         None if local_reduce is None else local_reduce.cache_key,
         fragmentwise,
         main_transform,
-        packed_interleaved_b16x2,
+        packed_transport,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
@@ -312,10 +308,6 @@ def flex_gemm_epimod(
                     callable(store_finalize)
                     and len(inspect.signature(store_finalize).parameters) == 2
                 ):
-                    if local_reduce.physical_span > 1:
-                        raise RuntimeError(
-                            "pair-domain local-reduce stores do not support binary finalizers"
-                        )
                     if output_layout is not None:
                         raise RuntimeError(
                             "local-reduce output layouts do not support binary finalizers"
@@ -368,13 +360,13 @@ def flex_gemm_epimod(
                     physical_span=local_reduce.physical_span,
                 )
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-    if packed_interleaved_b16x2:
+    if packed_transport is not None:
         epimod = epilogue_module.gemm_epilogue(
             outputs=aux_output_names,
             ops=ops,
             outs=sinks,
             extra_ops=extra_ops,
-            mode="packed_cd_b16x2",
+            mode=packed_transport.quack_mode,
             vectorize=False,
         )(epilogue_fn)
     elif fragmentwise:
@@ -431,7 +423,8 @@ def gemm_epimod(
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
     fragmentwise: bool = False,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
-    packed_preact: torch.Tensor | None = None,
+    packed_capture: torch.Tensor | None = None,
+    packed_transport: FlexGemmPackedTransport | None = None,
     tuned: bool = False,
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
@@ -453,7 +446,10 @@ def gemm_epimod(
             "chunked grouped main output requires column-major B storage"
         )
     quack_epilogue_args = tuple(quack_epilogue_arg(arg) for arg in epilogue_args)
-    packed_interleaved_b16x2 = packed_preact is not None
+    if (packed_capture is None) != (packed_transport is None):
+        raise RuntimeError(
+            "packed FlexGEMM calls require both packed_capture and packed_transport"
+        )
     epimod = flex_gemm_epimod(
         epilogue_fn,
         quack_epilogue_args,
@@ -463,11 +459,11 @@ def gemm_epimod(
         local_reduce,
         fragmentwise,
         main_transform,
-        packed_interleaved_b16x2,
+        packed_transport,
     )
     effective_C = (
-        packed_preact
-        if packed_interleaved_b16x2
+        packed_capture
+        if packed_transport is not None
         else normalize_c(C, tuple(out.shape), beta)
     )
     operands: dict[str, Any] = {}
@@ -526,13 +522,17 @@ def gemm_epimod(
     # pyrefly: ignore [missing-import]  # optional external backend
     from quack.cache import cache_dir_override
 
-    output_buffers = {
-        "main" if main_transform is not None else "D": quack_epilogue_arg(out),
-        **{
-            f"output{index}": quack_epilogue_arg(aux_out)
-            for index, aux_out in enumerate(aux_outs)
-        },
-    }
+    output_names = (
+        "main" if main_transform is not None else "D",
+        *(f"output{index}" for index in range(len(aux_outs))),
+    )
+    output_buffers = dict(
+        zip(
+            output_names,
+            (quack_epilogue_arg(out), *map(quack_epilogue_arg, aux_outs)),
+            strict=True,
+        )
+    )
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
@@ -542,6 +542,16 @@ def gemm_epimod(
         # Layout callbacks predicate logical stores but do not own padded bytes.
         if initialize_local_reduce_out is not None:
             initialize_local_reduce_out.zero_()
+        blockscaled_kwargs = (
+            {}
+            if SFA is None
+            else {
+                "SFA": SFA,
+                "SFB": SFB,
+                "bs_format_a": bs_format_a,
+                "bs_format_b": bs_format_b,
+            }
+        )
         result = epimod(
             a,
             b,
@@ -552,13 +562,10 @@ def gemm_epimod(
             config=None,
             config_constraints=config_constraints,
             tuned=tuned,
-            SFA=SFA,
-            SFB=SFB,
-            bs_format_a=bs_format_a,
-            bs_format_b=bs_format_b,
             concat_layout=(
                 None if main_transform is None else main_transform.concat_layout
             ),
+            **blockscaled_kwargs,
             **operands,
         )
     return result["main" if main_transform is not None else "D"]

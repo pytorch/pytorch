@@ -13,6 +13,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmPackedTransport,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
@@ -89,6 +90,7 @@ class FlexGemmEpilogueConfig:
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
         blockscaled_format: Optional shared QuACK A/B format name.
+        blockscaled_scale_indices: Template input indices for the two block scales.
         quack_config_constraints: Optional native QuACK config field constraints.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
@@ -105,6 +107,7 @@ class FlexGemmEpilogueConfig:
     alpha: float
     beta: float
     blockscaled_format: str | None
+    blockscaled_scale_indices: tuple[int, int] | None
     quack_config_constraints: tuple[tuple[str, Any], ...]
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
@@ -112,6 +115,7 @@ class FlexGemmEpilogueConfig:
     indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
+    packed_transport: FlexGemmPackedTransport | None
     packed_capture_index: int | None
     fragmentwise: bool
     tuned: bool
@@ -160,6 +164,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             from torch._inductor.kernel.flex_gemm.constraints import (
                 FlexGemmGroupedMainOutputTransform,
                 FlexGemmLocalReduceGeometry,
+                FlexGemmPackedTransport,
             )
             from torch._inductor.kernel.flex_gemm import (
                 output_layout as flex_gemm_output_layout,
@@ -251,8 +256,13 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if config.quack_config_constraints:
             kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
         if config.blockscaled_format is not None:
+            if config.blockscaled_scale_indices is None:
+                raise RuntimeError(
+                    "block-scaled FlexGEMM config requires scale indices"
+                )
+            scale_a_index, scale_b_index = config.blockscaled_scale_indices
             kwargs.append(
-                f", SFA={input_args[2]}, SFB={input_args[3]}, "
+                f", SFA={input_args[scale_a_index]}, SFB={input_args[scale_b_index]}, "
                 f"bs_format_a={config.blockscaled_format!r}, "
                 f"bs_format_b={config.blockscaled_format!r}"
             )
@@ -278,8 +288,15 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             )
         if config.main_transform is not None:
             kwargs.append(f", main_transform={config.main_transform!r}")
+        if (config.packed_transport is None) != (config.packed_capture_index is None):
+            raise RuntimeError(
+                "packed FlexGEMM config requires both transport and capture index"
+            )
         if config.packed_capture_index is not None:
-            kwargs.append(f", packed_preact={input_args[config.packed_capture_index]}")
+            kwargs.append(
+                f", packed_capture={input_args[config.packed_capture_index]}, "
+                f"packed_transport={config.packed_transport!r}"
+            )
         return "".join(kwargs)
 
 
