@@ -5,9 +5,30 @@
 set(CK_FMHA_GENERATE python3 ${CMAKE_CURRENT_LIST_DIR}/generate_compat.py
     ${CMAKE_SOURCE_DIR}/third_party/composable_kernel/example/ck_tile/01_fmha/generate.py)
 
+# Ask the CK codegen for the architecture families matching PYTORCH_ROCM_ARCH.
+# Without --targets the generator falls back to its own default ("gfx9,gfx950"),
+# so no instances are emitted for RDNA4 even when PYTORCH_ROCM_ARCH asks for it.
+set(_ck_fmha_targets "")
+if("gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  list(APPEND _ck_fmha_targets gfx9)
+endif()
+if("gfx950" IN_LIST PYTORCH_ROCM_ARCH)
+  list(APPEND _ck_fmha_targets gfx950)
+endif()
+if("gfx1200" IN_LIST PYTORCH_ROCM_ARCH OR "gfx1201" IN_LIST PYTORCH_ROCM_ARCH)
+  list(APPEND _ck_fmha_targets gfx12)
+endif()
+if(NOT _ck_fmha_targets)
+  # Should not happen: aten/src/ATen/CMakeLists.txt disables USE_ROCM_CK_SDPA first.
+  message(FATAL_ERROR "CK Tile FMHA: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) maps to no CK codegen target")
+endif()
+list(JOIN _ck_fmha_targets "," _ck_fmha_targets_arg)
+message(STATUS "CK Tile FMHA codegen targets: ${_ck_fmha_targets_arg}")
+set(CK_FMHA_TARGETS --targets ${_ck_fmha_targets_arg})
+
 # generate a list of kernels, but not actually emit files at config stage
 execute_process(
-  COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --optdim=32,64,128,256
+  COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --optdim=32,64,128,256
   --api fwd --receipt 4 --filter "*_lse*ntrload*nsink*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_blob_list.txt
   RESULT_VARIABLE ret
 )
@@ -17,7 +38,7 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --optdim=32,64,128,256
+  COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --optdim=32,64,128,256
   --api fwd_splitkv --receipt 4 --filter "*psdv*_lse*_nsquant*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_splitkv_blob_list.txt
   RESULT_VARIABLE ret
 )
@@ -27,7 +48,7 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --optdim=32,64,128,256
+  COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --optdim=32,64,128,256
   --api fwd_appendkv --receipt 4 --filter "*psskddv_*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/fwd_appendkv_blob_list.txt
   RESULT_VARIABLE ret
 )
@@ -37,7 +58,7 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12
+  COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS}
   --api bwd --optdim=32,64,128,256 --receipt 4 --filter "*psdv*@*psd*@*_pd1dv1*_ntrload*" --list_blobs ${CMAKE_CURRENT_LIST_DIR}/bwd_blob_list.txt
   RESULT_VARIABLE ret
 )
@@ -47,28 +68,28 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 # Generate the files for both fwd, fwd_splitkv, fwd_appendkv, and bwd
-execute_process(COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --api fwd  --optdim=32,64,128,256 --receipt 4 --filter "*_lse*ntrload*nsink*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --api fwd  --optdim=32,64,128,256 --receipt 4 --filter "*_lse*ntrload*nsink*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
 )
 
 if(ret AND NOT ret EQUAL 0)
   message( FATAL_ERROR "CK Tile FMHA FAILED to generate FWD kernels.")
 endif()
 
-execute_process(COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --api fwd_splitkv --optdim=32,64,128,256 --receipt 4 --filter "*psdv*_lse*_nsquant*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --api fwd_splitkv --optdim=32,64,128,256 --receipt 4 --filter "*psdv*_lse*_nsquant*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
 )
 
 if(ret AND NOT ret EQUAL 0)
     message( FATAL_ERROR "CK Tile FMHA FAILED to generate FWD_SPLITKV kernels.")
 endif()
 
-execute_process(COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --api fwd_appendkv --optdim=32,64,128,256 --receipt 4 --filter "*psskddv_*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --api fwd_appendkv --optdim=32,64,128,256 --receipt 4 --filter "*psskddv_*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
 )
 
 if(ret AND NOT ret EQUAL 0)
     message( FATAL_ERROR "CK Tile FMHA FAILED to generate FWD_APPENDKV kernels.")
 endif()
 
-execute_process(COMMAND ${CK_FMHA_GENERATE} --targets gfx9,gfx950,gfx12 --api bwd --optdim=32,64,128,256 --receipt 4 --filter "*psdv*@*psd*@*_pd1dv1*_ntrload*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
+execute_process(COMMAND ${CK_FMHA_GENERATE} ${CK_FMHA_TARGETS} --api bwd --optdim=32,64,128,256 --receipt 4 --filter "*psdv*@*psd*@*_pd1dv1*_ntrload*" --output_dir ${CMAKE_CURRENT_LIST_DIR}
   RESULT_VARIABLE ret
 )
 
