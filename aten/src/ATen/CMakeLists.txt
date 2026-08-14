@@ -198,19 +198,19 @@ file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/fla
 if(USE_FLASH_ATTENTION)
   # Now building CK by default
   if(USE_ROCM)
-    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
-    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
-    # empty HIP_ARCHITECTURES and CMake errors out.
+    # CK SDPA supports gfx942/gfx950 (CDNA, MFMA) and gfx1200/gfx1201 (RDNA4, WMMA).
+    # Auto-disable when none of those archs are in PYTORCH_ROCM_ARCH; otherwise the
+    # ck_sdpa target ends up with an empty HIP_ARCHITECTURES and CMake errors out.
     if(USE_ROCM_CK_SDPA)
       set(_have_ck_sdpa_arch FALSE)
-      foreach(ARCH gfx942 gfx950)
+      foreach(ARCH gfx942 gfx950 gfx1200 gfx1201)
         if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
           set(_have_ck_sdpa_arch TRUE)
           break()
         endif()
       endforeach()
       if(NOT _have_ck_sdpa_arch)
-        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no CK SDPA arch (gfx942/gfx950/gfx1200/gfx1201)")
         caffe2_update_option(USE_ROCM_CK_SDPA OFF)
       endif()
     endif()
@@ -298,10 +298,11 @@ if(USE_FLASH_ATTENTION)
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
 
-    # Only build for MI3xx series architectures as building for all targets takes too long
+    # Only build for the architectures we generate CK SDPA instances for, as
+    # building for all targets takes too long.
     # We will selectively add supported architectures when/if needed
     set(_ck_sdpa_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
+    foreach(ARCH gfx942 gfx950 gfx1200 gfx1201)
       if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
         list(APPEND _ck_sdpa_hip_arches ${ARCH})
       endif()
