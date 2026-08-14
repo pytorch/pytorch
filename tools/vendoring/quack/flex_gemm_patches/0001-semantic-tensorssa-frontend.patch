@@ -1,11 +1,11 @@
 diff --git a/pyproject.toml b/pyproject.toml
-index 14d004d0aa19bfeb645669145771070e6c84224a..0d9931bec1842dec86511fe43fad8ec4994507f5 100644
+index 14d004d..0d9931b 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -14,0 +15 @@ dependencies = [
 +    "cloudpickle",
 diff --git a/quack/autotuner.py b/quack/autotuner.py
-index 67875584990bb2552f0c89b409cfec07e332c12d..8ed8511b825b5fc509e2f181e0c10227df7b6196 100644
+index 6787558..8ed8511 100644
 --- a/quack/autotuner.py
 +++ b/quack/autotuner.py
 @@ -20,0 +21 @@ from quack.bench.bench_utils import (
@@ -16,7 +16,7 @@ index 67875584990bb2552f0c89b409cfec07e332c12d..8ed8511b825b5fc509e2f181e0c10227
 -        )
 +        self.cache_dir = get_cache_dir() or default_cache_dir()
 diff --git a/quack/cache/__init__.py b/quack/cache/__init__.py
-index 8c9f6552e223738154c5c2b87d7aba12175002bb..823ba7eaaa441955602a770abe42cfcb29b7c5d0 100644
+index 8c9f655..823ba7e 100644
 --- a/quack/cache/__init__.py
 +++ b/quack/cache/__init__.py
 @@ -33,0 +34 @@ from __future__ import annotations
@@ -51,7 +51,7 @@ index 8c9f6552e223738154c5c2b87d7aba12175002bb..823ba7eaaa441955602a770abe42cfcb
 +    "cache_dir_override",
 +    "get_cache_dir",
 diff --git a/quack/cache/jit.py b/quack/cache/jit.py
-index 71065265053498bb301bf788c07373b8c6fd52e3..6ce345f4c63b9ac0eb6b6aff361db32321a4cb80 100644
+index 7106526..6ce345f 100644
 --- a/quack/cache/jit.py
 +++ b/quack/cache/jit.py
 @@ -48,2 +48,3 @@ def get_cache_path() -> Path:
@@ -62,10 +62,10 @@ index 71065265053498bb301bf788c07373b8c6fd52e3..6ce345f4c63b9ac0eb6b6aff361db323
 +        cache_dir = Path(cache_root)
 diff --git a/quack/epi_math.py b/quack/epi_math.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..19971c7ad1e1171343e6f054f09aa9ba66b8934a
+index 0000000..53e0c8b
 --- /dev/null
 +++ b/quack/epi_math.py
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,334 @@
 +"""Tuple-polymorphic pointwise math for :mod:`quack.epilogue.frontend` functions.
 +
 +Values are Float32 scalars or two-lane tuple values such as ``F2`` and ``Pair``.
@@ -112,6 +112,18 @@ index 0000000000000000000000000000000000000000..19971c7ad1e1171343e6f054f09aa9ba
 +    if const_expr(isinstance(x, tuple)):
 +        return _pair_like(x, reciprocal(x[0], fast=fast), reciprocal(x[1], fast=fast))
 +    return cute.math.rcp(x, approx=fast)
++
++
++def divide(a, b, *, fast=False):
++    """Elementwise division with scalar broadcasting and explicit precision."""
++    if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
++        template = a if isinstance(a, tuple) else b
++        return _pair_like(
++            template,
++            divide(_lane(a, 0), _lane(b, 0), fast=fast),
++            divide(_lane(a, 1), _lane(b, 1), fast=fast),
++        )
++    return a * reciprocal(b, fast=True) if const_expr(fast) else a / b
 +
 +
 +def exp(x, *, fast=False):
@@ -389,7 +401,7 @@ index 0000000000000000000000000000000000000000..19971c7ad1e1171343e6f054f09aa9ba
 +    """Explicit pre-store cast; normal EpiMod stores convert from the destination dtype."""
 +    return to_dtype(x, dtype)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c1683479fbb562 100644
+index 1b56f44..283c131 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -163 +163 @@ from typing import NamedTuple, Optional
@@ -484,8 +496,8 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c16834
 +        return (
 +            self.mode == "element"
 +            and self.prepass is None
-+            and all(getattr(op, "supports_swap_ab", True) for op in self.ops.values())
-+            and all(getattr(op, "supports_swap_ab", False) for op in self.sinks.values())
++            and all(op.supports_swap_ab for op in self.ops.values())
++            and all(op.supports_swap_ab for op in self.sinks.values())
 +        )
 +
 @@ -422,0 +504 @@ class EpiMod:
@@ -604,12 +616,14 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c16834
 +
 @@ -1398,0 +1525 @@ class EpiMod:
 +                config_constraints=constraints,
-@@ -1442,0 +1570 @@ class EpiMod:
+@@ -1411,0 +1539 @@ class EpiMod:
++                concat_layout=concat_layout,
+@@ -1442,0 +1571 @@ class EpiMod:
 +                constraints,
-@@ -1526 +1654 @@ class EpiMod:
+@@ -1526 +1655 @@ class EpiMod:
 -                shape_key = (lead[-1], n, l, str(A.device), num_seqs)
 +                shape_key = (lead[-1], n, l, str(A.device), num_seqs, constraints)
-@@ -1531 +1659,7 @@ class EpiMod:
+@@ -1531 +1660,7 @@ class EpiMod:
 -                        self, lead[-1], n, l=l, device=A.device, num_seqs=num_seqs
 +                        self,
 +                        lead[-1],
@@ -618,9 +632,9 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c16834
 +                        device=A.device,
 +                        num_seqs=num_seqs,
 +                        config_constraints=constraints,
-@@ -1557,0 +1692 @@ class EpiMod:
+@@ -1557,0 +1693 @@ class EpiMod:
 +                config_constraints=constraints,
-@@ -1586,0 +1722,36 @@ class EpiMod:
+@@ -1586,0 +1723,36 @@ class EpiMod:
 +            elif constraints or any(
 +                hasattr(op, "supports_config")
 +                for op in (
@@ -630,11 +644,11 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c16834
 +                    *self.extra_ops,
 +                )
 +            ):
-+                from quack.gemm_runtime.autotune import _select_mod_config
++                from quack.gemm_runtime.autotune import _select_mod_config, mod_selection_args
 +
-+                selection_args = dict(operands)
-+                selection_args.update({name: out[name] for name in self.outputs})
-+                selection_args.update(
++                selection_args = mod_selection_args(
++                    operands,
++                    {name: out[name] for name in self.outputs},
 +                    A=A,
 +                    B=B_d,
 +                    b_kn=b_kn,
@@ -657,7 +671,7 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c16834
 +                    selection_args,
 +                    preferred_config=preferred_config,
 +                )
-@@ -1794,0 +1966,16 @@ def gemm_epilogue(
+@@ -1794,0 +1967,16 @@ def gemm_epilogue(
 +def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +    """Decorate a whole-fragment TensorSSA callback using the EpiMod host stack."""
 +
@@ -675,7 +689,7 @@ index 1b56f445722dab8c90c88092a2b0679d123c8cab..5a23741f5bebc0d7ba4bd85235c16834
 +
 +
 diff --git a/quack/epilogue/library.py b/quack/epilogue/library.py
-index 631ff1c553a18fc51a702d97f817d38c0ac71850..9096a86e7451ebbcf80729fc49fbd86694336b1c 100644
+index 631ff1c..9096a86 100644
 --- a/quack/epilogue/library.py
 +++ b/quack/epilogue/library.py
 @@ -10,2 +10 @@ Sections:
@@ -703,22 +717,26 @@ index 631ff1c553a18fc51a702d97f817d38c0ac71850..9096a86e7451ebbcf80729fc49fbd866
 +    corrupt the max (see VecReduce.combine note)."""
 +    return {"D": acc, "amax": epi_math.abs(acc, fast=True)}
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c5410f1d0 100644
+index b7e4ae2..4874d18 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
-@@ -599 +599,4 @@ class Scalar(EpiOp):
+@@ -320,0 +321 @@ class EpiOp:
++    supports_swap_ab = False
+@@ -520,0 +522 @@ class Scalar(EpiOp):
++    supports_swap_ab = True
+@@ -599 +601,4 @@ class Scalar(EpiOp):
 -            return utils.load_scalar_or_pointer(param, dtype=self.dtype)
 +            value = utils.load_scalar_or_pointer(param, dtype=self.dtype)
 +            if const_expr(self.dtype in (cutlass.Float16, cutlass.BFloat16)):
 +                return Float32(value)
 +            return value
-@@ -602,0 +606,5 @@ class Scalar(EpiOp):
+@@ -602,0 +608,5 @@ class Scalar(EpiOp):
 +def is_floating_dtype(dtype):
 +    """Return whether a static CuTeDSL numeric type is floating-point."""
 +    return hasattr(dtype, "__tvm_ffi_float__")
 +
 +
-@@ -611,0 +620,7 @@ class VecLoad(EpiOp):
+@@ -611,0 +622,7 @@ class VecLoad(EpiOp):
 +    def __init__(self, name, dtype=None):
 +        super().__init__(name)
 +        self.dtype = dtype
@@ -726,26 +744,30 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +    def config_key(self):
 +        return (self.dtype,)
 +
-@@ -636,0 +652,5 @@ class VecLoad(EpiOp):
+@@ -636,0 +654,5 @@ class VecLoad(EpiOp):
 +    @cute.jit
 +    def _valid_extent(self, vector, coord_idx, tile_dim, ctx):
 +        """Return the in-bounds vector extent for the current tile."""
 +        return min(cute.size(vector, mode=[0]) - coord_idx * tile_dim, tile_dim)
 +
-@@ -682 +702 @@ class VecLoad(EpiOp):
+@@ -682 +704 @@ class VecLoad(EpiOp):
 -        limit = min(cute.size(mVec, mode=[0]) - coord_idx * tile_dim, tile_dim)
 +        limit = self._valid_extent(mVec, coord_idx, tile_dim, ctx)
-@@ -696 +716 @@ class VecLoad(EpiOp):
+@@ -696 +718 @@ class VecLoad(EpiOp):
 -        # Pre-allocate register tensor reused across begin_loop calls
 +        # Pre-allocate register tensor reused across begin_loop calls.
-@@ -698 +718,2 @@ class VecLoad(EpiOp):
+@@ -698 +720,2 @@ class VecLoad(EpiOp):
 -        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
 +        register_dtype = gemm.acc_dtype if is_floating_dtype(dtype) else dtype
 +        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
-@@ -715 +736 @@ class VecLoad(EpiOp):
+@@ -715 +738 @@ class VecLoad(EpiOp):
 -            tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
 +            tDrV_cvt.store(tDrV.load().to(tDrV_cvt.element_type))
-@@ -751,15 +772,3 @@ class ColVecLoad(VecLoad):
+@@ -723,0 +747 @@ class RowVecLoad(VecLoad):
++    supports_swap_ab = True
+@@ -735,0 +760 @@ class ColVecLoad(VecLoad):
++    supports_swap_ab = True
+@@ -751,15 +776,3 @@ class ColVecLoad(VecLoad):
 -    def begin(self, gemm, param, smem_tensor, ctx):
 -        dtype = param.element_type
 -        num_copy_elems = const_expr(max(32, dtype.width)) // dtype.width
@@ -764,7 +786,7 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +    def _valid_extent(self, vector, coord_idx, tile_dim, ctx):
 +        """Use the active varlen-M extent for column-vector tail predicates."""
 +        return min(
-@@ -769,17 +778,7 @@ class ColVecLoad(VecLoad):
+@@ -769,17 +782,7 @@ class ColVecLoad(VecLoad):
 -        for m in cutlass.range(cute.size(tVsV.shape[1]), unroll_full=True):
 -            if tVcV[0, m] < tile_dim:  # Guard to avoid writing beyond the smem we've allocated
 -                pred = cute.make_rmem_tensor(1, Boolean)
@@ -789,7 +811,7 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +    if isinstance(epi_tile[1], cute.Layout):
 +        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
 +    return (epi_tile[0], epi_tile[1] // group)
-@@ -790,3 +789,11 @@ def _gated_epi_tile_fn(gemm, epi_tile):
+@@ -790,3 +793,11 @@ def _gated_epi_tile_fn(gemm, epi_tile):
 -    if isinstance(epi_tile[1], cute.Layout):
 -        return (epi_tile[0], cute.recast_layout(2, 1, epi_tile[1]))
 -    return (epi_tile[0], epi_tile[1] // 2)
@@ -804,7 +826,10 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +def _grouped_main_epi_tile_4(gemm, epi_tile):
 +    """Contract a grouped-main output tile by four adjacent N lanes."""
 +    return _contract_epi_tile_n(epi_tile, 4)
-@@ -883,6 +890,3 @@ class TileStore(EpiOp):
+@@ -824,0 +836,2 @@ class TileStore(EpiOp):
++    supports_swap_ab = True
++
+@@ -883,6 +896,3 @@ class TileStore(EpiOp):
 -        # A halved/reshaped tile (epi_tile_fn, e.g. gated postact) has an N
 -        # extent unrelated to the GEMM's n: use a fresh sym. Such tiles are
 -        # n-major by construction (asserted in to_params). Sub-byte (fp4)
@@ -814,25 +839,25 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +        # A halved/reshaped tile has an N extent unrelated to the GEMM's n,
 +        # while only sub-byte storage requires static packing divisibility.
 +        if dtype.width < 8:
-@@ -889,0 +894,2 @@ class TileStore(EpiOp):
+@@ -889,0 +900,2 @@ class TileStore(EpiOp):
 +        elif self.epi_tile_fn is not None:
 +            n = cute.sym_int()
-@@ -1041,0 +1048,6 @@ class TileStore(EpiOp):
+@@ -1041,0 +1054,6 @@ class TileStore(EpiOp):
 +    def store_tile_shape_mn(self, gemm):
 +        """Return the logical CTA tile shape written by this store."""
 +        if self.gated:
 +            return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // 2)
 +        return gemm.cta_tile_shape_mnk[:2]
 +
-@@ -1060,4 +1071,0 @@ class TileStore(EpiOp):
+@@ -1060,4 +1077,0 @@ class TileStore(EpiOp):
 -        if self.gated:
 -            tile_shape_mn = (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // 2)
 -        else:
 -            tile_shape_mn = gemm.cta_tile_shape_mnk[:2]
-@@ -1067 +1075 @@ class TileStore(EpiOp):
+@@ -1067 +1081 @@ class TileStore(EpiOp):
 -            tile_shape_mn,
 +            self.store_tile_shape_mn(gemm),
-@@ -1159,0 +1168,83 @@ class DStore(EpiOp):
+@@ -1159,0 +1174,85 @@ class DStore(EpiOp):
 +class GroupedMainStore(TileStore):
 +    """Store one value per adjacent-N group from a direct TensorSSA callback.
 +
@@ -841,6 +866,8 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +    config legality. It intentionally remains an ordinary output EpiOp rather
 +    than introducing a grouped-main GEMM mode.
 +    """
++
++    supports_swap_ab = False
 +
 +    def __init__(self, name, group, paired=False):
 +        if group not in (2, 4):
@@ -916,16 +943,18 @@ index b7e4ae2cfec3be705fe36cdf10fd3e8164f7c89d..663cb513f681091c865c894c3cd9077c
 +        return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // self.group)
 +
 +
-@@ -1187 +1278 @@ class TileLoad(EpiOp):
+@@ -1185,0 +1285 @@ class TileLoad(EpiOp):
++    supports_swap_ab = True
+@@ -1187 +1287 @@ class TileLoad(EpiOp):
 -    def __init__(self, name, epi_tile_fn=None):
 +    def __init__(self, name, epi_tile_fn=None, dtype=None):
-@@ -1189,0 +1281 @@ class TileLoad(EpiOp):
+@@ -1189,0 +1290 @@ class TileLoad(EpiOp):
 +        self.dtype = dtype
-@@ -1192 +1284 @@ class TileLoad(EpiOp):
+@@ -1192 +1293 @@ class TileLoad(EpiOp):
 -        return (_callable_config_key(self.epi_tile_fn),)
 +        return (_callable_config_key(self.epi_tile_fn), self.dtype)
 diff --git a/quack/gemm_config.py b/quack/gemm_config.py
-index 3156c2be4d7bd5b52bd5cd301aeb709b9e7829a3..bef7138329340d4dd6cfa01a40376c4c28f0a4b2 100644
+index 3156c2b..bef7138 100644
 --- a/quack/gemm_config.py
 +++ b/quack/gemm_config.py
 @@ -2,0 +3,2 @@ import itertools
@@ -976,7 +1005,7 @@ index 3156c2be4d7bd5b52bd5cd301aeb709b9e7829a3..bef7138329340d4dd6cfa01a40376c4c
 +
 +
 diff --git a/quack/gemm_runtime/autotune.py b/quack/gemm_runtime/autotune.py
-index 244058163b1f20a6acf0384a66d98d3bce409f18..dcc396df34ad21e66a1b24c9c91ef3ed192cc2ec 100644
+index 2440581..acb2197 100644
 --- a/quack/gemm_runtime/autotune.py
 +++ b/quack/gemm_runtime/autotune.py
 @@ -55,0 +56 @@ from quack.gemm_config import (
@@ -1054,40 +1083,44 @@ index 244058163b1f20a6acf0384a66d98d3bce409f18..dcc396df34ad21e66a1b24c9c91ef3ed
 +            or varlen_or_gather
 +            or has_concat
 +            or not mod.supports_swap_ab()
-@@ -214,0 +252,18 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+@@ -214,0 +252,22 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
 +    if not survivors:
++        raw_configs = tuple(conf.kwargs["config"] for conf in configs)
++        diagnostic_configs = (
++            tuple(_config_space(mod, A.device)) if config_constraints else raw_configs
++        )
++        unsupported_ops = [
++            op
++            for op in epi_ops
++            if (supports := getattr(op, "supports_config", None)) is not None
++            and not any(supports(config) for config in diagnostic_configs)
++        ]
++        if len(unsupported_ops) == 1 and hasattr(unsupported_ops[0], "config_support_error"):
++            raise ValueError(
++                "no supported GemmConfig: "
++                f"{unsupported_ops[0].config_support_error(diagnostic_configs)}"
++            )
 +        if config_constraints:
 +            raise ValueError(
 +                "no supported GemmConfig matches "
 +                f"config_constraints={dict(config_constraints)!r} for this call"
 +            )
-+        raw_configs = tuple(conf.kwargs["config"] for conf in configs)
-+        unsupported_ops = [
-+            op
-+            for op in epi_ops
-+            if (supports := getattr(op, "supports_config", None)) is not None
-+            and not any(supports(config) for config in raw_configs)
-+        ]
-+        if len(unsupported_ops) == 1 and hasattr(unsupported_ops[0], "config_support_error"):
-+            raise ValueError(
-+                f"no supported GemmConfig: {unsupported_ops[0].config_support_error(raw_configs)}"
-+            )
 +        raise ValueError("no supported GemmConfig for this epilogue and call")
-@@ -237,0 +293 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
+@@ -237,0 +297 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
 +        config_constraints=(),
-@@ -334,0 +391 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
+@@ -334,0 +395 @@ def _make_tuned_fn(mod, epi_names, transform_a=None, ta_names=()):
 +            "config_constraints",
-@@ -352 +409,4 @@ _MOD_TUNERS: dict = {}
+@@ -352 +413,4 @@ _MOD_TUNERS: dict = {}
 -def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
 +def _get_tuner(
 +    mod, epi_names, has_c, device, transform_a=None, ta_names=(), config_constraints=None
 +):
 +    constraints = canonicalize_config_constraints(config_constraints)
-@@ -359,0 +420 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
+@@ -359,0 +424 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
 +        constraints,
-@@ -366,0 +428 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
+@@ -366,0 +432 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
 +                "config_constraints",
-@@ -374,2 +436,6 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
+@@ -374,2 +440,6 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
 -            configs=[AutotuneConfig(config=c) for c in _config_space(mod, device)],
 -            prune_configs_by={"early_config_prune": partial(_prune_for_mod, mod, transform_a)},
 +            configs=[AutotuneConfig(config=c) for c in _config_space(mod, device, constraints)],
@@ -1096,7 +1129,33 @@ index 244058163b1f20a6acf0384a66d98d3bce409f18..dcc396df34ad21e66a1b24c9c91ef3ed
 +                    _prune_for_mod, mod, transform_a, config_constraints=constraints
 +                )
 +            },
-@@ -381,0 +448,14 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
+@@ -381,0 +452,40 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
++def mod_selection_args(
++    operands,
++    outputs,
++    *,
++    A,
++    B,
++    b_kn,
++    cu_seqlens_m=None,
++    A_idx=None,
++    SFA=None,
++    concat_layout=None,
++):
++    """Build the canonical argument map consumed by EpiMod config pruning."""
++    return {
++        **operands,
++        **outputs,
++        "A": A,
++        "B": B,
++        "b_kn": b_kn,
++        "cu_seqlens_m": cu_seqlens_m,
++        "A_idx": A_idx,
++        "SFA": SFA,
++        "concat_layout": concat_layout,
++    }
++
++
 +def _select_mod_config(
 +    mod, device, config_constraints, named_args, *, preferred_config=None, transform_a=None
 +):
@@ -1111,11 +1170,11 @@ index 244058163b1f20a6acf0384a66d98d3bce409f18..dcc396df34ad21e66a1b24c9c91ef3ed
 +    ].kwargs["config"]
 +
 +
-@@ -405,0 +486 @@ def tuned_mod_gemm(
+@@ -405,0 +516 @@ def tuned_mod_gemm(
 +    config_constraints=None,
-@@ -415,0 +497 @@ def tuned_mod_gemm(
+@@ -415,0 +527 @@ def tuned_mod_gemm(
 +    constraints = canonicalize_config_constraints(config_constraints)
-@@ -419 +501,21 @@ def tuned_mod_gemm(
+@@ -419 +531,21 @@ def tuned_mod_gemm(
 -    tuner = _get_tuner(mod, epi_names, C is not None, A.device, transform_a, ta_names)
 +    tuner = _get_tuner(mod, epi_names, C is not None, A.device, transform_a, ta_names, constraints)
 +    call_kwargs = dict(
@@ -1138,10 +1197,10 @@ index 244058163b1f20a6acf0384a66d98d3bce409f18..dcc396df34ad21e66a1b24c9c91ef3ed
 +            config_constraints=constraints,
 +            **call_kwargs,
 +        )
-@@ -425,0 +528 @@ def tuned_mod_gemm(
+@@ -425,0 +558 @@ def tuned_mod_gemm(
 +        config_constraints=constraints,
 diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
-index 14bb369dc62e3c4e6a454cda5acc0abae3c2db22..e9b803889fc75ae02fb661836a8949d366d6b7f7 100644
+index 14bb369..e9b8038 100644
 --- a/quack/gemm_runtime/identity.py
 +++ b/quack/gemm_runtime/identity.py
 @@ -31,0 +32 @@ import sysconfig
@@ -1166,13 +1225,13 @@ index 14bb369dc62e3c4e6a454cda5acc0abae3c2db22..e9b803889fc75ae02fb661836a8949d3
 +                    if not registered:
 +                        cloudpickle.unregister_pickle_by_value(module)
 diff --git a/quack/gemm_runtime/torch_op.py b/quack/gemm_runtime/torch_op.py
-index 3c89e3dee3616ca8226cbf723b3b19022d0ad2c8..e231532e7bd5e240d69096a47b52488163a7c544 100644
+index 3c89e3d..1da5f85 100644
 --- a/quack/gemm_runtime/torch_op.py
 +++ b/quack/gemm_runtime/torch_op.py
 @@ -42 +42,2 @@ from quack.blockscaled.operand import BlockScaledFormat
 -from quack.gemm_config import GemmConfig, cta_tile_shape_m, default_config
 +from quack.gemm_config import GemmConfig, blockscaled_default_config, cta_tile_shape_m
-+from quack.gemm_runtime.autotune import _select_mod_config
++from quack.gemm_runtime.autotune import _select_mod_config, mod_selection_args
 @@ -49,7 +49,0 @@ from quack.rounding import RoundingMode
 -# The compile-path body below runs under Dynamo, and default_config is host
 -# plumbing whose result is fixed once the input device is guarded: run it
@@ -1183,24 +1242,32 @@ index 3c89e3dee3616ca8226cbf723b3b19022d0ad2c8..e231532e7bd5e240d69096a47b524881
 -
 @@ -120,0 +115 @@ def _gemm_epi(digest: str, ins: list[torch.Tensor], outs: list[torch.Tensor], me
 +        config_constraints=m.get("config_constraints", ()),
-@@ -144,0 +140,36 @@ def _gemm_epi_fake(digest, ins, outs, meta) -> None:
-+def _sink_config_from_meta(mod, named, meta, transform_a):
+@@ -144,0 +140,44 @@ def _gemm_epi_fake(digest, ins, outs, meta) -> None:
++def _sink_config_from_meta(mod, named, outputs, meta, transform_a):
 +    """Resolve the exact sink config outside Dynamo for fake and real allocation."""
 +    if meta["config"] is not None:
 +        return GemmConfig(**meta["config"])
 +    A, B = named["A"], named["B"]
-+    b_kn = A.device.type == "cuda" and torch.cuda.get_device_capability(A.device)[0] >= 9
++    b_kn = (
++        A.device.type == "cuda"
++        and torch.cuda.get_device_capability(A.device)[0] >= 9
++        and not meta.get("concat_layout")
++    )
 +    B_d = B if b_kn or (transform_a is not None and transform_a.owned_fmt is not None) else B.mT
-+    selection_args = {
-+        **meta["scalar_ops"],
-+        **{key[4:]: value for key, value in named.items() if key.startswith("op__")},
-+        "A": A,
-+        "B": B_d,
-+        "b_kn": b_kn,
-+        "cu_seqlens_m": named.get("cu_seqlens_m"),
-+        "A_idx": named.get("A_idx"),
-+        "SFA": named.get("SFA"),
-+    }
++    selection_args = mod_selection_args(
++        {
++            **meta["scalar_ops"],
++            **{key[4:]: value for key, value in named.items() if key.startswith("op__")},
++        },
++        outputs,
++        A=A,
++        B=B_d,
++        b_kn=b_kn,
++        cu_seqlens_m=named.get("cu_seqlens_m"),
++        A_idx=named.get("A_idx"),
++        SFA=named.get("SFA"),
++        concat_layout=meta.get("concat_layout"),
++    )
 +    if named.get("SFA") is not None:
 +        n = transform_a.padded_n(B) if transform_a is not None else B.shape[-1]
 +        preferred_config = blockscaled_default_config(
@@ -1220,39 +1287,43 @@ index 3c89e3dee3616ca8226cbf723b3b19022d0ad2c8..e231532e7bd5e240d69096a47b524881
 +    )
 +
 +
-@@ -158,0 +190 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+@@ -158,0 +198 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
 +    transform_a = None
-@@ -160,2 +192,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+@@ -160,2 +200,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
 -    if t is not None and t["owned"]:
 -        n_ov = _resolve(t["digest"], t["locator"], _TA_REGISTRY, "transform").padded_n(B)
 +    if t is not None:
 +        transform_a = _resolve(t["digest"], t["locator"], _TA_REGISTRY, "transform")
 +        if t["owned"]:
 +            n_ov = transform_a.padded_n(B)
-@@ -165 +199,2 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+@@ -165 +207,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
 -        cfg, lead = m["config"], mod._lead_shape(A, cu, A_idx)
-+        cfg = _sink_config_from_meta(mod, named, m, transform_a)
++        cfg = _sink_config_from_meta(
++            mod, named, {name: out[name] for name in m["out_names"]}, m, transform_a
++        )
 +        lead = mod._lead_shape(A, cu, A_idx)
-@@ -168 +203,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+@@ -168 +213,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
 -            cfg["tile_m"], cfg["cluster_m"], cfg["device_capacity"], named.get("SFA") is not None
 +            cfg.tile_m,
 +            cfg.cluster_m,
 +            cfg.device_capacity,
 +            named.get("SFA") is not None,
-@@ -171 +209 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+@@ -171 +219 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
 -            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg["tile_n"])
 +            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
-@@ -199,0 +238 @@ def compile_call(
+@@ -199,0 +248 @@ def compile_call(
 +    config_constraints,
-@@ -225,0 +265 @@ def compile_call(
+@@ -212,0 +262 @@ def compile_call(
++    concat_layout=None,
+@@ -225,0 +276 @@ def compile_call(
 +    constraints = tuple(config_constraints)
-@@ -227,5 +266,0 @@ def compile_call(
+@@ -227,5 +277,0 @@ def compile_call(
 -    if mod.sinks and cfg is None:
 -        # Partials are graph-allocated before the op runs, so the tiling must
 -        # be fixed here — no runtime autotune under compile with sinks.
 -        cfg = default_config(A.device)
 -        tuned = False
-@@ -233,0 +269,9 @@ def compile_call(
+@@ -233,0 +280,9 @@ def compile_call(
 +    if sink_names and caller_owned and cfg is None:
 +        raise NotImplementedError(
 +            "compiled calls with caller-owned outputs and graph-allocated sinks "
@@ -1262,10 +1333,12 @@ index 3c89e3dee3616ca8226cbf723b3b19022d0ad2c8..e231532e7bd5e240d69096a47b524881
 +        # The functional custom op resolves the same deterministic config in
 +        # fake and real execution before allocating exact-shaped partials.
 +        tuned = False
-@@ -270,0 +315 @@ def compile_call(
+@@ -270,0 +326 @@ def compile_call(
 +            config_constraints=constraints,
+@@ -278,0 +335 @@ def compile_call(
++            concat_layout=concat_layout,
 diff --git a/quack/rounding.py b/quack/rounding.py
-index 7e425c4d726bdac279ec7778fd58a2806cc738ff..87ebf7d91ef7cd03df7d89cf020f32b9332801c6 100644
+index 7e425c4..87ebf7d 100644
 --- a/quack/rounding.py
 +++ b/quack/rounding.py
 @@ -35 +35 @@ from cutlass._mlir import ir
@@ -1327,3 +1400,1009 @@ index 7e425c4d726bdac279ec7778fd58a2806cc738ff..87ebf7d91ef7cd03df7d89cf020f32b9
 +    return _cvt_f32x2_ue8m0x2(a, b, "cvt.rz.ue8m0x2.f32", loc=loc, ip=ip)
 +
 +
+diff --git a/tests/test_cache.py b/tests/test_cache.py
+index 0dbab27..f34e8b3 100644
+--- a/tests/test_cache.py
++++ b/tests/test_cache.py
+@@ -66,0 +67,29 @@ def test_jit_module_sees_live_flags():
++def test_cache_dir_override_is_nested_and_exception_safe(tmp_path):
++    import quack.cache
++
++    outer = tmp_path / "outer"
++    inner = tmp_path / "inner"
++    original = quack.cache.get_cache_dir()
++    with quack.cache.cache_dir_override(str(outer)):
++        assert quack.cache.get_cache_path() == outer
++        try:
++            with quack.cache.cache_dir_override(str(inner)):
++                assert quack.cache.get_cache_path() == inner
++                raise RuntimeError("probe")
++        except RuntimeError:
++            pass
++        assert quack.cache.get_cache_path() == outer
++    assert quack.cache.get_cache_dir() == original
++
++
++def test_autotune_cache_honors_scoped_override(tmp_path):
++    """Autotune timing records share the caller-owned cache root with objects."""
++    import quack.cache
++    from quack.autotuner import FileCacheManager
++
++    cache_root = tmp_path / "caller"
++    with quack.cache.cache_dir_override(str(cache_root)):
++        manager = FileCacheManager("autotune-key")
++    assert manager.cache_dir == str(cache_root / "autotune-key")
++
++
+diff --git a/tests/test_epi_autotune.py b/tests/test_epi_autotune.py
+index 6b599ae..4d7bfbd 100644
+--- a/tests/test_epi_autotune.py
++++ b/tests/test_epi_autotune.py
+@@ -7,0 +8,2 @@ import math
++from dataclasses import replace
++from types import SimpleNamespace
+@@ -8,0 +11 @@ import math
++import cutlass.cute as cute
+@@ -11,0 +15 @@ import torch
++import quack.cache as cache_state
+@@ -12,0 +17 @@ import quack.gemm_runtime.autotune as epi_autotune
++from quack.cache.async_compile import CompilePool
+@@ -14 +19 @@ from quack.cute_dsl_utils import get_device_capacity
+-from quack.gemm_runtime.autotune import sink_arg_shapes, tuned_mod_gemm
++from quack.epilogue.frontend import gemm_epilogue, fragment_epilogue
+@@ -16 +21,3 @@ from quack.epilogue.library import rms_fused, rstd_swiglu_epi
+-from quack.gemm_config import GemmConfig
++from quack.epilogue.ops import RowVecLoad
++from quack.gemm_config import GemmConfig, canonicalize_config_constraints
++from quack.gemm_runtime.autotune import mod_selection_args, sink_arg_shapes, tuned_mod_gemm
+@@ -36 +43,2 @@ def small_space(monkeypatch, tmp_path):
+-    monkeypatch.setenv("QUACK_CACHE_DIR", str(tmp_path))  # hermetic disk cache
++    monkeypatch.setenv("QUACK_CACHE_DIR", str(tmp_path))
++    monkeypatch.setattr(cache_state, "CACHE_DIR", str(tmp_path))  # hermetic disk cache
+@@ -38 +46,13 @@ def small_space(monkeypatch, tmp_path):
+-    monkeypatch.setattr(epi_autotune, "_config_space", lambda mod, device: cfgs)
++
++    def config_space(mod, device, config_constraints=()):
++        constraints = canonicalize_config_constraints(config_constraints)
++        matching = [
++            config
++            for config in cfgs
++            if all(getattr(config, name) == value for name, value in constraints)
++        ]
++        if not matching:
++            raise ValueError(f"no GemmConfigs matching config_constraints={dict(constraints)!r}")
++        return matching
++
++    monkeypatch.setattr(epi_autotune, "_config_space", config_space)
+@@ -42,0 +63,144 @@ def small_space(monkeypatch, tmp_path):
++def test_config_constraints_are_canonical_and_typed():
++    assert canonicalize_config_constraints({"tile_n": 128, "pingpong": False}) == (
++        ("pingpong", False),
++        ("tile_n", 128),
++    )
++    assert canonicalize_config_constraints((("tile_n", 128),)) == (("tile_n", 128),)
++    with pytest.raises(ValueError, match="unknown GemmConfig constraint"):
++        canonicalize_config_constraints({"tile_q": 128})
++    with pytest.raises(TypeError, match="exact type int"):
++        canonicalize_config_constraints({"tile_n": True})
++
++
++def test_config_constraints_filter_tuner_and_sink_shapes(small_space):
++    """Constraints select only matching candidates and size sinks from that set."""
++    constraints = {"tile_n": 256}
++    cfgs = epi_autotune._config_space(rms_fused, torch.device("cuda"), constraints)
++    assert cfgs == [small_space[1]]
++    assert sink_arg_shapes(rms_fused, 512, 1536, l=2, config_constraints=constraints) == {
++        "sqsum": (2, 512, 6)
++    }
++    unconstrained_tuner = epi_autotune._get_tuner(
++        rms_fused, ("weight",), False, torch.device("cuda")
++    )
++    tuner = epi_autotune._get_tuner(
++        rms_fused, ("weight",), False, torch.device("cuda"), config_constraints=constraints
++    )
++    assert tuner is not unconstrained_tuner
++    assert [candidate.kwargs["config"] for candidate in tuner.configs] == [small_space[1]]
++    assert "config_constraints" in tuner.keys
++
++
++def test_config_constraints_preserve_structural_support_errors(small_space):
++    """Only architecture-wide EpiOp failures override constraint diagnostics."""
++    from quack.autotuner import AutotuneConfig
++
++    class ConfigGate:
++        def __init__(self, tile_n=None):
++            self.tile_n = tile_n
++
++        def supports_config(self, config):
++            return self.tile_n is not None and config.tile_n == self.tile_n
++
++        @staticmethod
++        def config_support_error(configs):
++            return f"unsupported across {len(configs)} architecture configs"
++
++    mod = SimpleNamespace(
++        ops={"gate": ConfigGate()},
++        sinks={},
++        output_ops={},
++        extra_ops=(),
++        outputs=(),
++        mode="element",
++    )
++    named_args = {
++        "A": torch.empty((128, 64), device="cuda", dtype=torch.bfloat16),
++        "B": torch.empty((64, 128), device="cuda", dtype=torch.bfloat16),
++    }
++    configs = [AutotuneConfig(config=small_space[0])]
++    constraints = (("tile_n", small_space[0].tile_n),)
++
++    with pytest.raises(ValueError, match="unsupported across 3 architecture configs"):
++        epi_autotune._prune_for_mod(
++            mod,
++            None,
++            configs,
++            named_args,
++            config_constraints=constraints,
++        )
++
++    mod.ops = {"gate": ConfigGate(small_space[1].tile_n)}
++    with pytest.raises(ValueError, match="matches config_constraints"):
++        epi_autotune._prune_for_mod(
++            mod,
++            None,
++            configs,
++            named_args,
++            config_constraints=constraints,
++        )
++
++
++def test_mod_selection_args_preserve_all_pruning_inputs():
++    A = object()
++    B = object()
++    output = object()
++    assert mod_selection_args(
++        {"scale": 2.0},
++        {"aux": output},
++        A=A,
++        B=B,
++        b_kn=False,
++        concat_layout={"axis": 1},
++    ) == {
++        "scale": 2.0,
++        "aux": output,
++        "A": A,
++        "B": B,
++        "b_kn": False,
++        "cu_seqlens_m": None,
++        "A_idx": None,
++        "SFA": None,
++        "concat_layout": {"axis": 1},
++    }
++
++
++def test_untuned_selection_prefers_default_when_supported(small_space):
++    """Untuned mods preserve the native default before falling back after pruning."""
++
++    class ConfigGate:
++        def __init__(self, tile_n):
++            self.tile_n = tile_n
++
++        def supports_config(self, config):
++            return config.tile_n == self.tile_n
++
++    A = torch.empty((128, 64), device="cuda", dtype=torch.bfloat16)
++    B = torch.empty((128, 64), device="cuda", dtype=torch.bfloat16)
++    mod = SimpleNamespace(ops={}, sinks={}, output_ops={}, extra_ops=(), outputs=(), mode="element")
++    named_args = {"A": A, "B": B, "b_kn": False}
++
++    assert (
++        epi_autotune._select_mod_config(
++            mod,
++            A.device,
++            (),
++            named_args,
++            preferred_config=small_space[1],
++        )
++        == small_space[1]
++    )
++
++    mod.ops = {"gate": ConfigGate(small_space[0].tile_n)}
++    assert (
++        epi_autotune._select_mod_config(
++            mod,
++            A.device,
++            (),
++            named_args,
++            preferred_config=small_space[1],
++        )
++        == small_space[0]
++    )
++
++
+@@ -87,0 +252,81 @@ def test_tuned_mod_gemm_matches_explicit(small_space):
++def test_epimod_config_constraints_select_and_validate(small_space, monkeypatch):
++    """The eager API accepts partial constraints but exact GemmConfig pins only."""
++
++    @gemm_epilogue()
++    def local_epi(acc):
++        return {"D": acc + 1.25}
++
++    selected = []
++    original_execute = local_epi._iface_execute
++
++    def record_execute(config, dynamic_scheduler, ctx, _launch=True):
++        selected.append(config)
++        return original_execute(config, dynamic_scheduler, ctx, _launch)
++
++    monkeypatch.setattr(local_epi, "_iface_execute", record_execute)
++    A = torch.randn((128, 64), device="cuda", dtype=torch.bfloat16)
++    B = torch.randn((64, 256), device="cuda", dtype=torch.bfloat16)
++    result = local_epi(A, B, config_constraints={"tile_n": 256}, tuned=False)
++    assert selected == [small_space[1]]
++    torch.testing.assert_close(
++        result["D"].float(), A.float() @ B.float() + 1.25, rtol=2e-2, atol=2e-2
++    )
++
++    with pytest.raises(ValueError, match="no GemmConfigs.*tile_n"):
++        local_epi(A, B, config_constraints={"tile_n": 999}, tuned=False)
++    with pytest.raises(TypeError, match="exact GemmConfig"):
++        local_epi(A, B, config={"tile_n": 256}, tuned=False)
++
++
++def test_fragment_epilogue_autotunes_direct_tensorssa_callback(small_space):
++    """The fragment frontend reuses EpiOp loads and the generic mod tuner."""
++
++    @fragment_epilogue(ops={"bias": RowVecLoad("bias")})
++    @cute.jit
++    def direct_fragment_epilogue(acc, bias):
++        return {"D": (acc + bias) * 0.5}
++
++    torch.random.manual_seed(42)
++    a = torch.randn((128, 64), device="cuda", dtype=torch.bfloat16)
++    b = torch.randn((64, 256), device="cuda", dtype=torch.bfloat16)
++    bias = torch.randn((1, 256), device="cuda", dtype=torch.float32)
++
++    result = direct_fragment_epilogue(a, b, bias=bias, tuned=True)
++
++    assert direct_fragment_epilogue.fragmentwise
++    assert len(epi_autotune._MOD_TUNERS) == 1
++    tuner = next(iter(epi_autotune._MOD_TUNERS.values()))
++    bench_time = tuner.bench_time
++    cached = direct_fragment_epilogue(a, b, bias=bias, tuned=True)
++    assert len(tuner.cache) == 1 and tuner.bench_time == bench_time
++    reference = (a.float() @ b.float() + bias) * 0.5
++    torch.testing.assert_close(result["D"].float(), reference, rtol=2e-2, atol=2e-2)
++    torch.testing.assert_close(cached["D"].float(), reference, rtol=2e-2, atol=2e-2)
++
++
++def test_local_mod_autotune_submits_parallel_compiles(small_space, monkeypatch):
++    """Factory-created EpiMods ship every cold candidate to the compile pool."""
++
++    @gemm_epilogue()
++    def local_epi(acc):
++        return {"D": acc + 2.0}
++
++    submitted = []
++    original_submit = CompilePool.submit
++
++    def track_submit(pool, sha, fn, args, kwargs, o_path):
++        accepted = original_submit(pool, sha, fn, args, kwargs, o_path)
++        if accepted:
++            submitted.append(sha)
++        return accepted
++
++    monkeypatch.setattr(CompilePool, "submit", track_submit)
++    A = torch.randn((128, 64), device="cuda", dtype=torch.bfloat16)
++    B = torch.randn((128, 64), device="cuda", dtype=torch.bfloat16)
++    D = torch.empty((128, 128), device="cuda", dtype=torch.bfloat16)
++
++    tuned_mod_gemm(local_epi, A, B, D, epi_args={})
++
++    assert len(set(submitted)) >= len(small_space)
++
++
+@@ -107,0 +353,19 @@ def test_tuned_mod_gemm_cache_hit(small_space):
++def test_swap_ab_pruning_rejects_unaligned_n(small_space):
++    """Swap candidates must fail before CuTeDSL sees a misaligned operand stride."""
++    from quack.autotuner import AutotuneConfig
++
++    @gemm_epilogue()
++    def identity(acc):
++        return {"D": acc}
++
++    swapped = replace(small_space[0], swap_ab=True)
++    configs = [AutotuneConfig(config=swapped)]
++    named = {
++        "A": torch.empty((128, 64), device="cuda", dtype=torch.bfloat16),
++        "B": torch.empty((64, 129), device="cuda", dtype=torch.bfloat16),
++        "b_kn": True,
++    }
++    with pytest.raises(ValueError, match="no supported GemmConfig"):
++        epi_autotune._prune_for_mod(identity, None, configs, named)
++
++
+@@ -145 +408,0 @@ def test_mod_digest_in_disk_key(small_space):
+-from quack.epilogue.frontend import gemm_epilogue  # noqa: E402
+diff --git a/tests/test_epi_math.py b/tests/test_epi_math.py
+new file mode 100644
+index 0000000..cda62d7
+--- /dev/null
++++ b/tests/test_epi_math.py
+@@ -0,0 +1,150 @@
++"""CUDA numerical coverage for tuple-polymorphic EpiMod pointwise math."""
++
++import pytest
++import torch
++from cutlass import Float16, Float32
++
++from quack import epi_math
++from quack.epilogue.frontend import gemm_epilogue
++
++pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
++
++
++def _transcendentals(x):
++    return epi_math.log1p(epi_math.exp(epi_math.tanh(x))) + epi_math.erf(x)
++
++
++def _roots_and_log(x):
++    positive = x * x + 1.0
++    return (
++        epi_math.reciprocal(epi_math.sqrt(positive))
++        + epi_math.rsqrt(positive)
++        + epi_math.log(positive)
++    )
++
++
++def _activations(x):
++    return epi_math.abs(x) + epi_math.relu(x) + epi_math.sigmoid(x)
++
++
++def _fast_math(x):
++    positive = x * x + 1.0
++    return (
++        epi_math.tanh(x, fast=True)
++        + epi_math.sigmoid(x, fast=True)
++        + epi_math.rsqrt(positive, fast=True)
++    )
++
++
++def _bounds_and_selects(x):
++    eq = epi_math.where(epi_math.eq(x, x), x, -x)
++    ne = epi_math.where(epi_math.ne(x, x), -x, x)
++    le = epi_math.where(epi_math.le(x, 0.0), x, -x)
++    gt = epi_math.where(epi_math.gt(x, 0.0), x, -x)
++    ge = epi_math.select(epi_math.ge(x, 0.0), x, -x)
++    bounded = epi_math.clamp_max(
++        epi_math.clamp_min(epi_math.max(epi_math.min(eq + ne + le + gt + ge, 1.5), -1.5), -1.0),
++        1.0,
++    )
++    return epi_math.clamp(bounded, min=-1.0, max=1.0) + epi_math.where(
++        epi_math.logical_not(epi_math.lt(x, 0.0)), 0.25, -0.25
++    )
++
++
++def _casts(x):
++    return epi_math.store_cast(epi_math.convert_element_type(x, Float16), Float32)
++
++
++def _torch_dtype_casts(x):
++    return epi_math.to_dtype(epi_math.to_dtype(x, torch.float16), torch.float32)
++
++
++PROGRAMS = (
++    (
++        "transcendentals",
++        _transcendentals,
++        lambda x: torch.log1p(torch.exp(torch.tanh(x))) + torch.erf(x),
++        2e-2,
++    ),
++    (
++        "roots_and_log",
++        _roots_and_log,
++        lambda x: 2.0 * torch.rsqrt(x * x + 1.0) + torch.log(x * x + 1.0),
++        2e-2,
++    ),
++    (
++        "activations",
++        _activations,
++        lambda x: x.abs() + torch.relu(x) + torch.sigmoid(x),
++        2e-2,
++    ),
++    (
++        "fast_math",
++        _fast_math,
++        lambda x: torch.tanh(x) + torch.sigmoid(x) + torch.rsqrt(x * x + 1.0),
++        6e-2,
++    ),
++    (
++        "bounds_and_selects",
++        _bounds_and_selects,
++        lambda x: (
++            torch.clamp(
++                torch.maximum(
++                    torch.minimum(
++                        x
++                        + x
++                        + torch.where(x <= 0, x, -x)
++                        + torch.where(x > 0, x, -x)
++                        + torch.where(x >= 0, x, -x),
++                        torch.tensor(1.5, device=x.device),
++                    ),
++                    torch.tensor(-1.5, device=x.device),
++                ),
++                min=-1.0,
++                max=1.0,
++            )
++            + torch.where(torch.logical_not(x < 0), 0.25, -0.25)
++        ),
++        2e-2,
++    ),
++    ("casts", _casts, lambda x: x.to(torch.float16).float(), 2e-2),
++    (
++        "torch_dtype_casts",
++        _torch_dtype_casts,
++        lambda x: x.to(torch.float16).float(),
++        2e-2,
++    ),
++)
++
++
++def _make_epilogue(program, mode):
++    @gemm_epilogue(mode=mode, vectorize=False)
++    def epilogue(acc):
++        return {"D": program(acc)}
++
++    return epilogue
++
++
++@pytest.mark.parametrize("mode", ("element", "acc_pair"))
++@pytest.mark.parametrize("_name,program,reference,rtol", PROGRAMS)
++def test_epi_math(_name, program, reference, rtol, mode):
++    """Every helper runs through scalar and paired EpiMod accumulator paths."""
++    torch.manual_seed(0)
++    m = n = k = 128
++    a = torch.randn((1, m, k), device="cuda", dtype=torch.bfloat16) / k**0.5
++    b = torch.randn((1, n, k), device="cuda", dtype=torch.bfloat16) / k**0.5
++    out = torch.empty((1, m, n), device="cuda", dtype=torch.bfloat16)
++
++    _make_epilogue(program, mode).gemm(
++        a,
++        b,
++        out,
++        epi_args={},
++        tile_M=128,
++        tile_N=128,
++        cluster_M=1,
++        cluster_N=1,
++    )
++
++    acc = torch.einsum("lmk,lnk->lmn", a.float(), b.float())
++    torch.testing.assert_close(out.float(), reference(acc), rtol=rtol, atol=2e-2)
+diff --git a/tests/test_epi_quant.py b/tests/test_epi_quant.py
+new file mode 100644
+index 0000000..435300b
+--- /dev/null
++++ b/tests/test_epi_quant.py
+@@ -0,0 +1,92 @@
++"""Numeric contracts for quantization helpers used by generated EpiMods."""
++
++import torch
++
++from quack import epi_math
++from quack.epilogue.frontend import gemm_epilogue
++
++
++@gemm_epilogue(outputs=("scale",))
++def mx_rceil_epi(acc):
++    """Encode each accumulator value with the MX RCEIL recipe."""
++    return {"scale": epi_math.mx_e8m0_scale(acc, 448.0, "rceil")}
++
++
++@gemm_epilogue(outputs=("scale",))
++def mx_floor_epi(acc):
++    """Encode each accumulator value with the MX FLOOR recipe."""
++    return {"scale": epi_math.mx_e8m0_scale(acc, 448.0, "floor")}
++
++
++@gemm_epilogue(outputs=("scale",))
++def nvfp4_scale_epi(acc):
++    """Encode each accumulator value with the NVFP4 E4M3 scale recipe."""
++    return {"scale": epi_math.nvfp4_e4m3_scale(acc, 6.0, "nearest")}
++
++
++def mx_reference(values, rounding):
++    """Return the eager E8M0 byte encoding for one MX rounding recipe."""
++    values = values.float()
++    if rounding == "floor":
++        extracted = ((values.view(torch.int32) >> 23) & 0xFF) - 127
++        encoded = (torch.clamp(extracted - 8, min=-127, max=128) + 127).to(torch.uint8)
++        return torch.where(torch.isnan(values), torch.full_like(encoded, 255), encoded)
++    descale = values / 448.0
++    bits = descale.view(torch.int32)
++    exponent = (bits >> 23) & 0xFF
++    mantissa = bits & 0x7FFFFF
++    encoded = exponent + (mantissa != 0).to(torch.int32)
++    encoded = torch.where(
++        (exponent == 0) & (mantissa <= 0x400000),
++        torch.zeros_like(encoded),
++        encoded,
++    )
++    encoded = torch.clamp(encoded, max=254).to(torch.uint8)
++    return torch.where(torch.isnan(descale), torch.full_like(encoded, 255), encoded)
++
++
++def run_scale_mod(mod, values, dtype):
++    """Run one scale EpiMod on exactly representable GEMM values."""
++    m, logical_n, n, k = 128, values.numel(), max(16, values.numel()), 8
++    A = torch.zeros((m, k), device="cuda", dtype=torch.bfloat16)
++    B = torch.zeros((k, n), device="cuda", dtype=torch.bfloat16)
++    A[:, 0] = 1
++    B[0, :logical_n] = values.to(device="cuda", dtype=torch.bfloat16)
++    out = torch.empty((m, n), device="cuda", dtype=dtype)
++    result = mod(A, B, out={"scale": out}, store_d=False, tuned=False)["scale"]
++    return result[:, :logical_n]
++
++
++def test_epi_math_mx_scale_matches_reference_bytes():
++    values = torch.tensor(
++        [
++            0.0,
++            448.0,
++            449.0,
++            500.0,
++            511.0,
++            512.0,
++            float("inf"),
++            float("nan"),
++        ],
++        dtype=torch.float32,
++    )
++    for rounding, mod in (("rceil", mx_rceil_epi), ("floor", mx_floor_epi)):
++        actual = run_scale_mod(mod, values, torch.float8_e8m0fnu)[0].view(torch.uint8)
++        expected = mx_reference(values.to(torch.bfloat16), rounding)
++        torch.testing.assert_close(actual.cpu(), expected)
++
++
++def test_epi_math_nvfp4_scale_matches_reference_bytes():
++    values = torch.tensor(
++        [0.0, 0.09375, 1.0, 6.0, 7.0, 2688.0, float("inf"), float("nan")],
++        dtype=torch.float32,
++    )
++    actual = run_scale_mod(nvfp4_scale_epi, values, torch.float8_e4m3fn)[0].view(torch.uint8)
++    expected = torch.clamp(
++        values.to(torch.bfloat16).float() / 6.0,
++        min=torch.finfo(torch.float8_e4m3fn).tiny,
++        max=torch.finfo(torch.float8_e4m3fn).max,
++    ).to(torch.float8_e4m3fn)
++    torch.testing.assert_close(actual[:-1].cpu(), expected.view(torch.uint8)[:-1])
++    assert torch.isnan(actual[-1].view(torch.float8_e4m3fn))
+diff --git a/tests/test_epilogue_iface.py b/tests/test_epilogue_iface.py
+index 2ac168d..5bbcce3 100644
+--- a/tests/test_epilogue_iface.py
++++ b/tests/test_epilogue_iface.py
+@@ -9 +9 @@ import torch
+-from quack.epilogue.ops import ColVecReduce, RowVecReduce
++from quack.epilogue.ops import ColVecReduce, EpiOp, RowVecReduce
+@@ -41,0 +42,9 @@ def _colsum(acc):
++class _UndeclaredSwapOp(EpiOp):
++    fn_port = "value"
++
++
++@gemm_epilogue(ops={"value": _UndeclaredSwapOp("value")})
++def _undeclared_swap(acc, value):
++    return {"D": acc + value}
++
++
+@@ -308 +317 @@ def test_swap_requires_contract():
+-    with pytest.raises(ValueError, match="element-mode"):
++    with pytest.raises(ValueError, match=r"element[- ]mode"):
+@@ -309,0 +319,12 @@ def test_swap_requires_contract():
++
++
++def test_swap_requires_explicit_op_support():
++    assert not _undeclared_swap.supports_swap_ab()
++
++
++def test_swap_supports_default_tile_transport():
++    from quack.epilogue.ops import GroupedMainStore, TileLoad, TileStore
++
++    assert TileLoad("tile").supports_swap_ab
++    assert TileStore("tile").supports_swap_ab
++    assert not GroupedMainStore("main", 2).supports_swap_ab
+diff --git a/tests/test_gemm_epilogue.py b/tests/test_gemm_epilogue.py
+index e490843..bc46d70 100644
+--- a/tests/test_gemm_epilogue.py
++++ b/tests/test_gemm_epilogue.py
+@@ -8,5 +7,0 @@ fn frontend must produce the same math the mixin produces.
+-import pytest
+-from quack.epilogue.ops import ColVecReduce, OnlineLSEReduce, RowVecReduce, Scalar, TileLoad
+-from quack.epilogue.frontend import gemm_epilogue, pack, unpack
+-from quack.gemm_config import cta_tile_shape_m
+-from quack.gemm_runtime.host import resolve_gemm_class
+@@ -14,0 +10,3 @@ import pickle
++from unittest import mock
++
++import pytest
+@@ -17,0 +16,6 @@ from cutlass import Float32, Int32
++
++from quack import epi_math
++from quack.epilogue.frontend import EpiMod, gemm_epilogue, pack, fragment_epilogue, unpack
++from quack.epilogue.ops import ColVecReduce, OnlineLSEReduce, RowVecReduce, Scalar, TileLoad
++from quack.gemm_config import cta_tile_shape_m
++from quack.gemm_runtime.host import _compile_gemm_epi, resolve_gemm_class
+@@ -101,0 +106,122 @@ def test_epi_mod_semantic_cache_key_and_resolver():
++def test_fragmentwise_frontend_changes_semantic_cache_identity():
++    """Elementwise and whole-fragment callbacks must never share compiled kernels."""
++
++    @cute.jit
++    def identity(acc):
++        return {"D": acc}
++
++    elementwise = EpiMod(identity)
++    fragmentwise = EpiMod(identity, fragmentwise=True)
++
++    assert elementwise.semantic_digest != fragmentwise.semantic_digest
++    assert not elementwise.fragmentwise
++    assert fragmentwise.fragmentwise
++
++
++def test_fragmentwise_and_elementwise_frontends_match_same_config():
++    """Both authoring frontends preserve identical pointwise semantics."""
++
++    @cute.jit
++    def tensor_relu(acc):
++        zero = cute.full_like(acc, 0)
++        return {"D": cute.where(acc > zero, acc, zero)}
++
++    @gemm_epilogue()
++    def scalar_relu(acc):
++        return {"D": epi_math.relu(acc)}
++
++    fragment_mod = fragment_epilogue()(tensor_relu)
++    torch.manual_seed(123)
++    A = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
++    B = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
++    constraints = {
++        "tile_m": 128,
++        "tile_n": 128,
++        "cluster_m": 1,
++        "cluster_n": 1,
++        "swap_ab": False,
++    }
++    tensor_result = fragment_mod(A, B, tuned=False, config_constraints=constraints)["D"]
++    scalar_result = scalar_relu(A, B, tuned=False, config_constraints=constraints)["D"]
++    assert torch.equal(tensor_result, scalar_result)
++
++
++def test_epi_mod_compile_preserves_config_constraints():
++    """Compiled sink allocation and execution use the constrained exact config."""
++    _cache_add_mod._call_cache.clear()
++    constraints = {
++        "tile_m": 128,
++        "tile_n": 192,
++        "cluster_m": 1,
++        "cluster_n": 1,
++        "pingpong": False,
++        "is_dynamic_persistent": True,
++        "swap_ab": False,
++        "use_tma_gather": False,
++    }
++
++    def fn(A, B):
++        result = _cache_add_mod(
++            A,
++            B,
++            tuned=False,
++            config_constraints=constraints,
++        )
++        return result["D"], result["stat"]
++
++    A = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
++    B = torch.randn(64, 384, device="cuda", dtype=torch.bfloat16)
++    D, stat = torch.compile(fn, fullgraph=True)(A, B)
++    torch.testing.assert_close(D.float(), A.float() @ B.float(), rtol=0.02, atol=0.2)
++    assert stat.shape == (128,)
++    plans = [entry[0] for entry in _cache_add_mod._call_cache.values()]
++    assert plans and {plan.tile_N for plan in plans} == {192}
++
++
++def test_epi_mod_compile_blockscaled_sink_uses_runtime_config():
++    """Fake sink allocation matches runtime block-scaled config selection."""
++    from quack.blockscaled.operand import BlockScaledOperand
++
++    m, n, k = 128, 384, 128
++    A = BlockScaledOperand.quantize(
++        torch.randn(m, k, device="cuda", dtype=torch.bfloat16),
++        "mxfp8_e4m3",
++    )
++    B = BlockScaledOperand.quantize(
++        torch.randn(k, n, device="cuda", dtype=torch.bfloat16),
++        "mxfp8_e4m3",
++        dim=-2,
++    )
++
++    def fn(a, b, sfa, sfb):
++        result = _cache_add_mod(
++            a,
++            b,
++            SFA=sfa,
++            SFB=sfb,
++            bs_format_a="mxfp8_e4m3",
++            bs_format_b="mxfp8_e4m3",
++            tuned=False,
++            config_constraints={"cluster_n": 1},
++        )
++        return result["D"], result["stat"]
++
++    D, stat = torch.compile(fn, fullgraph=True)(A.qdata, B.qdata, A.scale, B.scale)
++    assert D.shape == (m, n)
++    assert stat.shape == (m,)
++
++
++def test_epi_mod_d_only_params_include_extra_fields():
++    """D-only mods retain driver fields even when they instantiate no EpiOps."""
++    from quack.rounding import RoundingMode
++
++    @gemm_epilogue()
++    def d_only(acc):
++        return {"D": acc}
++
++    gemm_cls = d_only._mint((), 10, False, False, (), RoundingMode.RN, (), False)
++    fields = gemm_cls.EpilogueParams.__dataclass_fields__
++    assert "split_k_semaphore" in fields
++    assert "split_k_workspace" in fields
++
++
+@@ -103 +228,0 @@ def test_epi_mod_local_payload_identity_and_consumption():
+-    cloudpickle = pytest.importorskip("cloudpickle")  # noqa: F841
+@@ -132,0 +258,78 @@ def test_epi_mod_local_payload_identity_and_consumption():
++def test_epi_mod_local_payload_pickles_generated_callback_by_value(monkeypatch):
++    """Worker payloads do not import ephemeral generated callback modules."""
++    import sys
++    import types
++
++    import cloudpickle
++
++    from quack.gemm_runtime.identity import LOCAL_EPI_MODS, install_epi_mod_payload
++    from quack.rounding import RoundingMode
++
++    module_name = "torch._inductor.runtime.compile_tasks.generated_epilogue_test"
++    module = types.ModuleType(module_name)
++    exec("def generated_epi(acc): return {'D': acc}", module.__dict__)
++    monkeypatch.setitem(sys.modules, module_name, module)
++    registry_before = cloudpickle.list_registry_pickle_by_value()
++
++    mod = gemm_epilogue()(module.generated_epi)
++    mint_key = ((), 10, False, False, (), RoundingMode.RN, (), False)
++    ref = mod._class_ref(mint_key)
++    payload = ref.__quack_pool_payload__()
++    assert cloudpickle.list_registry_pickle_by_value() == registry_before
++    assert LOCAL_EPI_MODS.resolve(mod.semantic_digest) is mod
++
++    monkeypatch.delitem(sys.modules, module_name)
++    install_epi_mod_payload(payload.identity, payload.data)
++    resolve_gemm_class(ref)
++    assert LOCAL_EPI_MODS.resolve(mod.semantic_digest) is None
++
++
++def test_epi_mod_local_payload_drops_process_local_caches():
++    """Worker payloads exclude eager launch recipes and compiled objects."""
++    import threading
++
++    from quack.gemm_runtime.identity import LOCAL_EPI_MODS, install_epi_mod_payload
++    from quack.rounding import RoundingMode
++
++    def build():
++        @gemm_epilogue()
++        def local_epi(acc):
++            return {"D": acc}
++
++        return local_epi
++
++    mod = build()
++    mod._call_cache["unpicklable"] = threading.Lock()
++    ref = mod._class_ref(((), 10, False, False, (), RoundingMode.RN, (), False))
++    payload = ref.__quack_pool_payload__()
++    assert LOCAL_EPI_MODS.resolve(mod.semantic_digest) is mod
++
++    install_epi_mod_payload(payload.identity, payload.data)
++    installed = LOCAL_EPI_MODS.resolve(mod.semantic_digest)
++    assert installed is not None
++    assert installed._call_cache == {}
++
++
++def test_epi_mod_local_payload_submits_to_compile_pool(tmp_path):
++    """Factory-created EpiMods remain shippable to parallel compile workers."""
++    from quack.cache.async_compile import CompilePool
++    from quack.rounding import RoundingMode
++
++    def build():
++        @gemm_epilogue()
++        def local_epi(acc):
++            return {"D": acc}
++
++        return local_epi
++
++    mod = build()
++    ref = mod._class_ref(((), 10, False, False, (), RoundingMode.RN, (), False))
++    pool = CompilePool.__new__(CompilePool)
++    pool._futures = {}
++    pool.submit_raw = mock.Mock()
++
++    assert pool.submit("a" * 64, _compile_gemm_epi, (ref,), {}, tmp_path / "kernel.o")
++    pool.submit_raw.assert_called_once()
++    assert pool.submit_raw.call_args.args[-1]
++
++
+diff --git a/tests/test_grouped_main.py b/tests/test_grouped_main.py
+new file mode 100644
+index 0000000..3b9f04d
+--- /dev/null
++++ b/tests/test_grouped_main.py
+@@ -0,0 +1,165 @@
++"""Grouped-main output coverage for the direct TensorSSA epilogue frontend."""
++
++from types import SimpleNamespace
++
++import cutlass
++import cutlass.cute as cute
++import pytest
++import torch
++
++from quack import epi_math
++from quack.epilogue.frontend import gemm_epilogue, fragment_epilogue
++from quack.epilogue.ops import GroupedMainStore
++
++
++@cute.jit
++def grouped_main_sum2(acc):
++    """Contract adjacent accumulator pairs into one logical output value."""
++    group = 2
++    fragment_group = cutlass.const_expr(min(group, cute.size(acc.shape, mode=[0])))
++    repeats = cutlass.const_expr(cute.size(acc.shape, mode=[0]) // fragment_group)
++    grouped = acc.reshape(((1, fragment_group, repeats), 1, 1))
++    return {"main": grouped[((0, 0, None), None, None)] + grouped[((0, 1, None), None, None)]}
++
++
++@cute.jit
++def grouped_main_sum4(acc):
++    """Contract adjacent groups of four into one logical output value."""
++    group = 4
++    fragment_group = cutlass.const_expr(min(group, cute.size(acc.shape, mode=[0])))
++    repeats = cutlass.const_expr(cute.size(acc.shape, mode=[0]) // fragment_group)
++    grouped = acc.reshape(((1, fragment_group, repeats), 1, 1))
++    return {
++        "main": grouped[((0, 0, None), None, None)]
++        + grouped[((0, 1, None), None, None)]
++        + grouped[((0, 2, None), None, None)]
++        + grouped[((0, 3, None), None, None)]
++    }
++
++
++def test_grouped_main_store_shape_identity_and_config_legality():
++    group2 = GroupedMainStore("main", 2)
++    group4 = GroupedMainStore("main", 4)
++    assert group2.output_n(256) == 128
++    assert group2.cache_key() != group4.cache_key()
++    with pytest.raises(ValueError, match="divisible by 4"):
++        group4.output_n(258)
++
++    safe = SimpleNamespace(
++        device_capacity=10,
++        tile_m=128,
++        tile_n=128,
++        cluster_m=1,
++        cluster_n=1,
++        swap_ab=False,
++    )
++    assert group2.supports_config(safe)
++    assert group4.supports_config(safe)
++    assert group4.supports_problem(safe, 128, 256)
++
++    n64 = SimpleNamespace(**{**vars(safe), "tile_n": 64})
++    assert group2.supports_config(n64)
++    assert not group4.supports_config(n64)
++    assert not group2.supports_config(SimpleNamespace(**{**vars(safe), "swap_ab": True}))
++    assert not group4.supports_config(SimpleNamespace(**{**vars(safe), "device_capacity": 11}))
++    assert not group2.supports_config(SimpleNamespace(**{**vars(safe), "tile_m": 64, "tile_n": 64}))
++    assert not group2.supports_problem(safe, 128, 64)
++
++
++@pytest.mark.parametrize(
++    ("group", "fn"),
++    ((2, grouped_main_sum2), (4, grouped_main_sum4)),
++)
++def test_fragment_epilogue_grouped_main_matches_reference(group, fn):
++    torch.manual_seed(group)
++    m, n, k = 128, 256, 128
++    A = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
++    B = torch.randn((k, n), device="cuda", dtype=torch.bfloat16)
++    mod = fragment_epilogue(outputs=(GroupedMainStore("main", group),))(fn)
++
++    result = mod(
++        A,
++        B,
++        store_d=False,
++        tuned=False,
++        config_constraints={"swap_ab": False, "cluster_n": 1},
++    )["main"]
++    reference = (A.float() @ B.float()).reshape(m, n // group, group).sum(dim=-1)
++
++    assert result.shape == reference.shape
++    torch.testing.assert_close(result.float(), reference, atol=0.08, rtol=0.02)
++
++
++@pytest.mark.parametrize(
++    ("m", "tile_m", "cluster_m", "persistent"),
++    (
++        (1, 128, 1, True),
++        (17, 128, 1, False),
++        (256, 256, 2, False),
++    ),
++)
++def test_grouped_main_n64_vendor_configs(m, tile_m, cluster_m, persistent):
++    """Modern grouped stores retain the vendor-winning sparse N64 frontier."""
++    torch.manual_seed(m)
++    n, k = 256, 128
++    A = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
++    B = torch.randn((k, n), device="cuda", dtype=torch.bfloat16)
++    mod = fragment_epilogue(outputs=(GroupedMainStore("main", 2),))(grouped_main_sum2)
++
++    result = mod(
++        A,
++        B,
++        store_d=False,
++        tuned=False,
++        config_constraints={
++            "tile_m": tile_m,
++            "tile_n": 64,
++            "cluster_m": cluster_m,
++            "cluster_n": 1,
++            "is_dynamic_persistent": persistent,
++            "swap_ab": False,
++        },
++    )["main"]
++    reference = (A.float() @ B.float()).reshape(m, n // 2, 2).sum(dim=-1)
++    torch.testing.assert_close(result.float(), reference, atol=0.08, rtol=0.02)
++
++
++def test_paired_grouped_main_stores_packed_uint8():
++    """Scalar pair mode can store one packed byte for each adjacent-N pair."""
++
++    @gemm_epilogue(
++        outputs=(GroupedMainStore("main", 2, paired=True),),
++        mode="acc_pair",
++        vectorize=False,
++    )
++    def pack_main(acc):
++        return {"main": epi_math.nvfp4_pack(acc)}
++
++    m, n, k = 128, 256, 128
++    A = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
++    B = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
++    result = pack_main(
++        A,
++        B,
++        store_d=False,
++        out_dtype=torch.uint8,
++        tuned=False,
++        config_constraints={"swap_ab": False, "cluster_n": 1},
++    )["main"]
++    values = B.float().view(m, -1, 2)
++    magnitude = values.abs()
++    codes = torch.where(magnitude > 0.25, 1, 0)
++    codes = torch.where(magnitude >= 0.75, 2, codes)
++    codes = torch.where(magnitude > 1.25, 3, codes)
++    codes = torch.where(magnitude >= 1.75, 4, codes)
++    codes = torch.where(magnitude > 2.5, 5, codes)
++    codes = torch.where(magnitude >= 3.5, 6, codes)
++    codes = torch.where(magnitude > 5.0, 7, codes)
++    codes = codes.to(torch.uint8) + (values < 0).to(torch.uint8) * 8
++    reference = codes[..., 0] | (codes[..., 1] << 4)
++    mismatch = result != reference
++    assert not mismatch.any(), (
++        mismatch.sum().item(),
++        result[mismatch][:16],
++        reference[mismatch][:16],
++    )

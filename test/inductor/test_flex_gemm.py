@@ -187,6 +187,10 @@ class TestFlexGemmOutputLayout(TestCase):
         self.assertFalse(
             TRANSPOSED.supports_config_fn(SimpleNamespace(swap_ab=True), 0, 8)
         )
+        singleton = torch.empty(4).as_strided((4, 1), (1, 4))
+        TRANSPOSED.validate_carrier_fn(singleton)
+        with self.assertRaisesRegex(ValueError, "must be contiguous"):
+            TRANSPOSED.validate_carrier_fn(torch.empty_strided((4, 3), (4, 1)))
 
     def test_layout_passes_first_class_callbacks_to_quack(self):
         from torch._inductor.kernel.flex_gemm import output_layout
@@ -218,6 +222,10 @@ class TestFlexGemmOutputLayout(TestCase):
             output_layout.BLOCKED_128X4.codegen_reference(),
             "flex_gemm_output_layout.BLOCKED_128X4",
         )
+        with self.assertRaisesRegex(ValueError, "must be bound"):
+            dataclasses.replace(
+                output_layout.BLOCKED_128X4, symbol="MISSING"
+            ).codegen_reference()
 
     def test_blocked_layout_owns_carrier_validation(self):
         from torch._inductor.kernel.flex_gemm.output_layout import BLOCKED_128X4
@@ -229,6 +237,18 @@ class TestFlexGemmOutputLayout(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    def test_epimod_division_respects_fast_math(self):
+        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpiModOpOverrides
+
+        self.assertEqual(
+            FlexGemmEpiModOpOverrides(False).truediv("a", "b"),
+            "epi_math.divide(a, b, fast=False)",
+        )
+        self.assertEqual(
+            FlexGemmEpiModOpOverrides(True).truediv("a", "b"),
+            "epi_math.divide(a, b, fast=True)",
+        )
+
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     def test_epimod_cache_identity_includes_all_capture_dtypes(self):
@@ -923,6 +943,15 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
 
 class FlexGemmTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if SM100OrLater:
+            from torch._inductor.kernel.flex_gemm import lowering
+
+            if not lowering.has_flex_gemm_quack():
+                raise unittest.SkipTest("requires patched external QuACK")
+
     @contextlib.contextmanager
     def limitEpiModAutotune(self, device):
         """Limit tests after production legality pruning has selected candidates."""
@@ -1083,13 +1112,12 @@ class FlexGemmTestCase(TestCase):
 
     def assertNvfp4ScaleCode(self, code, max_value=6.0):
         """Check direct E4M3 scale rounding in generated code."""
-        scalar_reciprocal = f"epi_math.reciprocal({max_value!r}"
-        if scalar_reciprocal in code:
-            self.assertIn("torch.float8_e4m3fn", code)
-        else:
-            self.assertIn("/ cute.full_like(", code)
-            self.assertIn(f", {max_value!r})", code)
-            self.assertIn("cutlass.Float8E4M3FN", code)
+        precise_division = (
+            f"epi_math.divide(value, {max_value!r}, fast=False)",
+            f"/ cute.full_like(local_reduce0, {max_value!r})",
+        )
+        self.assertTrue(any(expression in code for expression in precise_division))
+        self.assertTrue("torch.float8_e4m3fn" in code or "cutlass.Float8E4M3FN" in code)
 
     def assertMatchesEpilogue(
         self, actual, expected, high_precision_expected, reduction_size
@@ -1143,6 +1171,7 @@ class FlexGemmTestCase(TestCase):
         file_check.check("feeds_main=True").check("combine=").run(code)
 
 
+@instantiate_parametrized_tests
 class TestFlexGemmAnalysis(TestCase):
     def test_nvgemm_backend_overrides_global_backend(self):
         import inspect
@@ -1286,9 +1315,11 @@ class TestFlexGemmAnalysis(TestCase):
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(match)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(object(), aux, 0)
+            FlexGemmLocalReduceStore(object(), 0)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, aux, -1)
+            FlexGemmLocalReduceStore(aux, 0, object())
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmLocalReduceStore(aux, -1)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(object(), (), analysis)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
@@ -1297,7 +1328,7 @@ class TestFlexGemmAnalysis(TestCase):
             node,
             (aux,),
             FlexGemmOutputLocalReducePlan(
-                match, store=FlexGemmLocalReduceStore(aux, aux, 0)
+                match, store=FlexGemmLocalReduceStore(aux, 0)
             ),
         )
         FlexGemmOutputPlan(
@@ -1305,6 +1336,39 @@ class TestFlexGemmAnalysis(TestCase):
             (aux,),
             FlexGemmOutputLocalReducePlan(match, feeds_main=True),
         )
+
+    @parametrize(
+        "case",
+        (
+            ("t", lambda x: x.t(), (4, 8), 2),
+            ("transpose", lambda x: x.transpose(0, 1), (1, 8), 1),
+            ("permute", lambda x: x.permute(1, 0), (8, 1), 1),
+            ("identity", lambda x: x.permute(0, 1), (4, 4), None),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_local_reduce_output_storage_classifies_transpose(self, case):
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            FlexGemmLocalReduceOutputStorage,
+            match_flex_gemm_local_reduce_output_storage,
+        )
+        from torch._inductor.kernel.flex_gemm.output_layout import TRANSPOSED
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, transpose, shape, expected_nodes = case
+        graph_module = make_fx(lambda x: transpose(x).contiguous())(torch.randn(shape))
+        output = next(
+            node for node in graph_module.graph.nodes if node.op == "output"
+        ).args[0]
+        storage = match_flex_gemm_local_reduce_output_storage(output)
+        if expected_nodes is None:
+            self.assertIsNone(storage)
+            return
+        self.assertIsInstance(storage, FlexGemmLocalReduceOutputStorage)
+        self.assertIs(storage.layout, TRANSPOSED)
+        self.assertEqual(len(storage.nodes), expected_nodes)
+        self.assertIs(storage.nodes[-1], output)
+        self.assertEqual(storage.source.op, "placeholder")
 
     def test_ordered_outputs_restore_local_reduce_position(self):
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
@@ -1361,6 +1425,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         actual = flex_gemm(op, args_fn(a, b), epilogue_fn)
 
         torch.testing.assert_close(actual, epilogue_fn(ref_fn(a, b)))
+
+    def test_default_backend_compiled_matches_reference(self):
+        def fn(a, b):
+            return flex_gemm(torch.mm, (a, b), lambda acc: acc.relu())
+
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        torch.testing.assert_close(actual, (a @ b).relu())
 
     def test_default_backend_eager_tuple_aux_matches_reference(self):
         a = torch.randn(8, 16)
@@ -1461,6 +1534,30 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(addmm_fn, backend="inductor", fullgraph=True)(bias, a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_compiled_uses_current_stream(self):
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            a.fill_(0.25)
+            b.fill_(0.5)
+            actual = compiled(a, b)
+        torch.cuda.current_stream().wait_stream(stream)
+        self.assertEqual(actual, (a @ b).relu())
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -7138,6 +7235,7 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
             rtol=5e-3,
         )
         self.assertTrue(dw.is_contiguous())
+        self.assertEqual(dw.stride(), expected[2].stride())
         self.assertEqual(dw.shape, (n, m // group))
         FileCheck().check("tuned=True").check(
             "output_layout=flex_gemm_output_layout.TRANSPOSED"
@@ -7147,15 +7245,14 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("axis_m_t", "t", 0, 128, 192),
-            ("axis_n_transpose", "transpose", 1, 192, 128),
+            ("axis_m_singleton_t", "t", 0, 128, 192, 128),
+            ("axis_n_two_groups", "transpose", 1, 128, 256, 128),
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_tuple_aux_single_group_contiguous_transpose(self, device, case):
-        _, form, axis, m, n = case
+    def test_mm_tuple_aux_contiguous_transpose(self, device, case):
+        _, form, axis, m, n, group = case
         k = 64
-        group = m if axis == 0 else n
         tile = torch.randn(m, n, device=device, dtype=torch.float32) * 0.02
         config = {
             "tile_m": 256,
@@ -7174,7 +7271,11 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
                 if axis == 0
                 else value.view(m, -1, group).sum(-1)
             )
-            transposed = reduced.t() if form == "t" else reduced.transpose(0, 1)
+            match form:
+                case "t":
+                    transposed = reduced.t()
+                case "transpose":
+                    transposed = reduced.transpose(0, 1)
             return acc.relu(), transposed.contiguous()
 
         def fn(a, b):
@@ -7196,6 +7297,7 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
         )
         self.assertEqual(aux, expected[1].float(), atol=5e-3, rtol=5e-3)
         self.assertTrue(aux.is_contiguous())
+        self.assertEqual(aux.stride(), expected[1].stride())
         expected_shape = (n, m // group) if axis == 0 else (n // group, m)
         self.assertEqual(aux.shape, expected_shape)
         FileCheck().check("output_layout=flex_gemm_output_layout.TRANSPOSED").check_not(
