@@ -1869,6 +1869,7 @@ class _NestedReductionBase:
             self.check_numeric(g, (x, z))
         self.assertTrue(saw_staged_reduction)
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_looped_standalone_sub_parent_large_group(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
