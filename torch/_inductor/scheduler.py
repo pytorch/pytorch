@@ -605,10 +605,6 @@ class NestedReduction:
         R = enum.auto()
         X = enum.auto()
 
-    INTERLEAVED_SUB_PARENT_FACTOR = 2
-    # The nested append path currently supports only factor-2 interleaving.
-    NESTED_SUB_PARENT_FACTOR = INTERLEAVED_SUB_PARENT_FACTOR
-
     class SubParentSourceLayout(enum.Enum):
         # The parent grouped axis is split as child, lane, so parent_r =
         # factor * child_r + lane. This covers NVFP4 even/odd packing.
@@ -624,7 +620,8 @@ class NestedReduction:
         grouped_rnumel: sympy.Expr
         local_reduction_domain: tuple[sympy.Expr, ...]
         parent_full_domain: tuple[sympy.Expr, ...]
-        sub_parent_domain: tuple[sympy.Expr, ...] | None = None
+        grouped_axis: NestedReduction.GroupedAxis
+        group_size: int
 
         @classmethod
         def create(
@@ -638,24 +635,14 @@ class NestedReduction:
             parent_rnumel: sympy.Expr,
         ) -> NestedReduction.PointwiseDomainContext:
             iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
-            sub_parent_domain = None
-            if (
-                grouped_axis is NestedReduction.GroupedAxis.R
-                and group_size % NestedReduction.NESTED_SUB_PARENT_FACTOR == 0
-            ):
-                # Preserve the grouped-axis boundary used by derived codegen;
-                # a flat parent domain could admit reshapes that cross groups.
-                sub_parent_domain = (
-                    *iter_ranges,
-                    group_size // NestedReduction.NESTED_SUB_PARENT_FACTOR,
-                )
             return cls(
                 grouped_reduction=grouped_reduction,
                 grouped_numel=grouped_numel,
                 grouped_rnumel=grouped_rnumel,
                 local_reduction_domain=(*iter_ranges, *reduce_ranges),
                 parent_full_domain=(parent_numel, parent_rnumel),
-                sub_parent_domain=sub_parent_domain,
+                grouped_axis=grouped_axis,
+                group_size=group_size,
             )
 
     @classmethod
@@ -885,6 +872,12 @@ class NestedReduction:
             return None
         if not candidates:
             return None
+        return cls._group_sub_parent_epilogue_nodes(candidates)
+
+    @staticmethod
+    def _group_sub_parent_epilogue_nodes(
+        candidates: Sequence[tuple[SchedulerNode, int, int]],
+    ) -> tuple[tuple[tuple[int, tuple[SchedulerNode, ...]], ...], int] | None:
         factors = OrderedSet(factor for _node, factor, _lanes in candidates)
         if len(factors) != 1:
             return None
@@ -929,6 +922,38 @@ class NestedReduction:
         if (factor, output_lanes) != (4, 3):
             return None
         return factor, output_lanes
+
+    @classmethod
+    def _nested_sub_parent_rate(
+        cls,
+        node: SchedulerNode,
+        domain_context: PointwiseDomainContext,
+    ) -> tuple[int, int] | None:
+        if domain_context.grouped_axis is not cls.GroupedAxis.R:
+            return None
+        _, (node_numel, _node_rnumel) = node.group
+        full_numel = V.graph.sizevars.simplify(
+            domain_context.grouped_numel * domain_context.grouped_rnumel
+        )
+        rate = cls._sub_parent_epilogue_rate(node_numel, full_numel)
+        if rate is None:
+            return None
+        factor, output_lanes = rate
+        if (
+            factor > cls.MAX_INTERLEAVED_SUB_PARENT_FACTOR
+            or domain_context.group_size % factor != 0
+        ):
+            return None
+        iter_ranges, _ = domain_context.grouped_reduction.get_ranges()
+        expected_groups = (
+            *iter_ranges,
+            domain_context.group_size // factor * output_lanes,
+        )
+        if not cls._pointwise_node_matches_domain(
+            node, sympy_product(expected_groups), expected_groups
+        ):
+            return None
+        return rate
 
     @staticmethod
     def _pointwise_node_matches_domain(
@@ -1357,12 +1382,7 @@ class NestedReduction:
             )
             sub_parent_compatible = (
                 is_consumer
-                and domain_context.sub_parent_domain is not None
-                and cls._pointwise_node_matches_domain(
-                    sn,
-                    sympy_product(domain_context.sub_parent_domain),
-                    domain_context.sub_parent_domain,
-                )
+                and cls._nested_sub_parent_rate(sn, domain_context) is not None
             )
             reads_reduction_source = bool(
                 reduction_source_names & sn.used_buffer_names()
@@ -1419,10 +1439,7 @@ class NestedReduction:
             )
             expected_groups = domain_context.parent_full_domain
         elif domain is cls.PointwiseDomain.SUB_PARENT:
-            if domain_context.sub_parent_domain is None:
-                return False
-            expected_groups = domain_context.sub_parent_domain
-            expected_numel = sympy_product(expected_groups)
+            return cls._nested_sub_parent_rate(sn, domain_context) is not None
         else:
             raise AssertionError(f"unexpected pointwise domain: {domain}")
         return cls._pointwise_node_matches_domain(sn, expected_numel, expected_groups)
@@ -1443,6 +1460,22 @@ class NestedReduction:
         if not sub_parent_nodes:
             return None
         if any(node.has_aliasing_or_mutation() for node in sub_parent_nodes):
+            return None
+
+        candidates: list[tuple[SchedulerNode, int, int]] = []
+        for node in sub_parent_nodes:
+            rate = cls._nested_sub_parent_rate(node, domain_context)
+            if rate is None:
+                return None
+            candidates.append((node, *rate))
+        grouped_candidates = cls._group_sub_parent_epilogue_nodes(candidates)
+        if grouped_candidates is None:
+            return None
+        output_groups, sub_parent_factor = grouped_candidates
+        internal_dependency_names = cls._sub_parent_internal_dependencies(
+            sub_parent_nodes
+        )
+        if internal_dependency_names is None:
             return None
 
         grouped_reduction = domain_context.grouped_reduction
@@ -1491,7 +1524,7 @@ class NestedReduction:
             parent_numel,
             parent_rnumel,
             parent_source_names,
-            cls.NESTED_SUB_PARENT_FACTOR,
+            sub_parent_factor,
             allow_contiguous=False,
             known_extent_subs=(
                 {parent_rnumel: normalized_parent_rnumel}
@@ -1503,9 +1536,10 @@ class NestedReduction:
             return None
 
         return SubParentEpilogueStage(
-            factor=cls.NESTED_SUB_PARENT_FACTOR,
+            factor=sub_parent_factor,
             source_layouts=source_layouts,
-            output_groups=((1, sub_parent_nodes),),
+            output_groups=output_groups,
+            internal_dependency_names=tuple(internal_dependency_names),
             broadcast_source_names=tuple(broadcast_source_names),
         )
 
