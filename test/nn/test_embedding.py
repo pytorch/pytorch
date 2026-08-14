@@ -1,6 +1,8 @@
 # Owner(s): ["module: nn"]
 import itertools
 import random
+import subprocess
+import sys
 import unittest
 from itertools import product
 
@@ -31,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     set_default_dtype,
     skipIfTorchDynamo,
+    slowTest,
     TEST_CUDA,
     TEST_XPU,
 )
@@ -1197,43 +1200,92 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     # https://github.com/pytorch/pytorch/issues/192445
     @onlyOn(["cuda"])
+    @slowTest
     @dtypes(torch.int32, torch.int64)
-    def test_embedding_bag_per_sample_weights_mutated_indices(self, device, dtype):
-        stderr = self.runWithPytorchAPIUsageStderr(f"""\
-#!/usr/bin/env python3
-
+    @parametrize_test("target", ("indices", "offset2bag"))
+    @parametrize_test("bound", ("negative", "upper"))
+    def test_embedding_bag_per_sample_weights_rejects_invalid_saved_indices(
+        self, device, dtype, target, bound
+    ):
+        script = f"""
 import torch
-import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase
 
-class TestEmbeddingBagMutatedIndices(TestCase):
-    def test_mutated_indices(self):
-        weight = torch.ones((5, 2), device="{device}")
-        indices = torch.zeros(1024, dtype={dtype}, device="{device}")
-        indices_alias = torch.from_dlpack(indices)
-        offsets = torch.tensor([0], dtype={dtype}, device="{device}")
-        per_sample_weights = torch.ones(1024, device="{device}", requires_grad=True)
+weight = torch.ones((5, 2), device={device!r})
+indices = torch.zeros(1024, dtype={dtype}, device={device!r})
+indices_alias = torch.from_dlpack(indices)
+offsets = torch.tensor([0], dtype={dtype}, device={device!r})
+per_sample_weights = torch.ones(1024, device={device!r}, requires_grad=True)
 
-        output = F.embedding_bag(
+output, offset2bag, _, _ = torch._embedding_bag(
+    weight,
+    indices,
+    offsets,
+    False,
+    0,
+    False,
+    per_sample_weights,
+)
+if {target!r} == "indices":
+    invalid_value = -1 if {bound!r} == "negative" else weight.size(0)
+    indices_alias.fill_(invalid_value)
+else:
+    invalid_value = -1 if {bound!r} == "negative" else output.size(0)
+    torch.from_dlpack(offset2bag).fill_(invalid_value)
+
+output.sum().backward()
+torch.cuda.synchronize()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        stderr = proc.stderr
+        expected_assert = (
+            "embedding_idx >= 0 && embedding_idx < num_embeddings"
+            if target == "indices"
+            else "bag_idx >= 0 && bag_idx < num_bags"
+        )
+        has_cuda_assert = (
+            "device-side assert triggered" in stderr
+            and "EmbeddingBag.cu" in stderr
+            and expected_assert in stderr
+        )
+        has_hip_assert = (
+            "hipErrorLaunchFailure" in stderr
+            or "unspecified launch failure" in stderr
+            or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
+    # https://github.com/pytorch/pytorch/issues/192445
+    @onlyOn(["cuda"])
+    @largeTensorTest("5GB", device="cuda")
+    def test_embedding_bag_per_sample_weights_large_index(self, device):
+        large_index = 2**31
+        weight = torch.empty((large_index + 1, 1), device=device, dtype=torch.float16)
+        weight[large_index] = 3.0
+        indices = torch.tensor([large_index], device=device, dtype=torch.int64)
+        offsets = torch.tensor([0], device=device, dtype=torch.int64)
+        per_sample_weights = torch.ones(
+            1, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        torch.nn.functional.embedding_bag(
             indices,
             weight,
             offsets,
             mode="sum",
             per_sample_weights=per_sample_weights,
-        )
-        indices_alias.fill_(weight.size(0))
-        output.sum().backward()
-        torch.cuda.synchronize()
+        ).sum().backward()
 
-if __name__ == "__main__":
-    run_tests()
-""")
-        has_cuda_assert = "device-side assert triggered" in stderr
-        has_hip_assert = "launch failure" in stderr
-        has_hip_assert = has_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
-        self.assertTrue(
-            has_cuda_assert or has_hip_assert,
-            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        self.assertEqual(
+            per_sample_weights.grad,
+            torch.tensor([3.0], device=device, dtype=torch.float16),
         )
 
     def test_embedding_bag_dimension_errors(self, device):
