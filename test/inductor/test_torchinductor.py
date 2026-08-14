@@ -180,44 +180,6 @@ _P = ParamSpec("_P")
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
-_OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
-    {
-        "airy_ai",
-        "bessel_i0",
-        "bessel_i1",
-        "bessel_j0",
-        "bessel_j1",
-        "bessel_y0",
-        "bessel_y1",
-        "chebyshev_polynomial_t",
-        "chebyshev_polynomial_u",
-        "chebyshev_polynomial_v",
-        "chebyshev_polynomial_w",
-        "erfcx",
-        "gammainc",
-        "gammaincc",
-        "hermite_polynomial_h",
-        "hermite_polynomial_he",
-        "i1",
-        "i1e",
-        "laguerre_polynomial_l",
-        "legendre_polynomial_p",
-        "modified_bessel_i0",
-        "modified_bessel_i1",
-        "modified_bessel_k0",
-        "modified_bessel_k1",
-        "ndtri",
-        "scaled_modified_bessel_k0",
-        "scaled_modified_bessel_k1",
-        "shifted_chebyshev_polynomial_t",
-        "shifted_chebyshev_polynomial_u",
-        "shifted_chebyshev_polynomial_v",
-        "shifted_chebyshev_polynomial_w",
-        "spherical_bessel_j0",
-        "zeta",
-    }
-)
-
 if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
@@ -17060,11 +17022,42 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_pointwise(self, name, op):
         dtype = torch.float32
         check_lowp = True
-        if self.device == GPU_TYPE and (
-            name in _OPS_WITHOUT_GPU_LOWP
-            or (GPU_TYPE == "mtia" and name == "log_ndtr")
-        ):
-            # Low-precision implementations are unavailable for these operators.
+        if self.device == GPU_TYPE and name in {
+            "airy_ai",
+            "bessel_i0",
+            "bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "erfcx",
+            "gammainc",
+            "gammaincc",
+            "i1",
+            "i1e",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "ndtri",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "spherical_bessel_j0",
+            "zeta",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_w",
+            "legendre_polynomial_p",
+            "shifted_chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_u",
+            "shifted_chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_w",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+            "laguerre_polynomial_l",
+        }:
+            # <func>_cuda not implemented for Half
             check_lowp = False
 
         if (
