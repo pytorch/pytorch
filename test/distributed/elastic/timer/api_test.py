@@ -10,6 +10,7 @@ import unittest.mock as mock
 
 from torch.distributed.elastic.timer import TimerServer
 from torch.distributed.elastic.timer.api import RequestQueue, TimerRequest
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class MockRequestQueue(RequestQueue):
@@ -57,6 +58,8 @@ class MockTimerServer(TimerServer):
 
 
 class TimerApiTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @mock.patch.object(MockTimerServer, "register_timers")
     @mock.patch.object(MockTimerServer, "clear_timers")
     def test_run_watchdog(self, mock_clear_timers, mock_register_timers):
