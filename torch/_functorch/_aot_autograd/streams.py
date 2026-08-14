@@ -578,6 +578,16 @@ def _wrap_sync_node(
     return control_deps_node, replacements
 
 
+def _update_event_passthroughs(
+    event_to_passthrough: dict[int, list[Node]],
+    replacements: dict[Node, Node],
+) -> None:
+    for event, passthroughs in event_to_passthrough.items():
+        event_to_passthrough[event] = [
+            replacements.get(dep, dep) for dep in passthroughs
+        ]
+
+
 def _collect_sync_forward_deps(
     graph: torch.fx.Graph,
 ) -> tuple[dict[Node, OrderedSet[Node]], dict[Node, OrderedSet[Node]]]:
@@ -762,6 +772,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         ctrl_node_sync, replacements = _wrap_sync_node(
                             gm, node, all_stream_deps, visited
                         )
+                        _update_event_passthroughs(event_to_passthrough, replacements)
                         passthrough_sync = list(replacements.values())
                     else:
                         ctrl_node_sync = None
@@ -815,6 +826,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         ctrl_node_ws, replacements = _wrap_sync_node(
                             gm, node, deps_before_sync, visited
                         )
+                        _update_event_passthroughs(event_to_passthrough, replacements)
                         passthrough_ws = list(replacements.values())
                     else:
                         ctrl_node_ws = None
@@ -938,10 +950,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         else None,
                     )
                     # Keep recorded event data on its latest SSA version.
-                    for event, passthroughs in event_to_passthrough.items():
-                        event_to_passthrough[event] = [
-                            replacements.get(dep, dep) for dep in passthroughs
-                        ]
+                    _update_event_passthroughs(event_to_passthrough, replacements)
                     passthrough = list(replacements.values())
                 else:
                     ctrl_node = None
