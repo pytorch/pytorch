@@ -75,6 +75,16 @@ def _is_supported_arch(device_index: int) -> bool:
     return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
 
 
+def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
+    int32_max = (1 << 31) - 1
+    buffer_bytes_max = (1 << 32) - 1
+    return (
+        0 < rows_m <= int32_max
+        and 0 < n <= int32_max
+        and rows_m * n * itemsize <= buffer_bytes_max
+    )
+
+
 @functools.cache
 def _min_rows_for_full_wave(device_idx: int) -> int:
     return torch.cuda.get_device_properties(device_idx).multi_processor_count
@@ -100,6 +110,8 @@ def _eligible(
         return False
     N = self.shape[-1] if self.ndim >= 1 else 0
     M = self.numel() // N if N else 0
+    if not _fits_int32_buffer_span(M, N, self.element_size()):
+        return False
     if M < _min_rows_for_full_wave(device_index):
         return False
     return _kernel_for(k, N) is not None
@@ -186,7 +198,12 @@ def _run_out(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     _, RadixSelectTopKOut, _, RegisterTopKOut = _get_topk_kernels()
 
-    if not values.is_contiguous() or not indices.is_contiguous():
+    if (
+        not values.is_contiguous()
+        or not indices.is_contiguous()
+        or torch._C._overlaps(self, values)
+        or torch._C._overlaps(self, indices)
+    ):
         v, i = _run(self, k)
         values.copy_(v)
         indices.copy_(i)

@@ -17,10 +17,11 @@ from flydsl.expr import (
     rocdl as fly_rocdl,
 )
 from flydsl.expr.typing import T
-from flydsl.runtime.device import get_rocm_arch, is_rdna_arch
+from flydsl.runtime.device import is_rdna_arch
 
 import torch
 from torch._native.flydsl.cache import CacheInfo
+from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
 from ._common import any_cow
@@ -87,11 +88,11 @@ def _make_topk_storage(k: int, sort_len: int, block_threads: int):
     return SharedStorage
 
 
-def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
+def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: str):
     num_stages = (k - 1).bit_length()
     sort_len = 1 << num_stages
     block_threads = max(sort_len, _N_HIST_BINS)
-    warp_size = 32 if is_rdna_arch(get_rocm_arch()) else 64
+    warp_size = 32 if is_rdna_arch(arch) else 64
     num_warps = block_threads // warp_size
     tile = block_threads * _VEC
     vec_iters = n // tile
@@ -507,8 +508,8 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
     return launch_radix_select_topk
 
 
-def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
-    threads_per_row = 32 if is_rdna_arch(get_rocm_arch()) else 64
+def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2):
+    threads_per_row = 32 if is_rdna_arch(arch) else 64
     block_threads = threads_per_row * rows_per_cta
     vec = n // threads_per_row
     num_stages_vec = int(math.log2(vec)) if vec > 1 else 0
@@ -542,11 +543,9 @@ def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
             inv_idx64 = fx.Int64(~idx) & fx.Int64(0xFFFFFFFF)
             return (ord64 << fx.Int64(32)) | inv_idx64
 
-        def decode_key(key):
-            ord32 = fx.Int32(key >> fx.Int64(32))
+        def decode_index(key):
             inv_idx = fx.Int32(key & fx.Int64(0xFFFFFFFF))
-            val_bits = ord32 ^ ((ord32 >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
-            return val_bits.bitcast(Float32), ~inv_idx
+            return ~inv_idx
 
         def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
@@ -618,8 +617,8 @@ def _build_register_topk_module(n: int, k: int, rows_per_cta: int = 2):
 
         if lane == 0 and in_bounds:
             for i in range_constexpr(k):
-                val, idx = decode_key(topk[i])
-                row_values[i] = val
+                idx = decode_index(topk[i])
+                row_values[i] = row_input[idx]
                 row_indices[i] = fx.Int64(idx)
 
     @flyc.jit
@@ -654,18 +653,26 @@ def _make_compile_arg(tensor: torch.Tensor, *, read_only: bool = False) -> Any:
     return flyc.from_torch_tensor(tensor_arg).mark_shape_dynamic(0)
 
 
-@instrumented_flydsl_cache("aten::topk")
+@instrumented_flydsl_cache(
+    "aten::topk",
+    key_fn=lambda n, k, rows_per_cta, arch, backend, device_index, *a, **kw: (
+        f"register N={n} K={k} rows_per_cta={rows_per_cta} {arch} "
+        f"backend={backend} device={device_index}"
+    ),
+)
 def _compile_register_topk(
     n: int,
     k: int,
     rows_per_cta: int,
     arch: str,
     backend: str,
+    device_index: int,
     *,
     compile_args,
 ) -> flyc.CompiledFunction:
+    del backend, device_index
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_register_topk_module(n, k, rows_per_cta=rows_per_cta)
+    launch = _build_register_topk_module(n, k, arch, rows_per_cta=rows_per_cta)
     return flyc.compile(
         launch,
         _make_compile_arg(input_2d, read_only=True),
@@ -686,6 +693,9 @@ def RegisterTopKOut(
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
+    device_index = input_2d.device.index
+    resolved = _resolve_rocm_arch(device_index)
+    arch = resolved.split(":", 1)[0]  # pyrefly: ignore[missing-attribute]
 
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
@@ -693,8 +703,9 @@ def RegisterTopKOut(
             n,
             k,
             rows_per_cta,
-            str(get_rocm_arch()),
+            arch,
             flyc.compile_backend_name(),
+            device_index,
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
         compiled(_read_only(input_2d), values_2d, indices_2d, rows_m, stream)
@@ -710,18 +721,26 @@ def RegisterTopK(
     return values_2d, indices_2d
 
 
-@instrumented_flydsl_cache("aten::topk")
+@instrumented_flydsl_cache(
+    "aten::topk",
+    key_fn=lambda n, k, deterministic, arch, backend, device_index, *a, **kw: (
+        f"radix N={n} K={k} deterministic={deterministic} {arch} "
+        f"backend={backend} device={device_index}"
+    ),
+)
 def _compile_radix_select_topk(
     n: int,
     k: int,
     deterministic: bool,
     arch: str,
     backend: str,
+    device_index: int,
     *,
     compile_args,
 ) -> flyc.CompiledFunction:
+    del backend, device_index
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_radix_select_topk_module(n, k, deterministic)
+    launch = _build_radix_select_topk_module(n, k, deterministic, arch)
     return flyc.compile(
         launch,
         _make_compile_arg(input_2d, read_only=True),
@@ -742,6 +761,9 @@ def RadixSelectTopKOut(
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
+    device_index = input_2d.device.index
+    resolved = _resolve_rocm_arch(device_index)
+    arch = resolved.split(":", 1)[0]  # pyrefly: ignore[missing-attribute]
 
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
@@ -749,8 +771,9 @@ def RadixSelectTopKOut(
             n,
             k,
             deterministic,
-            str(get_rocm_arch()),
+            arch,
             flyc.compile_backend_name(),
+            device_index,
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
         )
         compiled(_read_only(input_2d), values_2d, indices_2d, rows_m, stream)

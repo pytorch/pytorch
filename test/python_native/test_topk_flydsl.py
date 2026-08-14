@@ -61,6 +61,24 @@ def _test_m(device_index: int | None = None) -> int:
     return max(256, _min_rows_for_full_wave(device_index))
 
 
+class TestFlyDSLTopKGates(TestCase):
+    @parametrize(
+        "rows_m,n,itemsize,expected",
+        (
+            ((1 << 20) - 1, 1024, 4, True),
+            (1 << 20, 1024, 4, False),
+            (1 << 31, 1, 1, False),
+            (1, 1 << 31, 1, False),
+        ),
+    )
+    def test_int32_buffer_span(
+        self, rows_m: int, n: int, itemsize: int, expected: bool
+    ):
+        from torch._native.ops.topk.flydsl_impl import _fits_int32_buffer_span
+
+        self.assertEqual(_fits_int32_buffer_span(rows_m, n, itemsize), expected)
+
+
 @unittest.skipIf(_UNSUPPORTED_REASON is not None, str(_UNSUPPORTED_REASON))
 class TestFlyDSLTopK(TestCase):
     def setUp(self):
@@ -117,23 +135,22 @@ class TestFlyDSLTopK(TestCase):
 
     @parametrize("k", (8, 512))
     def test_correctness_with_nan(self, k: int):
-        import struct
-
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
         torch.manual_seed(10)
         m = _test_m()
         x = make_tensor((m, _test_n(k)), device="cuda", dtype=torch.float32)
-        neg_nan = struct.unpack("<f", struct.pack("<I", 0xFFC00000))[0]
-        x[:, 0] = float("nan")
-        x[:, 1] = neg_nan
+        x_bits = x.view(torch.int32)
+        x_bits[:, 0] = 0x7FC12345
+        x_bits[:, 1] = 0xFFC54321 - (1 << 32)
         x[:, 2] = float("inf")
         x[:, 3] = float("-inf")
         with pn.flydsl.disabled():
             ref_v, _ = torch.topk(x, k, dim=-1)
         got_v, got_i = torch.topk(x, k, dim=-1)
         self.assertEqual(topk_cache_info().misses, 1)
-        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+        gathered = torch.gather(x, -1, got_i)
+        self.assertEqual(gathered.view(torch.int32), got_v.view(torch.int32))
         self.assertEqual(got_v.isnan().sum(dim=-1), ref_v.isnan().sum(dim=-1))
         ref_finite = ref_v.masked_select(~ref_v.isnan()).reshape(m, -1)
         got_finite = got_v.masked_select(~got_v.isnan()).reshape(m, -1)
@@ -167,6 +184,28 @@ class TestFlyDSLTopK(TestCase):
         self.assertIs(got_i, out_i)
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
+
+    def test_out_values_overlapping_input(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        k = 8
+        m = 16 * _test_m()
+        n = _test_n(k)
+        x = self._make_input(shape=(m, n))
+        original = x.clone()
+        with pn.flydsl.disabled():
+            ref_v, _ = torch.topk(original, k, dim=-1)
+
+        values = x.flatten()[m * (n - k) :].view(m, k)
+        indices = torch.empty((m, k), device="cuda", dtype=torch.int64)
+        self.assertTrue(torch._C._overlaps(x, values))
+
+        got_v, got_i = torch.topk(x, k, dim=-1, out=(values, indices))
+        self.assertEqual(topk_cache_info().misses, 1)
+        self.assertIs(got_v, values)
+        self.assertIs(got_i, indices)
+        self.assertEqual(got_v, ref_v)
+        self.assertEqual(torch.gather(original, -1, got_i), got_v)
 
     @parametrize("k", (8, 704))
     def test_cow_input_dispatches_and_remains_cow(self, k: int):
@@ -319,26 +358,41 @@ class TestFlyDSLTopK(TestCase):
         torch.cuda.device_count() < 2,
         "requires at least 2 visible CUDA devices",
     )
-    def test_non_current_device(self):
+    @parametrize("k", (8, 704))
+    def test_each_device_gets_its_own_specialization(self, k: int):
+        from torch._native.ops.topk.flydsl_impl import _is_supported_arch
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        if not all(_is_supported_arch(index) for index in (0, 1)):
+            self.skipTest("requires two gfx950 devices")
+
         old_device = torch.cuda.current_device()
         try:
             torch.cuda.set_device(0)
-            k = 8
-            x = make_tensor(
-                (_test_m(1), _test_n(k)), device="cuda:1", dtype=torch.float32
-            )
-            with pn.flydsl.disabled():
-                ref_v, _ = torch.topk(x, k, dim=-1)
-            got_v, got_i = torch.topk(x, k, dim=-1)
+            for index in (0, 1):
+                device = torch.device("cuda", index)
+                x = make_tensor(
+                    (_test_m(index), _test_n(k)),
+                    device=device,
+                    dtype=torch.float32,
+                )
+                with pn.flydsl.disabled():
+                    ref_v, _ = torch.topk(x, k, dim=-1)
+                got_v, got_i = torch.topk(x, k, dim=-1)
 
-            self.assertEqual(torch.cuda.current_device(), 0)
-            self.assertEqual(got_v.device, torch.device("cuda:1"))
-            self.assertEqual(got_v, ref_v)
-            self.assertEqual(torch.gather(x, -1, got_i), got_v)
+                self.assertEqual(torch.cuda.current_device(), 0)
+                self.assertEqual(got_v.device, device)
+                self.assertEqual(got_v, ref_v)
+                self.assertEqual(torch.gather(x, -1, got_i), got_v)
+
+            info = topk_cache_info()
+            self.assertEqual(info.misses, 2)
+            self.assertEqual(info.currsize, 2)
         finally:
             torch.cuda.set_device(old_device)
 
 
+instantiate_parametrized_tests(TestFlyDSLTopKGates)
 instantiate_parametrized_tests(TestFlyDSLTopK)
 
 
