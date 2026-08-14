@@ -662,7 +662,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    _example: Any
+    _example: object
     # When True, this indicates that this GraphArg is a Python quantity (e.g.,
     # a float or int) which we pass to the FX graph as a Tensor.  This
     # controls how we codegen calls into the Dynamo graph: we will call
@@ -707,7 +707,11 @@ class GraphArg:
                 raise AssertionError("TensorWeakRef expired unexpectedly")
             return r
         else:
-            return self._example
+            # The declared return type is known-incomplete: torch.ScriptObject
+            # and list-of-tensor graphargs also reach here, and output_graph.py
+            # reads them back (1827, 3424, 3441). Do not tighten `_example` to
+            # this union without fixing those paths first.
+            return cast("torch.SymInt | BackwardState | None", self._example)
 
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):

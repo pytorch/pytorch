@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
-    skipIfRocm, skipIfRocmVersionAtLeast, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
+    skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
@@ -2106,6 +2106,8 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_put_fn(x, 0, 5.),
+                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
@@ -6526,18 +6528,30 @@ class TestTorchDeviceType(TestCase):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/193288")
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32)
+    @dtypes(
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.uint16,
+        torch.int32,
+        torch.uint32,
+        torch.int64,
+        torch.uint64,
+    )
     def test_clamp_integral_out_of_range_bounds(self, device, dtype):
         info = torch.iinfo(dtype)
         x = torch.tensor([info.min, 0, info.max], device=device, dtype=dtype)
+        min_bound = info.min if dtype is torch.int64 else info.min - 1
+        max_bound = info.max if dtype is torch.uint64 else info.max + 1
 
-        self.assertEqual(torch.clamp(x, min=info.min - 1), x)
-        self.assertEqual(torch.clamp_min(x, info.min - 1), x)
-        self.assertEqual(torch.clamp(x, max=info.max + 1), x)
-        self.assertEqual(torch.clamp_max(x, info.max + 1), x)
-        self.assertEqual(
-            torch.nn.functional.hardtanh(x, info.min - 1, info.max + 1), x
-        )
+        self.assertEqual(torch.clamp(x, min=min_bound), x)
+        self.assertEqual(torch.clamp_min(x, min_bound), x)
+        self.assertEqual(torch.clamp(x, max=max_bound), x)
+        self.assertEqual(torch.clamp_max(x, max_bound), x)
+        if dtype not in (torch.int64, torch.uint64):
+            self.assertEqual(
+                torch.nn.functional.hardtanh(x, min_bound, max_bound), x
+            )
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
@@ -8771,7 +8785,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         torch.__config__.show()
 
     @unittest.skipIf(IS_FBCODE, "CXX_FLAGS is only for OSS build.")
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()
 

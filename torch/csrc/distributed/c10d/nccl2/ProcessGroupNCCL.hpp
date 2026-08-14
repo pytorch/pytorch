@@ -122,10 +122,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   using Options = ::c10d::ProcessGroupNCCL::Options;
 
-  // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
-  // the first collective (or via eagerConnectSingleDevice / bound_device_id),
-  // matching c10d's device-binding model -- unlike torchcomms which took an
-  // eager init(device).
+  // c10d-style constructor. Communicator initialization happens when c10d
+  // binds the backend to a device via setBoundDeviceId().
   ProcessGroupNCCL(
       c10::intrusive_ptr<::c10d::Store> store,
       int rank,
@@ -230,6 +228,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsCoalescing() const override {
     return true;
   }
+  bool supportsTimeEstimation() const override {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+    return true;
+#else
+    return false;
+#endif
+  }
   bool supportsSplitting() const override {
     return true;
   }
@@ -242,6 +247,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
 
   // Create a child backend over `ranks` (a subset of this group's ranks) via
   // ncclCommSplit. Collective over the parent communicator: every parent rank
@@ -259,8 +266,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
           nullptr) override;
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
+  at::Tensor allocateTensor(long size, at::TensorOptions options) override;
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
   void setTimeout(std::chrono::milliseconds timeout) override;
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -328,8 +338,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // if it is not one already. Collective: all ranks must call it together.
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
+  bool supportsAbortHooks() const override {
+    return true;
+  }
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
+
+  bool supportsCompletionHooks() const override {
+    return true;
+  }
+  void registerCompletionHook(int64_t hook_id, ::c10d::CompletionHook hook)
+      override;
+  void unregisterCompletionHook(int64_t hook_id) override;
 
   // ---- accessors used by friend classes (work) ----
   NcclApi* getNcclApi() const {
@@ -455,8 +475,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     std::shared_ptr<NcclApi> nccl_api_;
   };
 
-  // Lazy, one-time bootstrap of the NCCL communicator on `device`. Subsequent
-  // calls validate the same device. Replaces torchcomms' eager init(device).
+  // One-time bootstrap of the NCCL communicator on `device`. Subsequent calls
+  // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
   void finalize();
@@ -579,6 +599,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void checkTensorDevice(const at::Tensor& tensor) const;
   void checkTensorsDevice(const std::vector<at::Tensor>& tensors) const;
   void runAbortHooks();
+  // Whether anyone is listening, so a work that completes with no hook
+  // registered does not pay for a duration measurement nobody reads.
+  bool hasCompletionHooks();
+  void runCompletionHooks(
+      const ::c10d::Work* work,
+      std::optional<float> duration_ms);
 
   void attachMemoryHook();
   void detachMemoryHook();
@@ -613,6 +639,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
+  std::unique_ptr<at::cuda::MemPool> memPool_;
 
   std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
   std::mutex event_pool_mutex_;
@@ -668,8 +695,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void registerAddressLocked(void* addr, size_t len);
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
-  // base, folded in here).
+  // base, folded in here). Guarded because the watchdog thread fires them while
+  // the owner of a hook may be un/registering on another thread -- a
+  // FlightRecorderHook unregisters from its destructor, i.e. whenever Python
+  // drops the handle.
   std::unordered_map<int64_t, ::c10d::AbortHook> abortHooks_;
+  std::mutex abort_hooks_mutex_;
+
+  // Completion hooks (c10d::Backend API). Same guarding rationale as the abort
+  // hooks: the watchdog fires them from checkStatus() while their owner may be
+  // un/registering on another thread.
+  std::unordered_map<int64_t, ::c10d::CompletionHook> completionHooks_;
+  std::mutex completion_hooks_mutex_;
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
