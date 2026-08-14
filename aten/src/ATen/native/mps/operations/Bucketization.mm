@@ -50,7 +50,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       id<MTLComputePipelineState> bucketizationPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});
+      getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter}, mpsStream);
 
       [computeEncoder setComputePipelineState:bucketizationPSO];
       mtl_setArgs(computeEncoder, input, boundaries, result, idim_in, idim_bd, numel_in, right_i64, is_1d_boundaries);
@@ -65,7 +65,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadGroupSize];
 
-      getMPSProfiler().endProfileKernel(bucketizationPSO);
+      getMPSProfiler().endProfileKernel(bucketizationPSO, mpsStream);
     }
   });
 }
