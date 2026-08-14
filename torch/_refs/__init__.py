@@ -28,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    IntWithoutSymInt,
     is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
@@ -798,8 +799,9 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 def imag(a: TensorLikeType) -> TensorLikeType:
     if not isinstance(a, TensorLike):
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
-    torch._check(
-        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    torch._check_type(
+        utils.is_complex_dtype(a.dtype),
+        lambda: "imag only supports complex tensors.",
     )
     return prims.imag(a)
 
@@ -829,7 +831,7 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isposinf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
@@ -843,7 +845,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isneginf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
@@ -2033,6 +2035,13 @@ def clamp(
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
+
+    if utils.is_integer_dtype(a.dtype):
+        limits = torch.iinfo(a.dtype)
+        if isinstance(min, IntWithoutSymInt):
+            min = builtins.max(limits.min, min)
+        if isinstance(max, IntWithoutSymInt):
+            max = builtins.min(limits.max, max)
 
     if min is not None:
         a_isnan = torch.isnan(a)
@@ -3431,11 +3440,16 @@ def native_group_norm(
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
-    # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
+    supports_memory_format = input.device.type in (
+        "cpu",
+        "cuda",
+        "meta",
+        torch._C._get_privateuse1_backend_name(),
+    )
     mem_fmt = (
-        torch.contiguous_format
-        if input.device.type not in ("cpu", torch._C._get_privateuse1_backend_name())
-        else utils.suggest_memory_format(input)
+        utils.suggest_memory_format(input)
+        if supports_memory_format
+        else torch.contiguous_format
     )
     input = input.contiguous(memory_format=mem_fmt)
     weight = weight.contiguous() if weight is not None else None
@@ -3483,6 +3497,7 @@ def native_group_norm(
             out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    out = out.contiguous(memory_format=mem_fmt)
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 

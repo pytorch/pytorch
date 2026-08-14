@@ -1612,6 +1612,17 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
+    def test_matmul_offset_output(self):
+        # Contiguous out= views at a nonzero storage offset; macOS < 15 dropped the write.
+        a = torch.randn(2, 16, 16, device="mps")
+        out = torch.zeros(4, 16, 16, device="mps")
+        torch.mm(a[0], a[1], out=out[1])
+        torch.addmm(a[0], a[0], a[1], out=out[2])
+        expected = torch.stack([a[0].cpu() @ a[1].cpu(), a[0].cpu() + a[0].cpu() @ a[1].cpu()])
+        self.assertEqual(out[1:3].cpu(), expected, atol=1e-5, rtol=1e-5)
+        torch.bmm(a, a, out=out.view(2, 2, 16, 16)[1])
+        self.assertEqual(out[2:].cpu(), a.cpu() @ a.cpu(), atol=1e-5, rtol=1e-5)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
         ((1, 64, 12), "inner"),
@@ -12056,6 +12067,68 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 
 class TestLinalgMPS(TestCaseMPS):
+    def test__int_mm(self):
+        torch.manual_seed(0)
+
+        def make_input(shape, dtype):
+            low, high = (-128, 128) if dtype == torch.int8 else (0, 256)
+            return make_tensor(shape, device="cpu", dtype=dtype, low=low, high=high)
+
+        cases = []
+        for m, k, n in ((1, 7, 5), (15, 16, 17), (16, 17, 15), (17, 15, 16), (65, 64, 65),
+                        (0, 7, 5), (3, 0, 5), (3, 7, 0)):
+            for lhs_dtype in (torch.int8, torch.uint8):
+                cases.append((make_input((m, k), lhs_dtype), make_input((k, n), torch.int8)))
+
+        cases.extend([
+            (make_input((16, 17), torch.int8).t(), make_input((15, 16), torch.int8).t()),
+            (make_input((18, 31), torch.uint8)[1:, 1::2], make_input((31, 33), torch.int8)[1::2, 1::2]),
+            (torch.full((1, 32), 127, dtype=torch.int8), torch.full((32, 1), 127, dtype=torch.int8)),
+        ])
+
+        for lhs, rhs in cases:
+            expected = torch._int_mm(lhs, rhs)
+            lhs_mps = lhs.to("mps")
+            rhs_mps = rhs.to("mps")
+            actual = torch._int_mm(lhs_mps, rhs_mps)
+
+            self.assertEqual(actual.dtype, torch.int32)
+            self.assertEqual(actual.device.type, "mps")
+            self.assertEqual(actual.cpu(), expected)
+
+            out = torch.empty(expected.shape, dtype=torch.int32, device="mps")
+            returned = torch._int_mm(lhs_mps, rhs_mps, out=out)
+            self.assertIs(returned, out)
+            self.assertEqual(out.cpu(), expected)
+
+    def test__int_mm_errors(self):
+        lhs = torch.empty((3, 7), dtype=torch.int8, device="mps")
+        rhs = torch.empty((7, 5), dtype=torch.int8, device="mps")
+
+        error_cases = [
+            ("Expected self to be of dimension 2", lambda: torch._int_mm(lhs[0], rhs)),
+            ("Expected mat2 to be of dimension 2",
+             lambda: torch._int_mm(
+                 lhs, rhs[:, 0], out=torch.empty((3, 5), dtype=torch.int32, device="mps"))),
+            (r"self.size\(1\) needs to match mat2.size\(0\)",
+             lambda: torch._int_mm(lhs, torch.empty((6, 5), dtype=torch.int8, device="mps"))),
+            ("Expected self dtype to be int8 or uint8", lambda: torch._int_mm(lhs.float(), rhs)),
+            ("Expected mat2 dtype to be of type int8", lambda: torch._int_mm(lhs, rhs.to(torch.uint8))),
+            ("Expected result dtype to be of type kInt",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((3, 5), device="mps"))),
+            ("Expected result to be of dimension 2",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((3, 5, 1), dtype=torch.int32, device="mps"))),
+            (r"Expected result.size\(0\) to be 3",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((2, 5), dtype=torch.int32, device="mps"))),
+            (r"Expected result.size\(1\) to be 5",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((3, 4), dtype=torch.int32, device="mps"))),
+            ("Expected result to be contiguous",
+             lambda: torch._int_mm(lhs, rhs, out=torch.empty((5, 3), dtype=torch.int32, device="mps").t())),
+        ]
+        for message, operation in error_cases:
+            with self.assertRaisesRegex(RuntimeError, message):
+                operation()
+
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -17282,6 +17355,23 @@ class TestMetalLibrary(TestCaseMPS):
         kernel = lib.nchw_to_nhwc_float_16_64_false_false
         kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
         self.assertEqual(dst, src.permute(0, 2, 1))
+
+    def test_conv_weight_to_dhwio_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        oc, ic, kd, kh, kw = 5, 3, 2, 2, 4
+        weight = torch.randn(oc, ic, kd, kh, kw, device="mps")
+        # contiguous, permuted, and width-sliced source strides
+        for source in (
+            weight,
+            weight.permute(2, 3, 4, 1, 0).contiguous().permute(4, 3, 0, 1, 2),
+            torch.randn(oc, ic, kd, kh, 2 * kw, device="mps")[..., ::2],
+        ):
+            destination = torch.empty(kd, kh, kw, ic, oc, dtype=source.dtype, device="mps")
+            params = [oc, ic, kh, kw, *source.stride()]
+            lib.conv_weight_to_dhwio_float(source, destination, params,
+                                           threads=(oc, ic, kd * kh), group_size=(oc, 1, 1), arg_casts="int32")
+            self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
