@@ -8,7 +8,10 @@ import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
-from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.codegen.multi_kernel import (
+    MultiKernelCall,
+    RuntimeDivisibleMultiKernelCall,
+)
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -92,6 +95,30 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
 )
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
+    def test_runtime_divisible_dispatch(self):
+        calls = []
+
+        class Kernel:
+            def __init__(self, name):
+                self.name = name
+
+            def run(self, *args, **kwargs):
+                calls.append((self.name, args, kwargs))
+
+        kernel = RuntimeDivisibleMultiKernelCall(
+            "runtime_divisible", [Kernel("generic"), Kernel("aligned")], (1, 2)
+        )
+        kernel.run("ptr", 32, 48, stream="stream")
+        kernel.run("ptr", 33, 48, stream="stream")
+
+        self.assertEqual(
+            calls,
+            [
+                ("aligned", ("ptr", 32, 48), {"stream": "stream"}),
+                ("generic", ("ptr", 33, 48), {"stream": "stream"}),
+            ],
+        )
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)

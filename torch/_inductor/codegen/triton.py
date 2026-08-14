@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Identity,
     Min,
     ModularIndexing,
     TruncToFloat,
@@ -49,6 +50,7 @@ from .. import config, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
+from ..dependencies import MemoryDep
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -3331,6 +3333,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: TritonMeta | None = None
+        self.runtime_divisible_by_16: tuple[int, ...] = ()
+        self.runtime_divisible_by_16_src: str | None = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -7180,6 +7184,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         metadata, and benchmarking infra.
         """
 
+        self.runtime_divisible_by_16 = ()
+        self.runtime_divisible_by_16_src = None
         code = IndentedBuffer()
 
         size_hints = {}
@@ -7253,8 +7259,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # pyrefly: ignore [bad-assignment]
         mutated_args = sorted(mutated_args)
 
+        numel_arg_indices: list[int] = []
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+            numel_arg_indices.append(len(signature))
             signature.append(sizearg)
             argdefs.append(ArgName(sizearg.name))
             # constexpr version causes issues, see
@@ -7371,6 +7379,66 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
+        # Keep runtime specialization to two variants of memory-heavy pointwise kernels.
+        # The dispatcher is only available in ordinary Python JIT wrappers.
+        if (
+            config.triton.divisible_by_16
+            and torch.version.hip is None
+            and props_device.type == "cuda"
+            and not V.graph.cpp_wrapper
+            and not V.graph.aot_mode
+            and not config.triton.autotune_at_compile_time
+            and not config.autotune_lookup_table
+            and not config.benchmark_kernel
+            and not self.features.is_reduction()
+            and not self.is_combo_kernel
+            and not self.uses_tma
+            and not self.atomic_add_found
+            and self.num_load >= 4
+        ):
+            # Range numels alone can vectorize flat accesses, but the benefit is
+            # inconsistent. Require a dynamic size in a nontrivial unit-stride
+            # access, then include range numels because their hints enable tail
+            # vectorization.
+            memory_index_exprs = []
+            for node in self.features.scheduler_nodes():
+                for dep in node.read_writes.reads:
+                    if not isinstance(dep, MemoryDep) or not dep.var_names:
+                        continue
+                    index = dep.index.replace(Identity, lambda value: value)
+                    strides = V.graph.sizevars.stride_vars(index, dep.var_names)
+                    if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+                        continue
+                    memory_index_exprs.append(dep.index)
+                    if len(dep.size) > 1:
+                        memory_index_exprs.extend(dep.size)
+            relevant_candidates = tuple(
+                (i, arg.expr)
+                for i, arg in enumerate(signature)
+                if isinstance(arg, SizeArg)
+                and i not in numel_arg_indices
+                and arg.expr is not None
+                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+                and not arg.name.startswith("load_seed_offset")
+                and bool(getattr(arg.expr, "free_symbols", ()))
+                and not V.graph.sizevars.statically_known_multiple_of(arg.expr, 16)
+                and any(expr.has(arg.expr) for expr in memory_index_exprs)
+            )
+            numel_candidates = tuple(
+                (i, signature[i].expr)
+                for i in numel_arg_indices
+                if isinstance(signature[i], SizeArg)
+                and signature[i].expr is not None
+                and triton_meta_signature[argdefs[i].name] in ("i32", "i64")
+                and bool(getattr(signature[i].expr, "free_symbols", ()))
+                and not V.graph.sizevars.statically_known_multiple_of(
+                    signature[i].expr, 16
+                )
+            )
+            candidates = relevant_candidates + numel_candidates
+            if relevant_candidates:
+                self.runtime_divisible_by_16 = tuple(i for i, _ in candidates)
+
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
         # we must not tag any args with pointer_range_32 in that case.
@@ -7390,6 +7458,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
             ]
 
+        triton_meta_placeholder = "_runtime_divisible_triton_meta"
+        triton_meta_src = (
+            triton_meta_placeholder
+            if self.runtime_divisible_by_16
+            else repr(triton_meta)
+        )
+
         for helper in self.helper_functions:
             code.writeline("")
             code.splice(helper)
@@ -7399,7 +7474,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton_heuristics.{self._get_heuristic()}(
                     config={self.fixed_config.config!r},
                     filename=__file__,
-                    triton_meta={triton_meta!r},
+                    triton_meta={triton_meta_src},
                     inductor_meta={inductor_meta!r}
                 )
                 @triton.jit
@@ -7411,7 +7486,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     size_hints={size_hints!r},
                     reduction_hint={reduction_hint},
                     filename=__file__,
-                    triton_meta={triton_meta!r},
+                    triton_meta={triton_meta_src},
                     inductor_meta={inductor_meta!r}
                 )
                 @triton.jit
@@ -7423,7 +7498,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
-                    triton_meta={triton_meta!r},
+                    triton_meta={triton_meta_src},
                     inductor_meta={inductor_meta!r},
                     min_elem_per_thread={self.min_elem_per_thread}
                 )
@@ -7451,7 +7526,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             )
 
-        return code.getvalue()
+        src_code = code.getvalue()
+        if self.runtime_divisible_by_16:
+            if src_code.count(triton_meta_placeholder) != 1:
+                raise AssertionError("expected one Triton metadata placeholder")
+            aligned_meta = {
+                **triton_meta,
+                "configs": [
+                    config_of(
+                        signature,
+                        skip_cpp_wrapper_input_tensor_alignment=True,
+                        divisible_by_16_extra=self.runtime_divisible_by_16,
+                    )
+                ],
+            }
+            self.runtime_divisible_by_16_src = src_code.replace(
+                triton_meta_placeholder, repr(aligned_meta)
+            )
+            src_code = src_code.replace(triton_meta_placeholder, repr(triton_meta))
+
+        return src_code
 
     @staticmethod
     def _get_persistent_RBLOCK(rnumel):
@@ -8200,6 +8294,20 @@ class TritonScheduling(SIMDScheduling):
         wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
 
     def define_kernel(self, src_code, node_schedule, kernel):
+        kernel_name = self._define_kernel(src_code, node_schedule, kernel)
+        if not isinstance(kernel, TritonKernel):
+            return kernel_name
+
+        aligned_src = kernel.runtime_divisible_by_16_src
+        if aligned_src is None:
+            return kernel_name
+
+        aligned_name = self._define_kernel(aligned_src, node_schedule, kernel)
+        return V.graph.wrapper_code.multi_kernel_state.define_runtime_divisible_kernel(
+            (kernel_name, aligned_name), kernel.runtime_divisible_by_16
+        )
+
+    def _define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
