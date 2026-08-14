@@ -9880,6 +9880,83 @@ class TestMPS(TestCaseMPS):
         empty_samples = torch.poisson(empty_rate)
         self.assertEqual(empty_samples.numel(), 0)
 
+    @parametrize("dtype", [torch.float32])
+    def test_binomial(self, dtype):
+        """Test binomial on MPS matches expected statistical properties and CPU."""
+        n_samples = 10000
+
+        # Cover the four branches of sample_binomial() (Distributions.h):
+        # inversion and BTRS, each for p <= 0.5 and for its p > 0.5 mirror.
+        for count_val, prob_val in [(10.0, 0.3), (100.0, 0.4), (10.0, 0.8), (100.0, 0.7)]:
+            count_mps = torch.full((n_samples,), count_val, device='mps', dtype=dtype)
+            prob_mps = torch.full((n_samples,), prob_val, device='mps', dtype=dtype)
+            samples_mps = torch.binomial(count_mps, prob_mps)
+            samples_cpu = torch.binomial(count_mps.cpu(), prob_mps.cpu())
+
+            case = f"count={count_val}, prob={prob_val}"
+            self.assertTrue(((samples_mps >= 0) & (samples_mps <= count_val)).all(),
+                            lambda msg: f"{msg}\nBinomial samples should lie in [0, count] for {case}")
+
+            mps_f = samples_mps.float()
+            self.assertTrue(torch.allclose(mps_f, mps_f.floor()),
+                            lambda msg: f"{msg}\nBinomial samples should be integers for {case}")
+
+            # Theoretical Binomial has mean == n*p and var == n*p*(1-p). Sampling
+            # error on n=10k is roughly sqrt(var / n_samples); compare MPS to CPU
+            # within a few standard errors so we catch implementation drift
+            # without being flaky on legitimate RNG noise.
+            mean = count_val * prob_val
+            var = mean * (1.0 - prob_val)
+            tol_mean = max(0.05, 6.0 * (var / n_samples) ** 0.5)
+            tol_var = max(0.1, 6.0 * var * (2.0 / n_samples) ** 0.5)
+
+            mps_mean = mps_f.mean().item()
+            cpu_mean = samples_cpu.float().mean().item()
+            self.assertAlmostEqual(mps_mean, mean, delta=tol_mean,
+                                   msg=lambda msg: f"{msg}\nMPS mean should match n*p for {case}")
+            self.assertAlmostEqual(mps_mean, cpu_mean, delta=tol_mean,
+                                   msg=lambda msg: f"{msg}\nMPS mean should match CPU mean for {case}")
+
+            mps_var = mps_f.var(unbiased=False).item()
+            cpu_var = samples_cpu.float().var(unbiased=False).item()
+            self.assertAlmostEqual(mps_var, var, delta=tol_var,
+                                   msg=lambda msg: f"{msg}\nMPS variance should match n*p*(1-p) for {case}")
+            self.assertAlmostEqual(mps_var, cpu_var, delta=tol_var,
+                                   msg=lambda msg: f"{msg}\nMPS variance should match CPU variance for {case}")
+
+        count = torch.full((100,), 20.0, device='mps', dtype=dtype)
+
+        # Degenerate parameters are returned exactly, without sampling
+        zeros = torch.zeros(100, device='mps', dtype=dtype)
+        self.assertTrue((torch.binomial(count, zeros) == 0).all(), "Binomial(n, 0) should return all zeros")
+        ones = torch.ones(100, device='mps', dtype=dtype)
+        self.assertTrue((torch.binomial(count, ones) == count).all(), "Binomial(n, 1) should return n")
+        self.assertTrue((torch.binomial(zeros, ones * 0.5) == 0).all(), "Binomial(0, p) should return all zeros")
+
+        # prob broadcasts against count
+        prob_row = torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0], device='mps', dtype=dtype)
+        broadcast = torch.binomial(torch.full((4, 5), 8.0, device='mps', dtype=dtype), prob_row)
+        self.assertEqual(broadcast.shape, (4, 5))
+        self.assertTrue((broadcast[:, 0] == 0).all())
+        self.assertTrue((broadcast[:, 4] == 8).all())
+
+        # Test empty tensor
+        empty = torch.empty(0, device='mps', dtype=dtype)
+        self.assertEqual(torch.binomial(empty, empty).numel(), 0)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_binomial_low_precision(self, dtype):
+        """Binomial supports half and bfloat16; counts stay exactly representable."""
+        count_val = 64.0
+        count = torch.full((4096,), count_val, device='mps', dtype=dtype)
+        for prob_val in [0.25, 0.75]:
+            samples = torch.binomial(count, torch.full_like(count, prob_val))
+            self.assertEqual(samples.dtype, dtype)
+            self.assertTrue(((samples >= 0) & (samples <= count_val)).all())
+            samples_f = samples.float()
+            self.assertTrue(torch.allclose(samples_f, samples_f.floor()))
+            self.assertAlmostEqual(samples_f.mean().item(), count_val * prob_val, delta=0.5)
+
     def test_distributions(self):
         ops = [
             ("normal_", lambda t: t.normal_(0, 1), []),
