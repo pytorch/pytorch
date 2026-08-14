@@ -19,7 +19,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     precisionOverride,
@@ -41,6 +40,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     is_iterable_of_tensors,
     numpy_to_torch_dtype_dict,
     parametrize,
@@ -80,7 +80,8 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs
 
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add test for inplace variants erroring on broadcasted inputs
-class TestUnaryUfuncs(TestCase):
+class TestUnaryUfuncsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     @ops(
@@ -879,7 +880,6 @@ class TestUnaryUfuncs(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
                     _test(op, data[0:sz], data[1 : sz + 1])
 
-    # TODO: run on non-native device types
     # https://github.com/pytorch/pytorch/issues/126474
     @xfailIfTorchDynamo
     @dtypes(torch.double)
@@ -1758,37 +1758,6 @@ class TestUnaryUfuncs(TestCase):
             ),
         )
 
-    @onlyCUDA
-    def test_nonzero_static_large(self, device):
-        # large enough to have multiple iters per SM even on H100
-        # with 132 sms
-        size_inp = 1024 * 16 * 132 + 1024 * 16
-        x = torch.zeros(size_inp, device=device)
-        # unique indices
-        indices = torch.randperm(size_inp, device=device)[: size_inp // 2]
-        sorted, _ = torch.sort(indices)
-        x[sorted] = 1
-        res = torch.nonzero_static(x, size=size_inp // 2).view(-1)
-        self.assertEqual(res, sorted)
-        # no oob writes
-        out = torch.full((size_inp,), 10, device=device, dtype=torch.int64)
-        res = torch.nonzero_static(x, size=size_inp // 4, out=out[: size_inp // 2])
-        self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
-        self.assertEqual(
-            out[size_inp // 4 :],
-            torch.tensor(10, device=device).expand_as(out[size_inp // 4 :]),
-        )
-        # correct fill for 2d
-        x = x.view(2, size_inp // 2)
-        ref = x.nonzero()
-        res = x.nonzero_static(size=size_inp // 2 + 2)
-        self.assertEqual(res.shape, [size_inp // 2 + 2, 2])
-        self.assertEqual(ref, res[: size_inp // 2])
-        self.assertEqual(
-            res[size_inp // 2 :],
-            torch.tensor(-1, device=device).expand_as(res[size_inp // 2 :]),
-        )
-
     # TODO: rationalize with exp OpInfo
 
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
@@ -1898,32 +1867,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
-    @onlyCUDA
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
-        # Regression test for ptxas codegen bug on sm_100 where FADD in the
-        # subnormal conversion path gets wrong source register for odd elements
-        # in the 8-wide unrolled vectorized_elementwise_kernel.
-        # e4m3fn subnormals: |x| < 2^-6
-        torch.manual_seed(0)
-        N = 2**20
-        x = (torch.randn(N, dtype=dtype, device=device) * 1e-3).clamp(-448, 448)
-        y = x.to(torch.float8_e4m3fn)
-        ref = x.cpu().float().to(torch.float8_e4m3fn)
-        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
-
-    @onlyCUDA
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
-        # Same regression test for e5m2.
-        # e5m2 subnormals: |x| < 2^-14
-        torch.manual_seed(0)
-        N = 2**20
-        x = (torch.randn(N, dtype=dtype, device=device) * 1e-4).clamp(-57344, 57344)
-        y = x.to(torch.float8_e5m2)
-        ref = x.cpu().float().to(torch.float8_e5m2)
-        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
-
     # Regression for https://github.com/pytorch/pytorch/issues/177839:
     # when eps > 0.5 the scalar kernel clamps via `x < eps ? eps : ...` (so
     # the lower bound wins over the upper bound when eps > 1 - eps), and the
@@ -1954,7 +1897,66 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(got, ref)
 
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals())
+class TestUnaryUfuncsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_nonzero_static_large(self, device):
+        # large enough to have multiple iters per SM even on H100
+        # with 132 sms
+        size_inp = 1024 * 16 * 132 + 1024 * 16
+        x = torch.zeros(size_inp, device=device)
+        # unique indices
+        indices = torch.randperm(size_inp, device=device)[: size_inp // 2]
+        sorted, _ = torch.sort(indices)
+        x[sorted] = 1
+        res = torch.nonzero_static(x, size=size_inp // 2).view(-1)
+        self.assertEqual(res, sorted)
+        # no oob writes
+        out = torch.full((size_inp,), 10, device=device, dtype=torch.int64)
+        res = torch.nonzero_static(x, size=size_inp // 4, out=out[: size_inp // 2])
+        self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
+        self.assertEqual(
+            out[size_inp // 4 :],
+            torch.tensor(10, device=device).expand_as(out[size_inp // 4 :]),
+        )
+        # correct fill for 2d
+        x = x.view(2, size_inp // 2)
+        ref = x.nonzero()
+        res = x.nonzero_static(size=size_inp // 2 + 2)
+        self.assertEqual(res.shape, [size_inp // 2 + 2, 2])
+        self.assertEqual(ref, res[: size_inp // 2])
+        self.assertEqual(
+            res[size_inp // 2 :],
+            torch.tensor(-1, device=device).expand_as(res[size_inp // 2 :]),
+        )
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
+        # Regression test for ptxas codegen bug on sm_100 where FADD in the
+        # subnormal conversion path gets wrong source register for odd elements
+        # in the 8-wide unrolled vectorized_elementwise_kernel.
+        # e4m3fn subnormals: |x| < 2^-6
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-3).clamp(-448, 448)
+        y = x.to(torch.float8_e4m3fn)
+        ref = x.cpu().float().to(torch.float8_e4m3fn)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
+        # Same regression test for e5m2.
+        # e5m2 subnormals: |x| < 2^-14
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-4).clamp(-57344, 57344)
+        y = x.to(torch.float8_e5m2)
+        ref = x.cpu().float().to(torch.float8_e5m2)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+
+instantiate_device_type_tests(TestUnaryUfuncsDevice, globals())
+instantiate_device_type_tests(TestUnaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
