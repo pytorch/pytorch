@@ -149,27 +149,100 @@ class FlexGemmLocalReduceMatch:
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmLocalReduceOutputStorage:
+    """Describe the physical storage selected for a returned local reduction."""
+
+    source: torch.fx.Node
+    layout: FlexGemmOutputLayout
+    nodes: tuple[torch.fx.Node, ...]
+
+
+def match_flex_gemm_local_reduce_output_storage(
+    node: torch.fx.Node,
+) -> FlexGemmLocalReduceOutputStorage | None:
+    """Recognize a supported terminal storage transform for a local reduction."""
+    if node.target is torch.ops.flex_gemm.to_blocked.default:
+        source = node.args[0] if node.args else None
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM output transform: {node.format_node()}"
+            )
+        return FlexGemmLocalReduceOutputStorage(source, BLOCKED_128X4, (node,))
+
+    if node.target is torch.ops.aten.clone.default:
+        if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
+            return None
+        transpose = node.args[0]
+        if not isinstance(transpose, torch.fx.Node) or tuple(transpose.users) != (
+            node,
+        ):
+            return None
+        nodes = (transpose, node)
+    else:
+        transpose = node
+        nodes = (node,)
+
+    if transpose.target not in (
+        torch.ops.aten.t.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.permute.default,
+    ):
+        return None
+    source = transpose.args[0]
+    if not isinstance(source, torch.fx.Node):
+        return None
+
+    source_meta = source.meta.get("val")
+    transpose_meta = transpose.meta.get("val")
+    output_meta = node.meta.get("val")
+    if (
+        not isinstance(source_meta, torch.Tensor)
+        or not isinstance(transpose_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or source_meta.ndim != 2
+        or not statically_known_shape_equal(output_meta.shape, source_meta.shape[::-1])
+        or not statically_known_shape_equal(
+            transpose_meta.stride(), source_meta.stride()[::-1]
+        )
+        or not output_meta.is_contiguous()
+        or not node.users
+        or any(user.op != "output" for user in node.users)
+    ):
+        return None
+    return FlexGemmLocalReduceOutputStorage(source, TRANSPOSED, nodes)
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmLocalReduceStore:
     """Describe a logical reduction value and its returned physical carrier."""
 
     node: torch.fx.Node
-    value_node: torch.fx.Node
     aux_index: int
-    output_layout: FlexGemmOutputLayout | None = None
-    owned_nodes: tuple[torch.fx.Node, ...] = ()
+    output_storage: FlexGemmLocalReduceOutputStorage | None = None
 
     def __post_init__(self) -> None:
+        storage = self.output_storage
         if (
             not isinstance(self.node, torch.fx.Node)
-            or not isinstance(self.value_node, torch.fx.Node)
             or self.aux_index < 0
-            or (
-                self.output_layout is not None
-                and not isinstance(self.output_layout, FlexGemmOutputLayout)
+            or storage is not None
+            and (
+                not isinstance(storage, FlexGemmLocalReduceOutputStorage)
+                or not storage.nodes
+                or storage.nodes[-1] is not self.node
             )
-            or not all(isinstance(node, torch.fx.Node) for node in self.owned_nodes)
         ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
+
+    @property
+    def value_node(self) -> torch.fx.Node:
+        """Return the logical value written through the optional storage transform."""
+        return self.node if self.output_storage is None else self.output_storage.source
+
+    @property
+    def output_layout(self) -> FlexGemmOutputLayout | None:
+        """Return the selected physical storage layout."""
+        return None if self.output_storage is None else self.output_storage.layout
 
 
 @dataclasses.dataclass(frozen=True)
@@ -229,12 +302,7 @@ class FlexGemmOutputPlan:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueGraph:
-    """Index transitive dependencies between nodes in an epilogue FX graph.
-
-    Attributes:
-        dependencies: Every FX node mapped to all of its direct and transitive
-            input nodes.
-    """
+    """Index transitive dependencies in an epilogue FX graph."""
 
     dependencies: dict[torch.fx.Node, frozenset[torch.fx.Node]]
 
@@ -299,47 +367,6 @@ def bind_terminal_output_storage(
         output_storage=source,
         output_storage_nodes=tuple(owned_nodes),
     )
-
-
-def contiguous_transpose_output_source(
-    node: torch.fx.Node,
-) -> tuple[torch.fx.Node, tuple[torch.fx.Node, ...]] | None:
-    """Match a terminal two-dimensional transpose materialized contiguously."""
-    if node.target is torch.ops.aten.clone.default:
-        if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
-            return None
-        transpose = node.args[0]
-        if not isinstance(transpose, torch.fx.Node) or tuple(transpose.users) != (
-            node,
-        ):
-            return None
-        owned_nodes = (transpose, node)
-    else:
-        transpose = node
-        owned_nodes = (node,)
-
-    if transpose.target is not torch.ops.aten.permute.default:
-        return None
-    source, permutation = transpose.args
-    if (
-        not isinstance(permutation, (tuple, list))
-        or tuple(permutation) != (1, 0)
-        or not isinstance(source, torch.fx.Node)
-    ):
-        return None
-
-    source_meta = source.meta.get("val")
-    output_meta = node.meta.get("val")
-    if (
-        not isinstance(source_meta, torch.Tensor)
-        or not isinstance(output_meta, torch.Tensor)
-        or source_meta.ndim != 2
-        or not output_meta.is_contiguous()
-        or not statically_known_shape_equal(output_meta.shape, source_meta.shape[::-1])
-        or any(user.op != "output" for user in node.users)
-    ):
-        return None
-    return source, owned_nodes
 
 
 @dataclasses.dataclass
@@ -846,20 +873,8 @@ class FlexGemmLocalReduceAnalysis:
         aux_index: int,
     ) -> FlexGemmOutputLocalReducePlan | None:
         """Plan a matched reduction returned through one physical layout."""
-        transposed = contiguous_transpose_output_source(aux)
-        if aux.target is torch.ops.flex_gemm.to_blocked.default:
-            value_node = aux.args[0] if aux.args else None
-            output_layout = BLOCKED_128X4
-            owned_nodes = (aux,)
-        elif transposed is not None:
-            value_node, owned_nodes = transposed
-            output_layout = TRANSPOSED
-        else:
-            value_node = aux
-            output_layout = None
-            owned_nodes = ()
-        if not isinstance(value_node, torch.fx.Node):
-            return None
+        output_storage = match_flex_gemm_local_reduce_output_storage(aux)
+        value_node = aux if output_storage is None else output_storage.source
         match = self.matches.get(value_node) or self.feed_main_plan(value_node)
         output_meta = (
             output.meta.get("val") if isinstance(output, torch.fx.Node) else None
@@ -880,16 +895,10 @@ class FlexGemmLocalReduceAnalysis:
         )
         if not statically_known_shape_equal(expected_aux_shape, value_meta.shape):
             return None
-        if output_layout is not None:
-            output_layout.validate_geometry(match.geometry)
+        if output_storage is not None:
+            output_storage.layout.validate_geometry(match.geometry)
         return match.to_plan(
-            store=FlexGemmLocalReduceStore(
-                aux,
-                value_node,
-                aux_index,
-                output_layout,
-                owned_nodes,
-            ),
+            store=FlexGemmLocalReduceStore(aux, aux_index, output_storage),
             feeds_main=False,
         )
 
@@ -961,12 +970,6 @@ def tuple_output_plan(
             ),
             local_reduce=compressed_aux_plan,
         )
-    if any(
-        node.target is torch.ops.flex_gemm.to_blocked.default
-        for aux_output in aux_outputs
-        for node in analysis.graph.dependencies.get(aux_output, ())
-    ):
-        raise NotImplementedError("output layout transforms must be returned directly")
     feed_main_plan = analysis.feed_main_output_plan(output, aux_outputs)
     if feed_main_plan is not None:
         return feed_main_plan
@@ -994,6 +997,23 @@ def output_plan(
     return (
         FlexGemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
     )
+
+
+def validate_output_storage_transforms(
+    graph: FlexGemmEpilogueGraph,
+    outputs: FlexGemmOutputPlan,
+) -> None:
+    """Require every storage transform to belong to the output plan."""
+    store = None if outputs.local_reduce is None else outputs.local_reduce.store
+    selected_node = (
+        store.node if store is not None and store.output_storage is not None else None
+    )
+    if any(
+        match_flex_gemm_local_reduce_output_storage(node) is not None
+        and node is not selected_node
+        for node in graph.dependencies
+    ):
+        raise NotImplementedError("output layout transforms must be returned directly")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1230,6 +1250,7 @@ class FlexGemmEpilogueAnalysis:
         """Analyze reductions and an optional grouped main-output transform."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module, gemm)
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
+        validate_output_storage_transforms(local_reduce.graph, outputs)
         grouped_main = grouped_main_output_match(
             outputs.output_storage or outputs.output,
             gemm,
@@ -1475,7 +1496,7 @@ class FlexGemmEpiModOpOverrides(CuteDSLOpOverrides):
 
     def truediv(self, a: Any, b: Any) -> str:
         a_expr, b_expr = self._binary_exprs(a, b)
-        return f"({a_expr} * epi_math.reciprocal({b_expr}, fast={self.fast_math!r}))"
+        return f"epi_math.divide({a_expr}, {b_expr}, fast={self.fast_math!r})"
 
     @classmethod
     def neg(cls, x: Any) -> str:
@@ -1817,8 +1838,8 @@ class FlexGemmEpiModEmitter:
         local_reduce_store = (
             None if self.local_reduce is None else self.local_reduce.store
         )
-        self.output_layout_nodes = frozenset(
-            () if local_reduce_store is None else local_reduce_store.owned_nodes
+        self.local_reduce_output_storage = (
+            None if local_reduce_store is None else local_reduce_store.output_storage
         )
         self.output_storage = self.outputs.output_storage
         self.output_storage_nodes = frozenset(self.outputs.output_storage_nodes)
@@ -2160,7 +2181,10 @@ class FlexGemmEpiModEmitter:
                         self.output_storage, self.env
                     )
                     continue
-                if node in self.output_layout_nodes:
+                if (
+                    self.local_reduce_output_storage is not None
+                    and node in self.local_reduce_output_storage.nodes
+                ):
                     continue
                 if self.local_reduce_prepass is not None and node in prepass_aliases:
                     if self.local_reduce_prepass_value is None:
