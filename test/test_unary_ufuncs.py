@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -1212,6 +1213,7 @@ class TestUnaryUfuncs(TestCase):
     # generation does not reliably emit exact zeros, and y1's domain floors samples
     # away from 0, so these special-cased values are only covered here.
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)  # MPS has no float64
     @parametrize(
         "name, expected",
         (
@@ -1229,6 +1231,7 @@ class TestUnaryUfuncs(TestCase):
     # The x = 0 special casing must not swallow NaN: a NaN input has to keep
     # producing a NaN gradient rather than the finite limit at the origin.
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)  # MPS has no float64
     @parametrize(
         "name",
         ("bessel_j1", "modified_bessel_i1", "i1", "i1e"),
