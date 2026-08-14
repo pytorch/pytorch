@@ -933,10 +933,6 @@ This API is in beta and subject to future changes.
 Forward-mode AD is not supported.
 :::
 
-Foreach operations accept a list or tuple of tensors. Out-of-place operations
-return the results as a tuple of tensors. In-place operations mutate each tensor
-and return the exact Python list or tuple passed as input, rather than `None`.
-
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
