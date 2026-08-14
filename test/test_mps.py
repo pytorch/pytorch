@@ -1612,6 +1612,17 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
+    def test_matmul_offset_output(self):
+        # Contiguous out= views at a nonzero storage offset; macOS < 15 dropped the write.
+        a = torch.randn(2, 16, 16, device="mps")
+        out = torch.zeros(4, 16, 16, device="mps")
+        torch.mm(a[0], a[1], out=out[1])
+        torch.addmm(a[0], a[0], a[1], out=out[2])
+        expected = torch.stack([a[0].cpu() @ a[1].cpu(), a[0].cpu() + a[0].cpu() @ a[1].cpu()])
+        self.assertEqual(out[1:3].cpu(), expected, atol=1e-5, rtol=1e-5)
+        torch.bmm(a, a, out=out.view(2, 2, 16, 16)[1])
+        self.assertEqual(out[2:].cpu(), a.cpu() @ a.cpu(), atol=1e-5, rtol=1e-5)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
         ((1, 64, 12), "inner"),
