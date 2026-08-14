@@ -88,6 +88,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
+      abort_process_on_timeout_or_error_(
+          SHOULD_TEAR_DOWN(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
+              ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
+              ::c10d::SkipCleanUp)))),
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;

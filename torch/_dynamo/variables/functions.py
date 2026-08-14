@@ -194,6 +194,10 @@ def _get_spec(func: FunctionType) -> FunctionSpec:
     return spec
 
 
+class BindArgsTypeError(TypeError):
+    pass
+
+
 def bind_args_cached(
     func: FunctionType,
     tx: "InstructionTranslatorBase",
@@ -257,14 +261,14 @@ def bind_args_cached(
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
-            raise TypeError(f"missing required positional argument: {name}")
+            raise BindArgsTypeError(f"missing required positional argument: {name}")
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise TypeError(
+        raise BindArgsTypeError(
             f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
         )
 
@@ -278,13 +282,13 @@ def bind_args_cached(
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise TypeError(f"Missing required keyword-only argument: {name}")
+            raise BindArgsTypeError(f"Missing required keyword-only argument: {name}")
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
+        raise BindArgsTypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
 
     return ba
 
@@ -2204,9 +2208,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
-            func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()  # type: ignore[attr-defined]
-        bound = inspect.signature(func).bind(*args, **kwargs)
-        bound.apply_defaults()
+            func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()  # type: ignore[missing-attribute]
+        try:
+            bound = inspect.signature(func).bind(*args, **kwargs)
+            bound.apply_defaults()
+        except TypeError as e:
+            raise BindArgsTypeError(e.args[0]) from e
         result = dict(bound.arguments.items())
         wrap_args_kwargs(parent.output.root_tx, result)  # type: ignore[arg-type]
         init_cellvars(parent, result, code)
