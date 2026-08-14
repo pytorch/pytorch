@@ -621,24 +621,9 @@ def _op_namespace(tgt) -> str | None:
 # aten ops that return a view of their input (no implicit copy), so the fused
 # non-contiguous layout propagates to their outputs and downstream consumers
 # still matter. view / as_strided additionally require a compatible layout and
-# can fail on the non-contiguous fused output.
-_VIEW_OPS = OrderedSet(
-    [
-        aten.view,
-        aten.as_strided,
-        aten.reshape,
-        aten.permute,
-        aten.transpose,
-        aten.slice,
-        aten.split,
-        aten.unsqueeze,
-        aten.squeeze,
-        aten.expand,
-        aten.select,
-    ]
-)
-
-# Same ops traced as tensor methods (e.g. x.view(-1) is call_method[target="view"]).
+# can fail on the non-contiguous fused output. The same ops are traced either
+# as call_function[target=aten.view] or call_method[target="view"], so they are
+# matched by their op name.
 _VIEW_METHODS = OrderedSet(
     [
         "view",
@@ -664,11 +649,16 @@ def _view_op_kind(user: torch.fx.Node) -> str | None:
     # "crash" for view/as_strided (can fail on non-contiguous), "propagate" for
     # the other view-producing ops (layout flows through), None otherwise.
     if user.op == "call_function":
-        packet = getattr(user.target, "overloadpacket", user.target)
-        if packet in _VIEW_OPS:
-            return "crash" if packet in (aten.view, aten.as_strided) else "propagate"
-    if user.op == "call_method" and user.target in _VIEW_METHODS:
-        return "crash" if user.target in _CRASH_VIEW_OPS else "propagate"
+        # Normalize OpOverload / OpOverloadPacket to the op name ("view").
+        name = getattr(
+            getattr(user.target, "overloadpacket", user.target), "__name__", None
+        )
+    elif user.op == "call_method":
+        name = user.target
+    else:
+        return None
+    if name in _VIEW_METHODS:
+        return "crash" if name in _CRASH_VIEW_OPS else "propagate"
     return None
 
 
