@@ -16,6 +16,11 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -28,6 +33,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -74,6 +80,8 @@ subtest_name = functools.partial(subtest_name, test_name_mapping)
 
 
 class TestShardGradScaler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_grad_scaling(self):
         pg = DummyProcessGroup(0, 1)
         scaler = ShardedGradScaler(
@@ -148,6 +156,8 @@ class TestShardGradScaler(TestCase):
 
 
 class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _get_init_modes_for_test(self, cpu_offload):
         modes = [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
         # Note that DEVICEInitMode.DEVICE_NEVER works currently only with CPU
@@ -159,6 +169,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
 
         return modes
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_fsdp_ddp_parity_with_grad_scaler(
@@ -232,6 +243,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         return model, optim, ref_model, ref_optim
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_sharded_grad_scaler_found_inf(self):
         self.run_subtests(
@@ -341,7 +353,13 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
 
 
 instantiate_parametrized_tests(TestShardGradScaler)
-instantiate_parametrized_tests(TestShardedGradScalerParityWithDDP)
+devices = ("cuda", "hpu", "xpu", "privateuse1")
+instantiate_device_type_tests(
+    TestShardedGradScalerParityWithDDP,
+    globals(),
+    only_for=devices,
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
