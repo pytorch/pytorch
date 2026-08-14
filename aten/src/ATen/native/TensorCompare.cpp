@@ -1,6 +1,7 @@
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
@@ -320,24 +321,31 @@ static Scalar saturate_integral_bound(const Scalar& bound) {
     }
   } else {
     const auto value = bound.toLong();
-    if (value <= static_cast<int64_t>(lowest)) {
-      return Scalar(lowest);
-    }
     if constexpr (std::is_signed_v<scalar_t>) {
+      if (value <= static_cast<int64_t>(lowest)) {
+        return Scalar(lowest);
+      }
       if (value >= static_cast<int64_t>(highest)) {
         return Scalar(highest);
       }
-    } else if (value >= static_cast<int64_t>(highest)) {
-      return Scalar(highest);
+    } else {
+      if (value <= 0) {
+        return Scalar(lowest);
+      }
+      if (static_cast<uint64_t>(value) >= static_cast<uint64_t>(highest)) {
+        return Scalar(highest);
+      }
     }
   }
   return bound;
 }
 
 static Scalar saturate_integral_bound(const Scalar& bound, ScalarType dtype) {
-  return AT_DISPATCH_INTEGRAL_TYPES(dtype, "saturate_integral_bound", [&] {
-    return saturate_integral_bound<scalar_t>(bound);
-  });
+  return AT_DISPATCH_V2(
+      dtype,
+      "saturate_integral_bound",
+      AT_WRAP([&] { return saturate_integral_bound<scalar_t>(bound); }),
+      AT_EXPAND(AT_INTEGRAL_TYPES_V2));
 }
 
 DEFINE_DISPATCH(
