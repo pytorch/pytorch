@@ -35,8 +35,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import blas_library_context, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_ARM64,
     IS_CI,
     IS_LINUX,
@@ -47,7 +48,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_GRAPH,
     TEST_WITH_SLOW,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -121,6 +122,8 @@ def cdata(t):
 
 
 class TestCase(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -151,6 +154,8 @@ class TestCase(InductorTestCase):
 
 
 class CUDAGraphAPIOnlyTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_mark_warmup_incomplete_without_cudagraphs(self):
         cudagraph_trees = torch._inductor.cudagraph_trees
         containers = cudagraph_trees.get_obj(
@@ -182,6 +187,8 @@ if HAS_CUDA_AND_TRITON:
         return len(all_live_blocks())
 
     class CudaGraphTreeTests(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         def setUp(self):
             super().setUp()
             self.graph_stack = contextlib.ExitStack()
@@ -6154,6 +6161,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(result2[0], inp * 3.0)
 
     class TestCUDAGraphPolicy(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         def setUp(self):
             super().setUp()
             counters.clear()
@@ -6345,6 +6354,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertGreater(len(wrap_calls), 0)
 
     class TestSAC(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
                 def __init__(self):
@@ -6743,14 +6754,14 @@ if HAS_CUDA_AND_TRITON:
                 obs.op_outputs[aten.rand.default][2],
             )
 
-    instantiate_parametrized_tests(CudaGraphTreeTests)
-    instantiate_parametrized_tests(TestCUDAGraphPolicy)
-    instantiate_parametrized_tests(TestSAC)
+    instantiate_device_type_tests(CUDAGraphAPIOnlyTests, globals(), except_for="cpu")
+    instantiate_device_type_tests(CudaGraphTreeTests, globals(), except_for="cpu")
+    instantiate_device_type_tests(TestCUDAGraphPolicy, globals(), except_for="cpu")
+    instantiate_device_type_tests(TestSAC, globals(), except_for="cpu")
 
     # OpInfo-based test for index/scatter ops with cudagraphs
     from torch.testing._internal.common_device_type import (
         DeviceTypeTestBase,
-        instantiate_device_type_tests,
         ops,
     )
     from torch.testing._internal.common_methods_invocations import op_db
@@ -6775,6 +6786,8 @@ if HAS_CUDA_AND_TRITON:
         1. Work correctly with cudagraph capture, or
         2. Properly skip cudagraphs (e.g., for boolean indices)
         """
+
+        hw_classification = HardwareClassification.CUDA
 
         @ops(
             indexing_op_db,
@@ -6827,5 +6840,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_TRITON:
         run_tests(needs="filelock")
