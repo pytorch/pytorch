@@ -103,6 +103,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void createEvent(cudaEvent_t* cuda_event, const EventFlag flag) const {
     // Maps PyTorch EventFlag bits to CUDA event flags.
     // cudaEventDefault has timing enabled; disable it unless TIMING bit is set.
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING) || !(flag & EventFlag::INTERPROCESS),
+        "Cannot create IPC event with timing enabled.");
     const unsigned int cuda_flag =
         (flag & EventFlag::TIMING ? cudaEventDefault : cudaEventDisableTiming) |
         (flag & EventFlag::BLOCKING ? cudaEventBlockingSync
@@ -299,9 +302,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       void** event,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
-    TORCH_CHECK(
-        !(flag & EventFlag::TIMING),
-        "Cannot create IPC handle for event with timing enabled.");
     DeviceIndex orig_device{-1};
     C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
     C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
@@ -321,9 +321,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       void** event,
       const DeviceIndex device_index,
       const std::string& handle_string) const override {
-    TORCH_CHECK(
-        *event == nullptr,
-        "Event is already initialized; cannot reconstruct from IPC handle.");
     TORCH_CHECK(
         handle_string.size() == CUDA_IPC_HANDLE_SIZE,
         "IPC handle string doesn't match size CUDA_IPC_HANDLE_SIZE");
