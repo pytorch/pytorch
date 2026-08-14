@@ -16234,80 +16234,92 @@ class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
     @parametrize_test('train', [True, False])
     @parametrize_test('p', [0, 0.1234])
-    def test_RNN_dropout_state(self, device, p, train):
-        rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu').to(device)
-        if train:
-            rnn.train()
-        else:
-            rnn.eval()
-        input = torch.rand(1, 1, 100, device=device)
-        hx = torch.rand(2, 1, 100, device=device)
+    def test_RNN_dropout_state(self, p, train):
+        for cuda in (True, False):
+            rnn = nn.RNN(100, 100, 2, bias=False, dropout=p, nonlinearity='relu')
+            if cuda:
+                rnn.cuda()
 
-        output1, hy1 = rnn(input, hx)
-        output2, hy2 = rnn(input, hx)
+            if train:
+                rnn.train()
+            else:
+                rnn.eval()
+            input = torch.rand(1, 1, 100)
+            hx = torch.rand(2, 1, 100)
+            if cuda:
+                input = input.cuda()
+                hx = hx.cuda()
 
-        buf = io.BytesIO()
-        rnn_pickle = torch.save(rnn, buf)
-        buf.seek(0)
-        # weights_only=False as this is legacy code that saves the model
-        rnn2 = torch.load(buf, weights_only=False)
-        rnn2.flatten_parameters()
-        output3, hy3 = rnn2(input, hx)
+            output1, hy1 = rnn(input, hx)
+            output2, hy2 = rnn(input, hx)
 
-        if p == 0 or not train:
-            self.assertEqual(output1, output2)
-            self.assertEqual(output1, output3)
-            self.assertEqual(hy1, hy2)
-            self.assertEqual(hy1, hy3)
-        else:
-            self.assertNotEqual(output1, output2)
-            self.assertNotEqual(output1, output3)
-            self.assertNotEqual(hy1, hy2)
-            self.assertNotEqual(hy1, hy3)
+            buf = io.BytesIO()
+            rnn_pickle = torch.save(rnn, buf)
+            buf.seek(0)
+            # weights_only=False as this is legacy code that saves the model
+            rnn2 = torch.load(buf, weights_only=False)
+            rnn2.flatten_parameters()
+            output3, hy3 = rnn2(input, hx)
+
+            if p == 0 or not train:
+                self.assertEqual(output1, output2)
+                self.assertEqual(output1, output3)
+                self.assertEqual(hy1, hy2)
+                self.assertEqual(hy1, hy3)
+            else:
+                self.assertNotEqual(output1, output2)
+                self.assertNotEqual(output1, output3)
+                self.assertNotEqual(hy1, hy2)
+                self.assertNotEqual(hy1, hy3)
 
     @skipCUDAIfNoCudnn
     @set_default_dtype(torch.double)
     @parametrize_test('train', [True, False])
-    def test_RNN_change_dropout(self, device, train):
-        rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu').to(device)
-        input = torch.rand(3, 2, 100, device=device)
-        if train:
-            rnn.train()
-        else:
-            rnn.eval()
+    def test_RNN_change_dropout(self, train):
+        for cuda in (True, False):
+            rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
+            input = torch.rand(3, 2, 100)
+            if cuda:
+                input.data = input.data.cuda()
+                rnn.cuda()
 
-        prev_output = None
-        for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
-            rnn.dropout = p
-            output1, hy1 = rnn(input)
-            output2, hy2 = rnn(input)
-
-            if p == 0 or p == 1 or not train:
-                self.assertEqual(output1, output2)
-                self.assertEqual(hy1, hy2)
+            if train:
+                rnn.train()
             else:
-                self.assertNotEqual(output1, output2)
-                self.assertNotEqual(hy1, hy2)
+                rnn.eval()
 
-            if prev_output is not None:
-                if not train:
-                    self.assertEqual(output1.data, prev_output)
-                    self.assertEqual(output2.data, prev_output)
+            prev_output = None
+            for p in (0, 0.5, 0, 0.7, 0.2, 1, 0.2, 0):
+                rnn.dropout = p
+                output1, hy1 = rnn(input)
+                output2, hy2 = rnn(input)
+
+                if p == 0 or p == 1 or not train:
+                    self.assertEqual(output1, output2)
+                    self.assertEqual(hy1, hy2)
                 else:
-                    self.assertNotEqual(output1.data, prev_output)
-                    self.assertNotEqual(output2.data, prev_output)
-            prev_output = output1.data
+                    self.assertNotEqual(output1, output2)
+                    self.assertNotEqual(hy1, hy2)
+
+                if prev_output is not None:
+                    if not train:
+                        self.assertEqual(output1.data, prev_output)
+                        self.assertEqual(output2.data, prev_output)
+                    else:
+                        self.assertNotEqual(output1.data, prev_output)
+                        self.assertNotEqual(output2.data, prev_output)
+                prev_output = output1.data
 
     @skipCUDAIfNoCudnn
-    def test_batchnorm_nhwc_train(self, device):
+    def test_batchnorm_cudnn_nhwc(self, device):
         def run_test(input, grad_output):
             c = input.size(1)
-            mod = nn.BatchNorm2d(c).to(device).float()
+            mod = nn.BatchNorm2d(c).cuda().float()
             mod.weight.data.uniform_()
             mod.bias.data.uniform_()
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_mod = nn.BatchNorm2d(c).to(device).float()
+            ref_mod = nn.BatchNorm2d(c).cuda().float()
             ref_mod.load_state_dict(mod.state_dict())
             out = mod(input)
             out.backward(grad_output)
@@ -16320,22 +16332,22 @@ class TestNNCUDA(NNTestCase):
             self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device=device)
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
 
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device=device)
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
         grad = grad.contiguous(memory_format=torch.channels_last)
         run_test(input, grad)
         # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
         # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device=device)
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device=device)
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
         grad = grad.permute(0, 2, 1, 3)
         run_test(input, grad)
 
     @skipCUDAIfNoCudnn
-    def test_batchnorm_half(self, device):
+    def test_batchnorm_cudnn_half(self, device):
         # THNN
         input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device=device, requires_grad=True)
         m = nn.BatchNorm2d(3).half().to(device)
