@@ -31,6 +31,7 @@ class MultiKernelState:
 
     def __init__(self):
         self.subkernel_to_kernel_name = {}
+        self.runtime_divisible_kernels = {}
         self.kernel_defs = IndentedBuffer()
 
     def define_kernel(
@@ -136,6 +137,27 @@ class MultiKernelState:
             )
 
         return multi_kernel_name
+
+    def define_runtime_divisible_kernel(
+        self, kernel_names: tuple[str, str], divisible_by_16: tuple[int, ...]
+    ) -> str:
+        key = (kernel_names, divisible_by_16)
+        if key in self.runtime_divisible_kernels:
+            return self.runtime_divisible_kernels[key]
+
+        kernel_name = f"runtime_divisible_kernel_{len(self.runtime_divisible_kernels)}"
+        self.runtime_divisible_kernels[key] = kernel_name
+
+        self.kernel_defs.writeline("")
+        self.kernel_defs.writeline(
+            f"{kernel_name} = async_compile.runtime_divisible_multi_kernel("
+        )
+        with self.kernel_defs.indent():
+            self.kernel_defs.writeline(f"{kernel_name!r},")
+            self.kernel_defs.writeline(f"[{kernel_names[0]}, {kernel_names[1]}],")
+            self.kernel_defs.writeline(f"divisible_by_16={divisible_by_16!r},")
+        self.kernel_defs.writeline(")")
+        return kernel_name
 
 
 class MultiKernel:
@@ -527,6 +549,30 @@ class MultiKernelCall:
                 row[f"kernel{i}_path"] = ""
                 row[f"kernel{i}_latency"] = ""
         return row
+
+
+class RuntimeDivisibleMultiKernelCall:
+    """Dispatch between [generic, aligned] using scalar runtime argument indices."""
+
+    def __init__(self, multi_kernel_name, kernels, divisible_by_16):
+        if len(kernels) != 2:
+            raise AssertionError(f"expected 2 kernels, got {len(kernels)}")
+        if not divisible_by_16:
+            raise AssertionError("expected at least one divisibility check")
+        self._kernels = kernels
+        self.multi_kernel_name = multi_kernel_name
+        self.divisible_by_16 = divisible_by_16
+
+    @property
+    def kernels(self):
+        for i, kernel in enumerate(self._kernels):
+            if isinstance(kernel, CodeCacheFuture):
+                self._kernels[i] = kernel.result()
+        return self._kernels
+
+    def run(self, *args, **kwargs):
+        index = int(all(args[i] % 16 == 0 for i in self.divisible_by_16))
+        self.kernels[index].run(*args, **kwargs)
 
 
 class SizeHintMultiKernel(MultiKernel):
