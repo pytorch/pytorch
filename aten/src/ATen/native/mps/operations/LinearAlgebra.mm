@@ -875,6 +875,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool check_errors) {
   using namespace mps;
 
+  getCurrentMPSStream()->assertCapturable("linalg.lu_factor");
   TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
@@ -1008,6 +1009,7 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
 
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   using namespace mps;
+  getCurrentMPSStream()->assertCapturable("linalg.lu_solve");
   TORCH_CHECK(LU.scalar_type() == kFloat, "linalg.lu_solve(): MPS only supports float32.");
   if (B.numel() == 0) {
     return;
@@ -1646,6 +1648,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                 Tensor& out) {
   using namespace mps;
 
+  getCurrentMPSStream()->assertCapturable("linalg.solve_triangular");
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
   TORCH_CHECK(A.scalar_type() == kFloat && B.scalar_type() == kFloat,
               "linalg.solve.triangular(); Only float is supported!");
@@ -2000,6 +2003,7 @@ static void svd_kernel_mps(const Tensor& A,
   const bool too_small = (batch * m * n < 8192);
 
   if (too_large || too_small) {
+    getCurrentMPSStream()->assertCapturable("linalg.svd (CPU fallback path)");
     if (too_large) {
       TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
                       staging_bytes,
@@ -2137,6 +2141,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   const bool too_small = (batch * n * n < 12288);
 
   if (unsupported_dtype || !fits || too_small) {
+    getCurrentMPSStream()->assertCapturable("linalg.eigh (CPU fallback path)");
     if (!fits) {
       TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
                       2 * staging_bytes,

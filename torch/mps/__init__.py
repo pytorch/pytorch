@@ -231,6 +231,87 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
     return torch._C._mps_host_alias_storage(storage)
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def metal_graph_capture():
+    r"""Context manager that records a sequence of MPS operations
+    for later replay via :func:`metal_graph_replay`.
+
+    On entry the stream begins recording; every op executed inside
+    the block is encoded normally (outputs are valid) and its executable +
+    buffer bindings are saved. On exit recording stops. The block yields an
+    opaque handle (via ``as``) identifying this particular capture; pass it to
+    :func:`metal_graph_replay` to replay it, and to :func:`metal_graph_free`
+    to release its retained buffers/executables once it is no longer needed.
+
+    Subsequent calls to :func:`metal_graph_replay` re-encode all saved ops in a
+    single ``dispatch_sync`` block, collapsing N per-op dispatches to one and
+    eliminating their CPU overhead.
+
+    Constraints (identical to ``torch.cuda.graph``):
+
+    * Tensor shapes must not change between the capture pass and replays.
+    * Input data must be updated **in-place** via ``.copy_()`` before each
+      replay - do **not** create new tensors or reassign variables. This only
+      propagates for buffer-backed inputs; scalar / 0-dim tensor inputs are
+      encoded via ``setBytes`` at capture time and are **frozen** on replay.
+      Materialize scalars as 1-element tensors to make them buffer-backed if
+      you need to vary them across replays.
+    * MPS profiling must be disabled during capture.
+    * Multiple independent captures may be alive at once, each replayed and
+      freed via its own handle. Recording itself is exclusive: nesting
+      ``metal_graph_capture()`` blocks raises ``RuntimeError``.
+
+    Example::
+
+        model_a.eval()
+        model_b.eval()
+        x1 = torch.randn(batch, seq, d_model, device="mps")
+        x2 = torch.randn(batch, seq, d_model, device="mps")
+
+        with torch.mps.metal_graph_capture() as g1:
+            out1 = model_a(x1)  # runs once; ops recorded
+        with torch.mps.metal_graph_capture() as g2:
+            out2 = model_b(x2)  # independent of g1
+
+        for batch1, batch2 in loader:
+            x1.copy_(batch1)  # update inputs in-place
+            x2.copy_(batch2)
+            torch.mps.metal_graph_replay(g1)
+            torch.mps.metal_graph_replay(g2)
+            results.append((out1.cpu(), out2.cpu()))
+
+        torch.mps.metal_graph_free(g1)
+        torch.mps.metal_graph_free(g2)
+    """
+    handle = torch._C._mps_metalGraphCaptureBegin()
+    try:
+        yield handle
+    finally:
+        torch._C._mps_metalGraphCaptureEnd()
+
+
+def metal_graph_replay(handle: int) -> None:
+    r"""Replays the ops recorded by the :func:`metal_graph_capture` block that
+    produced ``handle``.
+
+    All captured ops are encoded to the command buffer inside a single
+    ``dispatch_sync``, eliminating per-op dispatch overhead. Input tensors must
+    have been updated in-place before calling this function.
+    """
+    torch._C._mps_metalGraphReplay(handle)
+
+
+def metal_graph_free(handle: int) -> None:
+    r"""Releases the resources (compiled executables, retained buffers) held by
+    the completed capture identified by ``handle``. Do not reuse ``handle``
+    after calling this.
+    """
+    torch._C._mps_metalGraphCaptureFree(handle)
+
+
 from . import profiler
 from .event import Event
 
@@ -240,6 +321,9 @@ __all__ = [
     "load_metallib",
     "device_count",
     "get_rng_state",
+    "metal_graph_capture",
+    "metal_graph_replay",
+    "metal_graph_free",
     "manual_seed",
     "seed",
     "set_rng_state",

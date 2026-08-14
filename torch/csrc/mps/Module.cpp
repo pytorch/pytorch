@@ -570,6 +570,24 @@ void initModule(PyObject* module) {
     pybind11::gil_scoped_release no_gil;
     at::mps::getMPSProfiler().stopCapture();
   });
+  m.def("_mps_metalGraphCaptureBegin", []() {
+    return at::mps::getDefaultMPSStream()->captureBegin();
+  });
+  m.def("_mps_metalGraphCaptureEnd", []() {
+    at::mps::getDefaultMPSStream()->captureEnd();
+  });
+  m.def("_mps_metalGraphCaptureFree", [](uint64_t handle) {
+    at::mps::getDefaultMPSStream()->captureFree(handle);
+  });
+  m.def("_mps_metalGraphCaptureReset", []() {
+    at::mps::getDefaultMPSStream()->captureReset();
+  });
+  m.def("_mps_metalGraphCapturedStepCount", [](uint64_t handle) {
+    return at::mps::getDefaultMPSStream()->capturedStepCount(handle);
+  });
+  m.def("_mps_metalGraphReplay", [](uint64_t handle) {
+    at::mps::getDefaultMPSStream()->replay(handle);
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
