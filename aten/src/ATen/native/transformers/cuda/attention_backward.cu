@@ -236,7 +236,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     const int64_t max_k,
     double dropout_p,
     bool is_causal,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool causal_mask_bottom_right) {
 
     auto& ctx = at::globalContext();
     if (ctx.deterministicAlgorithms()) {
@@ -248,6 +249,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     }
 
     const bool is_nested = cum_seq_q.defined();
+    TORCH_CHECK(
+        !causal_mask_bottom_right || is_nested,
+        "bottom-right causal masking is only supported for cuDNN varlen attention");
+    TORCH_CHECK(
+        !is_causal || !causal_mask_bottom_right,
+        "top-left and bottom-right causal masking cannot both be enabled");
     TORCH_CHECK(
         !is_nested || max_q > 128,
         "cuDNN varlen attention does not support query sequence length <= 128.");
@@ -342,6 +349,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         head_dim_v,
         softmax_scale,
         is_causal,
+        causal_mask_bottom_right,
         dropout_p,
         cum_seq_q,
         cum_seq_k,

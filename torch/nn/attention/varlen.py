@@ -61,7 +61,10 @@ def _can_use_cudnn(
         return False
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         return False
-    if window_size != [-1, -1]:
+    if window_size == [-1, 0]:
+        if seqused_k is not None or block_table is not None:
+            return False
+    elif window_size != [-1, -1]:
         return False
     if enable_gqa or query.size(-2) != key.size(-2):
         return False
@@ -128,11 +131,12 @@ def _varlen_attn(
             max_k=max_k,
             compute_log_sumexp=True,
             dropout_p=0.0,  # dropout_p hardcoded to 0.0
-            is_causal=is_causal,
+            is_causal=False,
             return_debug_mask=False,  # return_debug_mask
             scale=scale,
             seqused_k=seqused_k,
             block_table=block_table,
+            causal_mask_bottom_right=is_causal,
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
         output, softmax_lse, rng_state = result[0], result[1], result[6]
@@ -553,10 +557,6 @@ def _varlen_attn_backward(
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-        if window_size[0] != -1 or window_size[1] != -1:
-            raise RuntimeError(
-                "cuDNN backend does not support window attention. Please use Flash Attention backend."
-            )
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
             grad_out=grad_out,
             query=query,
@@ -572,8 +572,9 @@ def _varlen_attn_backward(
             philox_seed=rng_state,
             philox_offset=rng_state,  # should be unused
             attn_bias=None,
-            is_causal=is_causal,
+            is_causal=False,
             scale=scale,
+            causal_mask_bottom_right=is_causal,
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")

@@ -827,17 +827,97 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("window_size", [(-1, -1), (-1, 0)])
     @parametrize("_should_use_cudnn", [True])
-    def test_cudnn_attention_varlen(self, device, dtype, _should_use_cudnn):
+    def test_cudnn_attention_varlen(
+        self, device, dtype, window_size, _should_use_cudnn
+    ):
         self._test_varlen_vs_sdpa(
             device,
             dtype,
             scale=None,
-            window_size=(-1, -1),
+            window_size=window_size,
             backend="fa2",
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    def test_cudnn_causal_varlen_unequal_lengths(self, device):
+        """Match Flash bottom-right causality when packed Q/K lengths differ."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        cu_seq_q = torch.tensor([0, 192, 416], device=device, dtype=torch.int32)
+        cu_seq_k = torch.tensor([0, 256, 448], device=device, dtype=torch.int32)
+        q_base = torch.randn(416, 4, 64, device=device, dtype=torch.bfloat16)
+        k_base = torch.randn(448, 4, 64, device=device, dtype=torch.bfloat16)
+        v_base = torch.randn_like(k_base)
+        grad_out = torch.randn_like(q_base)
+
+        with torch.no_grad():
+            torch.ops.aten._cudnn_attention_forward(
+                q_base,
+                k_base,
+                v_base,
+                None,
+                cu_seq_q,
+                cu_seq_k,
+                224,
+                256,
+                True,
+                0.0,
+                False,
+                False,
+            )
+
+        results = {}
+        for use_cudnn in (False, True):
+            q = q_base.clone().requires_grad_()
+            k = k_base.clone().requires_grad_()
+            v = v_base.clone().requires_grad_()
+            with _use_cudnn_varlen(use_cudnn, device):
+                out = varlen_attn(
+                    q,
+                    k,
+                    v,
+                    cu_seq_q,
+                    cu_seq_k,
+                    224,
+                    256,
+                    window_size=(-1, 0),
+                )
+            results[use_cudnn] = (
+                out,
+                *torch.autograd.grad(out, (q, k, v), grad_out),
+            )
+
+        q = q_base.clone().requires_grad_()
+        k = k_base.clone().requires_grad_()
+        v = v_base.clone().requires_grad_()
+        native = torch.ops.aten._cudnn_attention_forward(
+            q,
+            k,
+            v,
+            None,
+            cu_seq_q,
+            cu_seq_k,
+            224,
+            256,
+            True,
+            0.0,
+            False,
+            False,
+            causal_mask_bottom_right=True,
+        )[0]
+        native_result = (native, *torch.autograd.grad(native, (q, k, v), grad_out))
+
+        flash = results[False]
+        for actual in (results[True], native_result):
+            for flash_tensor, actual_tensor in zip(flash, actual):
+                self.assertEqual(flash_tensor, actual_tensor, atol=1e-2, rtol=2e-2)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
@@ -865,8 +945,10 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
         use_cudnn = backend == "cudnn"
-        if use_cudnn and (window_size != (-1, -1) or num_splits is not None):
-            self.skipTest("cuDNN does not support window_size or num_splits")
+        if use_cudnn and (
+            window_size not in ((-1, -1), (-1, 0)) or num_splits is not None
+        ):
+            self.skipTest("cuDNN does not support this window_size or num_splits")
         if TEST_WITH_ROCM:
             if num_splits is not None:
                 self.skipTest("num_splits is not supported on ROCm")
