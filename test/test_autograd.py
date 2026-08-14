@@ -73,7 +73,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
-    onlyCPU,
     parametrize,
     run_tests,
     scoped_load_inline,
@@ -12456,6 +12455,8 @@ def bernoulli_scalar():
 
 
 class TestAutogradForwardModeBatchedGrad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
         b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
@@ -12565,6 +12566,8 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
 
 
 class TestAutogradForwardMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         # Ensure that a failing test won't make others fail
         while fwAD._current_level >= 0:
@@ -14832,6 +14835,8 @@ class TestAutogradDeviceType(TestCase):
 
 
 class TestAllowMutationOnSaved(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertClonedLenEqual(self, ctx, n):
         self.assertEqual(len(list(ctx.cloned.items())), n)
 
@@ -15029,6 +15034,8 @@ class TestAllowMutationOnSaved(TestCase):
 
 
 class TestAutogradInferenceMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _is_inference_tensor(self, tensor):
         try:
             err_msg = "Inference tensors do not track version counter"
@@ -15452,6 +15459,8 @@ def _get_device_name(idx):
 # Although this is written to be generic over all accelerators, non-cuda accelerators
 # are not fully tested since sleep is only supported on cuda.
 class TestAutogradStreamSynchronization(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def get_default_streams(self, num_devices=1):
         out = []
         for i in range(num_devices):
@@ -15478,12 +15487,10 @@ class TestAutogradStreamSynchronization(TestCase):
                 )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:0    s1
@@ -15559,7 +15566,7 @@ class TestAutogradStreamSynchronization(TestCase):
             # when FuncBackward produces a gradient on a default stream
             # a sync is necessary.
             with torch.Stream(0) as s0:
-                a = torch.ones(256, 256, requires_grad=True, device="cuda")
+                a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
                 b = a * 2
 
             default_stream_0.wait_stream(s0)
@@ -15586,6 +15593,7 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
@@ -15594,35 +15602,30 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self, device
     ):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=True
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_3_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=False
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_4_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
         # Producer: cuda:1    s1
@@ -15679,15 +15682,13 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_multi_producer_case_4_correctness(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
@@ -15874,11 +15875,9 @@ class TestAutogradStreamSynchronization(TestCase):
         populate_events()
         check_ordering()
 
+    @onlyAccelerator
     @expectedFailureMPS
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
-
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
                 with set_warn_always_context(True):
@@ -15925,6 +15924,8 @@ class TestAutogradStreamSynchronization(TestCase):
 
 
 class TestMultithreadAutograd(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_py_multithread_fn(
         self, fn, args=(), num_threads=10, kwargs=None, pass_idx=False
     ):
@@ -16364,6 +16365,8 @@ class TestMultithreadAutograd(TestCase):
 
 
 class TestNestedCheckpoint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def grad(fn):
         def wrapper(x):
@@ -16881,6 +16884,8 @@ class _AutoNamingMode(TorchDispatchMode):
 
 
 class TestSelectiveActivationCheckpoint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_flops_and_mem(self):
         # From https://github.com/pytorch/pytorch/pull/126320
@@ -17505,6 +17510,8 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
 @skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
 class TestSACAmbientSavedTensorsHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Characterizes how a user saved_tensors_hooks context wrapped OUTER around
     # a selective activation checkpoint (SAC) region interacts with the tensors
     # SAC decides to save. Historically SAC held those tensors outside the
@@ -17746,6 +17753,8 @@ class TestSACAmbientSavedTensorsHooks(TestCase):
 
 
 class TestAutogradMultipleDispatch(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
         # using _test_autograd_multiple_dispatch.fullcoverage which has
@@ -17861,36 +17870,11 @@ class TestAutogradMultipleDispatch(TestCase):
             # Default gradient registered is grad.reshape_as(self)
             self.assertEqual(t.grad, grad.reshape_as(t))
 
-    @onlyCPU
-    def test_per_dispatch_key_input_saving(self, device):
-        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
-        def foo(x):
-            # Don't modify the input inplace
-            x = x.clone()
-            res = x.sum(-1, keepdim=True)
-            x.add_(x)
-            return res
-
-        inp = torch.rand(2, device=device, requires_grad=True)
-        # sum's input is not saved for regular Tensors
-        foo(inp).backward()
-
-        # sum's input is saved for Nested Tensors
-        nt = torch.nested.nested_tensor(
-            [torch.rand(2), torch.rand(2)], device=device, requires_grad=True
-        )
-        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            foo(nt).backward(
-                torch.nested.nested_tensor(
-                    [torch.rand(1), torch.rand(1)], device=device
-                )
-            )
-
+    @onlyAccelerator
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
     )
-    @onlyCUDA
-    def test_backward_single_threaded(self):
+    def test_backward_single_threaded(self, device):
         threads_eq = None
 
         class TestFn(Function):
@@ -17906,7 +17890,7 @@ class TestAutogradMultipleDispatch(TestCase):
                 threads_eq = ctx.tid == threading.get_ident()
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        inp = torch.rand(10, device=device, requires_grad=True)
 
         with torch.autograd.set_multithreading_enabled(False):
             TestFn.apply(inp, None).sum().backward()
@@ -17915,8 +17899,8 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertFalse(threads_eq)
 
-    @onlyCUDA
-    def test_backward_tls_stash(self):
+    @onlyAccelerator
+    def test_backward_tls_stash(self, device):
         local = threading.local()
         local.my_obj = {}
         local.my_obj[10] = 10
@@ -17935,10 +17919,14 @@ class TestAutogradMultipleDispatch(TestCase):
                 torch._C._get_obj_in_tls("my_obj")[10] = 5
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        inp = torch.rand(10, device=device, requires_grad=True)
 
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
+
+
+class TestAutogradMultipleDispatchOnCPU(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181323"
@@ -18101,12 +18089,34 @@ class TestAutogradMultipleDispatch(TestCase):
                     expected[i, i] = 1.0
                 self.assertEqual(x.grad, expected)
 
+    def test_per_dispatch_key_input_saving(self):
+        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
+        def foo(x):
+            # Don't modify the input inplace
+            x = x.clone()
+            res = x.sum(-1, keepdim=True)
+            x.add_(x)
+            return res
+
+        inp = torch.rand(2, requires_grad=True)
+        # sum's input is not saved for regular Tensors
+        foo(inp).backward()
+
+        # sum's input is saved for Nested Tensors
+        nt = torch.nested.nested_tensor(
+            [torch.rand(2), torch.rand(2)], requires_grad=True
+        )
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)]))
+
 
 @skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
 class TestFunctionAssertMessages(TestCase):
     # THPFunction_assert forwards to a printf-style formatter. Regression tests
     # that the dynamic content (offending type name / index) is not silently
     # dropped from the error message.
+    hw_classification = HardwareClassification.GENERIC
+
     def _apply(self, forward_fn):
         class F(Function):
             @staticmethod
@@ -18270,12 +18280,8 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 instantiate_device_type_tests(TestAutogradDeviceType, globals())
 instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for="cuda")
 
-instantiate_device_type_tests(
-    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestAutogradStreamSynchronization, globals(), except_for=None
-)
+instantiate_device_type_tests(TestAutogradMultipleDispatch, globals())
+instantiate_device_type_tests(TestAutogradStreamSynchronization, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
