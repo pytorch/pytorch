@@ -80,7 +80,7 @@ class TestShapeOps(TestCase):
             res2 = x.unbind(dim)
             self.assertEqual(x.size(dim), len(res))
             self.assertEqual(x.size(dim), len(res2))
-            for i in range(dim):
+            for i in range(x.size(dim)):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
@@ -250,6 +250,22 @@ class TestShapeOps(TestCase):
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
+
+    @dtypes(torch.float)
+    def test_diagonal_multidim(self, device, dtype):
+        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
+        xn = x.cpu().numpy()
+        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
+            result = torch.diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertEqual(expected, result)
+        # test non-contiguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.cpu().numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertEqual(expected, result)
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
@@ -616,11 +632,11 @@ class TestShapeOps(TestCase):
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
-        x = torch.randn(42).to(dtype)
+        x = torch.randn(42, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
-            torch.fliplr(torch.tensor(42, device=device, dtype=dtype))
+            torch.fliplr(x.to(device))
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_flipud(self, device, dtype):
@@ -722,7 +738,7 @@ class TestShapeOps(TestCase):
                         tensor, out=torch.empty([], dtype=torch.float, device=device)
                     ),
                 )
-            if self.device_type != "cpu":
+            if self.device_type not in ("cpu", "xla"):
                 self.assertRaisesRegex(
                     RuntimeError,
                     "on the same device",
@@ -858,22 +874,6 @@ class TestShapeOps(TestCase):
 
 class TestShapeOpsOnCPU(TestCase):
     hw_classification = HardwareClassification.CPU
-
-    @dtypes(torch.float)
-    def test_diagonal_multidim(self, device, dtype):
-        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
-        xn = x.cpu().numpy()
-        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
-            result = torch.diagonal(x, *args)
-            expected = xn.diagonal(*args)
-            self.assertEqual(expected.shape, result.shape)
-            self.assertEqual(expected, result)
-        # test non-contiguous
-        xp = x.permute(1, 2, 3, 0)
-        result = torch.diagonal(xp, 0, -2, -1)
-        expected = xp.cpu().numpy().diagonal(0, -2, -1)
-        self.assertEqual(expected.shape, result.shape)
-        self.assertEqual(expected, result)
 
     @unittest.expectedFailure
     @dtypes(torch.quint4x2, torch.quint2x4)
