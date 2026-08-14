@@ -3357,13 +3357,9 @@ class TestFxGraphCacheHashing(TestCase):
         return torch.fx.GraphModule({}, graph)
 
     def _custom_op_schema_cache_key(self, mutates_out, target_kind):
-        with torch.library._scoped_library(
-            "test_fx_cache_schema", "FRAGMENT"
-        ) as lib:
+        with torch.library._scoped_library("test_fx_cache_schema", "FRAGMENT") as lib:
 
-            def mul_out(
-                x: torch.Tensor, y: torch.Tensor, *, out: torch.Tensor
-            ) -> None:
+            def mul_out(x: torch.Tensor, y: torch.Tensor, *, out: torch.Tensor) -> None:
                 pass
 
             schema = torch.library.infer_schema(

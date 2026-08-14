@@ -1555,9 +1555,9 @@ class FxGraphHashDetails:
         # the kernel source code separately
         self.user_defined_triton_source: list[Any] = []
         if gm is not None:
-            custom_op_schema_details: OrderedSet[
-                tuple[str, tuple[str, ...]]
-            ] = OrderedSet()
+            custom_op_schema_details: OrderedSet[tuple[str, tuple[str, ...]]] = (
+                OrderedSet()
+            )
             for module in gm.modules():
                 if not isinstance(module, torch.fx.GraphModule):
                     continue
@@ -1602,9 +1602,7 @@ class FxGraphHashDetails:
             if custom_op_schema_details:
                 # GraphModule serialization records operator names, but not the
                 # schemas and tags that determine compiler-visible semantics.
-                self.custom_op_schema_details = tuple(
-                    sorted(custom_op_schema_details)
-                )
+                self.custom_op_schema_details = tuple(sorted(custom_op_schema_details))
 
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs
