@@ -369,7 +369,7 @@ class MixOrderReduction:
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
-        if node1.has_strict_sum() or node2.has_strict_sum():
+        if node1.has_strict_reduction() or node2.has_strict_reduction():
             return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
@@ -555,8 +555,8 @@ class NestedReduction:
             config.triton.nested_reduction
             and not V.graph.cpp_wrapper
             and _is_gpu_triton_backend(outer_node, grouped_node)
-            and not outer_node.has_strict_sum()
-            and not grouped_node.has_strict_sum()
+            and not outer_node.has_strict_reduction()
+            and not grouped_node.has_strict_reduction()
         )
 
     @classmethod
@@ -1470,12 +1470,12 @@ class BaseSchedulerNode:
         return [self]
 
     @cache_on_self
-    def has_strict_sum(self) -> bool:
+    def has_strict_reduction(self) -> bool:
         return any(
             isinstance(node, SchedulerNode)
             and isinstance(node.node, ComputedBuffer)
             and isinstance(node.node.data, ir.Reduction)
-            and node.node.data.strict_sum_rblock is not None
+            and node.node.data.strict_reduction_rblock is not None
             for node in self.get_nodes()
         )
 
@@ -2270,6 +2270,7 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         super().__init__(scheduler)
         self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
+        self._loop_state_gen = 0
         self._init_from_node(node)
         self._compute_attrs()
 
@@ -2371,6 +2372,7 @@ class SchedulerNode(BaseSchedulerNode):
             self.group,
             self.read_writes,
             self.unmet_dependencies,
+            self._loop_state_gen,
         )
 
     def restore_loop_state(self, state: tuple[Any, ...]) -> None:
@@ -2381,12 +2383,19 @@ class SchedulerNode(BaseSchedulerNode):
             self.group,
             self.read_writes,
             self.unmet_dependencies,
+            self._loop_state_gen,
         ) = state
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
             self._loop_mutation_listener(self)
+        # Identifies the current loop state, so analyses derived from it can be
+        # cached across the O(n^2) fusion pair search. Bumped after notifying
+        # the listener, which snapshots the pre-mutation state: snapshot and
+        # restore then carry the generation, so rolling a trial reindex back
+        # also restores cache validity.
+        self._loop_state_gen += 1
 
     def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
         if self._body is None:
@@ -3033,7 +3042,7 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode):
-        if self.has_strict_sum() or other.has_strict_sum():
+        if self.has_strict_reduction() or other.has_strict_reduction():
             return False
         # Limit tl.load() count in the fused RSPLIT loop to avoid register
         # spills. See https://github.com/pytorch/pytorch/issues/179423
@@ -3553,8 +3562,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
 
-        # Keep strict sums standalone so their planned R0_BLOCK cannot change.
-        filtered_nodes = [node for node in filtered_nodes if not node.has_strict_sum()]
+        # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
+        filtered_nodes = [
+            node for node in filtered_nodes if not node.has_strict_reduction()
+        ]
 
         # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
         if config.combo_kernels_pointwise_only:
@@ -4226,6 +4237,10 @@ class _LoopMutationTracker:
         self.state.restore()
 
 
+# Distinguishes "not cached" from a cached None in _tiling_memory_cache.
+_TILING_MEMORY_MISS = object()
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -4241,6 +4256,7 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
+        self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
@@ -7618,15 +7634,30 @@ class Scheduler:
         if any(node.is_cpu() for node in snodes):
             return None
 
+        # The fusion search asks this for the same nodes over and over while
+        # pairing them up (on one model, 1160 calls over 53 distinct nodes).
+        # The answer is a function of the nodes' loop state, which
+        # _loop_state_gen identifies, so key on that. snodes are leaf
+        # SchedulerNodes (checked above), which the scheduler keeps for its
+        # lifetime, so keying on the nodes themselves retains nothing extra.
+        # pyrefly: ignore[missing-attribute]
+        cache_key = tuple((sn, sn._loop_state_gen) for sn in snodes)
+        cached = self._tiling_memory_cache.get(cache_key, _TILING_MEMORY_MISS)
+        if cached is not _TILING_MEMORY_MISS:
+            return cached
+
         analysis = analyze_memory_coalescing_for_nodes(snodes)
         if analysis is None:
+            self._tiling_memory_cache[cache_key] = None
             return None
 
         reduction = max(snodes, key=lambda node: int(node.is_reduction()))
         _, (numel, rnumel) = reduction.group
-        return SIMDScheduling.select_tiling_with_memory(
+        result = SIMDScheduling.select_tiling_with_memory(
             snodes, numel, rnumel, analysis
         ).memory
+        self._tiling_memory_cache[cache_key] = result
+        return result
 
     def _reindexing_regresses_memory_coalescing(
         self,
@@ -8116,16 +8147,16 @@ class Scheduler:
 
         why = WhyNoFuse(node1, node2)
 
-        if node1.is_template() and node2.has_strict_sum():
-            why("template fusion does not preserve strict sum ordering")
+        if node1.is_template() and node2.has_strict_reduction():
+            why("template fusion does not preserve strict reduction ordering")
             return False
 
         if (
-            (node1.has_strict_sum() or node2.has_strict_sum())
+            (node1.has_strict_reduction() or node2.has_strict_reduction())
             and node1.is_reduction()
             and node2.is_reduction()
         ):
-            why("reduction fusion does not preserve strict sum ordering")
+            why("reduction fusion does not preserve strict reduction ordering")
             return False
 
         if node1.is_template() and self.get_backend(
