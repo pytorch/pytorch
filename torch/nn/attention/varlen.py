@@ -47,6 +47,8 @@ def _cudnn_rejection_reasons(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
     max_q: int,
     window_size: list[int],
     enable_gqa: bool = False,
@@ -67,6 +69,10 @@ def _cudnn_rejection_reasons(
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         reasons.append("query and value head dimensions must be divisible by 8")
     if window_size == [-1, 0]:
+        if cu_seq_q is not cu_seq_k:
+            reasons.append(
+                "causal attention requires the same cu_seq tensor for Q and K"
+            )
         if seqused_k is not None or block_table is not None:
             reasons.append("causal attention does not support a KV cache")
     elif window_size != [-1, -1]:
@@ -84,6 +90,8 @@ def _select_backend(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
     max_q: int,
     window_size: list[int],
     enable_gqa: bool = False,
@@ -99,6 +107,8 @@ def _select_backend(
             query,
             key,
             value,
+            cu_seq_q,
+            cu_seq_k,
             max_q,
             window_size,
             enable_gqa,
@@ -173,12 +183,11 @@ def _varlen_attn(
             max_k=max_k,
             compute_log_sumexp=True,
             dropout_p=0.0,  # dropout_p hardcoded to 0.0
-            is_causal=False,
+            is_causal=is_causal,
             return_debug_mask=False,  # return_debug_mask
             scale=scale,
             seqused_k=seqused_k,
             block_table=block_table,
-            causal_mask_bottom_right=is_causal,
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
         output, softmax_lse, rng_state = result[0], result[1], result[6]
@@ -389,6 +398,8 @@ def varlen_attn(
         query,
         key,
         value,
+        cu_seq_q,
+        cu_seq_k,
         max_q,
         window_size_list,
         enable_gqa,
@@ -637,9 +648,8 @@ def _varlen_attn_backward(
             philox_seed=rng_state,
             philox_offset=rng_state,  # should be unused
             attn_bias=None,
-            is_causal=False,
+            is_causal=is_causal,
             scale=scale,
-            causal_mask_bottom_right=is_causal,
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")

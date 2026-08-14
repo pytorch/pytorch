@@ -51,7 +51,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
     float scaling_factor,
     bool return_softmaxstats,
     bool is_causal,
-    bool causal_mask_bottom_right,
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -107,7 +106,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
     float scaling_factor,
     bool is_causal,
-    bool causal_mask_bottom_right,
     float dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -284,7 +282,6 @@ struct MHAParams {
   int64_t d_v;
   double dropout_probability;
   bool is_causal;
-  bool causal_mask_bottom_right;
   bool return_softmaxstats;
   // might be redundant if we take 0 dim/stride
   // as signaling no-bias
@@ -357,7 +354,6 @@ void setMHAParams(
     const Tensor& softmaxstats,
     double dropout_probability,
     bool is_causal,
-    bool causal_mask_bottom_right,
     bool return_softmaxstats,
     bool is_nested,
     const std::optional<Tensor>& page_table) {
@@ -375,7 +371,6 @@ void setMHAParams(
   params.s_kv = s_kv;
   params.dropout_probability = dropout_probability;
   params.is_causal = is_causal;
-  params.causal_mask_bottom_right = causal_mask_bottom_right;
   params.return_softmaxstats = return_softmaxstats;
   params.has_attn_bias = attn_bias.has_value();
   params.is_paged = page_table.has_value();
@@ -463,7 +458,6 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       const Tensor& softmaxstats,
       double dropout_probability,
       bool is_causal,
-      bool causal_mask_bottom_right,
       bool return_softmaxstats,
       bool is_nested,
       const std::optional<Tensor>& page_table = std::nullopt) {
@@ -484,7 +478,6 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         softmaxstats,
         dropout_probability,
         is_causal,
-        causal_mask_bottom_right,
         return_softmaxstats,
         is_nested,
         page_table);
@@ -835,7 +828,6 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
     float scaling_factor,
     bool return_softmaxstats,
     bool is_causal,
-    bool causal_mask_bottom_right,
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -891,7 +883,6 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
           .set_generate_stats(return_softmaxstats)
 #endif
           .set_causal_mask(is_causal)
-          .set_causal_mask_bottom_right(causal_mask_bottom_right)
           .set_attn_scale(attn_scale)
           .set_seq_len_q(SEQ_LEN_Q_)
           .set_seq_len_kv(SEQ_LEN_KV_)
@@ -1269,7 +1260,6 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
     int64_t d_v,
     float scaling_factor,
     bool is_causal,
-    bool causal_mask_bottom_right,
     float dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -1320,15 +1310,13 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                             .set_dim({b, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_data_type(fe::DataType_t::INT32));
-  auto sdpa_backward_options =
-      fe::graph::SDPA_backward_attributes()
-          .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
-          .set_causal_mask(is_causal)
-          .set_causal_mask_bottom_right(causal_mask_bottom_right)
-          .set_attn_scale(attn_scale)
-          .set_seq_len_q(SEQ_LEN_Q_)
-          .set_seq_len_kv(SEQ_LEN_KV_)
-          .set_padding_mask(true);
+  auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
+                                   .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
+                                   .set_causal_mask(is_causal)
+                                   .set_attn_scale(attn_scale)
+                                   .set_seq_len_q(SEQ_LEN_Q_)
+                                   .set_seq_len_kv(SEQ_LEN_KV_)
+                                   .set_padding_mask(true);
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_uid(SEED)
@@ -1580,7 +1568,6 @@ void run_cudnn_SDP_fprop(
       softmaxstats,
       dropout_probability,
       is_causal,
-      /*causal_mask_bottom_right=*/false,
       return_softmaxstats,
       false);
   auto [cache_it, not_found] = getMHAGraphCache_().try_emplace(key, nullptr);
@@ -1653,7 +1640,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
     float scaling_factor,
     bool return_softmaxstats,
     bool is_causal,
-    bool causal_mask_bottom_right,
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -1714,7 +1700,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
       softmaxstats_,
       dropout_probability,
       is_causal,
-      causal_mask_bottom_right,
       return_softmaxstats,
       true,
       page_table);
@@ -1734,7 +1719,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
         scaling_factor,
         return_softmaxstats,
         is_causal,
-        causal_mask_bottom_right,
         dropout_probability,
         cum_seqlen_q,
         cum_seqlen_kv,
@@ -1897,7 +1881,6 @@ void run_cudnn_SDP_bprop(
       softmaxstats,
       dropout_probability,
       is_causal,
-      /*causal_mask_bottom_right=*/false,
       true,
       false);
   auto [cache_it, not_found] =
@@ -1978,7 +1961,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
     int64_t d_v,
     float scaling_factor,
     bool is_causal,
-    bool causal_mask_bottom_right,
     float dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -2064,7 +2046,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
       softmaxstats_,
       dropout_probability,
       is_causal,
-      causal_mask_bottom_right,
       true,
       true);
 
@@ -2082,7 +2063,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
         d_v,
         scaling_factor,
         is_causal,
-        causal_mask_bottom_right,
         dropout_probability,
         cum_seqlen_q,
         cum_seqlen_kv,
