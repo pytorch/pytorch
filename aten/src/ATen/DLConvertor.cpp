@@ -409,7 +409,7 @@ void fillVersion<DLManagedTensorVersioned>(
 
 // This function returns a shared_ptr to memory managed DLpack tensor
 // constructed out of ATen tensor. When read_only is set, the data is exported
-// through Storage::data() (avoiding a copy-on-write materialization) and the
+// through const_data_ptr() (avoiding a copy-on-write materialization) and the
 // DLPACK_FLAG_BITMASK_READ_ONLY flag is set on the versioned struct.
 template <class T>
 T* toDLPackImpl(const Tensor& src, bool read_only) {
@@ -417,20 +417,22 @@ T* toDLPackImpl(const Tensor& src, bool read_only) {
   atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor.get();
   atDLMTensor->tensor.deleter = &deleter<T>;
-  // Encode the storage base in `data` and the element offset in `byte_offset`.
-  // Required for MPS (where DLTensor.data is an opaque id<MTLBuffer>) and is
-  // also valid for CPU/CUDA per the DLPack spec; consumers must add byte_offset.
-  //
   // DLTensor::data is a plain void*, so the read-only path const_casts away the
-  // const from Storage::data(). This is safe: it does not materialize a
-  // copy-on-write tensor, and DLPACK_FLAG_BITMASK_READ_ONLY is set on the
-  // versioned struct (see fillVersion) so the consumer is told not to write
-  // through the pointer.
-  atDLMTensor->tensor.dl_tensor.data = read_only
-      ? const_cast<void*>(src.storage().data())
-      : src.storage().mutable_data();
-  atDLMTensor->tensor.dl_tensor.byte_offset =
-      src.storage_offset() * c10::elementSize(src.scalar_type());
+  // const from const_data_ptr(). This is safe: const_data_ptr() does not
+  // materialize a copy-on-write tensor, and DLPACK_FLAG_BITMASK_READ_ONLY is
+  // set on the versioned struct (see fillVersion) so the consumer is told not
+  // to write through the pointer. The mutable path uses mutable_data_ptr().
+  if (src.device().type()  == kMPS) {
+      atDLMTensor->tensor.dl_tensor.data = read_only
+          ? const_cast<void*>(src.storage().data())
+          : src.storage().mutable_data();
+      atDLMTensor->tensor.dl_tensor.byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
+  } else {
+      atDLMTensor->tensor.dl_tensor.data = read_only
+          ? const_cast<void*>(src.const_data_ptr())
+          : src.mutable_data_ptr();
+      atDLMTensor->tensor.dl_tensor.byte_offset = 0;
+  }
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
@@ -488,16 +490,12 @@ template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVers
 } // namespace
 
 void toDLPackNonOwning(const Tensor& src, DLTensor* out, bool read_only) {
-  // Fill in the pre-allocated DLTensor struct with direct pointers.
+  // Fill in the pre-allocated DLTensor struct with direct pointers
   // This is a non-owning conversion - the caller owns the tensor
-  // and must keep it alive for the duration of DLTensor usage.
-  // Encoding matches toDLPackImpl: storage base in `data`, element offset in
-  // `byte_offset`. Required for MPS (opaque id<MTLBuffer>) and valid for all
-  // other backends per the DLPack spec.
+  // and must keep it alive for the duration of DLTensor usage
   // See toDLPackImpl for why the read-only const_cast is safe.
-  out->data = read_only ? const_cast<void*>(src.storage().data())
-                        : src.storage().mutable_data();
-  out->byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
+  out->data = read_only ? const_cast<void*>(src.const_data_ptr())
+                        : src.mutable_data_ptr();
   out->device = torchDeviceToDLDevice(src.device());
   out->ndim = static_cast<int32_t>(src.dim());
   out->dtype = getDLDataType(src);
@@ -505,6 +503,7 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out, bool read_only) {
   // which remains valid as long as the tensor is alive
   out->shape = const_cast<int64_t*>(src.sizes().data());
   out->strides = const_cast<int64_t*>(src.strides().data());
+  out->byte_offset = 0;
 }
 
 DLManagedTensor* toDLPack(const Tensor& src) {
