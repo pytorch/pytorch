@@ -1222,7 +1222,7 @@ class LocalDTensorTestBase(DTensorTestBase):
 
 def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
-    def wrapped(self):
+    def wrapped(self, *args, **kwargs):
         torch._dynamo.reset()
         stack = contextlib.ExitStack()
         for ctx in ctxs:
@@ -1231,7 +1231,7 @@ def make_wrapped(fn, ctxs):
             else:
                 stack.enter_context(ctx)
         try:
-            out = fn(self)
+            out = fn(self, *args, **kwargs)
         finally:
             stack.close()
         return out
