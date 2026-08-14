@@ -520,6 +520,55 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         with config.patch(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
 
+    def test_alias_to_subconfig_field(self):
+        # An alias whose target is a sub-config field resolves through to it,
+        # both as a top-level alias and via an alias_fields_from subconfig.
+        self.assertEqual(config.e_nested_alias_bool, config.nested.e_bool)
+        self.assertEqual(config.nested_alias.e_bool, config.nested.e_bool)
+        # value_type resolves through the alias so get_type is meaningful.
+        self.assertEqual(config.get_type("e_nested_alias_bool"), bool)
+        self.assertEqual(config.get_type("nested_alias.e_bool"), bool)
+        # Both are recorded as aliases in _config.
+        self.assertIsNotNone(config._config["e_nested_alias_bool"].alias)
+        self.assertIsNotNone(config._config["nested_alias.e_bool"].alias)
+
+    def test_alias_write_through_and_sibling(self):
+        self.assertTrue(config.nested.e_bool)
+        # Updating the target is reflected through every alias to it.
+        with config.patch({"nested.e_bool": False}):
+            self.assertFalse(config.e_nested_alias_bool)
+            self.assertFalse(config.nested_alias.e_bool)
+        # Writing through one alias mutates the shared target and is therefore
+        # observed through the sibling alias too.
+        with config.patch({"nested_alias.e_bool": False}):
+            self.assertFalse(config.nested.e_bool)
+            self.assertFalse(config.e_nested_alias_bool)
+
+    def test_alias_mock_patch_teardown(self):
+        # mock.patch does delattr+setattr on teardown; the aliased field must
+        # remain readable afterwards. Regression for `hide` never being cleared
+        # on the alias write path.
+        orig = config.nested.e_bool
+        with patch(
+            "torch.testing._internal.fake_config_module.e_nested_alias_bool",
+            not orig,
+        ):
+            self.assertEqual(config.e_nested_alias_bool, not orig)
+        self.assertEqual(config.e_nested_alias_bool, orig)
+        self.assertEqual(config.nested.e_bool, orig)
+
+    def test_alias_delattr_marks_target_dirty(self):
+        # delattr on an alias resets the target's user_override; the target
+        # module's hash/get_dict must reflect that reset rather than the stale
+        # pre-delete value. Regression for the target dirty-marking bypass.
+        with config.patch({"nested.e_bool": False}):
+            hash_before = config.get_hash()
+            saved_before = config.save_config()
+            delattr(config, "e_nested_alias_bool")
+            self.assertTrue(config.nested.e_bool)
+            self.assertNotEqual(config.get_hash(), hash_before)
+            self.assertNotEqual(config.save_config(), saved_before)
+
     def test_reference_is_default(self):
         t = config.e_dict
         self.assertTrue(config._is_default("e_dict"))
