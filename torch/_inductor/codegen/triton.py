@@ -8266,6 +8266,9 @@ class TritonScheduling(SIMDScheduling):
 
     def define_kernel(self, src_code, node_schedule, kernel):
         kernel_name = self._define_kernel(src_code, node_schedule, kernel)
+        if not isinstance(kernel, TritonKernel):
+            return kernel_name
+
         aligned_src = kernel.runtime_divisible_by_16_src
         if aligned_src is None:
             return kernel_name
