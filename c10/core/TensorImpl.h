@@ -297,8 +297,8 @@ struct C10_API FakeTensorMode {
   mutable std::mutex constant_mutex_;
 
   // cache for cache_pyobj_cpp_fake_mode()
-  std::weak_ptr<c10::SafePyObject> pyobj_pin_;
-  std::mutex pyobj_pin_mutex_;
+  std::weak_ptr<c10::SafePyObject> pyobj_cpp_fake_mode_;
+  std::mutex pyobj_cpp_fake_mode_mutex_;
 };
 
 struct C10_API ExtraMeta {
