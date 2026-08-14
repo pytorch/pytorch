@@ -305,17 +305,35 @@ class MPSProfiler {
   // per graph/kernel/copy
   //
   // `stream` is the stream that the profiled work is dispatched on. If `stream`
-  // is nullptr, the current MPS stream is used.
+  // is nullptr, the default stream will be profiled, but most callers should
+  // specify a non-null stream.
   uint64_t beginProfileKernel(
       const void* handle,
       const std::string& strKey,
       bool isGraph,
-      MPSStream* stream = nullptr);
+      MPSStream* stream);
+  uint64_t beginProfileKernel(
+      const void* handle,
+      const std::string& strKey,
+      bool isGraph);
   uint64_t beginProfileKernel(
       const void* handle,
       const std::string& kernelName,
       const TensorList& tensors,
-      MPSStream* stream = nullptr);
+      MPSStream* stream);
+  uint64_t beginProfileKernel(
+      const void* handle,
+      const std::string& kernelName,
+      const TensorList& tensors);
+  uint64_t beginProfileCopy(
+      const void* srcBuffer,
+      const void* dstBuffer,
+      const OptionalTensorRef srcTensor,
+      const OptionalTensorRef dstTensor,
+      size_t length,
+      MPSStream* stream,
+      bool isNonBlocking,
+      bool usesBlitter = true);
   uint64_t beginProfileCopy(
       const void* srcBuffer,
       const void* dstBuffer,
@@ -323,21 +341,20 @@ class MPSProfiler {
       const OptionalTensorRef dstTensor,
       size_t length,
       bool isNonBlocking,
-      bool usesBlitter = true,
-      MPSStream* stream = nullptr);
+      bool usesBlitter = true);
   uint64_t beginProfileCPUFallback(
       const std::string& opName,
       const TensorList& tensors);
-  void beginProfileGPUInterval(const void* handle, MPSStream* stream = nullptr);
+  void beginProfileGPUInterval(const void* handle, MPSStream* stream);
+  void beginProfileGPUInterval(const void* handle);
 
-  void endProfileCopy(
-      uint64_t profileId,
-      SyncType syncType,
-      MPSStream* stream = nullptr);
+  void endProfileCopy(uint64_t profileId, SyncType syncType, MPSStream* stream);
+  void endProfileCopy(uint64_t profileId, SyncType syncType);
   void endProfileKernel(
       const void* handle,
-      SyncType syncType = SyncType::NONE,
-      MPSStream* stream = nullptr);
+      MPSStream* stream,
+      SyncType syncType = SyncType::NONE);
+  void endProfileKernel(const void* handle, SyncType syncType = SyncType::NONE);
   void endProfileCPUFallback(const std::string& opName);
 
   // these are used to hook into Python bindings for torch.mps.profiler module.
