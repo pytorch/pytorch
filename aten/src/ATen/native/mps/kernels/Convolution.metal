@@ -268,6 +268,48 @@ INSTANTIATE_NCHW_TO_NHWC_ALL(float)
 INSTANTIATE_NCHW_TO_NHWC_ALL(half)
 INSTANTIATE_NCHW_TO_NHWC_ALL(bfloat)
 
+// DHWIO copy of an OIDHW weight view; ATen's generic permute copy runs well
+// below memory bandwidth for this permutation. Each thread streams one kW row.
+template <typename T>
+kernel void conv_weight_to_dhwio(
+    device const T* source [[buffer(0)]],
+    device T* destination [[buffer(1)]],
+    constant ConvWeightPermuteParams& params [[buffer(2)]],
+    uint3 position [[thread_position_in_grid]]) {
+  const int output_channel = position.x;
+  const int input_channel = position.y;
+  const int kernel_plane_index = position.z;
+  const int kernel_height_index = kernel_plane_index % params.kernel_height;
+  const int kernel_depth_index = kernel_plane_index / params.kernel_height;
+  device const T* source_row = source +
+      output_channel * params.output_channel_stride +
+      input_channel * params.input_channel_stride +
+      kernel_depth_index * params.depth_stride +
+      kernel_height_index * params.height_stride;
+  device T* destination_row = destination +
+      (kernel_plane_index * params.kernel_width *
+           params.input_channels_per_group +
+       input_channel) *
+          params.output_channels +
+      output_channel;
+  for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
+       ++kernel_width_index) {
+    destination_row
+        [kernel_width_index * params.input_channels_per_group *
+         params.output_channels] =
+            source_row[kernel_width_index * params.width_stride];
+  }
+}
+
+#define INSTANTIATE_CONV_WEIGHT_TO_DHWIO(DT)                      \
+  template [[host_name("conv_weight_to_dhwio_" #DT)]] kernel void \
+  conv_weight_to_dhwio<DT>(                                       \
+      device const DT*, device DT*, constant ConvWeightPermuteParams&, uint3);
+
+INSTANTIATE_CONV_WEIGHT_TO_DHWIO(float)
+INSTANTIATE_CONV_WEIGHT_TO_DHWIO(half)
+INSTANTIATE_CONV_WEIGHT_TO_DHWIO(bfloat)
+
 #if __METAL_VERSION__ >= 400 && \
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
