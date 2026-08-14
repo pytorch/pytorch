@@ -7,11 +7,16 @@ import torch.optim as optim
 from torch.distributed._shard import shard_parameter, sharded_tensor
 from torch.distributed._shard.sharded_optim import ShardedOptimizer
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
@@ -56,8 +61,8 @@ class MyShardedLinear(torch.nn.Module):
         self.gelu = torch.nn.GELU()
 
         if rank:
-            self.linear1.to(rank)
-            self.linear2.to(rank)
+            self.linear1.to(torch.device(device_type, rank))
+            self.linear2.to(torch.device(device_type, rank))
 
     def shard_parameter(self):
         rowwise_sharding_spec = ChunkShardingSpec(
@@ -88,10 +93,13 @@ class MyShardedLinear(torch.nn.Module):
 
 
 class TestShardedOptimizer(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_sharded_optim(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_optim(self, device):
+        device_type = torch.device(device).type
         rowwise_spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -118,7 +126,11 @@ class TestShardedOptimizer(ShardedTensorTestBase):
 
         before_update = deepcopy(sharded_optim.named_params)
 
-        inp = torch.rand([5, 10]).to(self.rank).requires_grad_()
+        inp = (
+            torch.rand([5, 10])
+            .to(torch.device(device_type, self.rank))
+            .requires_grad_()
+        )
 
         # run forward
         local_output = local_model(inp)
@@ -149,8 +161,9 @@ class TestShardedOptimizer(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_named_params_with_sharded_tensor(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_named_params_with_sharded_tensor(self, device):
+        device_type = torch.device(device).type
         rowwise_spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -177,6 +190,9 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         self.assertTrue("linear1.weight" in param_keys)
         self.assertTrue("linear2.weight" in param_keys)
         self.assertFalse("bias" in param_keys)
+
+
+instantiate_device_type_tests(TestShardedOptimizer, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
