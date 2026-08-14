@@ -28,6 +28,15 @@ if TEST_NUMPY:
 class TestDTypeInfo(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_hash(self):
+        for type_info, dtype in [
+            (torch.iinfo, torch.int8),
+            (torch.finfo, torch.float32),
+        ]:
+            info = type_info(dtype)
+            self.assertEqual(hash(info), hash(type_info(dtype)))
+            self.assertEqual({info, type_info(dtype)}, {info})
+
     def test_invalid_input(self):
         for dtype in [
             torch.float16,

@@ -1,5 +1,6 @@
 #include <torch/csrc/TypeInfo.h>
 
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -109,8 +110,24 @@ static PyObject* THPDTypeInfo_compare(
       } else {
         Py_RETURN_FALSE;
       }
+    default:
+      Py_RETURN_NOTIMPLEMENTED;
   }
-  Py_RETURN_NOTIMPLEMENTED;
+}
+
+static Py_hash_t THPDTypeInfo_hash(THPDTypeInfo* self) {
+  const auto dtype_hash = PyObject_Hash(
+      reinterpret_cast<PyObject*>(torch::getTHPDtype(self->type)));
+  if (dtype_hash == -1) {
+    return -1;
+  }
+  const auto type_hash =
+      PyObject_Hash(reinterpret_cast<PyObject*>(Py_TYPE(self)));
+  if (type_hash == -1) {
+    return -1;
+  }
+  const auto hash = dtype_hash ^ type_hash;
+  return hash == -1 ? -2 : hash;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
@@ -317,7 +334,7 @@ PyTypeObject THPFInfoType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
+    reinterpret_cast<hashfunc>(THPDTypeInfo_hash), /* tp_hash */
     nullptr, /* tp_call */
     reinterpret_cast<reprfunc>(THPFInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
@@ -374,7 +391,7 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
+    reinterpret_cast<hashfunc>(THPDTypeInfo_hash), /* tp_hash */
     nullptr, /* tp_call */
     reinterpret_cast<reprfunc>(THPIInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
