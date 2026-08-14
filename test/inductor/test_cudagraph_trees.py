@@ -732,28 +732,35 @@ if HAS_CUDA_AND_TRITON:
                     return x + state, state
 
             compiled = torch.compile(Model().cuda().eval(), mode="reduce-overhead")
-            inputs = [torch.randn(1, 4, device="cuda") for _ in range(3)]
-            expected_state = torch.zeros_like(inputs[0])
+            priming_inputs = [torch.randn(1, 4, device="cuda") for _ in range(2)]
+            feedback_inputs = [torch.randn(1, 4, device="cuda") for _ in range(2)]
 
             with torch.no_grad():
-                state = None
-                for inp in inputs:
+                for inp in priming_inputs:
                     torch.compiler.cudagraph_mark_step_begin()
-                    prior_state_and_ptr = (
-                        (state, state.untyped_storage().data_ptr())
-                        if state is not None
-                        else None
-                    )
+                    out, state = compiled(inp, None)
+                    self.assertEqual(out, inp + inp)
+                    self.assertEqual(state, inp)
+
+                manager = self.get_manager()
+                self.assertEqual(manager.path_state, ExecutionState.EXECUTION)
+                self.assertTrue(
+                    manager._get_cuda_graph_recorded_tensor_checker()(state)
+                )
+                expected_state = priming_inputs[-1].clone()
+
+                for inp in feedback_inputs:
+                    torch.compiler.cudagraph_mark_step_begin()
+                    prior_state = state
+                    prior_state_ptr = state.untyped_storage().data_ptr()
                     expected_state.copy_(expected_state + inp)
                     expected_out = inp + expected_state
                     out, state = compiled(inp, state)
                     self.assertEqual(out, expected_out)
                     self.assertEqual(state, expected_state)
-                    if prior_state_and_ptr is not None:
-                        prior_state, prior_state_ptr = prior_state_and_ptr
-                        self.assertNotEqual(
-                            prior_state.untyped_storage().data_ptr(), prior_state_ptr
-                        )
+                    self.assertNotEqual(
+                        prior_state.untyped_storage().data_ptr(), prior_state_ptr
+                    )
             self.assertTrue("cudagraph_skips" not in counters["inductor"])
             self.assertEqual(self.get_manager().path_state, ExecutionState.EXECUTION)
 

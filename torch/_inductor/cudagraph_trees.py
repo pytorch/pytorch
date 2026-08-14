@@ -2521,6 +2521,19 @@ class CUDAGraphTreeManager:
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
 
+        node_id = self._get_node_id()
+        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+            self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
+
+        # Early exit if the function mutates inputs which are neither parameters/buffers nor
+        # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
+        # and `try_end_curr_warmup` which may change self.current_node, but before a
+        # user-visible generation transition clears the current path below.
+        if self.non_cudagraph_managed_mutation_hint[node_id][
+            function_id
+        ] or self.exceed_rerecord_limit(node_id, function_id):
+            return self.ids_to_funcs[function_id].model(new_inputs)
+
         if (
             self.has_live_user_visible_output_cloning
             and self.path_state == ExecutionState.EXECUTION
@@ -2534,18 +2547,6 @@ class CUDAGraphTreeManager:
                     curr_generation,
                     skip_dead_output_cleanup=True,
                 )
-
-        node_id = self._get_node_id()
-        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
-            self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
-
-        # Early exit if the function mutates inputs which are neither parameters/buffers nor
-        # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
-        # and `try_end_curr_warmup` which may change self.current_node.
-        if self.non_cudagraph_managed_mutation_hint[node_id][
-            function_id
-        ] or self.exceed_rerecord_limit(node_id, function_id):
-            return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
