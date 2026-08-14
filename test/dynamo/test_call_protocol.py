@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_call: callable() (PyCallable_Check) and the __call__ slot."""
 
+import binascii
 import functools
 import operator
 import types
@@ -35,7 +36,7 @@ class _WithCallChild(_WithCall):
 class _WithUntraceableCall:
     # __call__ is a C builtin with no traceable Python body; the type has a
     # tp_call slot (callable) but Dynamo cannot trace the call -> graph break.
-    __call__ = operator.add
+    __call__ = binascii.b2a_base64
 
 
 class TpCallTests(TestCase):
