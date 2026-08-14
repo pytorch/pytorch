@@ -209,7 +209,7 @@ exclude_patterns = [
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
-    'c10/util/complex_utils.h',
+    'torch/headeronly/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -583,29 +583,25 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Pre-existing violations; burn down over time.
+    # Vendored upstream code - permanent, not debt.
+    'third_party/concurrentqueue/**',
+    # Pre-existing violations; burn down over time. Nothing may be added here.
     'aten/src/**',
     'c10/core/**',
-    'c10/cuda/**',
     'c10/test/**',
     'c10/util/**',
-    'c10/xpu/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
-    'third_party/concurrentqueue/**',
     'tools/autograd/**',
     'torch/csrc/*.cpp',
     'torch/csrc/*.h',
-    'torch/csrc/api/**',
     'torch/csrc/autograd/**',
     'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
     'torch/csrc/dynamo/**',
     'torch/csrc/export/**',
-    'torch/csrc/fx/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/lazy/**',
     'torch/csrc/multiprocessing/**',
     'torch/csrc/profiler/**',
     'torch/csrc/stable/**',
@@ -614,23 +610,10 @@ exclude_patterns = [
     'torch/csrc/xpu/**',
     'torch/headeronly/**',
     'torch/lib/**',
-    'torch/nativert/**',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/grep_linter.py',
-    '--pattern=\bthrow\b',
-    '--allowlist-pattern=@allow-raw-throw',
-    '--linter-name=RAWTHROW',
-    '--error-name=raw throw statement',
-    """--error-description=\
-        Do not use raw `throw` in C++ code. Use TORCH_CHECK, \
-        TORCH_CHECK_WITH, C10_THROW_ERROR, or other error-reporting macros \
-        instead. See c10/util/Exception.h for available macros. If this is a \
-        re-throw (throw;), restructure the code to avoid try/catch/throw or \
-        add the file to the RAWTHROW exclude list in .lintrunner.toml with \
-        justification.\
-    """,
+    'tools/linter/adapters/raw_throw_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
