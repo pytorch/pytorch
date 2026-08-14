@@ -9,7 +9,6 @@ from torch.testing._internal.common_utils import (
 )
 import torch
 import torch._dynamo
-import os
 import unittest
 import warnings
 import operator
@@ -50,7 +49,7 @@ aten = torch.ops.aten
 
 HAS_CUDA = torch.cuda.is_available()
 
-CPP_FAKETENSOR = os.environ.get("CPP_FAKETENSOR", "0") == "1"
+CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
 
 if CPP_FAKETENSOR:
     raise NotImplementedError("c++ faketensor not implemented yet")

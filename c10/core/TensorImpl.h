@@ -284,7 +284,7 @@ struct C10_API FakeTensorMode {
   // that we don't lose the ref. So each fake tensor should hold onto a strong
   // ref of the python CppFakeTensorMode object through
   // ExtraMeta::fake_mode_pyobj_.
-  std::shared_ptr<c10::SafePyObject> pin_pyobj();
+  std::shared_ptr<c10::SafePyObject> cache_pyobj_cpp_fake_mode();
 
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
@@ -296,7 +296,7 @@ struct C10_API FakeTensorMode {
   // it indexes
   mutable std::mutex constant_mutex_;
 
-  // cache for pin_pyobj()
+  // cache for cache_pyobj_cpp_fake_mode()
   std::weak_ptr<c10::SafePyObject> pyobj_pin_;
   std::mutex pyobj_pin_mutex_;
 };
@@ -1533,7 +1533,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     auto& extra_meta = get_extra_meta();
-    extra_meta.fake_mode_pyobj_ = mode ? mode->pin_pyobj() : nullptr;
+    extra_meta.fake_mode_pyobj_ =
+        mode ? mode->cache_pyobj_cpp_fake_mode() : nullptr;
     extra_meta.fake_tensor_mode_ = std::move(mode);
   }
 

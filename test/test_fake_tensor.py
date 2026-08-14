@@ -9,7 +9,6 @@ import gc
 import inspect
 import io
 import itertools
-import os
 import pickle
 import subprocess
 import sys
@@ -103,7 +102,7 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
-CPP_FAKETENSOR = os.environ.get("CPP_FAKETENSOR", "0") == "1"
+CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
 
 skipIfCppFakeTensor = unittest.skipIf(
     CPP_FAKETENSOR, "this is not testing cpp fake functionality"
@@ -415,7 +414,7 @@ class FakeTensorTest(TestCase):
 
         weight = ParameterSubclass(torch.randn(10, 10))
         with self.assertRaisesRegex(
-            AssertionError,
+            (AssertionError, RuntimeError),
             "Please convert all Tensors to FakeTensors first",
         ):
             with FakeTensorMode():
@@ -2719,13 +2718,15 @@ class FakeTensorConverterTest(TestCase):
         )
         self.assertEqual(y_conv.storage_offset(), y.storage_offset())
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            x_real = maybe_get_real_tensor(x_conv)
+            y_real = maybe_get_real_tensor(y_conv)
             self.assertEqual(
-                x_conv.real_tensor.untyped_storage().nbytes(),
+                x_real.untyped_storage().nbytes(),
                 base.untyped_storage().nbytes(),
             )
-            self.assertEqual(y_conv.real_tensor.storage_offset(), y.storage_offset())
-            self.assertEqual(x_conv.real_tensor, x)
-            self.assertEqual(y_conv.real_tensor, y)
+            self.assertEqual(y_real.storage_offset(), y.storage_offset())
+            self.assertEqual(x_real, x)
+            self.assertEqual(y_real, y)
 
     def test_parameter_views_keep_full_storage_symbolic_propagate_real(self):
         base = torch.arange(12, dtype=torch.float16)
@@ -2784,7 +2785,7 @@ class FakeTensorConverterTest(TestCase):
                 y_refake = refake_mode.from_tensor(y_functional, static_shapes=True)
 
         self.assertEqual(y_refake.storage_offset(), y.storage_offset())
-        self.assertEqual(y_refake.real_tensor, y)
+        self.assertEqual(maybe_get_real_tensor(y_refake), y)
 
     def test_refake_unbacked_storage_static_shapes(self):
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False):
@@ -3355,10 +3356,12 @@ class FakeTensorPropTest(TestCase):
                 #  2. run FakeTensorProp
                 # The following code should fail.
                 failed = False
+                refake_errors = (
+                    (AssertionError, RuntimeError) if CPP_FAKETENSOR else AssertionError
+                )
                 try:
                     FakeTensorProp(graph_model).propagate(value)
-                except AssertionError:
-                    # AssertionError: tensor's device must be `meta`, got cpu instead
+                except refake_errors:
                     failed = True
                 self.assertTrue(failed)
 
@@ -3565,7 +3568,7 @@ class FakeTensorSerialization(TestCase):
         x = torch.tensor([0], device="cpu")
         with FakeTensorMode():
             y = pickle.loads(pickle.dumps(x))
-            self.assertEqual(type(y), FakeTensor)
+            self.assertTrue(is_fake_tensor(y))
             self.assertEqual(y.device.type, "meta")
 
             with unset_fake_temporarily():
