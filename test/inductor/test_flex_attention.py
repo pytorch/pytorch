@@ -2178,6 +2178,46 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_mps
+    @skip_on_rocm
+    def test_inline_asm_mask_mod_pack2(self, device):
+        """pack>1 with multiple inputs: the (M, 1) q_idx and (1, N) kv_idx
+        blocks must be broadcast to a common shape before packing."""
+        asm_str = "{\n.reg .pred p;\nsetp.ge.s32 p, $2, $4; selp.u32 $0, 1, 0, p;\nsetp.ge.s32 p, $3, $5; selp.u32 $1, 1, 0, p;\n}"
+
+        def asm_causal_mask(b, h, q_idx, kv_idx):
+            pred = inline_asm_elementwise(
+                q_idx.to(torch.int32),
+                kv_idx.to(torch.int32),
+                asm_str=asm_str,
+                constraints="=r,=r,r,r,r,r",
+                dtype=torch.int32,
+                pack=2,
+            )
+            return pred != 0
+
+        def ref_causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # pack > 1 requires compile, including for block-mask construction
+        bm = torch.compile(create_block_mask)(
+            asm_causal_mask, B, H, S, S, device=device
+        )
+        bm_ref = create_block_mask(ref_causal_mask, B, H, S, S, device=device)
+        self.assertEqual(bm.kv_indices, bm_ref.kv_indices)
+
+        q, k, v = [
+            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        compiled = torch.compile(flex_attention)
+        out = compiled(q, k, v, block_mask=bm)
+        ref = compiled(q, k, v, block_mask=bm_ref)
+        self.assertEqual(out, ref)
+
+    @supported_platform
+    @skip_on_cpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """

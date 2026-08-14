@@ -1809,6 +1809,15 @@ class TritonOverrides(OpOverrides):
         pack=1,
         input_dtypes=None,
     ):
+        """Emit a tl.inline_asm_elementwise call.
+
+        With pack > 1 the asm block is stamped once per `pack` adjacent
+        elements: the constraint string lists `pack` outputs and `pack` copies
+        of each input, with sub-32-bit elements packed into 32-bit registers.
+        Inputs are broadcast to a common shape, then raveled and zero-padded
+        via triton_helpers.inline_asm_pack; the result is restored with
+        inline_asm_unpack.
+        """
         # Use the actual dtype, not the compute type — the asm operates on
         # specific register types and Triton needs to know the real output type.
         asm_triton_type = triton_type(dtype)
@@ -1855,13 +1864,37 @@ class TritonOverrides(OpOverrides):
         first_input = inputs[0]
         compute = V.kernel.compute
         cse = V.kernel.cse
-        result = cse.newvar(dtype=dtype, shape=first_input.shape)
+        # inline_asm_pack ravels each input separately, so unlike the pack=1
+        # call (where tl.inline_asm_elementwise broadcasts internally) inputs
+        # with different block shapes (e.g. flex attention's (M, 1) q_idx vs
+        # (1, N) kv_idx) must be broadcast to a common shape before packing.
+        ref = first_input
+        if len(cast_inputs) > 1:
+            shape = first_input.shape
+            for inp in inputs[1:]:
+                if shape is None or inp.shape is None:
+                    shape = None
+                    break
+                shape = get_broadcasted_shape(tuple(shape), tuple(inp.shape))
+            if shape is None:
+                # TritonCSEVariable requires a shape; first input's is the
+                # best available approximation when propagation lost track.
+                shape = first_input.shape
+            ref = cse.newvar(dtype=dtype, shape=shape)
+            tmp = cse.newvar(dtype=dtype, shape=shape)
+            compute.writeline(f"{ref} = {cast_inputs[0]}")
+            for inp in cast_inputs[1:]:
+                compute.writeline(f"{ref}, {tmp} = tl.broadcast({ref}, {inp})")
+            cast_inputs = [
+                f"tl.broadcast_to({inp}, {ref}.shape)" for inp in cast_inputs
+            ]
+        result = cse.newvar(dtype=dtype, shape=ref.shape)
         packed_args = ", ".join(
             f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
         )
         compute.writeline(f"{result} = {asm_call(packed_args)}")
         compute.writeline(
-            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
+            f"{result} = triton_helpers.inline_asm_unpack({result}, {ref}, {pack})"
         )
         return result
 
