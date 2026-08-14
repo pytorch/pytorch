@@ -5548,7 +5548,7 @@ def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         return values.reshape(shape).to(dtype)
 
     # M=256 covers the gfx950 occupancy gate.
-    for K in (64, 320, 384, 768, 832, 1024):
+    for K in (64, 256, 257, 383, 384, 831, 832, 1024):
         n_range = _radix_n_range(K)
         if n_range is None:
             raise AssertionError(f"missing radix gate for K={K}")

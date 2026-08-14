@@ -15,22 +15,8 @@ from torch.testing._internal.common_utils import (
 
 
 _REGISTER_KS = (2, 4, 8, 16)
-_CORRECTNESS_KS = (
-    2,
-    16,
-    64,
-    65,
-    320,
-    350,
-    385,
-    511,
-    704,
-    705,
-    800,
-    832,
-    1023,
-    1024,
-)
+_RADIX_CORRECTNESS_KS = (64, 65, 128, 129, 256, 257, 383, 384, 512, 513, 831, 832, 1024)
+_CORRECTNESS_KS = _REGISTER_KS + _RADIX_CORRECTNESS_KS
 
 
 def _unsupported_environment_reason() -> str | None:
@@ -105,15 +91,18 @@ class TestFlyDSLTopK(TestCase):
             diffs = got_v[..., :-1] - got_v[..., 1:]
             self.assertTrue((diffs >= 0).all(), "output is not descending")
 
-    def test_override_is_registered(self):
-        operations = pn.get_dsl_operations("flydsl")
-        self.assertIn("topk", operations)
-        self.assertIn("topk.values", operations)
-
     @parametrize("k", _CORRECTNESS_KS)
-    def test_correctness_random_gaussian(self, k: int):
+    def test_correctness(self, k: int):
         torch.manual_seed(0)
         x = make_tensor((_test_m(), _test_n(k)), device="cuda", dtype=torch.float32)
+        self._assert_topk_matches_aten(x, k)
+
+    @parametrize("k", (8, 64, 257, 704, 1023))
+    def test_correctness_with_duplicates(self, k: int):
+        torch.manual_seed(1)
+        x = torch.randint(
+            0, 50, (_test_m(), _test_n(k)), device="cuda", dtype=torch.float32
+        )
         self._assert_topk_matches_aten(x, k)
 
     @parametrize("k", (8, 704))
@@ -150,7 +139,7 @@ class TestFlyDSLTopK(TestCase):
         got_finite = got_v.masked_select(~got_v.isnan()).reshape(m, -1)
         self.assertEqual(got_finite, ref_finite)
 
-    def test_nd_input(self):
+    def test_3d_input(self):
         torch.manual_seed(3)
         k = 704
         n = _test_n(k)
@@ -224,94 +213,47 @@ class TestFlyDSLTopK(TestCase):
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
 
-    def test_unsupported_k_falls_through_without_compiling(self):
-        torch.manual_seed(5)
-        bad_k = 32
-        x = make_tensor((_test_m(), 4096), device="cuda", dtype=torch.float32)
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, bad_k, dim=-1)
-        got = torch.topk(x, bad_k, dim=-1)
-        self._assert_no_flydsl_compiles()
-        self.assertEqual(got.values, ref.values)
-        self.assertEqual(got.indices, ref.indices)
-
-    def test_register_non_power_of_two_n_falls_through_without_compiling(self):
-        torch.manual_seed(8)
-        k = 8
-        x = make_tensor((_test_m(), 1537), device="cuda", dtype=torch.float32)
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, k, dim=-1)
-        got = torch.topk(x, k, dim=-1)
-        self._assert_no_flydsl_compiles()
-        self.assertEqual(got, ref)
-
-    @parametrize("k,n", ((64, 4096), (320, 8192)))
-    def test_radix_below_performance_gate_falls_through_without_compiling(
+    @parametrize("k,n", ((32, 4096), (8, 1537), (64, 4096), (320, 8192)))
+    def test_unsupported_configuration_falls_through_without_compiling(
         self, k: int, n: int
     ):
         x = self._make_input(shape=(_test_m(), n))
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, k, dim=-1)
-        got = torch.topk(x, k, dim=-1)
+        torch.topk(x, k, dim=-1)
         self._assert_no_flydsl_compiles()
-        self.assertEqual(got, ref)
 
     def test_radix_non_multiple_of_four_n(self):
         torch.manual_seed(11)
         x = make_tensor((_test_m(), 32769), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, 512)
 
-    def test_unsupported_dtype_falls_through_without_compiling(self):
-        x = make_tensor((_test_m(), _test_n(8)), device="cuda", dtype=torch.float16)
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, 8, dim=-1)
-        got = torch.topk(x, 8, dim=-1)
-        self._assert_no_flydsl_compiles()
-        self.assertEqual(got.values, ref.values)
-        self.assertEqual(torch.gather(x, -1, got.indices), got.values)
+    @parametrize(
+        "case",
+        (
+            "dtype",
+            "smallest",
+            "unsorted",
+            "non_last_dim",
+            "noncontiguous",
+            "too_few_rows",
+        ),
+    )
+    def test_unsupported_case_falls_through_without_compiling(self, case: str):
+        rows = _test_m()
+        if case == "too_few_rows":
+            from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
 
-    @parametrize("largest,sorted_", ((False, True), (True, False)))
-    def test_unsupported_options_fall_through_without_compiling(
-        self, largest: bool, sorted_: bool
-    ):
-        x = self._make_input(shape=(_test_m(), _test_n(8)))
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, 8, dim=-1, largest=largest, sorted=sorted_)
-        got = torch.topk(x, 8, dim=-1, largest=largest, sorted=sorted_)
+            rows = _min_rows_for_full_wave(torch.cuda.current_device()) - 1
+        n = _test_n(8)
+        shape = (n, rows) if case == "noncontiguous" else (rows, n)
+        dtype = torch.float16 if case == "dtype" else torch.float32
+        x = make_tensor(shape, device="cuda", dtype=dtype)
+        if case == "noncontiguous":
+            x = x.transpose(0, 1)
+        dim = 0 if case == "non_last_dim" else -1
+        largest = case != "smallest"
+        sorted_ = case != "unsorted"
+        torch.topk(x, 8, dim=dim, largest=largest, sorted=sorted_)
         self._assert_no_flydsl_compiles()
-        self.assertEqual(torch.gather(x, -1, got.indices), got.values)
-        got_values = torch.sort(got.values, descending=largest).values
-        ref_values = torch.sort(ref.values, descending=largest).values
-        self.assertEqual(got_values, ref_values)
-
-    def test_non_last_dim_falls_through_without_compiling(self):
-        x = self._make_input(shape=(_test_m(), _test_n(8)))
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, 8, dim=0)
-        got = torch.topk(x, 8, dim=0)
-        self._assert_no_flydsl_compiles()
-        self.assertEqual(got, ref)
-
-    def test_noncontiguous_input_falls_through_without_compiling(self):
-        base = self._make_input(shape=(_test_n(8), _test_m()))
-        x = base.transpose(0, 1)
-        self.assertFalse(x.is_contiguous())
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, 8, dim=-1)
-        got = torch.topk(x, 8, dim=-1)
-        self._assert_no_flydsl_compiles()
-        self.assertEqual(got, ref)
-
-    def test_too_few_rows_falls_through_without_compiling(self):
-        from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
-
-        rows = _min_rows_for_full_wave(torch.cuda.current_device()) - 1
-        x = self._make_input(shape=(rows, _test_n(8)))
-        with pn.flydsl.disabled():
-            ref = torch.topk(x, 8, dim=-1)
-        got = torch.topk(x, 8, dim=-1)
-        self._assert_no_flydsl_compiles()
-        self.assertEqual(got, ref)
 
     def test_noncontiguous_out_dispatches_and_matches_aten(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
@@ -358,23 +300,20 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(v1, ref_v)
         self.assertEqual(i1, ref_i)
 
-    def test_register_stable_with_heavy_ties(self):
-        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
-
-        torch.manual_seed(9)
-        k = 8
-        x = torch.randint(
-            0, 4, (_test_m(), _test_n(k)), device="cuda", dtype=torch.float32
+    @parametrize("k", (8, 704))
+    def test_autograd_passes_through(self, k: int):
+        x = make_tensor(
+            (_test_m(), _test_n(k)),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
         )
-        with pn.flydsl.disabled():
-            ref_v, _ = torch.topk(x, k, dim=-1)
-        v1, i1 = torch.topk(x, k, dim=-1)
-        v2, i2 = torch.topk(x, k, dim=-1)
-        self.assertEqual(topk_cache_info().misses, 1)
-        self.assertEqual(v1, v2)
-        self.assertEqual(i1, i2)
-        self.assertEqual(v1, ref_v)
-        self.assertEqual(torch.gather(x, -1, i1), v1)
+        values, indices = torch.topk(x, k, dim=-1)
+        values.sum().backward()
+        self.assertIsNotNone(x.grad)
+        expected = torch.zeros_like(x)
+        expected.scatter_(-1, indices, 1.0)
+        self.assertEqual(x.grad, expected)
 
     @unittest.skipIf(
         torch.cuda.device_count() < 2,

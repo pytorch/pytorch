@@ -24,13 +24,10 @@ _RUNTIME_AVAILABLE: bool = fu.runtime_available()
 _SUPPORTED_ARCHES = ("gfx950",)
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
-# Per-K register ranges tuned on MI355.  K=32 loses to aten in the measured
-# range.  A separate row-count gate below handles GPU underutilization.
+# Per-K register ranges tuned on MI355.
 _REGISTER_N_RANGE: tuple[int, int] = (1024, 8192)
 
 # Per-K radix ranges tuned on MI355.
-# A separate row-count gate below handles GPU underutilization.
-# K>1024 exceeds the device workgroup size limit.
 _RADIX_GATE_RANGES = (
     ((64, 256), (8192, 32768)),
     ((257, 383), (16384, 32768)),
