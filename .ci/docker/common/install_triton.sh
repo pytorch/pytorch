@@ -51,6 +51,8 @@ pushd /var/lib/jenkins/
 
 as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
+# The pinned commit may only be reachable through a pull request ref.
+as_jenkins git fetch origin ${TRITON_PINNED_COMMIT}
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
 
