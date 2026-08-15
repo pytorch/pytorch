@@ -3,7 +3,6 @@ import contextlib
 import copy
 import functools
 import importlib
-import itertools
 import os
 import sys
 import unittest
@@ -17,11 +16,16 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     TEST_WITH_SLOW_GRADCHECK,
+    parametrize,
 )
 
 
@@ -36,7 +40,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
 
 aten = torch.ops.aten
@@ -297,15 +301,13 @@ class OptimizeForInferenceTemplate(TestCase):
             def foo(mod, inp):
                 return mod(inp)
 
-            kernel_invoke = (
-                "kernel_cpp_0" if self.device_type == "cpu" else "triton.jit"
-            )
+            kernel_invoke = "kernel_cpp_0" if torch.device(device).type == "cpu" else "triton.jit"
             mm_invoke = "mm("
             # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1263
             mkldnn_weight_pack_init = (
                 torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
             )
-            if self.device_type == "cpu" and mkldnn_weight_pack_init:
+            if torch.device(device).type == "cpu" and mkldnn_weight_pack_init:
                 if torch.ops.mkldnn._is_mkldnn_acl_supported():
                     # for aarch64 with acl supported, use mkldnn weight prepack
                     # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1176-L1184
@@ -381,103 +383,89 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
+    @parametrize("use_bias", [True, False])
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @torch._inductor.config.patch(layout_optimization=False)
-    def test_folded_conv_bn(self, device):
-        for use_bias, dtype in itertools.product(
-            [True, False], [torch.float16, torch.bfloat16, torch.float32]
-        ):
-            if self.device_type == "cpu" and dtype == torch.float16:
-                continue
+    def test_folded_conv_bn(self, device, use_bias, dtype):
+        if torch.device(device).type == "cpu" and dtype == torch.float16:
+            self.skipTest("float16 not supported on CPU")
 
-            if (
-                self.device_type != "cpu"
-                and dtype == torch.bfloat16
-                and not SM80OrLater
-            ):
-                continue
+        if torch.device(device).type == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            self.skipTest("bfloat16 requires SM80+ on CUDA")
 
-            mod = (
-                ConvBN(3, 32, bias=use_bias, kernel_size=3, stride=2)
-                .eval()
-                .to(device)
-                .to(dtype)
-            )
+        mod = (
+            ConvBN(3, 32, bias=use_bias, kernel_size=3, stride=2)
+            .eval()
+            .to(device)
+            .to(dtype)
+        )
 
-            x = torch.rand(3, 3, 32, 32).to(device).to(dtype)
+        x = torch.rand(3, 3, 32, 32).to(device).to(dtype)
 
-            torch._dynamo.reset()
-            counters.clear()
+        torch._dynamo.reset()
+        counters.clear()
 
-            @torch.compile()
-            def foo(mod, x):
-                return mod(x)
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
 
-            # TODO - bias is separate kernel right now, we should only unfuse it
-            # from conv if it can be fused
+        # TODO - bias is separate kernel right now, we should only unfuse it
+        # from conv if it can be fused
 
-            with torch.no_grad():
-                out_eager = mod(x)
-                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
-            # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device_type == "cuda":
-                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "frozen_param"
-                ).check_not("frozen_param").check_next("return").run(code[0])
+        # we unfuse the conv bias, but it should only have one constant in the kernel
+        if torch.device(device).type == "cuda":
+            FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                "frozen_param"
+            ).check_not("frozen_param").check_next("return").run(code[0])
 
-            self.assertEqual(
-                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
-            )
-            self.assertEqual(counters["inductor"]["binary_folding"], 4)
+        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["binary_folding"], 4)
 
+    @parametrize("use_bias", [True, False])
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @torch._inductor.config.patch(layout_optimization=False)
-    def test_folded_conv_bn_hardswish(self, device):
-        for use_bias, dtype in itertools.product(
-            [True, False], [torch.float16, torch.bfloat16, torch.float32]
-        ):
-            if self.device_type == "cpu" and dtype == torch.float16:
-                continue
+    def test_folded_conv_bn_hardswish(self, device, use_bias, dtype):
+        if torch.device(device).type == "cpu" and dtype == torch.float16:
+            self.skipTest("float16 not supported on CPU")
 
-            if (
-                self.device_type != "cpu"
-                and dtype == torch.bfloat16
-                and not SM80OrLater
-            ):
-                continue
+        if torch.device(device).type == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            self.skipTest("bfloat16 requires SM80+ on CUDA")
 
-            mod = (
-                ConvBNHardswish(3, 32, bias=use_bias, kernel_size=3, stride=2)
-                .eval()
-                .to(device)
-                .to(dtype)
-            )
+        mod = (
+            ConvBNHardswish(3, 32, bias=use_bias, kernel_size=3, stride=2)
+            .eval()
+            .to(device)
+            .to(dtype)
+        )
 
-            x = torch.rand(3, 3, 32, 32).to(device).to(dtype)
+        x = torch.rand(3, 3, 32, 32).to(device).to(dtype)
 
-            torch._dynamo.reset()
-            counters.clear()
+        torch._dynamo.reset()
+        counters.clear()
 
-            @torch.compile()
-            def foo(mod, x):
-                return mod(x)
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
 
-            # TODO - bias is separate kernel right now, we should only unfuse it
-            # from conv if it can be fused
+        # TODO - bias is separate kernel right now, we should only unfuse it
+        # from conv if it can be fused
 
-            with torch.no_grad():
-                out_eager = mod(x)
-                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
-            # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device_type == "cuda":
-                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "frozen_param"
-                ).check_not("frozen_param").check_next("return").run(code[0])
+        # we unfuse the conv bias, but it should only have one constant in the kernel
+        if torch.device(device).type == "cuda":
+            FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                "frozen_param"
+            ).check_not("frozen_param").check_next("return").run(code[0])
 
-            self.assertEqual(
-                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
-            )
-            self.assertEqual(counters["inductor"]["binary_folding"], 4)
+        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["binary_folding"], 4)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self, device):
@@ -604,7 +592,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self, device):
-        dtype = torch.float16 if self.device_type != "cpu" else torch.bfloat16
+        dtype = torch.float16 if torch.device(device).type != "cpu" else torch.bfloat16
 
         mod = (
             torch.nn.Conv2d(3, 32, bias=None, kernel_size=3, stride=2)
@@ -767,7 +755,7 @@ class OptimizeForInferenceTemplate(TestCase):
         # in the joint graph rather than torch.ops.aten.convolution.default.
         # Currently we only handle aten.convolution.default in layout
         # optimization. That's why the count may be 0 here for CPU.
-        if self.device_type == "cuda":
+        if torch.device(device).type == "cuda":
             self.assertTrue(nconv == 1)
 
     def test_unequal_bias_horizontal_addmm_fusion(self, device):
@@ -895,7 +883,7 @@ class OptimizeForInferenceTemplate(TestCase):
         for actual, expected in zip(actual_outputs, expected_outputs):
             self.assertEqual(expected, actual)
 
-        if self.device_type == "cpu":
+        if torch.device(device).type == "cpu":
             # CPU use different convolution implementation, skip the checks below
             return
 
@@ -925,13 +913,11 @@ if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 
-instantiate_device_type_tests(OptimizeForInferenceTemplate, globals(), allow_xpu=True)
-
-
 class OptimizeForInferenceAcceleratorTemplate(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     _do_cuda_non_default_stream = False
 
+    @requires_capabilities(Capability.lib.triton)
     def test_autocast(self, device):
         mod = torch.nn.Linear(10, 10).to(device).eval()
         inp = torch.rand([10, 10]).to(device).to(torch.half)
@@ -941,13 +927,14 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
             return mod(inp)
 
         with torch.no_grad():
-            with torch.autocast(self.device_type):
+            with torch.autocast(torch.device(device).type):
                 out_eager = mod(inp)
                 out_compiled, code = run_and_get_code(foo, mod, inp)
 
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_conv_multiple_uses(self, device):
         from torch import nn
 
@@ -974,6 +961,7 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
 
         self.assertEqual(output, output2)
 
+    @requires_capabilities(Capability.lib.triton)
     def test_param_deallocated(self, device):
         # TODO: cpu path keeps an extra copy of graph around somewhere,
         # memory not as important for cpu
@@ -1008,6 +996,7 @@ class OptimizeForInferenceCudaTemplate(TestCase):
     hw_classification = HardwareClassification.CUDA
     _do_cuda_non_default_stream = False
 
+    @requires_capabilities(Capability.lib.triton)
     def test_static_indices_cudagraph(self, device):
         mod1 = torch.nn.Sequential(
             torch.nn.Linear(2, 2).to(device), torch.nn.Linear(2, 2).to(device)
@@ -1035,6 +1024,8 @@ class OptimizeForInferenceCudaTemplate(TestCase):
         self.assertEqual(y1, y2)
 
 
+instantiate_device_type_tests(OptimizeForInferenceTemplate, globals(), allow_xpu=True)
+
 instantiate_device_type_tests(
     OptimizeForInferenceAcceleratorTemplate, globals(), except_for="cpu", allow_xpu=True
 )
@@ -1047,5 +1038,5 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU:
+    if HAS_CPU or HAS_TRITON:
         run_tests(needs="filelock")
