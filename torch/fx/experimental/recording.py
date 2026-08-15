@@ -274,17 +274,17 @@ def record_shapeenv_event(
             # methods called hundreds of thousands of times, so answer that case
             # before importing, building the retlog closure or touching NEST.
             shape_env = args[0]
-            if (
+            skip_recording = (
                 not shape_env.should_record_events  # type: ignore[attr-defined]
                 or shape_env.is_recording  # type: ignore[attr-defined]
-            ) and not trace_shape_events_log.isEnabledFor(logging.DEBUG):
+            )
+            if skip_recording and not trace_shape_events_log.isEnabledFor(
+                logging.DEBUG
+            ):
                 return fn(*args, **kwargs)
 
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            # Narrow shape_env itself, not args[0]: the fast path above binds
-            # it before this check, so narrowing here is what lets the uses
-            # below see a ShapeEnv rather than an untyped positional arg.
             if not isinstance(shape_env, ShapeEnv):
                 raise AssertionError(f"Expected ShapeEnv, got {type(shape_env)}")
 
@@ -300,7 +300,7 @@ def record_shapeenv_event(
                 return r
 
             try:
-                if not shape_env.should_record_events or shape_env.is_recording:
+                if skip_recording:
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #
@@ -346,7 +346,7 @@ def record_shapeenv_event(
                         raise
 
             except Exception:
-                if not shape_env.should_record_events or shape_env.is_recording:
+                if skip_recording:
                     # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
                     raise
                 log.error(

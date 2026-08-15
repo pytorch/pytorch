@@ -7,8 +7,10 @@ from collections import defaultdict
 
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
+from tools.pyi.gen_pyi import generate_type_hints
 
 from torchgen import dest
+from torchgen.api.python import PythonSignatureGroup, signature
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.gen import (
@@ -28,6 +30,32 @@ from torchgen.model import (
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
+
+
+class TestGenPyi(unittest.TestCase):
+    def test_inplace_foreach_returns_input_container(self) -> None:
+        native_function, _ = NativeFunction.from_yaml(
+            {
+                "func": "_foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()",
+                "variants": "function",
+                "device_check": "NoCheck",
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+        group = PythonSignatureGroup(
+            signature=signature(native_function, pyi=True),
+            base=native_function,
+            outplace=None,
+        )
+
+        hints = generate_type_hints(group)
+
+        self.assertEqual(len(hints), 1)
+        self.assertIn(
+            ") -> tuple[Tensor, ...] | list[Tensor]: ...",
+            hints[0],
+        )
 
 
 class TestCreateDerivative(unittest.TestCase):
