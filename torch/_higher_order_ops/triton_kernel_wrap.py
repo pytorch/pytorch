@@ -1169,7 +1169,7 @@ def analyze_kernel_access(
     return TensorAccesses(read_writes=read_writes, can_fuse_epilogue=can_fuse_epilogue)
 
 
-# Note [TTIR launch analysis cache]
+# Note [TTIR mutation analysis]
 #
 # Working out which arguments a user-defined triton kernel writes, and whether
 # an epilogue can be fused into it, means compiling the kernel to TTIR and
@@ -1177,9 +1177,7 @@ def analyze_kernel_access(
 #
 # The answer is worked out once, where the graph node is created, and recorded
 # on the node; the consumers downstream read it rather than each re-deriving it.
-# That still needs a cache here, because there are far more launch sites than
-# distinct kernel signatures: 48 nodes covering 8 signatures on one model. Per
-# node without a cache would be 48 analyses to compute 8 answers.
+# It is cached here too, since many launch sites share a kernel signature.
 #
 # Keying on the kernel alone - its id, or its source - would be wrong rather
 # than merely coarse. constexprs are compile-time constants, so they decide what
@@ -1198,17 +1196,19 @@ def analyze_kernel_access(
 # One entry for the kernel source, then one per formal parameter recording what
 # generate_ttir would feed Triton for it: ("sym"), ("tensor", dtype),
 # ("tma", metadata, dtype) or ("val", repr) for a constexpr or scalar.
-_TTIRAnalysisKey = tuple[object, ...]
+_TTIRMutationAnalysisKey = tuple[object, ...]
 
 # key -> (names of written args, whether an epilogue may be fused)
-_launch_analysis_cache: dict[_TTIRAnalysisKey, tuple[tuple[str, ...], bool]] = {}
+_ttir_mutation_analysis_cache: dict[
+    _TTIRMutationAnalysisKey, tuple[tuple[str, ...], bool]
+] = {}
 
 
-def _ttir_analysis_cache_key(
+def _ttir_mutation_analysis_cache_key(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
-) -> _TTIRAnalysisKey | None:
+) -> _TTIRMutationAnalysisKey | None:
     """Key covering everything generate_ttir derives its TTIR from.
 
     Returns None if a key cannot be built, in which case the caller recomputes.
@@ -1703,28 +1703,28 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     return None
 
 
-def analyze_kernel_launch(
+def ttir_mutation_analysis(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> tuple[tuple[str, ...], bool] | None:
-    """(names of written args, whether an epilogue may be fused) for a launch.
+    """Which args a triton kernel launch mutates, from its TTIR.
 
-    Called once where the graph node is created, so the consumers downstream can
-    read the answer off the node instead of each re-deriving it. Cached because
-    launch sites far outnumber distinct kernel signatures; see Note [TTIR launch
-    analysis cache].
+    Returns (names of written args, whether an epilogue may be fused) - the
+    epilogue answer falls out of the same walk. Called once where the graph node
+    is created, so consumers downstream read it off the node instead of each
+    re-deriving it; see Note [TTIR mutation analysis].
 
     Returns None if the analysis cannot run, in which case nothing is recorded
     on the node and consumers fall back to deriving it themselves.
     """
     key = None
     try:
-        key = _ttir_analysis_cache_key(kernel, kwargs, tma_descriptor_metadata)
+        key = _ttir_mutation_analysis_cache_key(kernel, kwargs, tma_descriptor_metadata)
     except Exception:
         log.debug("could not build a cache key for %s", kernel, exc_info=True)
     if key is not None:
-        cached = _launch_analysis_cache.get(key)
+        cached = _ttir_mutation_analysis_cache.get(key)
         if cached is not None:
             return cached
 
@@ -1739,17 +1739,17 @@ def analyze_kernel_launch(
         accesses.can_fuse_epilogue,
     )
     if key is not None:
-        _launch_analysis_cache[key] = result
+        _ttir_mutation_analysis_cache[key] = result
     return result
 
 
-def _launch_analysis_kwargs(
+def _ttir_mutation_analysis_kwargs(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
 ) -> dict[str, Any]:
     """The analysis results as HOP kwargs, or {} if they could not be worked out."""
-    analysis = analyze_kernel_launch(kernel, kwargs, tma_descriptor_metadata)
+    analysis = ttir_mutation_analysis(kernel, kwargs, tma_descriptor_metadata)
     if analysis is None:
         return {}
     mutated_arg_names, can_fuse_epilogue = analysis
@@ -2818,7 +2818,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             tma_descriptor_metadata={},
             kwargs=graphable_args,
             launch_kwargs=launch_kwargs,
-            **_launch_analysis_kwargs(variable.kernel, combined_args, {}),
+            **_ttir_mutation_analysis_kwargs(variable.kernel, combined_args, {}),
         )
 
 
