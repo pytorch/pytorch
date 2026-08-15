@@ -157,40 +157,6 @@ class DeviceInterface:
         """
         return False
 
-    @staticmethod
-    def is_gpu() -> bool:
-        """Return True if Inductor should treat this device as a GPU-class
-        accelerator (device guards, GPU codegen/fusion, cudagraph
-        eligibility).  Defaults to False so that unknown backends are
-        conservatively treated as non-GPU until they explicitly opt in."""
-        return False
-
-    @classmethod
-    def exposes_streams(cls) -> bool:
-        """Return True if this device exposes a stream abstraction.
-        Derived from whether the ``Stream`` slot has been overridden by a
-        subclass -- backends with a real Stream implementation (CUDA, XPU,
-        MTIA) automatically get True; backends that inherit the placeholder
-        (MPS) automatically get False."""
-        return cls.Stream is not DeviceInterface.Stream
-
-    @classmethod
-    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
-        """Return the number of compute units, used for occupancy /
-        reduction heuristics / max-autotune heuristics.  Defaults to
-        reading the standard field ``multi_processor_count`` from device
-        properties; backends whose native field name differs (XPU, MTIA)
-        must override."""
-        props = cls.get_device_properties(device)
-        mp_count = getattr(props, "multi_processor_count", None)
-        if mp_count is None:
-            raise AttributeError(
-                f"{cls.__name__} must override get_multi_processor_count "
-                f"because its device properties do not expose the standard "
-                f"field 'multi_processor_count'"
-            )
-        return mp_count
-
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
@@ -304,10 +270,6 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def is_gpu() -> bool:
-        return True
-
-    @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> int | str:
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
@@ -413,14 +375,6 @@ class MtiaInterface(DeviceInterface):
         return ret
 
     @staticmethod
-    def is_gpu() -> bool:
-        return True
-
-    @classmethod
-    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
-        return 64
-
-    @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         cc = torch.mtia.get_device_capability(device)
         return cc
@@ -506,14 +460,6 @@ class XpuInterface(DeviceInterface):
         return torch.xpu.is_available()
 
     @staticmethod
-    def is_gpu() -> bool:
-        return True
-
-    @classmethod
-    def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
-        return cls.get_device_properties(device).gpu_subslice_count
-
-    @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         cc = torch.xpu.get_device_capability(device)
         return cc
@@ -589,17 +535,8 @@ class CpuInterface(DeviceInterface):
         pass
 
     @staticmethod
-    def is_gpu() -> bool:
-        return False
-
-    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
-        try:
-            import triton.backends
-        except ModuleNotFoundError:
-            return False
-
-        return "cpu" in triton.backends.backends
+        return True
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -627,10 +564,6 @@ class MpsInterface(DeviceInterface):
     @staticmethod
     def is_available() -> bool:
         return torch.backends.mps.is_available()
-
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
 
     @staticmethod
     def current_device() -> int:
@@ -677,10 +610,6 @@ class TpuInterface(DeviceInterface):
     @staticmethod
     def is_available() -> bool:
         return has_torch_tpu()
-
-    @staticmethod
-    def is_gpu() -> bool:
-        return False
 
     @staticmethod
     def current_device() -> int:
