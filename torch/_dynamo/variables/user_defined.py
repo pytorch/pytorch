@@ -37,7 +37,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -110,11 +110,13 @@ from .base import (
     Method,
     MutationType,
     NO_SUCH_SUBOBJ,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .hashable import HashableTracker
+from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
@@ -125,7 +127,7 @@ from .object_protocol import (
     pynumber_index,
     type_implements_nb_slot,
 )
-from .sets import SetVariable
+from .sets import FrozensetVariable, SetVariable
 
 
 try:
@@ -178,11 +180,8 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
-
-    from .lists import ListVariable, TupleVariable
 
 
 def is_standard_setattr(val: object) -> bool:
@@ -1130,6 +1129,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # unreconstructable args (e.g. generators).  Other tp_new functions
             # (tuple.__new__, BaseException.__new__) use the extra args.
             new_fn = self.value.__new__
+            if new_fn is frozenset.__new__ and len(args) > 2:
+                # frozenset.__new__(cls, iterable) validates arity here because
+                # frozenset.__init__ is object.__init__ (a no-op); set validates
+                # in set.__init__ instead.
+                raise_type_error(
+                    tx,
+                    f"{self.value.__name__} expected at most 1 argument, "
+                    f"got {len(args) - 1}",
+                )
             if new_fn in (dict.__new__, set.__new__, collections.deque.__new__):
                 init_args: list[VariableTracker] = []
             else:
@@ -1822,11 +1830,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
-        if self._base_vt is not None:
-            return side_effects.is_modified(self._base_vt)
-        return False
 
     def reconstruct_pycode(self, codegen):
         if self.source:
@@ -4564,43 +4567,45 @@ class RemovableHandleVariable(VariableTracker):
         return RemovableHandleClass
 
 
-class UserDefinedDictVariable(UserDefinedObjectVariable):
+class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
     """
-    Represents user defined objects that are subclasses of dict/OrderedDict.
+    Represents user defined objects that are subclasses of dict.
 
-    Internally, it uses a ConstDictVariable to represent the dict part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
+    A UserDefinedDict is a dict with some extra fields: the object *is* the dict
+    storage (self.items) plus its instance __dict__.  Content mutations land on
+    self.items directly; the throwaway _base_vt view (which shares that storage
+    and the composite mutation_type) exists only for the delegation and
+    reconstruction paths that want a plain base dict VT.
     """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *ConstDictVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
         value: object,
-        dict_vt: ConstDictVariable | None = None,
+        items: dict[VariableTracker, VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(value, **kwargs)
-        if dict_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "dict_vt must be constructed by builder.py when source is present"
-                )
-            # OrderedDict subclasses need an OrderedDict-backed store so
-            # move_to_end / popitem(last=) delegate correctly.
-            base_cls = (
-                OrderedDictVariable
-                if isinstance(value, collections.OrderedDict)
-                else ConstDictVariable
-            )
-            self._base_vt = base_cls(
-                {},
-                mutation_type=ValueMutationNew(),
-            )
-        else:
-            self._base_vt = dict_vt
+        super().__init__(value, items=items if items is not None else {}, **kwargs)
         self._base_methods = dict_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
+
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # A ConstDictVariable view sharing this object's storage and composite
+        # mutation_type; see UserDefinedSetVariable._base_vt for the rationale.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        view = ConstDictVariable({}, mutation_type=self.mutation_type, source=source)
+        view.items = self.items
+        view.original_items = self.original_items
+        view.should_reconstruct_all = self.should_reconstruct_all
+        return view
 
     def len(self) -> int:
         # Used by nn_module.py to short-circuit the nn.Module forward method
@@ -4711,6 +4716,37 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         return super().tp_repr_impl(tx)
 
 
+class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariable):
+    """
+    Represents user defined objects that are subclasses of collections.OrderedDict.
+
+    OrderedDict-backed storage (self.items is an OrderedDict, from
+    OrderedDictVariable._cpython_type) plus the OrderedDict-only methods
+    (move_to_end, popitem(last=)) come from OrderedDictVariable in the MRO; the
+    dict-subclass behaviour comes from UserDefinedDictVariable.
+    """
+
+    _nonvar_fields = {
+        *UserDefinedDictVariable._nonvar_fields,
+        *OrderedDictVariable._nonvar_fields,
+    }
+
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # OrderedDictVariable view (not ConstDictVariable) so reconstruction emits
+        # an OrderedDict; otherwise identical to UserDefinedDictVariable._base_vt.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        view = OrderedDictVariable({}, mutation_type=self.mutation_type, source=source)
+        view.items = self.items
+        view.original_items = self.original_items
+        view.should_reconstruct_all = self.should_reconstruct_all
+        return view
+
+
 # TODO: move to dicts.py alongside ConstDictVariable.
 # Currently blocked by circular imports (dicts.py ↔ user_defined.py).
 class DefaultDictVariable(UserDefinedDictVariable):
@@ -4727,23 +4763,21 @@ class DefaultDictVariable(UserDefinedDictVariable):
     UserDefinedDictVariable.
     """
 
-    _cpython_type = collections.defaultdict
+    # NB: no `_cpython_type = collections.defaultdict`.  ConstDictVariable.__init__
+    # builds storage as `self._cpython_type({...})`, and defaultdict's first
+    # positional arg is the (callable) default_factory, so a defaultdict store
+    # would reject the initial items dict.  A plain-dict store (inherited from
+    # ConstDictVariable) is correct; python_type() still returns the defaultdict
+    # subclass via UserDefinedObjectVariable.
 
     def __init__(
         self,
         value: object,
         default_factory: VariableTracker | None = None,
-        dict_vt: ConstDictVariable | None = None,
+        items: dict[VariableTracker, VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
-        if dict_vt is None:
-            from .dicts import ConstDictVariable
-
-            dict_vt = ConstDictVariable(
-                {},
-                mutation_type=ValueMutationNew(),
-            )
-        super().__init__(value, dict_vt=dict_vt, **kwargs)
+        super().__init__(value, items=items, **kwargs)
         if default_factory is None:
             from .constant import ConstantVariable
 
@@ -4844,10 +4878,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in mp_subscript_impl")
-        if key in self._base_vt:  # type: ignore[operator]
-            return self._base_vt.getitem_const(tx, key)  # type: ignore[union-attr]
+        if key in self:
+            return self.getitem_const(tx, key)
         return self._missing_impl(tx, key)
 
     def nb_or_impl(
@@ -4872,14 +4904,13 @@ class DefaultDictVariable(UserDefinedDictVariable):
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        if isinstance(left, ConstDictVariable):
-            items = left.items
-        else:
-            if not isinstance(left, UserDefinedDictVariable):
-                raise AssertionError(
-                    f"Expected UserDefinedDictVariable, got {type(left)}: {left}"
-                )
-            items = left._base_vt.items  # type: ignore[missing-attribute]
+        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
+        # `left.items` is the storage in both cases.
+        if not isinstance(left, ConstDictVariable):
+            raise AssertionError(
+                f"Expected ConstDictVariable, got {type(left)}: {left}"
+            )
+        items = left.items
 
         new = tx.output.side_effects.track_new_user_defined_object(
             VariableTracker.build(tx, dict),
@@ -4888,7 +4919,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             tx=tx,
         )
         new.default_factory = self.default_factory  # type: ignore[missing-attribute]
-        new._base_vt = ConstDictVariable(items.copy(), mutation_type=ValueMutationNew())  # type: ignore[missing-attribute]
+        new.items.update(items)  # type: ignore[missing-attribute]
         default_factory = new.default_factory  # type: ignore[missing-attribute]
         tx.output.side_effects.store_attr(new, "default_factory", default_factory)
         new.call_method(tx, "update", [right], {})
@@ -4927,9 +4958,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
                     tx,
                     args=["first argument must be callable or None"],
                 )
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in __init__")
-        return self._base_vt.call_method(tx, "__init__", args, kwargs)
+        # Remaining args go to dict.__init__ (== dict.update) on this object.
+        return ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
 
     def _getitem(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
@@ -4952,8 +4982,6 @@ class DefaultDictVariable(UserDefinedDictVariable):
         # https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Modules/_collectionsmodule.c#L2290-L2293
         from .builder import SourcelessBuilder
 
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in copy")
         new_dd = tx.output.side_effects.track_new_user_defined_object(
             SourcelessBuilder.create(tx, dict),
             SourcelessBuilder.create(tx, collections.defaultdict),
@@ -4963,10 +4991,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
         if not isinstance(new_dd, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(new_dd)}")
         new_dd.default_factory = self.default_factory
-        new_dd._base_vt = self._base_vt.clone(
-            mutation_type=ValueMutationNew(),
-            source=None,
-        )
+        new_dd.items.update(self.items)
         tx.output.side_effects.store_attr(
             new_dd, "default_factory", new_dd.default_factory
         )
@@ -5004,145 +5029,232 @@ class DefaultDictVariable(UserDefinedDictVariable):
     }
 
 
-class UserDefinedSetVariable(UserDefinedObjectVariable):
+class UserDefinedSetVariable(UserDefinedObjectVariable, SetVariable):
     """
     Represents user defined objects that are subclasses of set.
-
-    Internally, it uses a SetVariable to represent the set part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
     """
 
-    def __init__(
-        self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
-    ) -> None:
-        from .builder import SourcelessBuilder
-
-        tx = kwargs.pop("tx", None)
-        super().__init__(value, **kwargs)
-
-        python_type = set if isinstance(value, set) else frozenset
-        self._base_methods = set_methods if python_type is set else frozenset_methods
-
-        if set_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "set_vt must be constructed by builder.py when source is present"
-                )
-            if python_type is set:
-                # set is initialized later
-                self._base_vt = variables.SetVariable(
-                    set(),
-                    mutation_type=ValueMutationNew(),
-                )
-            else:
-                init_args = kwargs.get("init_args", {})
-                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
-                    tx, init_args, {}
-                )
-        else:
-            self._base_vt = set_vt
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
-
-    def as_python_constant(self) -> object:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in as_python_constant")
-        return self._base_vt.as_python_constant()
-
-    @property
-    def set_items(self) -> set[Any]:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in set_items")
-        return self._base_vt.set_items  # pyrefly: ignore[missing-attribute]
-
-    @property
-    def items(self) -> dict[HashableTracker, VariableTracker]:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in items")
-        return self._base_vt.items  # pyrefly: ignore[missing-attribute]
-
-
-class UserDefinedListVariable(UserDefinedObjectVariable):
-    """
-    Represents user defined objects that are subclasses of lists.
-
-    Internally, it uses a ListVariable to represent the list part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
-    """
-
-    def __init__(
-        self, value: object, list_vt: Union["ListVariable", None] = None, **kwargs: Any
-    ) -> None:
-        from .lists import ListVariable
-
-        super().__init__(value, **kwargs)
-        if list_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "list_vt must be constructed by builder.py when source is present"
-                )
-            self._base_vt = ListVariable([], mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = list_vt
-        self._base_methods = list_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
-
-
-class UserDefinedDequeVariable(UserDefinedObjectVariable):
-    """
-    Represents user defined objects that are subclasses of collections.deque.
-
-    Internally, it uses a DequeVariable to represent the deque part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
-    """
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *SetVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
         value: object,
-        deque_vt: Union["variables.lists.DequeVariable", None] = None,
+        items: Iterable[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
-        from .lists import DequeVariable
+        super().__init__(value, items=items if items is not None else [], **kwargs)
+        self._base_methods = set_methods
 
-        super().__init__(value, **kwargs)
-        if deque_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "deque_vt must be constructed by builder.py when source is present"
-                )
-            self._base_vt = DequeVariable([], mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = deque_vt
-        self._base_methods = deque_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # A SetVariable view sharing this object's (composite) mutation_type.
+        # source must agree with the New/Existing kind (see
+        # VariableTracker.__init__); self.source is assigned late for new
+        # objects, so derive it from the mutation_type.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        view = SetVariable([], mutation_type=self.mutation_type, source=source)
+        # Share this object's storage (like the list _base_vt) so mutations made
+        # through the view -- e.g. unbound set.add(self, x), which dispatches via
+        # BuiltinVariable(set) -> _base_vt -- land on self.items rather than a
+        # throwaway dict.  Unlike list, SetVariable.__init__ rebuilds its dict, so
+        # the alias must be reinstated after construction.
+        view.items = self.items
+        view.original_items = self.original_items
+        return view
 
-    def _maxlen(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
-        # maxlen is a read-only getset on deque, not a method, so it is not
-        # covered by the _base_methods call_method delegation; route it to the
-        # DequeVariable which tracks maxlen on the base deque.
-        if self._base_vt is not None:
-            return self._base_vt.tp_getattro_impl(tx, "maxlen")
-        return None
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # UDOV.tp_init_impl would vectorcall the C set.__init__ against the
+        # throwaway _base_vt view; route to SetVariable's, which populates this
+        # object's storage in place.
+        return SetVariable.tp_init_impl(self, tx, args, kwargs)
 
-    # ref: deque_getset[] in CPython Modules/_collectionsmodule.c; maxlen is a
-    # read-only getset (deque_get_maxlen, no setter).
-    tp_getset = {
-        "maxlen": GetSet(_maxlen, None),
+    def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
+        # A new set built from a set subclass (union, difference, ...) is a plain
+        # set in CPython, not the subclass.  Also avoids SetVariable._new_set's
+        # type(self)(items), which would misfire on this class's (value, items)
+        # constructor.
+        return SetVariable(list(items), mutation_type=ValueMutationNew())
+
+
+class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable):
+    """
+    Represents user defined objects that are subclasses of frozenset.
+    """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *FrozensetVariable._nonvar_fields,
     }
 
+    def __init__(
+        self,
+        value: object,
+        items: Iterable[VariableTracker | HashableTracker] | None = None,
+        init_args: list[VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        tx = kwargs.pop("tx", None)
+        if items is None:
+            # frozenset is immutable: frozenset.__new__(cls, iterable) populates
+            # the content at construction (__init__ is a no-op), so materialize
+            # from the __new__ args.  Mirror call_frozenset's do-not-rehash fast
+            # path: reuse a set/dict operand's stored HashableTracker keys rather
+            # than re-hashing every element.
+            if init_args:
+                arg = init_args[0]
+                if isinstance(arg, (SetVariable, ConstDictVariable)):
+                    items = list(arg.items.keys())
+                else:
+                    items = unpack_iterable(tx, arg)
+            else:
+                items = []
+        super().__init__(value, items=items, init_args=init_args, **kwargs)
+        self._base_methods = frozenset_methods
 
-class UserDefinedTupleVariable(UserDefinedObjectVariable):
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        view = FrozensetVariable([], mutation_type=self.mutation_type, source=source)
+        view.items = self.items
+        view.original_items = self.original_items
+        return view
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return FrozensetVariable.tp_init_impl(self, tx, args, kwargs)
+
+    def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
+        # A new frozenset built from a frozenset subclass is a plain frozenset in
+        # CPython, not the subclass.  Also avoids SetVariable._new_set's
+        # type(self)(items), which would misfire on this class's constructor.
+        return FrozensetVariable(list(items), mutation_type=ValueMutationNew())
+
+
+class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
+    """
+    Represents user defined objects that are subclasses of lists.
+    """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *ListVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value: object,
+        items: list[VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(value, items=items if items is not None else [], **kwargs)
+        self._base_methods = list_methods
+
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # The composite mutation_type (ValueAndAttributeMutation*) is shared with
+        # this view so content mutations recorded here flow through the object's
+        # own mutation_type.  source must agree with the New/Existing kind (see
+        # VariableTracker.__init__); self.source is assigned late for new objects,
+        # so derive it from the mutation_type rather than reading it directly.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        return ListVariable(
+            self.items,
+            mutation_type=self.mutation_type,
+            source=source,
+        )
+
+
+class UserDefinedDequeVariable(UserDefinedObjectVariable, DequeVariable):
+    """
+    Represents user defined objects that are subclasses of collections.deque.
+    """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *DequeVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value: object,
+        items: list[VariableTracker] | None = None,
+        maxlen: VariableTracker | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            value,
+            items=items if items is not None else [],
+            maxlen=maxlen,
+            **kwargs,
+        )
+        self._base_methods = deque_methods
+
+    @property
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # A DequeVariable view sharing this object's (composite) mutation_type
+        # and maxlen.  source must agree with the New/Existing kind (see
+        # VariableTracker.__init__); self.source is assigned late for new
+        # objects, so derive it from the mutation_type.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        # DequeVariable.__init__ copies items (for maxlen truncation), which
+        # would break the shared-storage invariant the delegation relies on
+        # (e.g. deque.__init__ during construction mutates the view's items).
+        # Alias self.items so the view shares storage, matching ListVariable.
+        view = DequeVariable(
+            [],
+            maxlen=self.maxlen,
+            mutation_type=self.mutation_type,
+            source=source,
+        )
+        view.items = self.items
+        return view
+
+    # maxlen is a read-only getset; inherited from DequeVariable.tp_getset
+    # (reads self.maxlen directly).
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # UDOV.tp_init_impl would vectorcall the C deque.__init__ against the
+        # throwaway _base_vt view; route to DequeVariable's, which populates this
+        # object (contents + maxlen + state) in place with the correct semantics.
+        return DequeVariable.tp_init_impl(self, tx, args, kwargs)
+
+
+class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
     """
     Represents user defined objects that are subclasses of tuple.
-
-    Internally, it uses a TupleVariable to represent the tuple part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
 
     NamedTupleVariable and StructSequenceVariable are subclasses that handle
     namedtuples and structseqs (torch.return_types.*) respectively.
@@ -5151,6 +5263,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "tuple_cls",
         *UserDefinedObjectVariable._nonvar_fields,
+        *TupleVariable._nonvar_fields,
     }
 
     @staticmethod
@@ -5159,36 +5272,36 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return StructSequenceVariable
         return NamedTupleVariable
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
-        from .lists import TupleVariable
-
+    def __init__(self, value, items=None, init_args=None, **kwargs):  # type: ignore[all]
         tx = kwargs.pop("tx", None)
-        super().__init__(value, init_args=init_args, **kwargs)
-        if tuple_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "tuple_vt must be constructed by builder.py when source is present"
-                )
+        if items is None:
             # Emulate `tuple.__new__`: `tuple.__new__(cls)` with no iterable
             # arg builds an empty tuple, `tuple.__new__(cls, iterable)` builds
             # a tuple from the iterable.
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            elems = unpack_iterable(tx, init_args[0]) if init_args else []
-            self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = tuple_vt
+            items = unpack_iterable(tx, init_args[0]) if init_args else []
+        super().__init__(value, items=items, init_args=init_args, **kwargs)
         self.tuple_cls = type(value)
         self._base_methods = tuple_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
 
     @property
-    def items(self) -> list[VariableTracker]:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in items")
-        return self._base_vt.items  # type: ignore[return-value]
+    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
+        # A TupleVariable view of this object, sharing its (composite)
+        # mutation_type.  source must agree with the New/Existing kind (see
+        # VariableTracker.__init__); self.source is assigned late for new
+        # objects, so derive it from the mutation_type.
+        source = (
+            self.source
+            if isinstance(self.mutation_type, ValueMutationExisting)
+            else None
+        )
+        return TupleVariable(
+            self.items,
+            mutation_type=self.mutation_type,
+            source=source,
+        )
 
     def resolve_data_descriptor(
         self,
@@ -5253,12 +5366,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def _make_tree_map_result(
         self, new_items: list[VariableTracker]
     ) -> "UserDefinedTupleVariable":
-        from .lists import TupleVariable
-
-        tuple_vt = TupleVariable(new_items, mutation_type=ValueMutationNew())
         return type(self)(
             self.value,
-            tuple_vt=tuple_vt,
+            items=new_items,
             mutation_type=ValueMutationNew(),
         )
 
