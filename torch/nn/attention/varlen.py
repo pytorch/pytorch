@@ -331,8 +331,8 @@ def varlen_attn(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
-    is_causal = window_size == (-1, 0)
     window_size_list = list(window_size)
+    is_causal = window_size_list == [-1, 0]
     use_cudnn = _can_use_cudnn(
         query,
         key,
@@ -484,7 +484,8 @@ def varlen_attn_out(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
-    is_causal = window_size == (-1, 0)
+    window_size_list = list(window_size)
+    is_causal = window_size_list == [-1, 0]
     lse = torch.ops.torch_attn._varlen_attn_out(
         out,
         query,
@@ -496,7 +497,7 @@ def varlen_attn_out(
         max_k,
         is_causal,
         scale,
-        list(window_size),
+        window_size_list,
         enable_gqa,
         seqused_k,
         block_table,
