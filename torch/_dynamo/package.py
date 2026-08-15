@@ -236,17 +236,32 @@ def _defining_module_name(code: types.CodeType) -> str | None:
     return _scan_sys_modules_for_file(code.co_filename)
 
 
-@functools.cache
+# filename -> (len(sys.modules) when scanned, module key or None).
+_MODULE_KEY_BY_FILE: dict[str, tuple[int, str | None]] = {}
+
+
 def _scan_sys_modules_for_file(filename: str) -> str | None:
     """
     Memoized because the fallback is O(len(sys.modules)) and this runs per
     inlined code object during capture, on the shared caching_precompile path.
-    A hit is stable; a miss is recomputed only when a new filename shows up.
+
+    A hit is cached outright. A MISS is only cached while sys.modules has not
+    changed size, because the usual reason for one is that the module has not
+    been imported yet -- caching that permanently, which functools.cache would,
+    silently drops the source checksum for every lazily imported file for the
+    rest of the process.
     """
+    generation = len(sys.modules)
+    cached = _MODULE_KEY_BY_FILE.get(filename)
+    if cached is not None and (cached[1] is not None or cached[0] == generation):
+        return cached[1]
+    found = None
     for key, candidate in list(sys.modules.items()):
         if getattr(candidate, "__file__", None) == filename:
-            return key
-    return None
+            found = key
+            break
+    _MODULE_KEY_BY_FILE[filename] = (generation, found)
+    return found
 
 
 @dataclasses.dataclass
@@ -575,9 +590,13 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
+        # None means the artifact predates this field, not "no vector ISA":
+        # rejecting those would invalidate every artifact already on disk over a
+        # target they never recorded. New artifacts always carry a tuple.
         if (
             check_codegen
             and device_type == "cpu"
+            and self.cpu_codegen_target is not None
             and self.cpu_codegen_target != other.cpu_codegen_target
         ):
             raise RuntimeError(
@@ -1192,12 +1211,25 @@ class CompilePackage:
         self._installed_precompile_codes = []
         self._installed_precompile_region_id = -1
 
-    @staticmethod
     def _deserialize_backends(
-        backends: dict[_BackendId, Any],
+        self, backends: dict[_BackendId, Any]
     ) -> dict[_BackendId, Any]:
+        """
+        Deserialize outside the install lock, since an inductor artifact can be
+        slow to load, but only the backends install will actually reach: a
+        bypassed entry installs nothing, so loading its artifact is wasted work
+        and can fail the whole install over a graph that serves nothing.
+        """
+        needed = {
+            backend_id
+            for entry in self._codes.values()
+            if not entry.bypassed
+            for backend_id in entry.backend_ids
+        }
         deserialized = {}
         for backend_id, artifact in backends.items():
+            if backend_id not in needed:
+                continue
             with dynamo_timed("after_deserialization", phase_name="backend_compile"):
                 deserialized[backend_id] = artifact.after_deserialization()
         return deserialized

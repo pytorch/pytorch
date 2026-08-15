@@ -1327,6 +1327,45 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only harvests gradients"):
             torch.compiler.precompile(train_step, m, x, t, tracer="dynamo")
 
+    def _exec_dynamo_training_artifact(self):
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def train_step(model, xx, tt):
+            torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+        def fresh():
+            torch.manual_seed(0)
+            return torch.nn.Linear(4, 3)
+
+        code, _ = torch.compiler.precompile(
+            train_step, fresh(), x, t, tracer="dynamo", backend="eager"
+        )
+        ns = {"__name__": "_a"}
+        exec(compile(code, "<a>", "exec"), ns)
+        return ns["forward"], train_step, fresh, x, t
+
+    def test_tracer_dynamo_training_exec_forward_accepts_keyword_arguments(self):
+        # The exec'd artifact is documented as taking the same args fn took, and
+        # for inference it IS fn, so it honors fn's signature. The training path
+        # wraps fn to materialize .grad first, and that wrapper has to forward
+        # keywords too rather than narrowing the calling convention.
+        forward, train_step, fresh, x, t = self._exec_dynamo_training_artifact()
+        run, ref = fresh(), fresh()
+        forward(run, x, tt=t)
+        train_step(ref, x, t)
+        self.assertEqual(run.weight.grad, ref.weight.grad)
+        self.assertEqual(run.bias.grad, ref.bias.grad)
+
+    def test_tracer_dynamo_training_exec_forward_rejects_a_misplaced_model(self):
+        # GRAD_ACCUM_PARAMS records the model's POSITION, so a call that does not
+        # put a module there has to say so, rather than surfacing as an IndexError
+        # or an AttributeError on whatever else landed in the slot.
+        forward, _train_step, fresh, x, t = self._exec_dynamo_training_artifact()
+        with self.assertRaisesRegex(PrecompileError, "Pass the model positionally"):
+            forward(model=fresh(), xx=x, tt=t)
+        with self.assertRaisesRegex(PrecompileError, "Pass the model positionally"):
+            forward(x, fresh(), t)
+
     def test_tracer_dynamo_one_shot_graph_break_points_to_multi_graph_api(self):
         # The source-artifact path still requires one full graph. Its error points to the
         # example_inputs form, which preserves graph breaks and recompilations.

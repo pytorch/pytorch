@@ -4029,6 +4029,140 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with second, torch.no_grad(), serving():
             self.assertEqual(second(x), model(x))
 
+    def test_isolated_region_serves_a_default_region_precompile_entry(self):
+        # caching_precompile and aot_compile install into the default region,
+        # and ordinary cache entries have always fallen back to it from an
+        # isolated one. Precompile entries have to do the same, or loading any
+        # region-isolated artifact silently stops those from serving.
+        from torch._dynamo.precompile_package import _SingleFileStore
+
+        x = torch.randn(3, 4)
+        model = PrecompileSelfAct(torch.relu)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_risky_drops=False)
+
+        torch._dynamo.reset()
+        cache_entry = _SingleFileStore().load_cache_entry(self.path())
+        package = CompilePackage(model.forward, cache_entry.dynamo)
+        # Default region: install() with no isolate_recompiles_id.
+        package.install(cache_entry.backends)
+        try:
+            isolated = torch._dynamo.optimize(
+                "eager", dynamic=False, isolate_recompiles=True
+            )(model)
+            with torch.no_grad(), serving():
+                self.assertEqual(isolated(x), model(x))
+        finally:
+            package.uninstall()
+
+    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
+        # lookup() holds the ExtraState cache lock across guard evaluation,
+        # which runs Python and so can drop the GIL at any bytecode boundary. A
+        # second thread that blocks on that lock while holding the GIL wedges
+        # the first one forever, so the lock has to release the GIL before it
+        # waits. A short switch interval makes the handoff frequent.
+        x = torch.randn(3, 4)
+        model = PrecompileSelfAct(torch.relu)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(x)
+        session.save(self.path(), require_no_risky_drops=False)
+
+        torch._dynamo.reset()
+        loaded = precompile_load(model, self.path(), backend="eager", dynamic=False)
+        errors = queue.SimpleQueue()
+
+        def hammer():
+            try:
+                with torch.no_grad():
+                    for _ in range(200):
+                        loaded(x)
+            except BaseException as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(120)
+            alive = [t for t in threads if t.is_alive()]
+            self.assertFalse(alive, "threads deadlocked acquiring the cache lock")
+        finally:
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        loaded.unload()
+
+    def test_install_skips_backends_only_a_bypassed_entry_references(self):
+        # Deserializing an inductor artifact is expensive and can fail on a
+        # serving host, so install() must not touch one for an entry it will
+        # skip anyway.
+        class _Exploding:
+            def after_deserialization(self):
+                raise AssertionError("install deserialized an unusable backend")
+
+        model = PrecompileSelfAct(torch.relu)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(3, 4))
+        package = session._package
+        backend_ids = {
+            backend_id
+            for entry in package._codes.values()
+            for backend_id in entry.backend_ids
+        }
+        self.assertTrue(backend_ids)
+        for entry in package._codes.values():
+            entry.bypassed = True
+        package.install({backend_id: _Exploding() for backend_id in backend_ids})
+        package.uninstall()
+
+    def test_artifact_predating_cpu_codegen_target_still_loads(self):
+        # None means "written before the field existed", not "no vector ISA".
+        # Treating it as a mismatch would reject every artifact already on disk
+        # over a target they never recorded.
+        current = SystemInfo.current()
+        self.assertIsNotNone(current.cpu_codegen_target)
+        dataclasses.replace(current, cpu_codegen_target=None).check_compatibility(
+            current, "cpu"
+        )
+        drifted = dataclasses.replace(
+            current, cpu_codegen_target=("mips", "DEFAULT", None, "INVALID", None, None)
+        )
+        with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
+            drifted.check_compatibility(current, "cpu")
+
+    def test_scan_sys_modules_retries_after_a_later_import(self):
+        # A miss usually means the module is not imported YET. Caching that
+        # permanently drops the source checksum for every lazily imported file
+        # for the rest of the process.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "_precompile_late_import.py")
+            with open(path, "w") as f:
+                f.write("def f(x):\n    return x + 1\n")
+            self.assertIsNone(dynamo_package._scan_sys_modules_for_file(path))
+            sys.path.insert(0, tmp)
+            try:
+                import _precompile_late_import
+
+                self.assertEqual(
+                    dynamo_package._scan_sys_modules_for_file(
+                        _precompile_late_import.__file__
+                    ),
+                    "_precompile_late_import",
+                )
+            finally:
+                sys.path.remove(tmp)
+                sys.modules.pop("_precompile_late_import", None)
+                dynamo_package._MODULE_KEY_BY_FILE.clear()
+
     def _save_legacy_empty_graph_package(self):
         session = precompile_capture(PrecompileEmptyGraph(), backend="eager")
         with session as compiled, torch.no_grad():

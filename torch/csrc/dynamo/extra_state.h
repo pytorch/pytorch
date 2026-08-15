@@ -83,8 +83,12 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // to generalize.
   std::unordered_map<int64_t, py::dict> region_frame_state_map;
   std::mutex region_frame_state_mutex;
-  // Actions to apply to all frames with this code object (non-isolated)
+  // Actions to apply to all frames with this code object (non-isolated).
+  // Read on every intercepted frame, so the mutex guarding it is per-ExtraState
+  // rather than process-wide: two threads running different functions must not
+  // serialize against each other here.
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  mutable std::mutex strategy_mutex;
   // Monotonic token for the last global strategy write. Tokens come from a
   // process-wide counter, so resetting a code object's ExtraState cannot make
   // a stale owner appear current again.

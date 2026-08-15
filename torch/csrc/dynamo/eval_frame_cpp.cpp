@@ -521,9 +521,14 @@ PyObject* dynamo__custom_eval_frame(
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
+  // py::hasattr on a miss raises and clears an AttributeError, so keep it off
+  // the ordinary run-only path: torch._dynamo.run() and the eager_on_recompile
+  // stance both arrive here with callback == Py_False on every frame, and only
+  // a real callback object can carry the marker.
   bool force_callback_on_cache_miss = false;
-  if (strategy.cur_action == FrameAction::RUN_ONLY ||
-      strategy.recursive_action == FrameAction::RUN_ONLY) {
+  if ((strategy.cur_action == FrameAction::RUN_ONLY ||
+       strategy.recursive_action == FrameAction::RUN_ONLY) &&
+      !callback.is_none() && callback.ptr() != Py_False) {
     force_callback_on_cache_miss =
         py::hasattr(callback, "_torchdynamo_force_callback_on_cache_miss");
   }

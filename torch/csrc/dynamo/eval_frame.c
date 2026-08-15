@@ -28,6 +28,13 @@ typedef struct {
 // static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+// Thread-local, matching eval_frame_callback_key: the compile region is a
+// property of the call in flight, and a process-global one let a region entered
+// on one thread capture unrelated frames on every other. A thread that never
+// enters a region reads the default, so worker threads do NOT inherit the
+// region of whoever spawned them -- they must enter it themselves.
+// Stored offset by 2 so that the -1 default is distinguishable from tss's
+// "unset" NULL; set_current_isolate_recompiles_id rejects anything below -1.
 static Py_tss_t isolate_recompiles_key = Py_tss_NEEDS_INIT;
 
 static PyObject* eval_frame_callback_get(void) {
