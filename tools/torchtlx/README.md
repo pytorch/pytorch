@@ -31,13 +31,18 @@ correctness suite. `--full` adds `test/inductor/test_triton_kernels.py`
 
 ## Tests for the wiring itself
 
-`test_wiring.py` asserts the claim this fork rests on -- that FBTriton is
-opt-in and the default build path is unchanged -- by evaluating the Triton
-block of `.ci/pytorch/binary_populate_env.sh` and comparing the emitted
-requirement strings. No GPU, no network:
+`tools/test/test_torchtlx_wiring.py` asserts the claim this fork rests on --
+that FBTriton is opt-in and the default build path is unchanged -- by
+evaluating the Triton block of `.ci/pytorch/binary_populate_env.sh` and
+comparing the emitted requirement strings. It also guards that nothing lands
+under `.ci/docker/`, whose tree hash gates every CI Docker image rebuild.
+
+It lives in `tools/test/` rather than here so that CI collects it: the lint
+workflow runs `pytest tools/test`. That job uses the linter image, so the test
+imports neither torch nor triton and needs no GPU and no network.
 
 ```bash
-python tools/torchtlx/test_wiring.py
+python tools/test/test_torchtlx_wiring.py
 ```
 
 ## Compile caches

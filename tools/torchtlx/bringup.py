@@ -101,6 +101,26 @@ def uv_pip(subcommand: str, *args: str) -> list[str]:
     return [uv_bin(), "pip", subcommand, "--python", sys.executable, *args]
 
 
+def upstream_spec(pkg: str, version: str | None) -> str:
+    """Requirement for the upstream Triton matching this torch.
+
+    An explicit --version always wins. Otherwise prefer the build this repo
+    pins -- <ver>+git<shorthash> from triton_version.txt and
+    ci_commit_pins/triton.txt -- which is what a dev torch is built against,
+    so `switch oai` is reproducible rather than "whatever the nightly index
+    has today". Falls back to the bare name when that exact build was never
+    published, which is common when the pin is ahead of the index.
+    """
+    if version:
+        return f"{pkg}=={version}"
+    try:
+        ver = (REPO_ROOT / ".ci/docker/triton_version.txt").read_text().strip()
+        sha = (REPO_ROOT / ".ci/docker/ci_commit_pins/triton.txt").read_text().strip()
+    except OSError:
+        return pkg
+    return f"{pkg}=={ver}+git{sha[:8]}"
+
+
 def clear_caches() -> None:
     """Drop the Inductor and Triton compile caches.
 
@@ -155,7 +175,15 @@ def probe() -> dict:
     raise RuntimeError(f"probe failed:\n{res.stdout}\n{res.stderr}")
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+def report() -> tuple[list[str], list[str]]:
+    """Print the environment report; return (install, tlx) problems.
+
+    Split because the two mean different things to different callers.
+    Install problems (no Triton, colliding distributions) are failures
+    whatever you asked for. TLX problems (not FBTriton, no registry) are
+    the expected, correct outcome of `switch oai` -- reporting them is
+    useful, exiting non-zero for them is not.
+    """
     info = probe()
     dists = info.get("dists", {})
 
@@ -187,16 +215,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"  error        : {info['triton_error']}")
     print("=" * 72)
 
-    problems = []
+    install_problems = []
+    tlx_problems = []
     if len(dists) > 1:
-        problems.append(
+        install_problems.append(
             f"multiple triton distributions installed ({', '.join(sorted(dists))}); "
             "they collide on the `triton` package -- run `switch` to clean up"
         )
     if not version:
-        problems.append("triton is not importable")
+        install_problems.append("triton is not importable")
     elif not is_fbtriton:
-        problems.append(
+        tlx_problems.append(
             "the active Triton is not FBTriton (no '+fb' version suffix); "
             "torchTLX only exists in FBTriton"
         )
@@ -205,7 +234,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print(f"TLX registry   : MISSING ({TLX_REGISTRY})")
         print(f"  error        : {info.get('tlx_error')}")
-        problems.append(
+        tlx_problems.append(
             "the active Triton has no TLX Inductor registry, so torchTLX will "
             "silently never engage (tlx.py swallows the ImportError). Install "
             f"an FBTriton >={FBTRITON_MIN_VERSION}, which ships "
@@ -214,13 +243,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "`bringup.py switch fbtriton --from-source <checkout>`"
         )
 
-    if problems:
+    if install_problems or tlx_problems:
         print("\nNOT READY for torchTLX:")
-        for p in problems:
+        for p in install_problems + tlx_problems:
             print(f"  - {p}")
-        return 1
-    print("\nREADY for torchTLX.")
-    return 0
+    else:
+        print("\nREADY for torchTLX.")
+    return install_problems, tlx_problems
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    install_problems, tlx_problems = report()
+    return 1 if install_problems or tlx_problems else 0
 
 
 def resolves(spec: str, extra: list[str] | None = None) -> bool:
@@ -267,7 +301,8 @@ def cmd_switch(args: argparse.Namespace) -> int:
         info = probe()
         if info.get("hip"):
             rocm = ".".join(info["hip"].split(".")[:2])
-            spec = "pytorch-triton-rocm"
+            pkg = "pytorch-triton-rocm"
+            spec = upstream_spec(pkg, args.version)
             extra = [
                 "--index-url",
                 f"https://download.pytorch.org/whl/nightly/rocm{rocm}",
@@ -277,7 +312,8 @@ def cmd_switch(args: argparse.Namespace) -> int:
             label = f"upstream Triton for ROCm {rocm}: {spec}"
         elif info.get("cuda"):
             cuda = info["cuda"].replace(".", "")
-            spec = "pytorch-triton"
+            pkg = "pytorch-triton"
+            spec = upstream_spec(pkg, args.version)
             extra = [
                 "--index-url",
                 f"https://download.pytorch.org/whl/nightly/cu{cuda}",
@@ -302,7 +338,8 @@ def cmd_switch(args: argparse.Namespace) -> int:
         # to get a TLX-capable FBTriton, so it must not be the unguarded one.
         tmpdir = tempfile.mkdtemp(prefix="fbtriton-wheel-")
         print(f"--- building FBTriton wheel from {spec} (compiles Triton + LLVM, slow)")
-        build = [uv_bin(), "build", "--wheel", "--out-dir", tmpdir, spec]
+        build = [uv_bin(), "build", "--wheel", "--python", sys.executable,
+                 "--out-dir", tmpdir, spec]
         if run(build).returncode != 0:
             print("error: build failed; leaving the current install alone")
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -323,7 +360,18 @@ def cmd_switch(args: argparse.Namespace) -> int:
     else:
         print(f"--- checking {spec} resolves")
         if not resolves(spec, extra):
-            return 1
+            # The repo-pinned upstream build is often ahead of what the nightly
+            # index carries. Fall back to the newest published build rather than
+            # refusing to switch, but say so -- the A/B is then time-dependent.
+            fallback = spec.split("==")[0]
+            if args.version or fallback == spec:
+                return 1
+            print(f"warning: {spec} is not published; falling back to {fallback}")
+            print("         (the upstream side of the A/B is then unpinned)")
+            spec = fallback
+            label = f"{label.split(':')[0]}: {spec} (unpinned)"
+            if not resolves(spec, extra):
+                return 1
 
     print(f"--- removing all triton distributions: {', '.join(TRITON_DISTRIBUTIONS)}")
     run(uv_pip("uninstall", *TRITON_DISTRIBUTIONS))
@@ -341,7 +389,13 @@ def cmd_switch(args: argparse.Namespace) -> int:
     clear_caches()
 
     print()
-    return cmd_doctor(args)
+    install_problems, tlx_problems = report()
+    if install_problems:
+        return 1
+    # Landing on a non-TLX Triton is the whole point of `switch oai`, so those
+    # problems are informational there; they are failures only if fbtriton was
+    # requested.
+    return 1 if (args.provider == "fbtriton" and tlx_problems) else 0
 
 
 def discover_tlx_tests() -> list[str]:

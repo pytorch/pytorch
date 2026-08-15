@@ -6,18 +6,23 @@ path is unchanged, so that claim is asserted directly: with FBTRITON unset the
 emitted PYTORCH_EXTRA_INSTALL_REQUIREMENTS must be byte-identical to what
 upstream produces.
 
-    python tools/torchtlx/test_wiring.py
+    python tools/test/test_torchtlx_wiring.py
+    pytest tools/test -o "python_files=test*.py" -k torchtlx
 
-No GPU, no network, no torch import required.
+Lives here rather than under tools/torchtlx/ so CI collects it: the lint
+workflow runs `pytest tools/test`, and these guards -- particularly that
+nothing lands under .ci/docker/ -- only help if they run unattended. That job
+uses the linter image, so this shells out to bash and compares strings; it
+imports neither torch nor triton, and needs no GPU and no network. Hence plain
+unittest rather than torch.testing._internal, matching the rest of tools/test.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
+import unittest
 from pathlib import Path
-
-from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +59,7 @@ def emitted_requirement(build_version: str, fbtriton: bool) -> str:
     return res.stdout.strip().split("|")[-1].strip()
 
 
-class TestBinaryPopulateEnv(TestCase):
+class TestBinaryPopulateEnv(unittest.TestCase):
     ROCM_DEV = "2.15.0.dev20260814+rocm7.0"
     ROCM_REL = "2.15.0+rocm7.0"
     CUDA_DEV = "2.15.0.dev20260814+cu129"
@@ -122,11 +127,17 @@ class TestBinaryPopulateEnv(TestCase):
         )
 
     def test_ci_docker_untouched_by_this_fork(self):
-        merge_base = subprocess.run(
-            ["git", "merge-base", "HEAD", "main"],
-            cwd=REPO_ROOT, capture_output=True, text=True,
-        ).stdout.strip()
-        if not merge_base:
+        # origin/main first: a CI checkout usually has no local `main`, and
+        # skipping there would silently retire the guard exactly where it is
+        # needed most.
+        for base in ("origin/main", "main"):
+            merge_base = subprocess.run(
+                ["git", "merge-base", "HEAD", base],
+                cwd=REPO_ROOT, capture_output=True, text=True,
+            ).stdout.strip()
+            if merge_base:
+                break
+        else:
             self.skipTest("no main branch to diff against")
         diff = subprocess.run(
             ["git", "diff", "--name-only", merge_base, "HEAD", "--", ".ci/docker"],
@@ -139,4 +150,4 @@ if __name__ == "__main__":
     if not SCRIPT.exists():
         print(f"cannot find {SCRIPT}", file=sys.stderr)
         raise SystemExit(1)
-    run_tests()
+    unittest.main()
