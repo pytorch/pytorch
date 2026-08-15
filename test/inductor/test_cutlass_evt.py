@@ -29,7 +29,7 @@ def _is_cuda_sm90_or_sm10x():
 
 
 def _cuda_evt_arch_supported(device):
-    if device != "cuda":
+    if torch.device(device).type != "cuda":
         return True
 
     from cutlass_cppgen.backend.evt.passes.util import cc_map
@@ -525,7 +525,7 @@ return D""",
             self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
-        if device == "xpu":
+        if torch.device(device).type == "xpu":
             self.assertExpectedInline(
                 code,
                 """\
@@ -614,7 +614,7 @@ def fn(accum, bias):
 
         code = render_code()
 
-        if device == "xpu":
+        if torch.device(device).type == "xpu":
             self.assertExpectedInline(
                 code,
                 """\
@@ -869,7 +869,7 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
 """,
             )
-        if device == "xpu":
+        if torch.device(device).type == "xpu":
             self.assertExpectedInline(
                 code,
                 """\
