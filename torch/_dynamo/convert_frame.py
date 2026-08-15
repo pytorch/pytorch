@@ -1012,6 +1012,44 @@ class DynamoOutput:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
             raise AssertionError("output_graph must not be None when building guards")
+        # Translation validation runs when guards are produced, which is after
+        # tracing, so a contradiction found here would otherwise be reported
+        # without the bisection that says which node introduced it. Same
+        # treatment as the tracing side.
+        #
+        # Only for a validation failure, and only when validation is on. The
+        # tracing side can afford to bisect on any exception; here it cannot.
+        # bisect replays the recorded events and produces guards again, which
+        # overwrites shape env state the original error still needs - an
+        # unrelated exception escaping this call, such as export's constraint
+        # violation, would come out having lost its suggested fixes. The config
+        # is read directly to keep validator, and so z3, off the common path.
+        from torch.fx.experimental import _config as fx_experimental_config
+
+        if not fx_experimental_config.translation_validation:
+            return self._build_guards(
+                code, output_graph, cache_entries, hooks, save, strict_error
+            )
+
+        from torch.fx.experimental.validator import bisect, ValidationException
+
+        try:
+            return self._build_guards(
+                code, output_graph, cache_entries, hooks, save, strict_error
+            )
+        except ValidationException:
+            bisect(output_graph.shape_env)
+            raise
+
+    def _build_guards(
+        self,
+        code: types.CodeType,
+        output_graph: Any,
+        cache_entries: list[CacheEntry] | None,
+        hooks: Hooks | None,
+        save: bool,
+        strict_error: bool,
+    ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
             output_graph,
