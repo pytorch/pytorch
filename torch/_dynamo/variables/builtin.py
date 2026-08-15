@@ -3358,9 +3358,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     raise AssertionError(
                         f"Expected DefaultDictVariable, got {type(result)}"
                     )
-                result._base_vt = ConstDictVariable(
-                    items, mutation_type=ValueMutationNew()
-                )
+                # Route through ConstDictVariable to wrap raw VT keys into
+                # HashableTrackers before populating the defaultdict's storage.
+                wrapped = ConstDictVariable(items, mutation_type=ValueMutationNew())
+                result.items.update(wrapped.items)
                 return result
             else:
                 return ConstDictVariable(items, mutation_type=ValueMutationNew())
