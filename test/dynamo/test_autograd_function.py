@@ -3063,7 +3063,12 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_custom_jvp_under_func_grad_does_not_graph_break(self):
-        """Reverse mode never consults jvp, so the widened check must not fire."""
+        """Reverse mode never consults jvp, so the widened check must not fire.
+
+        The gradient value is deliberately not asserted: Dynamo drops the custom
+        `backward` of any autograd.Function under `torch.func.grad`, with or
+        without a custom jvp, which is a separate defect from the one fixed here.
+        """
 
         def fn(x):
             return SinWithZeroJvp.apply(x).sum()
@@ -3072,6 +3077,49 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(torch.func.grad(fn), backend=cnt, fullgraph=True)
         opt_fn(torch.randn(4))
 
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_custom_jvp_recompiles_when_dual_level_entered_later(self):
+        """A graph compiled without forward AD must not be reused under it.
+
+        The break decision reads ambient forward-AD state, so the artifact from
+        the first call would otherwise still inline forward() and drop the jvp.
+        """
+
+        def fn(x):
+            return SinWithZeroJvp.apply(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt)
+        x, dx = torch.randn(4), torch.randn(4)
+        opt_fn(x)
+        cold_frame_count = cnt.frame_count
+
+        with fwAD.dual_level():
+            actual = fwAD.unpack_dual(opt_fn(fwAD.make_dual(x, dx))).tangent
+            expected = fwAD.unpack_dual(fn(fwAD.make_dual(x, dx))).tangent
+
+        self.assertEqual(expected, torch.zeros(4))
+        self.assertEqual(actual, expected)
+        self.assertGreater(cnt.frame_count, cold_frame_count)
+
+    def test_custom_jvp_with_forward_grad_disabled_does_not_graph_break(self):
+        """A dual level with forward grad off cannot consult jvp, so no break.
+
+        `_set_fwd_grad_enabled(False)` makes `make_dual` a no-op, so the tangent
+        is dropped by forward AD itself and the custom rule is never reached.
+        """
+
+        def fn(x, dx):
+            with fwAD.dual_level(), fwAD._set_fwd_grad_enabled(False):
+                out = SinWithZeroJvp.apply(fwAD.make_dual(x, dx))
+                return fwAD.unpack_dual(out).primal
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        x, dx = torch.randn(4), torch.randn(4)
+        actual = torch.compile(fn, backend=cnt, fullgraph=True)(x, dx)
+
+        self.assertEqual(actual, torch.sin(x))
         self.assertEqual(cnt.frame_count, 1)
 
     def test_custom_jvp_backward_mode_still_uses_custom_backward(self):
@@ -3085,6 +3133,9 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
             return SinWithZeroJvp.apply(t).sum()
 
         xg = torch.randn(4).requires_grad_()
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "custom `jvp`"):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(xg)
+
         torch.compile(fn, backend="aot_eager")(xg).backward()
         self.assertEqual(xg.grad, torch.zeros(4))
 
