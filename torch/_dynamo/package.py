@@ -1001,13 +1001,17 @@ class CompilePackage:
             self._add_user_function(code)
 
         entry = self._codes[code]
-        guarded_codes_before = len(entry.guarded_codes)
         self._current_entry = entry
         try:
             yield
         finally:
             entry.has_compile_id = True
-            if len(entry.guarded_codes) == guarded_codes_before and not entry.bypassed:
+            # "Uncovered" means the frame produced NO guarded code at all, which
+            # is the case install() skip_code()s and save() reports as a gap. A
+            # frame that hit the recompile limit has working variants and is
+            # reported as truncated instead; counting it here too made the
+            # uncovered error text ("no guarded variants at all") false for it.
+            if not entry.guarded_codes and not entry.bypassed:
                 self._uncovered_frames.add(code.co_name)
             self._current_entry = None
 
@@ -1763,7 +1767,7 @@ class DiskDynamoCache(DiskDynamoStore):
         return None
 
     def load_and_install_package(
-        self, fn: Callable[..., Any], isolate_recompiles_id: int = -1
+        self, fn: Callable[..., Any], isolate_recompiles_id: int
     ) -> CompilePackage | None:
         """
         Load directly into a package and install backends.

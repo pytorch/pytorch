@@ -728,6 +728,12 @@ def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
     for c in consts:
         if isinstance(c, _STABLE_CONST_TYPES):
             out.append(c)
+        elif isinstance(c, types.CodeType):
+            # A nested code object reprs with its ADDRESS, so it cannot go in
+            # verbatim -- but dropping it merges two lambdas that differ only in
+            # a comprehension or an inner lambda, which is this same bug one
+            # level down. Recurse into its own fingerprint instead.
+            out.append(_code_fingerprint(c))
         elif isinstance(c, tuple):
             out.append(_stable_consts(c))
         elif isinstance(c, frozenset):

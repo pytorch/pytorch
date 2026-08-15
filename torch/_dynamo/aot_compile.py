@@ -576,6 +576,15 @@ class AOTCompiledModel:
             traced_fn, _ = convert_frame.get_traced_fn(model.forward)
             guard_globals = traced_fn.__globals__
         except RuntimeError:
+            # Log rather than swallow: if this model DOES carry a surviving
+            # global guard, it now resolves against self.fn.__globals__ -- the
+            # bug this change exists to fix -- and that should be visible.
+            log.warning(
+                "Could not resolve a guard scope from %s.forward; global guards "
+                "will resolve against the reconstructed scope instead",
+                type(model).__name__,
+                exc_info=True,
+            )
             guard_globals = None
 
         results: list[bytes] = pickle.loads(data)

@@ -2,6 +2,7 @@
 
 import dataclasses
 import functools
+import io
 import itertools
 import pickle
 import sys
@@ -212,6 +213,73 @@ class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
     @keep_name_with_unpicklable_default
     def forward(self, x, unused=UnpicklableDefault()):
         return x * 2
+
+
+# --- self-referential / cyclic module globals ------------------------------
+# `wrapped = deco(base)` at module scope: the wrapper is reachable from its own
+# __globals__, so its reduce args contain itself. pickle memoizes only AFTER
+# saving args, so this recursed forever before the cycle break.
+def keep_globals_len_selfref(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        return func(self, x) + len(func.__globals__)
+
+    return wrapper
+
+
+def _self_ref_base(self, x):
+    return x * 2
+
+
+# Bound at MODULE scope, then installed as the class's forward, so the guarded
+# wrapper is reachable from its own __globals__ -- the `wrapped = deco(base)`
+# shape. Decorating inside the class body would not do it: the wrapper would
+# only be a class attribute.
+SELF_REF_WRAPPED = keep_globals_len_selfref(_self_ref_base)
+
+
+class DecoratedSelfRefForwardModule(torch.nn.Module):
+    forward = SELF_REF_WRAPPED
+
+
+# --- an empty closure cell -------------------------------------------------
+def keep_name_with_empty_cell(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "forward":
+            x = x + 1
+        if x is None:
+            return unset
+        return func(self, x)
+
+    if func is None:
+        unset = 1  # never runs, so the cell wrapper closes over stays EMPTY
+
+    return wrapper
+
+
+def _empty_cell_base(self, x):
+    return x * 2
+
+
+EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
+
+
+# --- a guarded default whose VALUE must survive, not just the tuple length --
+def keep_default_value(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedDefaultValueForwardModule(torch.nn.Module):
+    @keep_default_value
+    def forward(self, x, scale=2.0):
+        return x * scale
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -629,6 +697,80 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_reduce_breaks_a_cycle_through_a_function_s_own_globals(self):
+        # `wrapped = deco(base)` at module scope: the wrapper is reachable from
+        # its own __globals__, so its reduce ARGS contain itself, and pickle
+        # memoizes only after saving args -- this recursed forever. Driven at
+        # the pickler directly because it takes a guard rooted at both the
+        # function and its globals dict, which no capture in this file produces.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        wrapped = SELF_REF_WRAPPED
+        self.assertIn(wrapped, wrapped.__globals__.values())
+        gtv = {id(wrapped): wrapped, id(wrapped.__globals__): wrapped.__globals__}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": wrapped})
+        self.assertGreater(len(buf.getvalue()), 0)
+
+    def test_reduce_handles_an_empty_closure_cell(self):
+        # A free variable a decorator only assigns on a path that did not run
+        # has no contents; reading it raised ValueError out of the reducer,
+        # which reaches the caller as a package bypass.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        wrapped = EMPTY_CELL_WRAPPED
+        empty = [c for c in wrapped.__closure__ if not self._cell_has_contents(c)]
+        self.assertEqual(len(empty), 1)
+        gtv = {id(wrapped): wrapped}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": wrapped})
+        self.assertGreater(len(buf.getvalue()), 0)
+
+    @staticmethod
+    def _cell_has_contents(cell):
+        try:
+            cell.cell_contents
+        except ValueError:
+            return False
+        return True
+
+    def test_fqn_mismatched_function_preserves_a_guarded_default_value(self):
+        # The SEQUENCE_LENGTH test pins the defaults TUPLE's length. This pins
+        # that a guarded element's value survives: forcing every default to
+        # _Missing passes that one and fails this one.
+        mod = DecoratedDefaultValueForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
+        # Two functions closing over one variable must still share the cell
+        # after reload; rebuilding every cell silently unshares them.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        def outer():
+            shared = torch.zeros(2)
+
+            def a():
+                return shared
+
+            def b():
+                return shared
+
+            return a, b
+
+        a, b = outer()
+        self.assertIs(a.__closure__[0], b.__closure__[0])
+        buf = io.BytesIO()
+        cell = a.__closure__[0]
+        gtv = {id(a): a, id(b): b, id(cell): cell}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
     def test_guard_rooted_at_fqn_mismatched_function(self):
         mod = DecoratedForwardModule()

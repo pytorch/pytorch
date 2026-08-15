@@ -321,6 +321,7 @@ import io
 import logging
 import marshal
 import pickle
+import sys
 import types
 from collections.abc import Callable, Mapping, Sequence  # noqa: TC003
 from contextlib import AbstractContextManager  # noqa: TC003
@@ -1392,8 +1393,67 @@ def _graph_traces_autograd(gm: torch.fx.GraphModule) -> bool:
     )
 
 
+def _frame_modules(
+    fn: Callable[..., object], args: tuple[object, ...]
+) -> list[tuple[int, torch.nn.Module]]:
+    """Every nn.Module the artifact's ``forward`` will receive, with its POSITION.
+
+    Positions are over the FRAME args, not the caller's ``args``: Dynamo traces
+    ``get_traced_fn(fn)`` and ``convert_frame._get_frame`` PREPENDS the bound self,
+    so for an nn.Module ``fn`` -- or a bound method -- the module carrying the
+    parameters is argument 0 and is absent from ``args`` entirely. Scanning ``args``
+    missed it, which silently baked the assign form of the backward (see
+    Note [precompile dynamo training grad accumulation]), and shifted every recorded
+    position by one for a bound method.
+
+    Containers are searched one level down, so ``train_step([model], x, t)`` is
+    covered too; the position recorded is the container's, which is what the driver
+    indexes and then re-searches the same way.
+    """
+    from torch._dynamo.convert_frame import get_traced_fn
+
+    _traced, bound_self = get_traced_fn(fn)
+    frame_args: list[object] = ([bound_self] if bound_self is not None else []) + list(
+        args
+    )
+    found: list[tuple[int, torch.nn.Module]] = []
+    for pos, a in enumerate(frame_args):
+        if isinstance(a, torch.nn.Module):
+            found.append((pos, a))
+        elif isinstance(a, (list, tuple)):
+            found.extend(
+                (pos, inner) for inner in a if isinstance(inner, torch.nn.Module)
+            )
+        elif isinstance(a, dict):
+            found.extend(
+                (pos, inner)
+                for inner in a.values()
+                if isinstance(inner, torch.nn.Module)
+            )
+    return found
+
+
+def _module_import_name(module: types.ModuleType) -> str | None:
+    """The sys.modules KEY for ``module``, which is what re-imports to it.
+
+    ``__name__`` is not: ``_collections_abc`` sets its own to "collections.abc",
+    which imports to the three-line shim instead. Real models inline through
+    such modules, so resolve the key and refuse rather than record a name that
+    binds something else at load.
+    """
+    name = getattr(module, "__name__", None)
+    if name is not None and sys.modules.get(name) is module:
+        return name
+    for key, candidate in list(sys.modules.items()):
+        if candidate is module:
+            return key
+    return None
+
+
 def _param_grad_inputs(
-    args: tuple[object, ...], example_inputs: Sequence[object]
+    fn: Callable[..., object],
+    args: tuple[object, ...],
+    example_inputs: Sequence[object],
 ) -> list[tuple[int, str]]:
     """Name every param whose ``.grad`` the captured graph took as an INPUT, as
     ``(positional arg index of the owning module, param name)``.
@@ -1405,17 +1465,17 @@ def _param_grad_inputs(
     """
     by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
     found = []
-    for pos, a in enumerate(args):
-        if not isinstance(a, torch.nn.Module):
-            continue
-        for name, p in a.named_parameters(remove_duplicate=False):
+    for pos, module in _frame_modules(fn, args):
+        for name, p in module.named_parameters(remove_duplicate=False):
             if p.grad is not None and id(p.grad) in by_id:
                 found.append((pos, name))
     return found
 
 
 def _seed_param_grads(
-    args: tuple[object, ...], example_inputs: Sequence[object]
+    fn: Callable[..., object],
+    args: tuple[object, ...],
+    example_inputs: Sequence[object],
 ) -> list[torch.nn.Parameter]:
     """Give every graph-input param that has no ``.grad`` a zero one, so a re-capture bakes
     the ACCUMULATING form of the backward. Returns the params that were seeded (for restore).
@@ -1436,13 +1496,18 @@ def _seed_param_grads(
     """
     by_id = {id(t) for t in example_inputs if isinstance(t, torch.Tensor)}
     seeded = []
-    for a in args:
-        if not isinstance(a, torch.nn.Module):
-            continue
-        for _name, p in a.named_parameters(remove_duplicate=False):
-            if p.grad is None and p.requires_grad and id(p) in by_id:
-                p.grad = torch.zeros_like(p)
-                seeded.append(p)
+    try:
+        for _pos, module in _frame_modules(fn, args):
+            for _name, p in module.named_parameters(remove_duplicate=False):
+                if p.grad is None and p.requires_grad and id(p) in by_id:
+                    p.grad = torch.zeros_like(p)
+                    seeded.append(p)
+    except BaseException:
+        # Seeding mutates the CALLER's model, so a failure part way through --
+        # an OOM on zeros_like for a large model -- must not leave grads behind.
+        for p in seeded:
+            p.grad = None
+        raise
     return seeded
 
 
@@ -1518,6 +1583,23 @@ def _capture_dynamo(
     training grad accumulation]). Other graph-breaking Python still raises a
     PrecompileError pointing at ``torch.compiler.precompile.capture``.
     """
+    # get_traced_fn refuses anything that is not a function, bound method or
+    # nn.Module -- a functools.partial, a callable object -- and Dynamo reaches
+    # it deep inside fullgraph_capture, where the raw RuntimeError escapes the
+    # handler below. Check up front so the caller gets a clean error naming the
+    # shapes that do work.
+    from torch._dynamo.convert_frame import get_traced_fn as _get_traced_fn
+
+    try:
+        _get_traced_fn(fn)
+    except RuntimeError as e:
+        raise PrecompileError(
+            f"precompile tracer='dynamo' cannot capture a {type(fn).__name__}: Dynamo "
+            f"traces a function, a bound method or an nn.Module. Pass partial.func with "
+            f"its arguments as explicit arguments, or the object's __call__, or use "
+            f"tracer='make_fx'. Underlying: {e}"
+        ) from e
+
     from torch._dynamo import config as dynamo_config, convert_frame
     from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported, UserError
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
@@ -1577,13 +1659,13 @@ def _capture_dynamo(
             # still sees them, and the caller's model is left exactly as it was.
             if bi is None:
                 raise AssertionError("a training capture always has a backend input")
-            seeded = _seed_param_grads(args, bi.example_inputs)
+            seeded = _seed_param_grads(fn, args, bi.example_inputs)
             try:
                 if seeded:
                     capture_output = _run_capture()
                     bi = capture_output.backend_input
                 grad_accum_params = _param_grad_inputs(
-                    args, bi.example_inputs if bi is not None else []
+                    fn, args, bi.example_inputs if bi is not None else []
                 )
             finally:
                 for p in seeded:
@@ -1661,7 +1743,24 @@ def _capture_dynamo(
             # rather than Dynamo's mangled __import_ alias. It is by-reference
             # state, so record it the way the aliases are recorded and let the
             # driver re-import it at load.
-            import_sources[ref] = value.__name__
+            #
+            # By sys.modules KEY, not __name__: _collections_abc sets its own
+            # __name__ to "collections.abc", which re-imports to a DIFFERENT
+            # module. Same trap _defining_module_name documents.
+            import_name = _module_import_name(value)
+            if import_name is None:
+                raise PrecompileError(
+                    f"precompile: fn reads the global {ref!r}, which holds module "
+                    f"{getattr(value, '__name__', value)!r} that is not in sys.modules, "
+                    f"so the artifact cannot re-import it at load. Pass what you need "
+                    f"from it as an explicit argument instead."
+                )
+            import_sources[ref] = import_name
+            # get_runtime_env pre-seeds used_globals[ref] with a BUILTIN of the
+            # same name when one exists (`import torch as vars`). The driver
+            # applies used_globals AFTER IMPORT_SOURCES, so leaving it would let
+            # the builtin win and produce a wrong artifact rather than an error.
+            used_globals.pop(ref, None)
             continue
         used_globals[ref] = value
 

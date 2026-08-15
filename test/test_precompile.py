@@ -11,6 +11,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import types
 import typing
 import unittest
 import weakref
@@ -1365,6 +1366,155 @@ class TestPrecompile(TestCase):
             forward(model=fresh(), xx=x, tt=t)
         with self.assertRaisesRegex(PrecompileError, "Pass the model positionally"):
             forward(x, fresh(), t)
+
+    @parametrize("shape", ["module_fn", "positional", "in_a_list", "bound_method"])
+    def test_tracer_dynamo_training_accumulates_whatever_holds_the_params(self, shape):
+        # GRAD_ACCUM_PARAMS positions are over the FRAME args, which prepend the
+        # bound self. Scanning the caller's args instead missed the module
+        # entirely for an nn.Module fn (baking the ASSIGN form: step 0 matches
+        # eager and nothing after does) and shifted every position by one for a
+        # bound method.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def fresh():
+            torch.manual_seed(0)
+            return torch.nn.Linear(4, 3)
+
+        class TrainMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 3)
+
+            def forward(self, xx, tt):
+                torch.nn.functional.mse_loss(self.lin(xx), tt).backward()
+
+        def fresh_mod():
+            torch.manual_seed(0)
+            return TrainMod()
+
+        def step(model, xx, tt):
+            torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+        def step_list(models, xx, tt):
+            torch.nn.functional.mse_loss(models[0](xx), tt).backward()
+
+        class Trainer:
+            def step(self, model, xx, tt):
+                torch.nn.functional.mse_loss(model(xx), tt).backward()
+
+        trainer = Trainer()
+        if shape == "module_fn":
+            fn, cap, call, mk, eager = (
+                fresh_mod(),
+                (x, t),
+                lambda r: (r, x, t),
+                fresh_mod,
+                lambda r: r(x, t),
+            )
+        elif shape == "positional":
+            fn, cap, call, mk, eager = (
+                step,
+                (fresh(), x, t),
+                lambda r: (r, x, t),
+                fresh,
+                lambda r: step(r, x, t),
+            )
+        elif shape == "in_a_list":
+            fn, cap, call, mk, eager = (
+                step_list,
+                ([fresh()], x, t),
+                lambda r: ([r], x, t),
+                fresh,
+                lambda r: step_list([r], x, t),
+            )
+        else:
+            fn, cap, call, mk, eager = (
+                trainer.step,
+                (fresh(), x, t),
+                lambda r: (trainer, r, x, t),
+                fresh,
+                lambda r: trainer.step(r, x, t),
+            )
+
+        code, cache = torch.compiler.precompile(
+            fn, *cap, tracer="dynamo", backend="eager"
+        )
+        f_c = torch.compiler.precompile.load(code, cache)
+        run, ref = mk(), mk()
+        # Three ACCUMULATING steps: the second is what catches a baked assign.
+        for _ in range(3):
+            f_c(*call(run))
+            eager(ref)
+            got = run.lin.weight.grad if shape == "module_fn" else run.weight.grad
+            want = ref.lin.weight.grad if shape == "module_fn" else ref.weight.grad
+            self.assertEqual(got, want)
+
+    @staticmethod
+    def _module_with(src: str, name: str):
+        """A real module whose globals are exactly what the source binds."""
+        mod = types.ModuleType(name)
+        mod.__file__ = f"{name}.py"
+        exec(compile(src, mod.__file__, "exec"), mod.__dict__)
+        sys.modules[name] = mod
+        return mod
+
+    def test_tracer_dynamo_module_global_round_trips_by_sys_modules_key(self):
+        # A module GLOBAL is by-reference state: recording it in IMPORT_SOURCES
+        # rather than pickling it is what lets a bare module reference next to a
+        # model call capture at all. The sys.modules KEY matters, not __name__:
+        # _collections_abc names itself "collections.abc", which re-imports to a
+        # different module.
+        name = "_precompile_modglobal_mod"
+        mod = self._module_with(
+            "import _collections_abc as cabc\n"
+            "def fn(model, xx):\n"
+            "    return model(xx), cabc.__file__\n",
+            name,
+        )
+        try:
+            m, x = torch.nn.Linear(4, 4), torch.randn(2, 4)
+            code, cache = torch.compiler.precompile(
+                mod.fn, m, x, tracer="dynamo", backend="eager"
+            )
+            self.assertIn("'_collections_abc'", code)
+            f_c = torch.compiler.precompile.load(code, cache)
+            self.assertEqual(f_c(m, x)[1], mod.fn(m, x)[1])
+        finally:
+            sys.modules.pop(name, None)
+
+    def test_tracer_dynamo_module_global_shadowing_a_builtin(self):
+        # get_runtime_env pre-seeds used_globals with a BUILTIN of the same
+        # name, and the driver applies used_globals AFTER IMPORT_SOURCES, so
+        # leaving it there lets the builtin win and the artifact loads broken
+        # instead of failing at capture.
+        name = "_precompile_shadow_mod"
+        mod = self._module_with(
+            "import torch as vars\n"
+            "def fn(model, xx):\n"
+            "    return model(xx), vars.__version__\n",
+            name,
+        )
+        try:
+            m, x = torch.nn.Linear(4, 4), torch.randn(2, 4)
+            code, cache = torch.compiler.precompile(
+                mod.fn, m, x, tracer="dynamo", backend="eager"
+            )
+            f_c = torch.compiler.precompile.load(code, cache)
+            self.assertEqual(f_c(m, x)[1], torch.__version__)
+        finally:
+            sys.modules.pop(name, None)
+
+    def test_tracer_dynamo_rejects_a_partial_cleanly(self):
+        # get_traced_fn refuses a partial deep inside fullgraph_capture; that
+        # raw RuntimeError used to escape.
+        def base(model, xx, k=1.0):
+            return model(xx) * k
+
+        m, x = torch.nn.Linear(4, 4), torch.randn(2, 4)
+        with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
+            torch.compiler.precompile(
+                functools.partial(base, k=3.0), m, x, tracer="dynamo"
+            )
 
     def test_tracer_dynamo_one_shot_graph_break_points_to_multi_graph_api(self):
         # The source-artifact path still requires one full graph. Its error points to the

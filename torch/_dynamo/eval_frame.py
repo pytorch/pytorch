@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -233,9 +234,16 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
-_stance_lock = threading.RLock()
-_fail_on_recompile_override_depth = 0
+# Thread-local: serving() scopes the calls made in ITS block. A process-global
+# counter made one request handler's serving() block reject a concurrent
+# handler's legitimate recompile, and a serving process is multi-threaded by
+# definition.
+_fail_on_recompile_override = threading.local()
 _force_eager_nested_compile = threading.local()
+
+
+def _fail_on_recompile_depth() -> int:
+    return getattr(_fail_on_recompile_override, "depth", 0)
 
 
 @contextlib.contextmanager
@@ -263,34 +271,41 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
     if callback is not False and callback is not None:
         raise RuntimeError("attempted to set_stance in a torch.compile region")
 
-    with _stance_lock:
-        prior = _stance
-        _stance = stance
-        return prior
+    prior = _stance
+    _stance = stance
+    return prior
 
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def _get_effective_stance() -> DynamoStance:
-    with _stance_lock:
-        if _fail_on_recompile_override_depth:
-            return DynamoStance("fail_on_recompile")
-        return _stance
+    """The stance in force, with serving()'s override applied.
+
+    The override replaces only the ACTION, keeping the ambient stance's other
+    fields. Building a bare DynamoStance("fail_on_recompile") silently dropped
+    skip_guard_eval_unsafe and backend along with it.
+
+    It does take precedence over force_eager, which reads backwards but is the
+    intended contract: serving() is the narrower, explicitly scoped request, and
+    it still honours what force_eager guarantees -- it raises rather than
+    compiling. Running eager instead would silently stop serving the artifact,
+    which is the failure serving() exists to make loud.
+    """
+    if _fail_on_recompile_depth():
+        return dataclasses.replace(_stance, stance="fail_on_recompile")
+    return _stance
 
 
 def _enter_fail_on_recompile_override() -> None:
-    global _fail_on_recompile_override_depth
-    with _stance_lock:
-        _fail_on_recompile_override_depth += 1
+    _fail_on_recompile_override.depth = _fail_on_recompile_depth() + 1
 
 
 def _exit_fail_on_recompile_override() -> None:
-    global _fail_on_recompile_override_depth
-    with _stance_lock:
-        if _fail_on_recompile_override_depth <= 0:
-            raise AssertionError("fail_on_recompile override is not active")
-        _fail_on_recompile_override_depth -= 1
+    depth = _fail_on_recompile_depth()
+    if depth <= 0:
+        raise AssertionError("fail_on_recompile override is not active")
+    _fail_on_recompile_override.depth = depth - 1
 
 
 _EXAMPLE_INPUTS: dict[str, list[Any]] | None = None
@@ -397,7 +412,14 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
-        fail_callback._torchdynamo_force_callback_on_cache_miss = True  # type: ignore[attr-defined]
+        if _fail_on_recompile_depth():
+            # Only for serving(): this marker makes the C++ frame eval ignore a
+            # RUN_ONLY pin, so an uncovered call raises instead of quietly
+            # running eager. Setting it for a plain
+            # set_stance("fail_on_recompile") would change that public stance
+            # for everyone -- a frame past its recompile limit would start
+            # raising where it used to run eager, and so would every callee.
+            fail_callback._torchdynamo_force_callback_on_cache_miss = True  # type: ignore[attr-defined]
 
         return fail_callback
     else:
