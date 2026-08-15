@@ -5,6 +5,7 @@ import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.apot_utils import (
     apot_to_float,
+    float_to_apot_device,
     quant_dequant_util,
 )
 
@@ -23,11 +24,13 @@ class APoTQuantizer:
         gamma: torch.Tensor,
         quantization_levels: torch.Tensor,
         level_indices: torch.Tensor,
+        device: torch.device | None = None,
     ) -> None:
-        self.alpha = alpha
-        self.gamma = gamma
-        self.quantization_levels = quantization_levels
-        self.level_indices = level_indices
+        device = alpha.device if device is None else device
+        self.alpha = alpha.to(device=device)
+        self.gamma = gamma.to(device=device)
+        self.quantization_levels = quantization_levels.to(device=device)
+        self.level_indices = level_indices.to(device=device)
 
     r""" Quantizes fp Tensor to integer APoT representation.
     Conversion is based on the qparams from a specified APoT non-uniform observer.
@@ -40,25 +43,12 @@ class APoTQuantizer:
 
     def quantize(self, tensor2quantize: Tensor):
         tensor2quantize = tensor2quantize.detach()
-        quantization_levels = self.quantization_levels.to(
-            device=tensor2quantize.device
+        quantized = float_to_apot_device(
+            tensor2quantize,
+            self.quantization_levels,
+            self.level_indices,
+            self.alpha,
         )
-        level_indices = self.level_indices.to(device=tensor2quantize.device)
-        alpha = self.alpha.to(device=tensor2quantize.device).reshape(())
-
-        level_deltas = torch.abs(
-            tensor2quantize.unsqueeze(-1) - quantization_levels
-        )
-        nearest_level_indices = level_indices[level_deltas.argmin(dim=-1)]
-        nearest_level_indices = torch.where(
-            torch.isnan(tensor2quantize),
-            torch.zeros_like(nearest_level_indices),
-            nearest_level_indices,
-        )
-        quantized = torch.where(
-            tensor2quantize < -alpha, -alpha, nearest_level_indices
-        )
-        quantized = torch.where(tensor2quantize > alpha, alpha, quantized)
 
         tensor2quantize.data.copy_(quantized)
 
@@ -140,6 +130,7 @@ def quantize_APoT(
         gamma=gamma,
         quantization_levels=quantization_levels,
         level_indices=level_indices,
+        device=tensor2quantize.device,
     )
     result = quantizer.quantize(tensor2quantize)
     return result
