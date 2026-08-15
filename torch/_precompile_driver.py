@@ -518,12 +518,25 @@ def _build_dynamo_forward():
 
                 raise _PrecompileError(
                     f"precompile: this training artifact accumulates gradients into "
-                    f"argument {_pos}, which capture saw as an nn.Module. This call "
-                    f"passed {len(args)} positional argument(s) and did not put a "
-                    f"module there. Pass the model positionally, in the same position "
-                    f"it occupied at capture."
+                    f"positional argument {_pos} (0-based), which capture saw as an "
+                    f"nn.Module. This call passed {len(args)} positional argument(s) "
+                    f"and did not put a module there. Pass the model positionally, in "
+                    f"the same position it occupied at capture."
                 )
-            _p = args[_pos].get_parameter(_name)
+            try:
+                _p = args[_pos].get_parameter(_name)
+            except AttributeError as e:
+                # Right kind of object, wrong module: the structural contract
+                # (invariant 2) is what failed, so say that rather than letting
+                # get_parameter's raw AttributeError stand in for it.
+                from torch._precompile import PrecompileError as _PrecompileError
+
+                raise _PrecompileError(
+                    f"precompile: the model passed as positional argument {_pos} has "
+                    f"no parameter {_name!r}, which this training artifact accumulates "
+                    f"a gradient into. The runtime model must match the example "
+                    f"model's parameter structure. Underlying: {e}"
+                ) from e
             if _p.grad is None:
                 _p.grad = torch.zeros_like(_p)
         return fn(*args, **kwargs)
