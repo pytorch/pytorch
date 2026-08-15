@@ -1011,33 +1011,6 @@ class DynamoOutput:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
             raise AssertionError("output_graph must not be None when building guards")
-        try:
-            return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
-            )
-        except Exception:
-            # Translation validation runs when guards are produced, which is
-            # after tracing, so a contradiction found here would otherwise be
-            # reported without the bisection that says which node introduced
-            # it. Same treatment as the tracing side.
-            from torch.fx.experimental.validator import (
-                bisect,
-                translation_validation_enabled,
-            )
-
-            if translation_validation_enabled():
-                bisect(output_graph.shape_env)
-            raise
-
-    def _build_guards(
-        self,
-        code: types.CodeType,
-        output_graph: Any,
-        cache_entries: list[CacheEntry] | None,
-        hooks: Hooks | None,
-        save: bool,
-        strict_error: bool,
-    ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
             output_graph,
