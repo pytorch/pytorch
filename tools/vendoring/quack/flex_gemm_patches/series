@@ -3,3 +3,4 @@
 0003-caller-owned-grouped-layouts.patch
 0004-carrier-stride-validation.patch
 0005-exact-typed-row-gathers.patch
+0006-generic-multi-plane-state.patch
