@@ -27,7 +27,6 @@ jobs:
       python-version: 3.12.7
       test-matrix: |
         { include: [
-          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-26" },
         ]}
