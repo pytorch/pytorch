@@ -1031,13 +1031,9 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor dbeta_blocks;
     T * dgamma_blocks_ptr = nullptr;
     T * dbeta_blocks_ptr = nullptr;
-    // Bug fix: the blocks buffers must be N columns wide (the width
-    // GammaBetaBackwardCUDAKernelTemplate actually writes via
-    // dg[thread_y * N + thread_x]), not dgamma->size(-1)/dbeta->size(-1),
-    // which is only the last dim of normalized_shape and can differ from N
-    // for multi-dim normalized_shape, or silently be 0 when the gradient
-    // tensor is undefined (e.g. weight=None). Allocate from each tensor's
-    // own options rather than borrowing dgamma's for dbeta_blocks too.
+    // The kernel writes N columns per row via dg[thread_y * N + thread_x];
+    // dgamma->size(-1) is only the last normalized dim, and is 0 for an
+    // undefined tensor.
     if (dgamma->defined()) {
       dgamma_blocks = at::empty({blocks.y * threads.y, N}, dgamma->options());
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
@@ -1049,8 +1045,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
-    // .sum(0) reduces to a rank-1 {N} tensor; view it back to the gradient's
-    // own (possibly multi-dim) shape rather than reassigning that shape away.
+    // sum(0) is flat {N}; the gradient itself may be multi-dim.
     if (dgamma_blocks.defined()) {
       *dgamma = dgamma_blocks.sum(0).view_as(*dgamma);
     }

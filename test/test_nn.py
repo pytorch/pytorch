@@ -8305,48 +8305,69 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
-    def test_layer_norm_backward_huge_M_multidim_normalized_shape(self, device):
+    @parametrize_test("op", ["layer_norm", "rms_norm"])
+    def test_layer_norm_backward_huge_M_multidim_normalized_shape(self, device, op):
         # Regression test: dgamma_blocks/dbeta_blocks in the huge-M tiled
         # path were allocated with dgamma->size(-1) as the column count
         # instead of N. For multi-dim normalized_shape that is too narrow
         # (an out-of-bounds device write), reproducing:
         #   Memory access fault by GPU node-5 ... Reason: Write access to a
         #   read-only page.
-        # Reachable whenever M > 65536 && N / 32 < sm_count / 2.
+        # rms_norm shares the same allocation, via
+        # LayerNormBackwardKernelImplInternal<scalar_t, /*rms_norm=*/true>.
+        #
+        # Test assumption: this only exercises the huge-M path if
+        # N / warp_size < sm_count / 2 (ShouldUseHugeMGammaBetaBackwardKernel).
+        # With N=128 that requires sm_count > 8 on warp_size 32, or > 4 on
+        # warp_size 64; a small-GPU runner could silently drop off this path.
         M = 100000
         normalized_shape = (8, 16)
         eps = 1e-5
         x = torch.randn(M, *normalized_shape, dtype=torch.float32, device=device)
         weight = torch.randn(normalized_shape, dtype=torch.float32, device=device, requires_grad=True)
-        bias = torch.randn(normalized_shape, dtype=torch.float32, device=device, requires_grad=True)
         grad_out = torch.randn(M, *normalized_shape, dtype=torch.float32, device=device)
 
-        out = torch.nn.functional.layer_norm(x, normalized_shape, weight, bias, eps)
-        out.backward(grad_out)
+        if op == "layer_norm":
+            bias = torch.randn(normalized_shape, dtype=torch.float32, device=device, requires_grad=True)
+            out = torch.nn.functional.layer_norm(x, normalized_shape, weight, bias, eps)
+            out.backward(grad_out)
 
-        weight_cpu = weight.detach().cpu().requires_grad_(True)
-        bias_cpu = bias.detach().cpu().requires_grad_(True)
-        out_cpu = torch.nn.functional.layer_norm(x.cpu(), normalized_shape, weight_cpu, bias_cpu, eps)
-        out_cpu.backward(grad_out.cpu())
+            weight_cpu = weight.detach().cpu().requires_grad_(True)
+            bias_cpu = bias.detach().cpu().requires_grad_(True)
+            out_cpu = torch.nn.functional.layer_norm(x.cpu(), normalized_shape, weight_cpu, bias_cpu, eps)
+            out_cpu.backward(grad_out.cpu())
 
-        self.assertEqual(weight.grad.shape, normalized_shape)
-        self.assertEqual(bias.grad.shape, normalized_shape)
-        self.assertEqual(weight.grad.cpu(), weight_cpu.grad, atol=1e-3, rtol=1e-3)
-        self.assertEqual(bias.grad.cpu(), bias_cpu.grad, atol=1e-3, rtol=1e-3)
+            self.assertEqual(weight.grad.shape, normalized_shape)
+            self.assertEqual(bias.grad.shape, normalized_shape)
+            self.assertEqual(weight.grad.cpu(), weight_cpu.grad, atol=1e-3, rtol=1e-3)
+            self.assertEqual(bias.grad.cpu(), bias_cpu.grad, atol=1e-3, rtol=1e-3)
 
-        # weight=None variant: previously dbeta_blocks borrowed dgamma->size(-1)
-        # even when dgamma was undefined, and size(-1) on an undefined tensor
-        # returns 0, silently allocating an empty buffer instead of raising.
-        bias2 = torch.randn(normalized_shape, dtype=torch.float32, device=device, requires_grad=True)
-        out2 = torch.nn.functional.layer_norm(x, normalized_shape, None, bias2, eps)
-        out2.backward(grad_out)
+            # weight=None variant: dbeta_blocks's column count was read from
+            # dgamma->size(-1), and size(-1) on an undefined tensor returns 0,
+            # silently allocating an empty buffer instead of raising.
+            bias2 = torch.randn(normalized_shape, dtype=torch.float32, device=device, requires_grad=True)
+            out2 = torch.nn.functional.layer_norm(x, normalized_shape, None, bias2, eps)
+            out2.backward(grad_out)
 
-        bias2_cpu = bias2.detach().cpu().requires_grad_(True)
-        out2_cpu = torch.nn.functional.layer_norm(x.cpu(), normalized_shape, None, bias2_cpu, eps)
-        out2_cpu.backward(grad_out.cpu())
+            bias2_cpu = bias2.detach().cpu().requires_grad_(True)
+            out2_cpu = torch.nn.functional.layer_norm(x.cpu(), normalized_shape, None, bias2_cpu, eps)
+            out2_cpu.backward(grad_out.cpu())
 
-        self.assertEqual(bias2.grad.shape, normalized_shape)
-        self.assertEqual(bias2.grad.cpu(), bias2_cpu.grad, atol=1e-3, rtol=1e-3)
+            self.assertEqual(bias2.grad.shape, normalized_shape)
+            self.assertEqual(bias2.grad.cpu(), bias2_cpu.grad, atol=1e-3, rtol=1e-3)
+        else:
+            out = torch.nn.functional.rms_norm(x, normalized_shape, weight, eps)
+            out.backward(grad_out)
+
+            # aten::_fused_rms_norm_backward has no CPU kernel, so build the
+            # reference through the decomposed rms_norm autograd path instead.
+            x_cpu = x.cpu().requires_grad_(True)
+            weight_cpu = weight.detach().cpu().requires_grad_(True)
+            out_cpu = torch.nn.functional.rms_norm(x_cpu, normalized_shape, weight_cpu, eps)
+            out_cpu.backward(grad_out.cpu())
+
+            self.assertEqual(weight.grad.shape, normalized_shape)
+            self.assertEqual(weight.grad.cpu(), weight_cpu.grad, atol=1e-3, rtol=1e-3)
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
