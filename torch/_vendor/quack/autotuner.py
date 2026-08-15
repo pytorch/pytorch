@@ -34,26 +34,6 @@ PACKAGE_NAME = "torch_vendor_quack"
 VERSION = __version__
 
 
-_TENSOR_META_TAG = "__quack_tensor_meta__"
-
-
-def _serialize_precompile_value(value: Any) -> Any:
-    if isinstance(value, Tensor):
-        return {
-            _TENSOR_META_TAG: True,
-            "shape": list(value.shape),
-            "stride": list(value.stride()),
-            "dtype": str(value.dtype),
-        }
-    if isinstance(value, tuple):
-        return tuple(_serialize_precompile_value(v) for v in value)
-    if isinstance(value, list):
-        return [_serialize_precompile_value(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _serialize_precompile_value(v) for k, v in value.items()}
-    return value
-
-
 def _get_current_cuda_device() -> str | None:
     """Return the physical CUDA device identifier for the current process.
 
@@ -288,7 +268,6 @@ class Autotuner:
         prune_configs_by: Optional[Dict] = None,
         do_bench=None,
         cache_results=False,
-        precompile_configs=True,
     ):
         """
         :param prune_configs_by: a dict of functions that are used to prune configs, fields:
@@ -307,7 +286,6 @@ class Autotuner:
         self.cache_results = (
             cache_results or os.getenv(f"{PACKAGE_NAME.upper()}_CACHE_AUTOTUNING", None) == "1"
         )
-        self.precompile_configs = precompile_configs
 
         self.restore_value = []
         if restore_value is not None:
@@ -377,7 +355,7 @@ class Autotuner:
         """
         from .cache import CACHE_ENABLED
 
-        if not self.precompile_configs or not CACHE_ENABLED:
+        if not CACHE_ENABLED:
             return _PrecompileHandle()
 
         max_workers = min(len(configs), int(os.getenv("QUACK_COMPILE_WORKERS", "8")))
@@ -408,8 +386,19 @@ class Autotuner:
             stream.write(data)
             stream.flush()
 
-        serialized_args = [_serialize_precompile_value(arg) for arg in args]
-        serialized_kwargs = _serialize_precompile_value(kwargs)
+        # Serialize tensor metadata
+        tensor_meta = []
+        for arg in args:
+            if isinstance(arg, Tensor):
+                tensor_meta.append(
+                    {
+                        "shape": list(arg.shape),
+                        "stride": list(arg.stride()),
+                        "dtype": str(arg.dtype),
+                    }
+                )
+            else:
+                tensor_meta.append(arg)
 
         fn_module = self.fn.__module__
         fn_qualname = self.fn.__qualname__
@@ -460,8 +449,8 @@ class Autotuner:
                     {
                         "fn_module": fn_module,
                         "fn_qualname": fn_qualname,
-                        "args": serialized_args,
-                        "kwargs": serialized_kwargs,
+                        "tensor_meta": tensor_meta,
+                        "kwargs": kwargs,
                         "config_kwargs": config.all_kwargs(),
                     },
                 )
@@ -816,13 +805,7 @@ class AutotuneConfig:
 
 
 def autotune(
-    configs,
-    key=None,
-    prune_configs_by=None,
-    restore_value=None,
-    do_bench=None,
-    cache_results=True,
-    precompile_configs=True,
+    configs, key=None, prune_configs_by=None, restore_value=None, do_bench=None, cache_results=True
 ):
     f"""
     Decorator for auto-tuning a function function.
@@ -846,7 +829,6 @@ def autotune(
     :param do_bench: a benchmark function to measure the time of each run.
     :type do_bench: lambda fn, quantiles
     :param cache_results: whether to cache autotune timings to disk.  Defaults to False.
-    :param precompile_configs: whether to warm config compile caches in worker subprocesses.
     "type cache_results: bool
     """
 
@@ -862,7 +844,6 @@ def autotune(
             prune_configs_by=prune_configs_by,
             do_bench=do_bench,
             cache_results=cache_results,
-            precompile_configs=precompile_configs,
         )
 
     return decorator
