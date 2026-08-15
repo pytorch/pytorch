@@ -3487,6 +3487,62 @@ class TestSDPACudaOnly(NNTestCase):
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
     )
+    def test_mem_efficient_bottom_right_window(self, device):
+        torch.manual_seed(42)
+        q_len, k_len, window_size = 96, 64, 17
+        query = torch.randn(
+            1, 2, q_len, 32, device=device, dtype=torch.float32, requires_grad=True
+        )
+        key = torch.randn(
+            1, 2, k_len, 32, device=device, dtype=torch.float32, requires_grad=True
+        )
+        value = torch.randn(
+            1, 2, k_len, 24, device=device, dtype=torch.float32, requires_grad=True
+        )
+        grad_out = torch.randn(1, 2, q_len, 24, device=device)
+        q_index = torch.arange(q_len, device=device)[:, None]
+        k_index = torch.arange(k_len, device=device)[None, :]
+        diagonal = k_len - q_len
+        mask = (k_index <= q_index + diagonal) & (
+            k_index > q_index + diagonal - window_size
+        )
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = scaled_dot_product_attention(
+                query, key, value, attn_mask=mask
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        with use_deterministic_algorithims(True, warn_only=False):
+            actual = torch.ops.aten._efficient_attention_forward.default(
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                int(CausalVariant.LOWER_RIGHT),
+                True,
+                window_size=window_size,
+            )[0].transpose(1, 2)
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
+
+        self.assertEqual(actual, expected, atol=5e-4, rtol=5e-4)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=5e-4)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
     @parametrize("shared_storage_dqdkdv", [False, True])
     def test_mem_efficient_bottom_right_varlen_fully_masked_rows(
         self, device, shared_storage_dqdkdv
@@ -3601,6 +3657,49 @@ class TestSDPACudaOnly(NNTestCase):
             actual_grads[0][:, :fully_masked],
             torch.zeros_like(actual_grads[0][:, :fully_masked]),
         )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    def test_mem_efficient_shared_storage_requires_matching_value_dim(self, device):
+        q_lengths = (192, 64)
+        k_lengths = (64, 192)
+        query = torch.randn(1, sum(q_lengths), 2, 64, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn(1, sum(k_lengths), 2, 40, device=device)
+        cu_seqlens_q = torch.tensor(
+            [0, *itertools.accumulate(q_lengths)], device=device, dtype=torch.int32
+        )
+        cu_seqlens_k = torch.tensor(
+            [0, *itertools.accumulate(k_lengths)], device=device, dtype=torch.int32
+        )
+        output = torch.empty(1, sum(q_lengths), 2, 40, device=device)
+        logsumexp = torch.empty(len(q_lengths), 2, max(q_lengths), device=device)
+        seed = torch.empty((), dtype=torch.int64, device=device)
+        offset = torch.empty((), dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "same embed dim"):
+            torch.ops.aten._efficient_attention_backward.default(
+                torch.empty_like(output),
+                query,
+                key,
+                value,
+                None,
+                output,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max(q_lengths),
+                max(k_lengths),
+                logsumexp,
+                0.0,
+                seed,
+                offset,
+                int(CausalVariant.LOWER_RIGHT),
+                False,
+                shared_storage_dqdkdv=True,
+            )
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")

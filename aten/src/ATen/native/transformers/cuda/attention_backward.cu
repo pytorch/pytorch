@@ -501,10 +501,10 @@ _efficient_attention_backward(
       " query tokens and ", key.size(1), " key/value tokens"
     );
     TORCH_CHECK(
-      query.size(3) == key.size(3),
+      query.size(3) == key.size(3) && query.size(3) == value.size(3),
       "`shared_storage_dqdkdv` is only supported when Q/K/V "
       "have the same embed dim: got ", query.size(3),
-      " for Q, and ", key.size(3), " for K"
+      " for Q, ", key.size(3), " for K, and ", value.size(3), " for V"
     );
     at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
     grad_q = chunk.select(2, 0);

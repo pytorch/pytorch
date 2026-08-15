@@ -28,6 +28,19 @@ def _normalize_window_size(window_size: list[int] | None) -> list[int]:
     return window_size
 
 
+def _normalize_scale(
+    query: torch.Tensor, scale: float | None
+) -> tuple[torch.Tensor, float | None]:
+    """Absorb nonpositive scales into query for fused attention kernels."""
+    if scale is None or scale > 0:
+        return query, scale
+    if scale == 0:
+        return query * 0, 1.0
+    if scale < 0:
+        return -query, -scale
+    return query, scale
+
+
 @lru_cache(maxsize=8)
 @torch.compiler.assume_constant_result
 def _should_use_cudnn(device_index: int) -> bool:
@@ -392,8 +405,9 @@ def varlen_attn(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
-    is_causal = window_size == (-1, 0)
+    query, scale = _normalize_scale(query, scale)
     window_size_list = list(window_size)
+    is_causal = window_size_list == [-1, 0]
     use_cudnn = _select_backend(
         query,
         key,
@@ -551,7 +565,9 @@ def varlen_attn_out(
             "with sdpa_kernel()."
         )
 
-    is_causal = window_size == (-1, 0)
+    query, scale = _normalize_scale(query, scale)
+    window_size_list = list(window_size)
+    is_causal = window_size_list == [-1, 0]
     lse = torch.ops.torch_attn._varlen_attn_out(
         out,
         query,
@@ -563,7 +579,7 @@ def varlen_attn_out(
         max_k,
         is_causal,
         scale,
-        list(window_size),
+        window_size_list,
         enable_gqa,
         seqused_k,
         block_table,
@@ -600,6 +616,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         raise RuntimeError("block_table is an inference-only parameter.")
 
     ctx.use_cudnn = use_cudnn
+    ctx.mark_non_differentiable(lse, rng_state)
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
     ctx.max_q = max_q
