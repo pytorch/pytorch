@@ -3405,7 +3405,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 
 
-def _launch_analysis_kwargs_for_node(
+def _ttir_mutation_analysis_kwargs_for_node(
     kernel_idx: int | None,
     constant_args_idx: int,
     non_constant_args: dict[Any, Any],
@@ -3418,7 +3418,7 @@ def _launch_analysis_kwargs_for_node(
     recorded and consumers fall back to deriving them themselves.
     """
     from torch._higher_order_ops.triton_kernel_wrap import (
-        _launch_analysis_kwargs,
+        _ttir_mutation_analysis_kwargs,
         kernel_side_table,
     )
 
@@ -3441,7 +3441,7 @@ def _launch_analysis_kwargs_for_node(
             exc_info=True,
         )
         return {}
-    return _launch_analysis_kwargs(
+    return _ttir_mutation_analysis_kwargs(
         kernel, {**example_kwargs, **constant_args}, tma_descriptor_metadata
     )
 
@@ -3642,7 +3642,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # consumers downstream would otherwise each ask independently; see Note
         # [TTIR analysis cache]. Best effort: if the analysis cannot run, the
         # argument is omitted and those consumers derive it themselves.
-        analysis_kwargs = _launch_analysis_kwargs_for_node(
+        analysis_kwargs = _ttir_mutation_analysis_kwargs_for_node(
             variable.kernel_idx,
             constant_args_idx,
             non_constant_args,

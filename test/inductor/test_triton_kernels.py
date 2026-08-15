@@ -4858,12 +4858,12 @@ class MutationTests(torch._inductor.test_case.TestCase):
         HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
         "requires gpu or triton cpu",
     )
-    def test_launch_analysis_reuses_result(self):
+    def test_ttir_mutation_analysis_reuses_result(self):
         import triton
         import triton.language as tl
 
         from torch._higher_order_ops import triton_kernel_wrap as tkw
-        from torch._higher_order_ops.triton_kernel_wrap import analyze_kernel_launch
+        from torch._higher_order_ops.triton_kernel_wrap import ttir_mutation_analysis
 
         # Declared here rather than at module scope so no other test can have
         # populated the analysis cache for it.
@@ -4884,7 +4884,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             return real_generate_ttir(*args, **kwargs)
 
         def analyze(block_size):
-            return analyze_kernel_launch(
+            return ttir_mutation_analysis(
                 cache_probe_kernel,
                 {
                     "in_ptr": x,
