@@ -17,9 +17,16 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfRocm,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -43,6 +50,8 @@ def _reset_mem_stats(dev: torch.device):
 
 
 class TestTrackerFullyShard1DTrainingCore(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
@@ -223,6 +232,8 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
 
 
 class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.accelerator.device_count(), 4)
@@ -318,6 +329,20 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         del inp
         del model
         del optim
+
+
+instantiate_device_type_tests(
+    TestTrackerFullyShard1DTrainingCore,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestTrackerFullyShard1DTrainingCompose,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
