@@ -363,24 +363,16 @@ class SuperVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         elif (
             isinstance(self.objvar, variables.UserDefinedObjectVariable)
-            and self.objvar._base_vt is not None
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
-            if name == "__init__" and isinstance(
-                self.objvar, variables.lists.DequeVariable
-            ):
-                # deque.__init__ establishes per-instance state by reassignment
-                # (self.maxlen), which must land on the real object -- run it on
-                # objvar (UserDefinedDequeVariable.tp_init_impl routes to
-                # DequeVariable's, populating objvar in place), not the throwaway
-                # _base_vt view.  Other base methods (and list/tuple __init__)
-                # keep using the view: it is a plain base VT, so its slot impls
-                # bypass objvar's overrides (e.g. a subclass __setitem__/extend).
-                return super(
-                    variables.UserDefinedObjectVariable, self.objvar
-                ).call_method(tx, name, args, kwargs)
-            return self.objvar._base_vt.call_method(tx, name, args, kwargs)
+            # Dispatch the non-overridden base-class method on objvar via super():
+            # objvar is-a base VT (multiple inheritance), so this runs the base
+            # slot/method impl on objvar directly, bypassing the subclass's Python
+            # overrides (e.g. a subclass __setitem__/extend, or CustomSet.add).
+            return super(
+                variables.UserDefinedObjectVariable, self.objvar
+            ).call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]
             # object.__getattribute__ IS PyObject_GenericGetAttr.  Delegate

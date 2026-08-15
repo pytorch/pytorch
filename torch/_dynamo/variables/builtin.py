@@ -1888,14 +1888,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             return variables.ConstantVariable.create(None)
 
         if self.fn in (set, frozenset, list, tuple):
-            if isinstance(args[0], variables.UserDefinedObjectVariable):
-                if args[0]._base_vt is None:
-                    raise AssertionError(
-                        "UserDefinedObjectVariable._base_vt must not be None"
-                    )
-                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
-            else:
-                return args[0].call_method(tx, name, args[1:], kwargs)
+            return args[0].call_method(tx, name, args[1:], kwargs)
 
         if (
             name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")

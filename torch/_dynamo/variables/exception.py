@@ -206,7 +206,7 @@ class ExceptionVariable(VariableTracker):
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
             if istype(attr, ConstantVariable):
-                if attr.constant_value not in (True, False, None):
+                if attr.value not in (True, False, None):
                     raise AssertionError(
                         f"attr.value must be True, False, or None, got {attr}"
                     )
@@ -442,7 +442,7 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
         for name, val in self._attrs.items():
-            if not (istype(val, ConstantVariable) and val.constant_value is None):
+            if not (istype(val, ConstantVariable) and val.value is None):
                 codegen.dup_top()
                 codegen(val)
                 codegen.extend_output(codegen.rot_n(2))
