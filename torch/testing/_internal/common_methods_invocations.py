@@ -959,7 +959,11 @@ def sample_inputs_divmod(op, device, dtype, requires_grad, **kwargs):
     ]
 
     for s1, s2 in samples:
-        yield SampleInput(s1, args=(s2,))
+        yield SampleInput(
+            s1,
+            args=(s2,),
+            output_process_fn_grad=lambda out: out[1],
+        )
 
 
 def error_inputs_exponential(op, device, **kwargs):
@@ -13172,10 +13176,9 @@ op_db: list[OpInfo] = [
         "divmod",
         ref=np.divmod,
         supports_out=False,
-        supports_autograd=False,    # todo need to enable the check here to remainder
+        supports_autograd=True,    # todo need to enable the check here to remainder
         dtypes=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_divmod,
-        gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs)[1]
     ),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types_and(torch.half),

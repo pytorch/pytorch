@@ -145,16 +145,24 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "B.__rdivmod__ called")
 
     # --- Tensor ---
-
-    def test_divmod_tensor_raises_type_error(self):
+    def test_divmod_tensor(self):
         def fn(x, y):
             return divmod(x, y)
 
         x = torch.randn(4)
         y = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager")
-        with self.assertRaises(TypeError):
-            opt_fn(x, y)
+        ret = divmod(x, y)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(ret, opt_fn(x, y))
+
+    def test_divmod_tensor_scalar(self):
+        def fn(x):
+            return divmod(x, 2), divmod(2, x)
+
+        x = torch.randn(4)
+        ret = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(ret, opt_fn(x))
 
 
 if __name__ == "__main__":
