@@ -473,7 +473,7 @@ class TestViewOps(TestCase):
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             torch.imag(t)
 
     @skipLazy
