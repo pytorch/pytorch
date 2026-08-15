@@ -40,6 +40,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -60,6 +63,7 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     device_sleep,
     get_cycles_per_ms,
+    HardwareClassification,
     MI200_ARCH,
     run_tests,
     skipIfRocm,
@@ -111,6 +115,8 @@ class ChunkedHeadModel(nn.Module):
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -162,6 +168,8 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
 
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
@@ -294,6 +302,8 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
 
 
 class TestFullyShardCastAfterInit(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -342,6 +352,8 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
 
 
 class TestFullyShard1DTrainingCore(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 8
@@ -786,6 +798,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
 
 class TestFullyShard1DTrainingCompose(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # Since these tests run with a larger transformer model, they may see
@@ -1018,7 +1032,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 total_loss += loss.detach()
                 loss.backward()
                 h_grads.append(chunk.grad.detach())
-                per_chunk_head_grads.append(self._snapshot_grad(model.head.weight.grad))
+                per_chunk_head_grads.append(type(self)._snapshot_grad(model.head.weight.grad))
             # Each chunk must contribute a non-zero delta — catches chunks
             # 2+ silently dropped due to unregistered post_backward hooks.
             for i in range(1, len(per_chunk_head_grads)):
@@ -1452,6 +1466,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
 
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 8
@@ -1503,6 +1519,8 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
 
 
 class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
@@ -1542,10 +1560,12 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
 
 
 class TestFullyShardSharedParams(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = (
         4
-        if device_type.type == "cpu"
-        else min(4, torch.get_device_module(device_type).device_count())
+        if get_devtype().type == "cpu"
+        else min(4, torch.get_device_module(get_devtype()).device_count())
     )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -1729,10 +1749,12 @@ class TestFullyShardSharedParams(FSDPTestContinuous):
 
 
 class TestFullyShardGradientAccumulation(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = (
         4
-        if device_type.type == "cpu"
-        else min(4, torch.get_device_module(device_type).device_count())
+        if get_devtype().type == "cpu"
+        else min(4, torch.get_device_module(get_devtype()).device_count())
     )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -1993,6 +2015,8 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
 
 
 class TestFullyShardNDTraining(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 8
@@ -2293,6 +2317,8 @@ class TestFullyShardNDTraining(FSDPTest):
 
 
 class TestFullyShardHSDP3DTraining(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 8
@@ -2377,6 +2403,8 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
 
 
 class TestFullyShardHSDPTraining(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 4
@@ -2471,6 +2499,8 @@ class TestFullyShardHSDPTraining(FSDPTest):
 
 
 class TestFullyShardCustomForwardMethod(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 2
@@ -2524,6 +2554,8 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
 
 
 class TestFullyShardShareCommContext(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         min_world_size = 2
@@ -2654,6 +2686,8 @@ class TestFullyShardInference(FSDPTest):
 
 
 class TestFullyShardWorldSize1(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 1
@@ -2716,6 +2750,8 @@ class TestFullyShardWorldSize1(FSDPTest):
 
 
 class TestFullyShardCudaGraph(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -2776,6 +2812,79 @@ class TestFullyShardCudaGraph(FSDPTest):
                 for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
                     self.assertTrue(torch.equal(graph_grad, ref_grad))
                 model.zero_grad(set_to_none=True)
+
+
+instantiate_device_type_tests(
+    TestFullyShard1DTrainingCore,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShard1DTrainingCompose,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardShardPlacementFnMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardSharedParams,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardGradientAccumulation,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardNDTraining,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardHSDP3DTraining,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardHSDPTraining,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardCustomForwardMethod,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardShareCommContext,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardWorldSize1,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardCudaGraph,
+    globals(),
+    only_for=["cuda"],
+)
 
 
 if __name__ == "__main__":
