@@ -149,7 +149,7 @@ op_db: list[OpInfo] = [
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
         dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        backward_dtypes=floating_types(),
+        backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
             DecorateInfo(
@@ -180,7 +180,7 @@ op_db: list[OpInfo] = [
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
         dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        backward_dtypes=floating_types(),
+        backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -455,6 +455,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.j1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -736,6 +737,7 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
+        backward_dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
