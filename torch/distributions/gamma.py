@@ -128,5 +128,12 @@ class Gamma(ExponentialFamily):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
-        return torch.special.gammainc(self.concentration, self.rate * value)
+            self._validate_sample(value, check_support=False)
+        # gammainc returns nan for a negative argument, so saturate to 0 below the
+        # support rather than clamping after the fact
+        x = self.rate * value
+        return torch.where(
+            x < 0,
+            torch.zeros_like(x),
+            torch.special.gammainc(self.concentration, x.clamp(min=0)),
+        )

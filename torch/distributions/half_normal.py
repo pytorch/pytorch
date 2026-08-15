@@ -74,8 +74,9 @@ class HalfNormal(TransformedDistribution):
 
     def cdf(self, value):
         if self._validate_args:
-            self._validate_sample(value)
-        return 2 * self.base_dist.cdf(value) - 1
+            self._validate_sample(value, check_support=False)
+        # saturates to 0 below the support, where the raw formula goes negative
+        return (2 * self.base_dist.cdf(value) - 1).clamp(min=0, max=1)
 
     def icdf(self, prob):
         return self.base_dist.icdf((prob + 1) / 2)

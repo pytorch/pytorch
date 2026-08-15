@@ -4338,6 +4338,58 @@ class TestDistributions(DistributionsTestCase):
                     ),
                 )
 
+    def test_cdf_outside_support(self):
+        # The CDF is defined on all of R: it saturates to 0 below the support and
+        # to 1 above it, so evaluating it outside the support must not raise even
+        # with validate_args enabled (e.g. plotting a CDF over a grid).
+        grid = torch.tensor([-2.0, -0.5, 0.5, 2.0])
+        cases = [
+            (Uniform(0.0, 1.0), [0.0, 0.0, 0.5, 1.0]),
+            (Exponential(1.0), [0.0, 0.0, 0.39346934, 0.86466472]),
+            (Gamma(2.0, 2.0), [0.0, 0.0, 0.26424112, 0.90842180]),
+            (HalfNormal(1.0), [0.0, 0.0, 0.38292492, 0.95449974]),
+            (HalfCauchy(1.0), [0.0, 0.0, 0.29516724, 0.70483276]),
+            (ContinuousBernoulli(probs=0.5), [0.0, 0.0, 0.5, 1.0]),
+        ]
+        for dist, expected in cases:
+            self.assertTrue(dist._validate_args)
+            actual = dist.cdf(grid)
+            self.assertEqual(
+                actual,
+                torch.tensor(expected),
+                msg=f"{dist.__class__.__name__}.cdf outside support",
+            )
+            self.assertFalse(torch.isnan(actual).any())
+
+    def test_cdf_outside_support_is_monotonic(self):
+        # Saturation must not break monotonicity of the CDF.
+        grid = torch.linspace(-5.0, 5.0, 41)
+        for dist in [
+            Uniform(0.0, 1.0),
+            Exponential(1.0),
+            Gamma(2.0, 2.0),
+            HalfNormal(1.0),
+            HalfCauchy(1.0),
+        ]:
+            cdfs = dist.cdf(grid)
+            self.assertTrue(
+                bool((cdfs[1:] - cdfs[:-1] >= -1e-6).all()),
+                msg=f"{dist.__class__.__name__}.cdf is not monotonic across the support boundary",
+            )
+            self.assertTrue(bool(((cdfs >= 0) & (cdfs <= 1)).all()))
+
+    def test_log_prob_still_validates_support(self):
+        # cdf relaxing the support check must not relax it for log_prob, whose
+        # density is only defined on the support.
+        for dist in [
+            Uniform(0.0, 1.0),
+            Exponential(1.0),
+            Gamma(2.0, 2.0),
+            HalfNormal(1.0),
+        ]:
+            with self.assertRaises(ValueError):
+                dist.log_prob(torch.tensor(-1.0))
+
     def test_valid_parameter_broadcasting(self):
         # Test correct broadcasting of parameter sizes for distributions that have multiple
         # parameters.

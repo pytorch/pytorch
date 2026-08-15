@@ -277,7 +277,7 @@ class Distribution:
             sample_shape = torch.Size(sample_shape)
         return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
-    def _validate_sample(self, value: Tensor) -> None:
+    def _validate_sample(self, value: Tensor, check_support: bool = True) -> None:
         """
         Argument validation for distribution methods such as `log_prob`,
         `cdf` and `icdf`. The rightmost dimensions of a value to be
@@ -287,6 +287,10 @@ class Distribution:
         Args:
             value (Tensor): the tensor whose log probability is to be
                 computed by the `log_prob` method.
+            check_support (bool): whether ``value`` is required to lie within the
+                distribution's support. True for ``log_prob``, whose density is
+                only defined there. False for ``cdf``, which is defined on all of
+                R and saturates to 0 below the support and 1 above it.
         Raises
             ValueError: when the rightmost dimensions of `value` do not match the
                 distribution's batch and event shapes.
@@ -307,6 +311,9 @@ class Distribution:
                 raise ValueError(
                     f"Value is not broadcastable with batch_shape+event_shape: {actual_shape} vs {expected_shape}."
                 )
+        if not check_support:
+            return
+
         try:
             support = self.support
         except NotImplementedError:
