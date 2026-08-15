@@ -503,9 +503,9 @@ class BatchLinearLHSFusion(BatchFusion):
         ) and is_linear_node_can_be_fused(node):
             # Splitting a wide GEMM returns non-contiguous views. Avoid changing
             # observable layout or passing those views to opaque custom operators.
-            # Note: this checks the linear node's direct users only; a layout
-            # change can also leak through aten view ops, but those are out of
-            # scope here (pre-existing limitation).
+            # The guard walks through view-producing users (including split /
+            # chunk / indexing via getitem) to find any consumer that can
+            # observe the layout or requires contiguity.
             if _has_layout_sensitive_user(node):
                 return None
             input = get_arg_value(node, 0, "input")
@@ -618,13 +618,15 @@ def _op_namespace(tgt) -> str | None:
     return None
 
 
-# aten ops that return a view of their input (no implicit copy), so the fused
-# non-contiguous layout propagates to their outputs and downstream consumers
-# still matter. view / as_strided additionally require a compatible layout and
+# aten ops whose output layout follows the input (views, or tuple-of-views for
+# split/chunk/unbind), so the fused non-contiguous layout propagates to their
+# consumers. reshape is included even though it may copy when the layout is
+# incompatible — a copy is contiguous, so walking through it is merely
+# conservative. view / as_strided additionally require a compatible layout and
 # can fail on the non-contiguous fused output. The same ops are traced either
 # as call_function[target=aten.view] or call_method[target="view"], so they are
 # matched by their op name.
-_VIEW_METHODS = OrderedSet(
+_VIEW_OP_NAMES = OrderedSet(
     [
         "view",
         "as_strided",
@@ -636,7 +638,11 @@ _VIEW_METHODS = OrderedSet(
         "expand",
         "select",
         "split",
+        "chunk",
+        "unbind",
         "slice",
+        "detach",
+        "t",
     ]
 )
 
@@ -649,15 +655,20 @@ def _view_op_kind(user: torch.fx.Node) -> str | None:
     # "crash" for view/as_strided (can fail on non-contiguous), "propagate" for
     # the other view-producing ops (layout flows through), None otherwise.
     if user.op == "call_function":
+        # operator.getitem unwraps the tuple returned by split/chunk/unbind and
+        # is itself an unguarded view producer (lin(x)[0]); walk through it.
+        if user.target is operator.getitem:
+            return "propagate"
         # Normalize OpOverload / OpOverloadPacket to the op name ("view").
-        name = getattr(
-            getattr(user.target, "overloadpacket", user.target), "__name__", None
-        )
+        tgt = user.target
+        if isinstance(tgt, torch._ops.OpOverload):
+            tgt = tgt.overloadpacket
+        name = getattr(tgt, "__name__", None)
     elif user.op == "call_method":
         name = user.target
     else:
         return None
-    if name in _VIEW_METHODS:
+    if name in _VIEW_OP_NAMES:
         return "crash" if name in _CRASH_VIEW_OPS else "propagate"
     return None
 
@@ -667,24 +678,30 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     # output, stride/contiguity/storage-offset queries, an opaque custom op
     # (both OpOverload and OpOverloadPacket call forms), or a view/as_strided
     # that can fail on the non-contiguous fused output. View-producing ops
-    # (call_function aten.* or call_method x.view(...)) are walked through,
-    # since the layout propagates to their consumers.
-    for user in node.users:
-        if user.op == "output":
-            return True
-        if user.op == "call_method" and user.target in (
-            "is_contiguous",
-            "storage_offset",
-            "stride",
-        ):
-            return True
-        if _op_namespace(user.target) not in (None, "aten"):
-            return True
-        kind = _view_op_kind(user)
-        if kind == "crash":
-            return True
-        if kind == "propagate" and _has_layout_sensitive_user(user):
-            return True
+    # (call_function aten.* / call_method x.view(...) / getitem) are walked
+    # through since the layout propagates to their consumers. Iterative
+    # worklist with a seen set, so each node is visited at most once (view
+    # chains can form diamonds that a naive recursion would re-traverse).
+    queue = [node]
+    seen = OrderedSet([node])
+    while queue:
+        for user in queue.pop().users:
+            if user.op == "output":
+                return True
+            if user.op == "call_method" and user.target in (
+                "is_contiguous",
+                "storage_offset",
+                "stride",
+            ):
+                return True
+            if _op_namespace(user.target) not in (None, "aten"):
+                return True
+            kind = _view_op_kind(user)
+            if kind == "crash":
+                return True
+            if kind == "propagate" and user not in seen:
+                seen.add(user)
+                queue.append(user)
     return False
 
 
