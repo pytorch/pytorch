@@ -145,8 +145,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("cummax"),
     xfail("cummin"),
     xfail("diag"),
-    xfail("fft.ihfft2"),
-    xfail("fft.ihfftn"),
     xfail("geqrf"),
     xfail("heaviside"),
     xfail("histc"),
