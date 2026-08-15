@@ -3511,6 +3511,86 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.common(fn4, [y])
 
+    @parametrize(
+        "dtype",
+        (torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    def test_kl_div_reduction_signbit_parity_187721(self, dtype):
+        # https://github.com/pytorch/pytorch/issues/187721
+        def fn(input_t, target_t):
+            y = F.kl_div(input_t, target_t, reduction="mean", log_target=True)
+            sign_val = torch.copysign(
+                torch.tensor(1.0, device=input_t.device, dtype=torch.float32), y
+            )
+            return sign_val, y
+
+        # 1. Small/unrolled reduction path (< unroll threshold)
+        input_small = torch.tensor([1000.0, 1000.0], dtype=dtype, device=device_type)
+        target_small = torch.tensor([-1000.0, -1000.0], dtype=dtype, device=device_type)
+
+        eager_sign_s, eager_y_s = fn(input_small, target_small)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled_sign_s, compiled_y_s = compiled_fn(input_small, target_small)
+
+        self.assertEqual(eager_sign_s, compiled_sign_s)
+        self.assertEqual(eager_y_s.signbit(), compiled_y_s.signbit())
+        self.assertFalse(compiled_y_s.signbit().item())
+        self.assertEqual(compiled_y_s.dtype, dtype)
+
+        # 2. Large reduction reaching Triton final_reduction (>= unroll threshold)
+        input_large = torch.full((1024,), 1000.0, dtype=dtype, device=device_type)
+        target_large = torch.full((1024,), -1000.0, dtype=dtype, device=device_type)
+
+        eager_sign_l, eager_y_l = fn(input_large, target_large)
+        compiled_sign_l, compiled_y_l = compiled_fn(input_large, target_large)
+
+        self.assertEqual(eager_sign_l, compiled_sign_l)
+        self.assertEqual(eager_y_l.signbit(), compiled_y_l.signbit())
+        self.assertFalse(compiled_y_l.signbit().item())
+        self.assertEqual(compiled_y_l.dtype, dtype)
+
+        def fn_sum(x):
+            y = torch.sum(x)
+            sign_val = torch.copysign(
+                torch.tensor(1.0, device=x.device, dtype=torch.float32), y
+            )
+            return sign_val, y
+
+        compiled_sum = torch.compile(fn_sum, backend="inductor", fullgraph=True)
+
+        # 3. Direct sum: small unrolled reduction (2 elements)
+        x_small = torch.tensor([-0.0, -0.0], dtype=dtype, device=device_type)
+        eager_sign, eager_y = fn_sum(x_small)
+        compiled_sign, compiled_y = compiled_sum(x_small)
+
+        self.assertEqual(eager_sign, compiled_sign)
+        self.assertEqual(eager_y.signbit(), compiled_y.signbit())
+        self.assertFalse(compiled_y.signbit().item())
+        self.assertEqual(compiled_y.dtype, dtype)
+
+        # 4. Direct sum: large Triton reduction (1024 elements)
+        x_large = torch.full((1024,), -0.0, dtype=dtype, device=device_type)
+        eager_sign_lg, eager_y_lg = fn_sum(x_large)
+        compiled_sign_lg, compiled_y_lg = compiled_sum(x_large)
+
+        self.assertEqual(eager_sign_lg, compiled_sign_lg)
+        self.assertEqual(eager_y_lg.signbit(), compiled_y_lg.signbit())
+        self.assertFalse(compiled_y_lg.signbit().item())
+        self.assertEqual(compiled_y_lg.dtype, dtype)
+
+        # 5. Direct sum: dim=1 reduction retaining outer dimension
+        def fn_dim(x):
+            return torch.sum(x, dim=1)
+
+        compiled_dim = torch.compile(fn_dim, backend="inductor", fullgraph=True)
+        x_dim = torch.full((16, 64), -0.0, dtype=dtype, device=device_type)
+        eager_dim = fn_dim(x_dim)
+        compiled_dim_out = compiled_dim(x_dim)
+
+        self.assertEqual(eager_dim.signbit(), compiled_dim_out.signbit())
+        self.assertFalse(compiled_dim_out.signbit().any().item())
+        self.assertEqual(compiled_dim_out.dtype, dtype)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

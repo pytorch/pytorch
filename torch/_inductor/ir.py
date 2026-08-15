@@ -1701,7 +1701,7 @@ class Reduction(Loops):
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
         def fn(index: Sequence[_IntLike]) -> Any:
-            return functools.reduce(
+            res = functools.reduce(
                 combine_fn,
                 (
                     value_fn(index, rindex)
@@ -1710,6 +1710,10 @@ class Reduction(Loops):
                     )
                 ),
             )
+            if reduction_type == "sum" and src_dtype.is_floating_point:
+                # IEEE-754 (-0.0) + (-0.0) == -0.0, but eager sum initializes to +0.0 (+0.0 + -0.0 == +0.0); absorb negative zero.
+                res = ops.add(res, ops.constant(0.0, src_dtype))
+            return res
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in (
