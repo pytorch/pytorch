@@ -1490,16 +1490,28 @@ def _capture_dynamo(
     # equals fn_globals[ref]); skip __builtins_dict__ refs, which get_runtime_env deliberately
     # stores as the _safe_builtins_dict-filtered (picklable) dict rather than the raw one.
     used_globals = dict(runtime_env.used_globals)
+    import_sources = dict(runtime_env.import_sources)
     fn_globals = gco.f_globals
     for ref in runtime_env.external_refs:
         if (
-            ref in runtime_env.import_sources
+            ref in import_sources
             or ref == (bi.backend_id if bi is not None else None)
             or ref.startswith("__builtins_dict__")
         ):
             continue
-        if ref in fn_globals:
-            used_globals[ref] = fn_globals[ref]
+        if ref not in fn_globals:
+            continue
+        value = fn_globals[ref]
+        if isinstance(value, types.ModuleType):
+            # A module is not picklable, so putting it in used_globals fails the
+            # capture outright with an unactionable error -- `torch` and `math`
+            # both land here whenever the residual bytecode loads the bare name
+            # rather than Dynamo's mangled __import_ alias. It is by-reference
+            # state, so record it the way the aliases are recorded and let the
+            # driver re-import it at load.
+            import_sources[ref] = value.__name__
+            continue
+        used_globals[ref] = value
 
     # Invariant 1: reject a tensor closed over by fn (global, captured local, or default
     # argument value, including one nested in a container or nn.Module); Dynamo surfaces
@@ -1576,7 +1588,7 @@ def _capture_dynamo(
 
     return _DynamoCapture(
         bytecode=runtime_env.bytecode,
-        import_sources=runtime_env.import_sources,
+        import_sources=import_sources,
         used_globals=used_globals,
         closure_contents=closure_contents,
         argdefs=runtime_env.argdefs,
