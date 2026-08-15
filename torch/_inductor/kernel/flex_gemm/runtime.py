@@ -13,6 +13,8 @@ import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    INDEXED_OUTPUT_INDICES_ARG_NAME,
+    INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
@@ -93,6 +95,29 @@ def normalize_c(
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmEpiModIndexedOutputPlan:
+    """Runtime buffers for one exact row-indexed auxiliary output."""
+
+    out: torch.Tensor
+    indices: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if self.out.ndim != 1 or self.out.stride(0) != 1:
+            raise RuntimeError("indexed output must be a contiguous vector")
+        if self.indices.ndim != 1 or self.indices.stride(0) != 1:
+            raise RuntimeError("indexed output indices must be a contiguous vector")
+        if self.out.shape != self.indices.shape:
+            raise RuntimeError("indexed output and indices must have the same shape")
+        if self.indices.dtype not in (torch.int32, torch.int64):
+            raise NotImplementedError("indexed output indices must be int32 or int64")
+
+    @property
+    def cache_key(self) -> tuple[torch.dtype, torch.dtype]:
+        """Return physical output and index dtypes affecting generated code."""
+        return quack_epilogue_arg(self.out).dtype, self.indices.dtype
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmEpiModLocalReducePlan:
     """QuACK EpiOp configuration for one analyzed grouped local reduction."""
 
@@ -159,6 +184,7 @@ def flex_gemm_epimod(
     epilogue_args: tuple[torch.Tensor, ...],
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
+    indexed_output: FlexGemmEpiModIndexedOutputPlan | None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
     fragmentwise: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
@@ -170,6 +196,7 @@ def flex_gemm_epimod(
         epilogue_arg_kinds,
         epilogue_arg_dtypes,
         aux_output_count,
+        None if indexed_output is None else indexed_output.cache_key,
         None if local_reduce is None else local_reduce.cache_key,
         fragmentwise,
         main_transform,
@@ -214,6 +241,19 @@ def flex_gemm_epimod(
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks = {}
+    extra_ops = ()
+    if indexed_output is not None:
+        physical_out = quack_epilogue_arg(indexed_output.out)
+        index_op = epi_ops.ColVecLoad(
+            INDEXED_OUTPUT_INDICES_ARG_NAME,
+            dtype=cute_dsl_utils.torch2cute_dtype_map[indexed_output.indices.dtype],
+        )
+        sinks[INDEXED_OUTPUT_STORE_ARG_NAME] = epi_ops.ColVecSelect(
+            INDEXED_OUTPUT_STORE_ARG_NAME,
+            idx_op=index_op,
+            output_dtype=cute_dsl_utils.torch2cute_dtype_map[physical_out.dtype],
+        )
+        extra_ops = (index_op,)
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
@@ -295,6 +335,7 @@ def flex_gemm_epimod(
             outputs=outputs,
             ops=ops,
             outs=sinks,
+            extra_ops=extra_ops,
             prepass=prepass,
             prepass_outs=prepass_outs,
         )(epilogue_fn)
@@ -303,6 +344,7 @@ def flex_gemm_epimod(
             outputs=outputs,
             ops=ops,
             outs=sinks,
+            extra_ops=extra_ops,
             mode=(
                 "acc_pair"
                 if main_transform is not None and main_transform.group == 2
@@ -338,6 +380,7 @@ def gemm_epimod(
     aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
+    indexed_output: FlexGemmEpiModIndexedOutputPlan | None = None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
     fragmentwise: bool = False,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
@@ -367,6 +410,7 @@ def gemm_epimod(
         quack_epilogue_args,
         epilogue_arg_kinds,
         len(aux_outs),
+        indexed_output,
         local_reduce,
         fragmentwise,
         main_transform,
@@ -383,6 +427,9 @@ def gemm_epimod(
         operands[f"operand{index}"] = (
             arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
         )
+    if indexed_output is not None:
+        operands[INDEXED_OUTPUT_INDICES_ARG_NAME] = indexed_output.indices
+        operands[INDEXED_OUTPUT_STORE_ARG_NAME] = quack_epilogue_arg(indexed_output.out)
     initialize_local_reduce_out = None
     if local_reduce is not None:
         grouped_reduce = importlib.import_module("quack.grouped_reduce")
