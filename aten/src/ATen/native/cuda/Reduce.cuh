@@ -821,8 +821,7 @@ struct ReduceOp {
       __threadfence(); // complete the acquire pattern after atomic
 #else
       // complete the acquire pattern after atomic
-      //
-      // On ROCm, committed stores [CMTSTRS] ensure the producer blocks' writes are visible to global memory.
+      // On ROCm, committed stores [CMTSTRS] ensure the producer block's writes are visible to global memory.
       // But the last block (consumer) still needs an acquire fence to invalidate its (non-coherent) L1,
       // before reading the staging buffer. An acquire-only fence at agent scope is sufficient
       // (and cheaper than a full seq_cst __threadfence()) since it pairs with the agent-scope
