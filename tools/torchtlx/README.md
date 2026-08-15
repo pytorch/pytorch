@@ -22,8 +22,14 @@ build-infrastructure only and does not apply to you as a user.)
 
 ## What `test` runs
 
-torchTLX tests (`test/inductor/test_torchtlx*.py`) if any exist. Otherwise it
-falls back to `sanity.py`, a deliberately small plumbing check -- eager matmul
+torchTLX tests (`test/inductor/test_torchtlx*.py`). Today that is
+`test_torchtlx_templates.py`, which asserts the contract between this repo and
+FBTriton: every TLX template Inductor proposes must have a heuristic
+registered for the running device. Those tests skip when the active Triton has
+no TLX registry, so they are inert on upstream Triton.
+
+With no torchTLX tests present it falls back to `sanity.py`, a deliberately
+small plumbing check -- eager matmul
 plus compiled pointwise, reduction and backward, asserting Inductor emitted a
 Triton kernel and the numerics match. It finishes in under 10s; it is not a
 correctness suite. `--full` adds `test/inductor/test_triton_kernels.py`
