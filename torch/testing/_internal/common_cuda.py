@@ -19,6 +19,38 @@ CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
+CUDA_DEVICE_IS_INTEGRATED = LazyVal(
+    lambda: TEST_CUDA
+    and bool(torch.cuda.get_device_properties(CUDA_DEVICE).is_integrated)
+)
+
+
+def with_limited_cuda_memory_on_integrated_device(limit_mb):
+    def decorator(test):
+        @functools.wraps(test)
+        def wrapped(*args, **kwargs):
+            if not CUDA_DEVICE_IS_INTEGRATED:
+                return test(*args, **kwargs)
+
+            original_fraction = torch.cuda.get_per_process_memory_fraction(CUDA_DEVICE)
+            torch.cuda.empty_cache()
+            reserved = torch.cuda.memory_reserved(CUDA_DEVICE)
+            total = torch.cuda.get_device_properties(CUDA_DEVICE).total_memory
+            fraction = (reserved + limit_mb * 1024**2) / total
+            torch.cuda.set_per_process_memory_fraction(fraction, CUDA_DEVICE)
+            try:
+                return test(*args, **kwargs)
+            finally:
+                torch.cuda.empty_cache()
+                torch.cuda.set_per_process_memory_fraction(
+                    original_fraction, CUDA_DEVICE
+                )
+
+        return wrapped
+
+    return decorator
+
+
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 if TEST_WITH_ROCM:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA)
