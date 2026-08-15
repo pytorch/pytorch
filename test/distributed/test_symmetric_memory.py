@@ -7,7 +7,7 @@ import random
 import re
 import tempfile
 from contextlib import contextmanager, nullcontext
-from unittest import skip, skipIf, skipUnless
+from unittest import skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -1879,7 +1879,6 @@ class LoweringTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
