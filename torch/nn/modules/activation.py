@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import warnings
 
 import torch
@@ -1054,14 +1055,20 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
+@functools.lru_cache
+def _mha_fastpath_supported(device_type: str) -> bool:
+    return torch._C._dispatch_has_kernel_for_dispatch_key(
+        "aten::_native_multi_head_attention",
+        torch._C._dispatch_key_for_device(device_type),
+    )
+
+
 def _check_arg_device(x: torch.Tensor | None) -> bool:
-    if x is not None:
-        return x.device.type in [
-            "cpu",
-            "cuda",
-            torch.utils.backend_registration._privateuse1_backend_name,
-        ]
-    return True
+    if x is None:
+        return True
+    if torch.jit.is_scripting():
+        return False
+    return _mha_fastpath_supported(x.device.type)
 
 
 def _arg_requires_grad(x: torch.Tensor | None) -> bool:
@@ -1412,8 +1419,8 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
-                    "some Tensor argument's device is neither one of "
-                    f"cpu, cuda or {torch.utils.backend_registration._privateuse1_backend_name}"
+                    "some Tensor argument's device has no "
+                    "_native_multi_head_attention kernel registered"
                 )
             elif torch.is_grad_enabled() and any(
                 _arg_requires_grad(x) for x in tensor_args
