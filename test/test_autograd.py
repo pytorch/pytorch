@@ -4252,6 +4252,14 @@ class TestAutograd(TestCase):
         self.assertFalse(out.is_leaf)
         expected_grad_dtype = out.dtype if declared == "unset" else declared
         self.assertEqual(out.grad_dtype, expected_grad_dtype)
+        if expected_grad_dtype is not None and expected_grad_dtype != out.dtype:
+            with self.assertRaisesRegex(RuntimeError, "must match.*grad_dtype"):
+                out.grad = torch.ones_like(out)
+        assigned_dtype = expected_grad_dtype
+        if assigned_dtype is None:
+            assigned_dtype = torch.float64
+        out.grad = torch.ones_like(out, dtype=assigned_dtype)
+        out.grad = None
         downstream_out = Downstream.apply(out)
         self.assertEqual(Downstream.input_grad_dtype, expected_grad_dtype)
         downstream_out.sum().backward()
