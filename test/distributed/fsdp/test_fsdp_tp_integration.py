@@ -4,6 +4,7 @@ import sys
 from collections import OrderedDict
 
 import torch
+from torch._utils import _get_device_module
 from torch import distributed as dist
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -115,7 +116,7 @@ class TPFSDPIntegrationTestBase(FSDPTestContinuous):
 
     @property
     def world_size(self) -> int:
-        return min(4, torch.accelerator.device_count())
+        return min(4, _get_device_module(self.device_type).device_count())
 
 
 class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
