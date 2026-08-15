@@ -13176,7 +13176,7 @@ op_db: list[OpInfo] = [
         "divmod",
         ref=np.divmod,
         supports_out=False,
-        supports_autograd=True,    # todo need to enable the check here to remainder
+        supports_autograd=True,
         dtypes=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_divmod,
     ),

@@ -4490,7 +4490,7 @@ Example::
 add_docstr(
     torch.divmod,
     r"""
-divmod(input, other) -> (Tensor, Tensor)
+divmod(input, other) -> (Tensor quotient, Tensor remainder)
 
 Computes the element-wise quotient and remainder of :attr:`input` divided by
 :attr:`other`, returning them as a tuple ``(quotient, remainder)``.
@@ -4504,14 +4504,17 @@ Args:
     input (Tensor or Number): the dividend
     other (Tensor or Number): the divisor
 
+Returns:
+    A named tuple (quotient, remainder) containing the quotient and remainder value.
+
 Example::
 
     >>> a = torch.tensor([7, -7, 7, -7])
     >>> b = torch.tensor([3, 3, -3, -3])
     >>> torch.divmod(a, b)
-    (tensor([ 2, -3, -3,  2]), tensor([ 1,  2, -2, -1]))
+    torch.return_types.divmod(quotient=tensor([ 2, -3, -3,  2]), remainder=tensor([ 1,  2, -2, -1]))
     >>> torch.divmod(a, 3)
-    (tensor([ 2, -3,  2, -3]), tensor([1, 2, 1, 2]))
+    torch.return_types.divmod(quotient=tensor([ 2, -3,  2, -3]), remainder=tensor([1, 2, 1, 2]))
 
 """,
 )

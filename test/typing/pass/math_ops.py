@@ -111,7 +111,7 @@ torch.divide(p, q, rounding_mode="floor")
 # divmod
 torch.divmod(x, 0.5)
 x.divmod(0.5)
-torch.vidmod(q)
+torch.divmod(x, q)
 x.divmod(q)
 
 # digamma
