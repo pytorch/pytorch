@@ -8918,7 +8918,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_args = kernel_args
         # Names of formal arguments in the kernel's prototype. Normally recorded
         # on the node when it was created; derived here only for a graph that
-        # carries neither - see Note [TTIR launch analysis cache].
+        # carries neither - see Note [TTIR mutation analysis].
         if mutated_arg_names is None or can_fuse_epilogue is None:
             accesses = identify_accessed_tensors(
                 kernel,
