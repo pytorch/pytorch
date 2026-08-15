@@ -846,7 +846,7 @@ Tensor _make_dual_batching_rule(
   int64_t level
 ) {
   DispatchKeySet after_batched_keyset =
-      DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Batched);
+      DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::Batched);
   return at::redispatch::_make_dual(ks & after_batched_keyset, primal, tangent, level);
 }
 

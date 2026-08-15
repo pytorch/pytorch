@@ -34,11 +34,11 @@ struct C10_API PODLocalDispatchKeySet {
 
   // See Note [TLS Initialization]
   DispatchKeySet included() const {
-    return DispatchKeySet(DispatchKeySet::RAW, included_) ^
+    return DispatchKeySet(DispatchKeySet::Raw::RAW, included_) ^
         c10::default_included_set;
   }
   DispatchKeySet excluded() const {
-    return DispatchKeySet(DispatchKeySet::RAW, excluded_) ^
+    return DispatchKeySet(DispatchKeySet::Raw::RAW, excluded_) ^
         c10::default_excluded_set;
   }
 

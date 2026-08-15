@@ -23,8 +23,8 @@ c10::impl::LocalDispatchKeySet safe_get_tls_on_entry() {
 }
 
 // All the keys below the Python key
-constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::DispatchKeySet::FULL) ^
-  (c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python) |
+constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::DispatchKeySet::Full::FULL) ^
+  (c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::Python) |
    c10::DispatchKeySet(c10::DispatchKey::Python));
 
 
@@ -144,7 +144,7 @@ void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySe
   // The guard below will properly ignore such calls.
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
+  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
 }
 
 // The PreDispatch key gets a no-op fallback that just redispatches.
@@ -154,7 +154,7 @@ void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySe
 // Alternatively, we could have hardcoded this kernel (in C++) to directly call in TorchProxyDispatchMode.
 // Doing that in C++ is a pain though, so it's done in python using the PythonDispatcher for convenience.
 void preDispatchFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PreDispatch), stack);
+  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::PreDispatch), stack);
 }
 
 } // anonymous namespace

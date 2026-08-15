@@ -38,7 +38,7 @@ bool called_redispatching_kernel = false;
 void redispatchingKernel_with_DispatchKeySet(const OperatorHandle& op, c10::DispatchKeySet ks, Stack* stack) {
   // this kernel is a no-op- it just redispatches to the lower-priority kernel
   called_redispatching_kernel = true;
-  auto updated_ks = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::TESTING_ONLY_GenericWrapper);
+  auto updated_ks = ks & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::TESTING_ONLY_GenericWrapper);
   op.redispatchBoxed(updated_ks, stack);
 }
 
