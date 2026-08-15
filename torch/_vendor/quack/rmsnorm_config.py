@@ -2,8 +2,8 @@
 
 """Launch configuration for the RMSNorm forward and backward kernels.
 
-Mirrors :mod:`quack.gemm_config`: frozen dataclasses that capture the launch
-knobs, plus arch-specific factories that own the heuristics.
+Uses frozen dataclasses to capture the launch knobs, plus arch-specific
+factories that own the heuristics.
 """
 
 import itertools
