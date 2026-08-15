@@ -2686,9 +2686,7 @@ class CPUReproTests(TestCase):
                 config.patch({"cpp.vec_isa_ok": False}),
             ):
                 self.assertEqual(cpu_vec_isa.valid_vec_isa_list(), [])
-                self.assertIs(
-                    cpu_vec_isa.pick_vec_isa(), cpu_vec_isa.invalid_vec_isa
-                )
+                self.assertIs(cpu_vec_isa.pick_vec_isa(), cpu_vec_isa.invalid_vec_isa)
         finally:
             cpu_vec_isa.valid_vec_isa_list.cache_clear()
 
