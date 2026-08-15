@@ -125,6 +125,29 @@ def keep_global(func):
     return wrapper
 
 
+def keep_globals_length(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        return func(self, x) + len(func.__globals__)
+
+    return wrapper
+
+
+class UnpicklableDefault:
+    def __reduce__(self):
+        raise RuntimeError("unrelated default cannot pickle")
+
+
+def keep_name_with_unpicklable_default(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 class DecoratedForwardModule(torch.nn.Module):
     # forward is the wrapper; the undecorated function it closes over has the
     # same __qualname__ but is unreachable from the module, which is what makes
@@ -155,6 +178,18 @@ class DecoratedNameForwardModule(torch.nn.Module):
 class DecoratedGlobalForwardModule(torch.nn.Module):
     @keep_global
     def forward(self, x):
+        return x * 2
+
+
+class DecoratedGlobalsLengthForwardModule(torch.nn.Module):
+    @keep_globals_length
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
+    @keep_name_with_unpicklable_default
+    def forward(self, x, unused=UnpicklableDefault()):
         return x * 2
 
 
@@ -630,6 +665,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self.assertFalse(loaded.check(inputs))
         finally:
             FQN_MISMATCH_GLOBAL = 2
+
+    def test_fqn_mismatched_function_preserves_globals_structure(self):
+        mod = DecoratedGlobalsLengthForwardModule()
+        ref, loaded = self._test_serialization("DICT_KEYS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_prunes_unguarded_defaults(self):
+        mod = DecoratedUnpicklableDefaultForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
