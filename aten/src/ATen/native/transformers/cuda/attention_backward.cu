@@ -528,6 +528,10 @@ _efficient_attention_backward(
   }
 #endif
 
+  // NOTE [Masked bias gradients]
+  // Causal and local-window kernels can skip masked dBias tiles, leaving them
+  // unwritten here. Zeroing the full [B, H, Q, K] allocation adds quadratic
+  // memory traffic, so this needs a targeted fix.
   if (bias_requires_grad) {
     TORCH_CHECK(
         bias.has_value(),
