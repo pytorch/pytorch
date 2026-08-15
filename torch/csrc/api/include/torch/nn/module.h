@@ -509,6 +509,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// Returns:
   ///   A handle that can be used to remove the hook by calling `handle.remove()`.
+  ///
+  /// \note\n
+  ///   This method mirrors the Python :func:`torch.nn.Module.register_forward_pre_hook_with_kwargs` API.
   void register_forward_pre_hook_with_kwargs(
       std::function<void(Module&, const std::vector<Tensor>&, std::unordered_map<std::string, at::Tensor>)> hook,
       bool prepend = false);
