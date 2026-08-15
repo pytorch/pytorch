@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -262,6 +262,54 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 param_sizes,
                 reduce_scatter_stream=reduce_scatter_stream,
                 reduce_scatter_dtype=torch.float16,
+            )
+
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_records_consumer_stream(self):
+        self.run_subtests(
+            {"needs_record_stream": [True, False]},
+            self._test_reduce_scatter_record_stream,
+        )
+
+    def _test_reduce_scatter_record_stream(self, needs_record_stream: bool):
+        param_sizes = self._get_param_sizes()
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
+        fsdp_params = fsdp_param_group.fsdp_params
+        fsdp_param_group.comm_ctx.lazy_init(self.device)
+        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        group = fsdp_param_group.mesh_info.shard_process_group
+
+        calls = []
+
+        def _record_stream_spy(tensor, stream):
+            calls.append(tensor.untyped_storage().data_ptr())
+
+        with patch.object(
+            device_module, "_needs_record_stream_on_free", needs_record_stream, create=True
+        ), patch.object(torch.Tensor, "record_stream", _record_stream_spy):
+            foreach_reduce(
+                fsdp_params,
+                unsharded_grads,
+                group,
+                device_module.Stream(),
+                DefaultReduceScatter(),
+                orig_dtype=orig_params[0].dtype,
+                reduce_dtype=torch.float32,
+                device=self.device,
+                gradient_divide_factor=None,
+                all_reduce_group=None,
+                all_reduce_stream=device_module.Stream(),
+                all_reduce_hook=None,
+                all_reduce_grads=True,
+                partial_reduce_output=None,
+            )
+
+        if needs_record_stream:
+            self.assertTrue(calls, "expected record_stream on the reduce-scatter output")
+        else:
+            self.assertEqual(
+                calls, [], "record_stream must not be called without the capability"
             )
 
     def _test_reduce_scatter(
