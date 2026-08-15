@@ -1791,7 +1791,13 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if not isinstance(target, ast.Name):
             continue
         if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
+            try:
+                found[target.id] = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError) as e:
+                raise PrecompileError(
+                    f"python_code {target.id!r} calling-convention metadata is "
+                    f"malformed; it must be a Python literal."
+                ) from e
         else:
             # Not a metadata name we consume (the driver section emits only
             # function defs today, but a future artifact revision could add a
