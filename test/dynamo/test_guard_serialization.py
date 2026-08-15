@@ -112,6 +112,19 @@ def keep_name(func):
     return wrapper
 
 
+FQN_MISMATCH_GLOBAL = 2
+
+
+def keep_global(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__globals__["FQN_MISMATCH_GLOBAL"] == 2:
+            x = x + 10
+        return func(self, x)
+
+    return wrapper
+
+
 class DecoratedForwardModule(torch.nn.Module):
     # forward is the wrapper; the undecorated function it closes over has the
     # same __qualname__ but is unreachable from the module, which is what makes
@@ -135,6 +148,12 @@ class DecoratedAttributeForwardModule(torch.nn.Module):
 
 class DecoratedNameForwardModule(torch.nn.Module):
     @keep_name
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedGlobalForwardModule(torch.nn.Module):
+    @keep_global
     def forward(self, x):
         return x * 2
 
@@ -586,6 +605,31 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )
+
+    def test_fqn_mismatched_function_preserves_guarded_globals(self):
+        global FQN_MISMATCH_GLOBAL
+
+        mod = DecoratedGlobalForwardModule()
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, x)
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": x, "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+
+        try:
+            FQN_MISMATCH_GLOBAL = 3
+            self.assertFalse(ref.check(inputs))
+            guards_state = torch._dynamo.package.load_guards_state(
+                self._cached_guards_state
+            )
+            loaded = torch._dynamo.package.load_guard_manager(
+                guards_state,
+                self._cached_f_code,
+                globals(),
+            )
+            self.assertFalse(loaded.check(inputs))
+        finally:
+            FQN_MISMATCH_GLOBAL = 2
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
