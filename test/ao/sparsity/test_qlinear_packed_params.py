@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
 
 
 class TestQlinearPackedParams(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     def qlinear_packed_params_test(self, allow_non_zero_zero_points=False):
         # copied from https://pytorch.org/docs/stable/sparse.html#csr-tensor-operations,
