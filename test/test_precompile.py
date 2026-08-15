@@ -2637,6 +2637,16 @@ class TestPrecompile(TestCase):
         ):
             torch.compiler.precompile.load("x = 1\n", buf.getvalue())
 
+    def test_nonliteral_calling_convention_metadata_rejected(self):
+        code, cache = torch.compiler.precompile(
+            lambda x: x.sin(), torch.randn(2), backend="eager"
+        )
+        bad_code = code.replace("BACKEND = 'eager'", "BACKEND = object()", 1)
+        with self.assertRaisesRegex(
+            PrecompileError, "BACKEND.*calling-convention metadata"
+        ):
+            torch.compiler.precompile.load(bad_code, cache)
+
     def test_singleton_pickle_deepcopy_roundtrip(self):
         # torch.compiler.precompile is a process-wide singleton; pickle and deepcopy
         # must round-trip to the SAME object (it carries no per-call state), and its
