@@ -199,7 +199,15 @@ class DeviceProperties(typing.NamedTuple):
 
         device_interface = get_interface_for_device(device)
         props = device_interface.get_device_properties(device)
-        multi_processor_count = device_interface.get_multi_processor_count(device)
+        try:
+            multi_processor_count = props.multi_processor_count
+        except AttributeError:
+            if device_type == "xpu":
+                multi_processor_count = props.gpu_subslice_count
+            elif device_type == "mtia":
+                multi_processor_count = 64
+            else:
+                raise
         return cls(
             type=device_type,
             index=device.index,
