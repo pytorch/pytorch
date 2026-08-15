@@ -623,9 +623,11 @@ class TestGroupBatchFusion(TestCase):
     )
     def test_batch_linear_lhs_skips_view_users(self):
         # A linear whose output feeds a view that needs the whole row contiguous
-        # (e.g. flattening across rows) would crash on the fused non-contiguous
-        # slice, so it must not be fused while the other pointwise-consumed
-        # linears still are.
+        # (e.g. flattening across rows) crashes on the fused non-contiguous
+        # slice — torch.compile raises "Cannot view ... strides (224, 1)" below —
+        # so it must not be fused while the other pointwise-consumed linears
+        # still are. The counter is 1 either way (it counts fuse() groups, not
+        # nodes); the discriminator here is the compile not raising.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -648,6 +650,22 @@ class TestGroupBatchFusion(TestCase):
 
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    def test_batch_linear_lhs_split_getitem_walked(self):
+        # split returns a tuple, so its users are operator.getitem nodes, which
+        # the guard must walk through to reach the downstream view.
+        import operator
+
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        split = graph.call_function(torch.ops.aten.split, args=(linear, 64, 1))
+        getitem = graph.call_function(operator.getitem, args=(split, 0))
+        graph.call_method("view", args=(getitem, -1))
+        self.assertTrue(_has_layout_sensitive_user(linear))
 
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
