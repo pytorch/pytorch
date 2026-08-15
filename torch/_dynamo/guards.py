@@ -4245,13 +4245,18 @@ class GuardsStatePickler(pickle.Pickler):
         guarded_globals: dict[str, object] | None = None,
         snapshot_globals: bool = False,
     ) -> types.FunctionType:
-        module_globals = importlib.import_module(module).__dict__
         if snapshot_globals:
-            f_globals = {}
-            if guarded_globals:
-                f_globals.update(guarded_globals)
+            # Deliberately no import_module here: the snapshot IS the scope, and
+            # importing a module only to discard it is a load-time failure mode
+            # this branch does not otherwise have.
+            f_globals: dict[str, Any] = dict(guarded_globals or {})
         else:
-            f_globals = module_globals
+            # NB obj.__module__ is not reliably the module the function LIVES in
+            # -- functools.wraps copies it from the wrapped function -- so this
+            # scope can belong to a different file. It is only reached when no
+            # guard walks __globals__, since one that does registers the dict
+            # and forces the snapshot above.
+            f_globals = importlib.import_module(module).__dict__
         fn = types.FunctionType(
             code,
             f_globals,
@@ -4265,7 +4270,58 @@ class GuardsStatePickler(pickle.Pickler):
             fn.__dict__.update(attributes)
         return fn
 
+    def _keep(self, value: object) -> bool:
+        """Whether a value a reconstructed function holds has to be carried.
+
+        Only values some guard tree node references: everything else becomes a
+        _Missing sentinel, so widening the set of reconstructed functions does
+        not drag unrelated -- and possibly unpicklable -- neighbours into the
+        pickle with them. Matching is by identity, which for an interned value
+        (True, None, a small int, a short str) can coincide with an unrelated
+        guarded one and keep it. That is harmless: such values are trivially
+        picklable, and a kept value is always the real one.
+        """
+        return id(value) in self.guard_tree_values
+
+    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
+        """Carry a closure cell, or replace it with a sentinel one.
+
+        A carried cell is passed through UNCHANGED so that two functions
+        closing over the same variable still share it after reload, and so that
+        pickle can memoize it. Only a dropped cell is rebuilt.
+
+        An EMPTY cell -- a free variable a decorator only assigns on a path that
+        did not run -- has no contents to read at all, so presence is checked
+        before identity. Reading it unconditionally raised ValueError here,
+        which reaches the caller as a package bypass.
+        """
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return type(self)._unpickle_cell(_Missing("empty function closure"))
+        if self._keep(cell) or self._keep(contents):
+            return cell
+        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
+
     def _reduce_nested_function(
+        self, obj: types.FunctionType
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        # pickle memoizes an object only AFTER saving its reduce args, so an arg
+        # that reaches back to obj re-enters this method forever. The ordinary
+        # `wrapped = deco(base)` at module scope does exactly that once the
+        # globals dict is guarded, and two mutually-referencing wrappers do it
+        # across each other. Substitute a sentinel for anything already being
+        # reduced further up the stack; a guard comparing against _Missing
+        # fails, which is the safe direction.
+        if not hasattr(self, "_reducing"):
+            self._reducing = set()
+        self._reducing.add(id(obj))
+        try:
+            return self._reduce_nested_function_inner(obj)
+        finally:
+            self._reducing.discard(id(obj))
+
+    def _reduce_nested_function_inner(
         self, obj: types.FunctionType
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
         snapshot_globals = id(obj.__globals__) in self.guard_tree_values
@@ -4273,7 +4329,7 @@ class GuardsStatePickler(pickle.Pickler):
             {
                 name: (
                     value
-                    if id(value) in self.guard_tree_values
+                    if self._keep(value) and id(value) not in self._reducing
                     else _Missing("unguarded function global")
                 )
                 for name, value in obj.__globals__.items()
@@ -4284,13 +4340,13 @@ class GuardsStatePickler(pickle.Pickler):
 
         defaults = obj.__defaults__
         if defaults is not None:
-            keep_defaults = id(defaults) in self.guard_tree_values or any(
-                id(value) in self.guard_tree_values for value in defaults
+            keep_defaults = self._keep(defaults) or any(
+                self._keep(value) for value in defaults
             )
             defaults = (
                 tuple(
                     value
-                    if id(value) in self.guard_tree_values
+                    if self._keep(value)
                     else _Missing("unguarded function default")
                     for value in defaults
                 )
@@ -4300,37 +4356,27 @@ class GuardsStatePickler(pickle.Pickler):
 
         kwdefaults = obj.__kwdefaults__
         if kwdefaults is not None:
-            keep_kwdefaults = id(kwdefaults) in self.guard_tree_values
+            keep_kwdefaults = self._keep(kwdefaults)
             kwdefaults = {
                 name: (
                     value
-                    if id(value) in self.guard_tree_values
+                    if self._keep(value)
                     else _Missing("unguarded function keyword default")
                 )
                 for name, value in kwdefaults.items()
-                if keep_kwdefaults or id(value) in self.guard_tree_values
+                if keep_kwdefaults or self._keep(value)
             }
             if not kwdefaults and not keep_kwdefaults:
                 kwdefaults = None
 
         closure = obj.__closure__
         if closure is not None:
-            closure = tuple(
-                type(self)._unpickle_cell(
-                    cell.cell_contents
-                    if id(cell) in self.guard_tree_values
-                    or id(cell.cell_contents) in self.guard_tree_values
-                    else _Missing("unguarded function closure")
-                )
-                for cell in closure
-            )
+            closure = tuple(self._reduce_cell(cell) for cell in closure)
         attributes = (
             dict(obj.__dict__)
-            if id(obj.__dict__) in self.guard_tree_values
+            if self._keep(obj.__dict__)
             else {
-                name: value
-                for name, value in obj.__dict__.items()
-                if id(value) in self.guard_tree_values
+                name: value for name, value in obj.__dict__.items() if self._keep(value)
             }
         )
         return type(self)._unpickle_nested_function, (
@@ -4628,12 +4674,20 @@ def pickle_guards_state(
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
         raise
+    except (AssertionError, RecursionError):
+        # These are OUR bugs, not a user object refusing to pickle: every
+        # AssertionError raised out of this pickler is an internal invariant
+        # (an unserializable SymInt, a sympy Function with no unpickler, the
+        # FSDP checks), and a RecursionError means a reduce cycle we failed to
+        # break. Turning them into PackageError makes them a silent package
+        # bypass under caching_precompile -- an invisible perf regression
+        # rather than a report -- so they propagate.
+        raise
     except Exception as e:
         # Pickling walks arbitrary user objects, so a __reduce__ or a property
         # can raise essentially anything; the caller turns PackageError into a
         # package bypass, or re-raises it under strict_precompile. Name the
-        # original type so a bug in the pickler itself stays identifiable in
-        # the bypass reason rather than reading as a user-object failure.
+        # original type so the reason stays diagnosable.
         raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
@@ -5296,7 +5350,9 @@ class CheckFunctionManager:
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            extra_state.invalidate(
+                cache_entry, deleted_guard_manager, self.guard_manager
+            )
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
