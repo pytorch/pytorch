@@ -1638,7 +1638,7 @@ In-place version of :meth:`~Tensor.floor_divide`
 add_docstr_all(
     "divmod",
     r"""
-divmod(other) -> (Tensor, Tensor)
+divmod(other) -> (Tensor quotient, Tensor remainder)
 
 See :func:`torch.divmod`
 """,
