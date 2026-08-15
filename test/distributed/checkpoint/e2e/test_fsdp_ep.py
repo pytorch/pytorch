@@ -6,7 +6,11 @@ from torch.distributed.checkpoint.state_dict import get_state_dict
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import DTensor
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -59,6 +63,8 @@ class TopModel(nn.Module):
 
 
 class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(8, torch.accelerator.device_count())
@@ -119,6 +125,14 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
                         self.assertEqual(tuple(v.device_mesh.mesh), ranks)
 
         self.assertEqual(set(osd["state"].keys()), set(msd.keys()))
+
+
+instantiate_device_type_tests(
+    TestFSDPWithEP,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
