@@ -53,9 +53,15 @@ device_type = torch.device(get_devtype())
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # `DeviceTypeTestBase.precision`/`rel_tol` are thread-local, but some
-    # asserts run in autograd worker threads (the reduce-scatter callbacks);
-    # override with the plain `TestCase` defaults.
+    # `instantiate_device_type_tests` injects `DeviceTypeTestBase`, whose
+    # `precision`/`rel_tol` are thread-local properties populated only on the
+    # thread that imports the module. The reduce-scatter callbacks in
+    # `test_compute_dtype`/`test_reduce_dtype`/`test_grad_acc_with_reduce_dtype`
+    # run `assertEqual` from an autograd worker thread during backward; since
+    # `assertEqual` always reads `self.rel_tol`, that worker thread's empty
+    # thread-local raises `AttributeError`. Override with the plain `TestCase`
+    # defaults (0 = no tolerance override) to shadow the thread-local
+    # properties; this is safe because this test sets no custom tolerance.
     precision = TestCase._precision
     rel_tol = TestCase._rel_tol
 
@@ -721,9 +727,15 @@ class TestFullyShardMixedPrecisionJVP(FSDPTest):
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # `DeviceTypeTestBase.precision`/`rel_tol` are thread-local, but some
-    # asserts run in autograd worker threads (the reduce-scatter callbacks);
-    # override with the plain `TestCase` defaults.
+    # `instantiate_device_type_tests` injects `DeviceTypeTestBase`, whose
+    # `precision`/`rel_tol` are thread-local properties populated only on the
+    # thread that imports the module. The reduce-scatter callback in
+    # `test_clamp_reduce_dtype` runs `assertEqual` from an autograd worker
+    # thread during backward; since `assertEqual` always reads `self.rel_tol`,
+    # that worker thread's empty thread-local raises `AttributeError`. Override
+    # with the plain `TestCase` defaults (0 = no tolerance override) to shadow
+    # the thread-local properties; this is safe because this test sets no
+    # custom tolerance.
     precision = TestCase._precision
     rel_tol = TestCase._rel_tol
 
