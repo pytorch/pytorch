@@ -4629,7 +4629,12 @@ def pickle_guards_state(
     except torch._dynamo.exc.PackageError:
         raise
     except Exception as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+        # Pickling walks arbitrary user objects, so a __reduce__ or a property
+        # can raise essentially anything; the caller turns PackageError into a
+        # package bypass, or re-raises it under strict_precompile. Name the
+        # original type so a bug in the pickler itself stays identifiable in
+        # the bypass reason rather than reading as a user-object failure.
+        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
 
