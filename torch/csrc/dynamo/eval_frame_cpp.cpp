@@ -633,7 +633,8 @@ PyObject* dynamo__custom_eval_frame(
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra, isolate_recompiles_id);
+  py::object frame_state = py::reinterpret_steal<py::object>(
+      extract_frame_state(extra, isolate_recompiles_id));
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -648,7 +649,7 @@ PyObject* dynamo__custom_eval_frame(
     }
     PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
-        callback, frame, locals.get(), cache_entry, frame_state);
+        callback, frame, locals.get(), cache_entry, frame_state.ptr());
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();

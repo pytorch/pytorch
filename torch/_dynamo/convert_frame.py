@@ -104,6 +104,7 @@ from .cache_size import (
 from .code_context import code_context
 from .eval_frame import (
     _get_cache_entries_for_region,
+    _get_explicit_compile_regions,
     _get_total_cache_entry_count,
     add_skip_reason,
     always_optimize_code_objects,
@@ -677,6 +678,8 @@ class ConvertFrameAssert:
             total_count = package.guarded_code_count(code)
         else:
             total_count = _get_total_cache_entry_count(code)
+            for region_id in _get_explicit_compile_regions():
+                total_count -= len(_get_cache_entries_for_region(code, region_id))
         cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:

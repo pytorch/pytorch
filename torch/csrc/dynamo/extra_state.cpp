@@ -99,15 +99,20 @@ FrameState* extract_frame_state(
   if (extra_state == nullptr) {
     return nullptr;
   }
+  PyObject* frame_state = nullptr;
   if (isolate_recompiles_id < 0) {
-    return (FrameState*)extra_state->frame_state.ptr();
+    frame_state = extra_state->frame_state.ptr();
+  } else {
+    std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
+    frame_state =
+        extra_state->region_frame_state_map[isolate_recompiles_id].ptr();
   }
-  std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
-  return (FrameState*)extra_state->region_frame_state_map[isolate_recompiles_id]
-      .ptr();
+  Py_INCREF(frame_state);
+  return frame_state;
 }
 
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
+  std::lock_guard<std::mutex> lock(strategy_mutex);
   return extra_state->strategy;
 }
 
@@ -158,6 +163,7 @@ bool extra_state_compare_and_set_exec_strategy(
 FrameExecStrategy extra_state_get_region_exec_strategy(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id) {
+  std::lock_guard<std::mutex> lock(strategy_mutex);
   if (isolate_recompiles_id < 0) {
     return extra_state->strategy;
   }
@@ -188,6 +194,7 @@ void extra_state_set_region_exec_strategy(
   if (isolate_recompiles_id < 0) {
     extra_state_set_exec_strategy(extra_state, strategy);
   } else {
+    std::lock_guard<std::mutex> lock(strategy_mutex);
     extra_state->region_strategy_map[isolate_recompiles_id] = strategy;
   }
 }
@@ -516,7 +523,10 @@ void _clear_cache_entries_for_region(
     extra->total_cache_entry_count -= it->second.size();
     extra->cache_entry_map.erase(it);
   }
-  extra->region_strategy_map.erase(isolate_recompiles_id);
+  {
+    std::lock_guard<std::mutex> lock(strategy_mutex);
+    extra->region_strategy_map.erase(isolate_recompiles_id);
+  }
   {
     std::lock_guard<std::mutex> lock(extra->region_frame_state_mutex);
     extra->region_frame_state_map.erase(isolate_recompiles_id);

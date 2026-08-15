@@ -38,6 +38,7 @@ from torch._dynamo.graph_utils import _graph_device_type
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
+    _reserve_unique_id_through,
     COMPILED_FN_PREFIX,
     get_code_keys,
     is_compiled_fn_name,
@@ -515,7 +516,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, CPU codegen, and GPU details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -525,6 +526,9 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    cpu_codegen_target: (
+        tuple[str, str, str | None, str, int | None, str | None] | None
+    ) = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
@@ -532,6 +536,8 @@ class SystemInfo:
         """Create a SystemInfo instance with current system information."""
         # Get GPU name if CUDA or XPU is available
         gpu_name = None
+        from torch._inductor import config as inductor_config
+        from torch._inductor.cpu_vec_isa import pick_vec_isa
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -550,6 +556,14 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            cpu_codegen_target=(
+                platform.machine(),
+                torch.backends.cpu.get_cpu_capability(),
+                os.environ.get("ATEN_CPU_CAPABILITY"),
+                str(pick_vec_isa()),
+                inductor_config.cpp.simdlen,
+                inductor_config.cpp.march,
+            ),
         )
 
     def check_compatibility(
@@ -567,6 +581,11 @@ class SystemInfo:
         if self.torch_version != other.torch_version:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
+            )
+        if device_type == "cpu" and self.cpu_codegen_target != other.cpu_codegen_target:
+            raise RuntimeError(
+                "Compile package was created with a different CPU codegen target: "
+                f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}"
             )
         if device_type in self.CHECK_GPUS:
             if not getattr(torch, device_type).is_available():
@@ -848,9 +867,11 @@ class CompilePackage:
             # could never be corrected and would be re-saved as this capture's.
             self._device_type = dynamo.device_type
         else:
-            self._add_function(
-                self._innermost_fn.__code__, self._innermost_fn.__module__
+            module_name = (
+                _defining_module_name(self._innermost_fn.__code__)
+                or self._innermost_fn.__module__
             )
+            self._add_function(self._innermost_fn.__code__, module_name)
         self._initialized = True
 
     def _add_function(
@@ -1174,13 +1195,16 @@ class CompilePackage:
             self._uninstall()
             try:
                 self._install_codes(backends)
-            except Exception:
+            except BaseException:
                 # A half-installed package is worse than an unloaded one: some
                 # frames serve precompiled code and some do not, and because
                 # install() raised, the caller has no handle to undo it. The
                 # expected way to get here is after_deserialization() rejecting an
                 # artifact on a serving host that does not match the capture host.
-                self._uninstall()
+                try:
+                    self._uninstall()
+                except BaseException:
+                    logger.exception("Failed to roll back a partial package install")
                 raise
 
     def reset_after_failed_install(self) -> None:
@@ -1320,6 +1344,9 @@ class CompilePackage:
                         builtin_dict_name
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
+                        _, separator, suffix = builtin_dict_name.rpartition("_")
+                        if separator and suffix.isdigit():
+                            _reserve_unique_id_through(int(suffix))
                         # A pre-reset compile's CleanupHook may still own this
                         # name even when we're about to leave its value alone
                         # below (same dict object every compile in this
@@ -1336,13 +1363,8 @@ class CompilePackage:
                                 )
                         else:
                             # Recorded, so uninstall() takes it back out. The
-                            # name carries the capture process's unique_id
-                            # counter, so leaving it behind makes the first
-                            # local compile that mints the same name die in
-                            # CleanupHook.create. That collision still happens
-                            # WHILE the artifact is installed: fixing it means
-                            # not minting the name off a process-local counter,
-                            # which is output_graph's call, not this loader's.
+                            # artifact's counter was reserved above, so local
+                            # compiles cannot mint the same name while loaded.
                             self._install_global(
                                 module, builtin_dict_name, builtins_dict
                             )

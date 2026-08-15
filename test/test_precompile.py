@@ -1628,6 +1628,58 @@ class TestPrecompile(TestCase):
         self.assertTrue(session.summary().complete)
         self.assertEqual(session.summary().guarded_codes, 1)
 
+    def test_multi_graph_exit_waits_for_worker_call(self):
+        from torch._dynamo.backends.registry import register_backend
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+
+        entered = threading.Event()
+        release = threading.Event()
+        worker_done = threading.Event()
+        errors = []
+        outputs = []
+
+        def blocking_backend(gm, example_inputs):
+            entered.set()
+            self.assertTrue(release.wait(20))
+            return gm.forward
+
+        backend_name = f"precompile_exit_waits_{id(entered)}"
+        register_backend(blocking_backend, name=backend_name)
+        session = torch.compiler.precompile.capture(
+            _precompile_single_graph, backend=backend_name, dynamic=False
+        )
+        compiled = session.__enter__()
+        x = torch.randn(2)
+
+        def run():
+            try:
+                outputs.append(compiled(x))
+            except BaseException as e:
+                errors.append(e)
+            finally:
+                worker_done.set()
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        self.assertTrue(entered.wait(20))
+
+        def release_call():
+            self.assertFalse(worker_done.wait(0.1))
+            release.set()
+
+        releaser = threading.Thread(target=release_call)
+        releaser.start()
+        session.__exit__(None, None, None)
+        worker.join(20)
+        releaser.join(20)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(releaser.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(outputs, [_precompile_single_graph(x)])
+        self.assertEqual(
+            _get_total_cache_entry_count(_precompile_single_graph.__code__), 0
+        )
+
     def test_multi_graph_caught_call_failure_is_incomplete(self):
         x = torch.randn(4)
         session = torch.compiler.precompile.capture(
@@ -1869,6 +1921,40 @@ class TestPrecompile(TestCase):
         x = torch.randn(4)
         self.assertEqual(compiled(x), _precompile_single_graph(x))
         self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(accumulated_recompile_limit=2, recompile_limit=8)
+    def test_multi_graph_active_capture_does_not_limit_ordinary_compile(self):
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        torch._dynamo.reset()
+        session = torch.compiler.precompile.capture(
+            _precompile_single_graph,
+            backend="eager",
+            dynamic=False,
+            recompile_limit=20,
+        )
+        with session as captured:
+            for n in (2, 3):
+                x = torch.randn(n)
+                self.assertEqual(captured(x), _precompile_single_graph(x))
+
+            during = torch._dynamo.testing.CompileCounter()
+            ordinary = torch.compile(
+                _precompile_single_graph, backend=during, dynamic=False
+            )
+            x = torch.randn(4)
+            self.assertEqual(ordinary(x), _precompile_single_graph(x))
+            self.assertEqual(during.frame_count, 1)
+
+        after = torch._dynamo.testing.CompileCounter()
+        ordinary = torch.compile(_precompile_single_graph, backend=after, dynamic=False)
+        x = torch.randn(5)
+        self.assertEqual(ordinary(x), _precompile_single_graph(x))
+        self.assertEqual(after.frame_count, 1)
+        strategy = get_code_exec_strategy(_precompile_single_graph.__code__)
+        self.assertEqual(strategy.cur_action, FrameAction.DEFAULT)
+        self.assertEqual(strategy.recursive_action, FrameAction.DEFAULT)
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True

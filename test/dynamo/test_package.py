@@ -7,6 +7,7 @@ import functools
 import gc
 import importlib
 import inspect
+import itertools
 import math
 import math as _precompile_stdlib_alias
 import os
@@ -47,7 +48,7 @@ from torch._dynamo.precompile_package import (
     serving,
 )
 from torch._dynamo.testing import reduce_to_scalar_loss
-from torch._dynamo.utils import CleanupManager
+from torch._dynamo.utils import CleanupHook, CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
@@ -2716,6 +2717,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, "different"):
                 skewed.check_compatibility(current, "cpu")
 
+    def test_artifact_rejected_on_cpu_codegen_target_skew(self):
+        with mock.patch.dict(os.environ, {"ATEN_CPU_CAPABILITY": "avx512"}):
+            captured = SystemInfo.current()
+        with mock.patch.dict(os.environ, {"ATEN_CPU_CAPABILITY": "avx2"}):
+            serving = SystemInfo.current()
+        with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
+            captured.check_compatibility(serving, "cpu")
+
     def test_two_artifacts_sharing_an_inner_frame_both_serve(self):
         # Two DIFFERENT models containing the same library block share that
         # block's frame and its resume function. Unlike two artifacts for one
@@ -4187,6 +4196,52 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(PackageError, "captured from code object"):
             precompile_load(instrumented, self.path(), backend="eager", dynamic=False)
 
+    def test_wrapped_entry_uses_its_defining_module_globals(self):
+        pkg_dir = self._write_module(
+            "wrapped_entry",
+            "precompile_entry_decorators",
+            """
+import functools
+
+ENABLE = True
+
+def deco(fn):
+    @functools.wraps(fn)
+    def wrapper(x):
+        y = x * 2 if ENABLE else x * 3
+        scalar = x.sum().item()
+        return y + scalar
+    return wrapper
+""",
+        )
+        self._write_module(
+            "wrapped_entry",
+            "precompile_wrapped_entry",
+            """
+from precompile_entry_decorators import deco
+
+@deco
+def staged(x):
+    return x
+""",
+        )
+        self._forget_modules("precompile_entry_decorators", "precompile_wrapped_entry")
+        mod = self._import_module(pkg_dir, "precompile_wrapped_entry")
+        x = torch.arange(4.0)
+        expected = mod.staged(x)
+        session = precompile_capture(mod.staged, backend="eager", dynamic=False)
+        with session as compiled, torch.no_grad():
+            self.assertEqual(compiled(x), expected)
+        self.assertEqual(session.summary().dropped_guards, ())
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        loaded = precompile_load(
+            mod.staged, self.path(), backend="eager", dynamic=False
+        )
+        with loaded, torch.no_grad(), serving():
+            self.assertEqual(loaded(x), expected)
+
     def test_save_writes_a_single_file(self):
         # save() names a FILE, written exactly as given with parent directories
         # created, and precompile_load takes that same path back. Matches
@@ -4341,17 +4396,66 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(any(n.startswith("__builtins_dict__") for n in scope))
 
         loaded.unload()
-        # The key carries the capture process's unique_id counter, so a leaked
-        # one collides with the first local compile that mints the same name,
-        # which then dies in CleanupHook.create. Import aliases are the one
-        # thing install() is expected to leave: plain torch.compile installs
-        # them permanently too.
+        # Import aliases are the one thing install() is expected to leave:
+        # plain torch.compile installs them permanently too.
         leftover = sorted(
             name for name in set(scope) - before if not name.startswith("__import_")
         )
         self.assertEqual(leftover, [])
 
-    def test_a_failed_install_leaves_nothing_installed(self):
+    def test_loaded_builtins_names_do_not_collide_with_local_compiles(self):
+        import torch._dynamo.bytecode_transformation as bytecode_transformation
+
+        scope = staged_with_graph_breaks.__globals__
+        generated = []
+        for name in [n for n in scope if n.startswith("__builtins_dict__")]:
+            CleanupHook.disown(scope, name)
+            del scope[name]
+        with mock.patch.object(
+            bytecode_transformation, "_unique_id_counter", itertools.count()
+        ):
+            session = precompile_capture(
+                staged_with_graph_breaks, backend="eager", dynamic=False
+            )
+            with session as compiled, torch.no_grad():
+                compiled(torch.randn(3, 4))
+            session.save(self.path())
+
+            torch._dynamo.reset()
+            for name in [n for n in scope if n.startswith("__builtins_dict__")]:
+                del scope[name]
+            bytecode_transformation._unique_id_counter = itertools.count()
+            loaded = precompile_load(
+                staged_with_graph_breaks,
+                self.path(),
+                backend="eager",
+                dynamic=False,
+            )
+            try:
+                for i in range(30):
+                    name = f"_precompile_bystander_{i}"
+                    generated.append(name)
+                    exec(
+                        compile(
+                            f"def {name}(x):\n    return x + {i}\n",
+                            __file__,
+                            "exec",
+                        ),
+                        scope,
+                    )
+                    x = torch.ones(2)
+                    compiled = torch.compile(
+                        scope[name], backend="eager", dynamic=False
+                    )
+                    self.assertEqual(compiled(x), x + i)
+            finally:
+                loaded.unload()
+                for name in generated:
+                    scope.pop(name, None)
+                torch._dynamo.reset()
+
+    @parametrize("error_type", (RuntimeError, KeyboardInterrupt))
+    def test_a_failed_install_leaves_nothing_installed(self, error_type):
         from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
         session = precompile_capture(
@@ -4367,7 +4471,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         class _Boom:
             def after_deserialization(self):
-                raise RuntimeError("artifact will not deserialize on this host")
+                raise error_type("artifact will not deserialize on this host")
 
         # The last frame's backend is the one that fails, so the earlier frames
         # are already installed when install() gives up. A backend rejected by
@@ -4380,7 +4484,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.optimize("eager", package=package, dynamic=False)(
             staged_with_graph_breaks
         )
-        with self.assertRaisesRegex(RuntimeError, "will not deserialize"):
+        with self.assertRaisesRegex(error_type, "will not deserialize"):
             package.install(backends)
 
         # install() raising leaves the caller no handle to unload with, so a

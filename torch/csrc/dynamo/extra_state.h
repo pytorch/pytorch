@@ -124,7 +124,7 @@ CacheEntry* extract_cache_entry(
 //  - extra_state: Borrowed
 //  - isolate_recompiles_id: Compile scope (-1 = default)
 // return
-//  - frame state: Borrowed.
+//  - frame state: New reference.
 FrameState* extract_frame_state(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id);

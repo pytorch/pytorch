@@ -99,38 +99,9 @@ Know these before relying on an artifact in production:
   counts are per model, not per library: torchvision's efficientnet_b0 reports
   2 and timm's swin reports 5, one of which is a real config slot. Audit the
   list before explicitly relaxing either dropped-guard requirement.
-* A transformers model does not round trip today, and some do not even capture:
-  T5 raises ``PackageError: Cannot find module for code <code object __init__``
-  from ``_get_code_source``, which is byte-identical to base and which plain
-  ``caching_precompile`` also raises, so it is upstream too. For the families
-  that do capture, save and load work,
-  but the first served call recompiles and ``serving()`` therefore raises. The
-  entry frame is a ``functools.wraps`` decorator defined in
-  ``transformers/utils/generic.py`` (``can_return_tuple`` for Qwen2), so its
-  code object lives in that file; ``CompilePackage._add_function`` records
-  the module as the decorated callable's ``__module__``
-  (``...models.qwen2.modeling_qwen2``), so ``_install_codes`` hands the guards a
-  global scope that is not the one the frame runs in and every ``G[...]`` guard
-  misses with a ``KeyError``. This is not specific to this module -- plain
-  ``torch._dynamo.config.caching_precompile`` records the same mapping -- so it
-  needs fixing in the loader, not here. Vision models (torchvision, timm) do
-  round trip.
-* A guard can also be KEPT and yet stop discriminating, which no rail reports.
-  Guards are rebuilt at load against the loading process, so one whose source
-  resolves through a reconstructed function's ``__globals__`` re-derives its
-  expected value from the serving machine and compares that value to itself.
-  A global rebound between capture and serve is then absorbed silently and the
-  capture-time graph is served. This is upstream in guard serialization, not
-  specific to this module -- the same shape reproduces through the untouched
-  ``<locals>`` reconstruction path -- but note it applies to KEPT guards, where
-  ``dropped_guards`` and ``risky_dropped_guards`` say nothing. The known shapes
-  also drop the reconstructed function's identity, so the public all-drops
-  default refuses them; choosing the relaxed policy can expose this gap.
-* SystemInfo checks Python, PyTorch, CUDA, Triton and GPU name at load, but NOT
-  the CPU vector ISA. Inductor bakes the vector width into generated CPU code,
-  so an artifact captured on an AVX-512 host and served on an AVX2 host can
-  produce wrong numbers with no error. Pin the ISA across your fleet, or gate
-  on it yourself, before deploying CPU artifacts.
+* Some models do not capture yet. For example, T5 raises ``PackageError: Cannot
+  find module for code <code object __init__`` from ``_get_code_source``, which
+  is byte-identical to base and which plain ``caching_precompile`` also raises.
 * The model must live in an importable module. Source is checksummed, so a
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
 * ``install()`` patches code objects process-globally, so an artifact is not
@@ -149,14 +120,6 @@ Know these before relying on an artifact in production:
   of the public all-drops refusal -- and dispatch becomes ambiguous: the first
   matching entry wins and one model is silently served the other's graph. Nothing
   warns, because the eviction warning covers entry frames only.
-* While an artifact is loaded, a plain ``torch.compile`` of anything else in
-  the same module can die with ``AssertionError: Name '__builtins_dict___1'
-  already exists in scope``. Loading installs that name -- a counter value from
-  the capture process -- into the module, and a local compile mints from a
-  counter that starts over here, so the two eventually collide. ``unload()``
-  removes it; until then keep loaded and freshly compiled callables in
-  separate modules.
-
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
@@ -198,6 +161,7 @@ from .exc import PackageError
 from .guards import CheckFunctionManager
 from .package import (
     _BackendId,
+    _defining_module_name,
     _DynamoCacheEntry,
     CompilePackage,
     DynamoStore,
@@ -1107,6 +1071,9 @@ class PrecompileSession:
         from .pgo import _new_code_state
 
         self._pgo_state = _new_code_state()
+        self._state = threading.Condition()
+        self._active_calls = 0
+        self._closing = False
         self._finished = False
 
     def _take_backend_artifacts(self) -> None:
@@ -1147,9 +1114,13 @@ class PrecompileSession:
     def _clear_runtime_cache(self) -> None:
         if self._isolate_recompiles_id is None:
             return
+        from .eval_frame import _unregister_explicit_compile_region
+
+        isolate_recompiles_id = self._isolate_recompiles_id
         try:
-            _clear_package_region(self._package, self._isolate_recompiles_id)
+            _clear_package_region(self._package, isolate_recompiles_id)
         finally:
+            _unregister_explicit_compile_region(isolate_recompiles_id)
             self._isolate_recompiles_id = None
             self._optimized = None
             if self._backend != "eager":
@@ -1157,16 +1128,24 @@ class PrecompileSession:
             self._pgo_state.clear()
 
     def _call(self, *args: object, **kwargs: object) -> object:
-        if self._compiled is None:
-            raise RuntimeError("PrecompileSession is not active")
+        with self._state:
+            if self._compiled is None or self._closing:
+                raise RuntimeError("PrecompileSession is not active")
+            compiled = self._compiled
+            self._active_calls += 1
         from .pgo import _use_code_state
 
         try:
             with _capture_config(), _use_code_state(self._pgo_state):
-                return self._compiled(*args, **kwargs)
+                return compiled(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
             raise
+        finally:
+            with self._state:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._state.notify_all()
 
     def __enter__(self) -> Callable[..., object]:
         if self._finished:
@@ -1201,6 +1180,9 @@ class PrecompileSession:
                 if not isinstance(isolate_recompiles_id, int):
                     raise AssertionError("missing isolate_recompiles_id")
                 self._isolate_recompiles_id = isolate_recompiles_id
+                from .eval_frame import _register_explicit_compile_region
+
+                _register_explicit_compile_region(isolate_recompiles_id, self)
                 self._optimized = optimize_ctx(self._fn)
             self._compiled = self._optimized
             # Automatic examples are the ordinary no_grad inference path.
@@ -1250,9 +1232,13 @@ class PrecompileSession:
     def __exit__(self, *exc: object) -> None:
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
-        stack = self._stack
-        self._stack = None
-        self._compiled = None
+        with self._state:
+            self._closing = True
+            while self._active_calls:
+                self._state.wait()
+            stack = self._stack
+            self._stack = None
+            self._compiled = None
         if stack is not None:
             try:
                 stack.close()
@@ -1265,6 +1251,8 @@ class PrecompileSession:
                 finally:
                     self._clear_runtime_cache()
                     self._finished = True
+                    with self._state:
+                        self._state.notify_all()
         self._recorded_exception_keys.clear()
         if self._invariants_path is None:
             return
@@ -1734,6 +1722,9 @@ class PrecompiledCallable:
         self._active_calls = 0
         self._unloading = False
         self._loaded = True
+        from .eval_frame import _register_explicit_compile_region
+
+        _register_explicit_compile_region(isolate_recompiles_id, self)
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         with self._state:
@@ -1786,6 +1777,9 @@ class PrecompiledCallable:
             try:
                 _clear_package_region(self._package, self._isolate_recompiles_id)
             finally:
+                from .eval_frame import _unregister_explicit_compile_region
+
+                _unregister_explicit_compile_region(self._isolate_recompiles_id)
                 with self._state:
                     self._unloading = False
                     self._compiled = None
@@ -1847,7 +1841,7 @@ def _check_artifact_matches(
     if not dynamo.codes:
         raise PackageError(f"Artifact at {path} contains no code entries.")
     entry = dynamo.codes[0]
-    actual_module = getattr(entry_fn, "__module__", None)
+    actual_module = _defining_module_name(code) or getattr(entry_fn, "__module__", None)
     if actual_module is not None and entry.python_module != actual_module:
         raise PackageError(
             f"Artifact at {path} was captured from a callable defined in "
