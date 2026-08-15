@@ -12106,11 +12106,11 @@ class TestLinalgMPS(TestCaseMPS):
         rhs = torch.empty((7, 5), dtype=torch.int8, device="mps")
 
         error_cases = [
-            ("self must be a matrix", lambda: torch._int_mm(lhs[0], rhs)),
-            ("mat2 must be a matrix",
+            ("Expected self to be of dimension 2", lambda: torch._int_mm(lhs[0], rhs)),
+            ("Expected mat2 to be of dimension 2",
              lambda: torch._int_mm(
                  lhs, rhs[:, 0], out=torch.empty((3, 5), dtype=torch.int32, device="mps"))),
-            (r"mat1 and mat2 shapes cannot be multiplied \(3x7 and 6x5\)",
+            (r"self.size\(1\) needs to match mat2.size\(0\)",
              lambda: torch._int_mm(lhs, torch.empty((6, 5), dtype=torch.int8, device="mps"))),
             ("Expected self dtype to be int8 or uint8", lambda: torch._int_mm(lhs.float(), rhs)),
             ("Expected mat2 dtype to be of type int8", lambda: torch._int_mm(lhs, rhs.to(torch.uint8))),
