@@ -13,6 +13,7 @@ import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmPackedTransport,
     INDEXED_OUTPUT_INDICES_ARG_NAME,
     INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
@@ -200,6 +201,7 @@ def flex_gemm_epimod(
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
     fragmentwise: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
+    packed_transport: FlexGemmPackedTransport | None,
 ):
     """Build and cache a QuACK EpiMod from generated FlexGEMM metadata."""
     epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
@@ -212,6 +214,7 @@ def flex_gemm_epimod(
         None if local_reduce is None else local_reduce.cache_key,
         fragmentwise,
         main_transform,
+        packed_transport,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
@@ -242,6 +245,7 @@ def flex_gemm_epimod(
             if kind == "scalar"
             else op_types[kind](name, dtype=dtype)
         )
+    aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
     if main_transform is not None:
         min_fragment_n = (
             local_reduce.group * local_reduce.physical_span
@@ -257,9 +261,10 @@ def flex_gemm_epimod(
                 paired=not fragmentwise and main_transform.group == 2,
                 min_fragment_n=min_fragment_n,
             ),
+            *aux_output_names,
         )
     else:
-        outputs = tuple(f"output{index}" for index in range(aux_output_count))
+        outputs = aux_output_names
     sinks = {}
     extra_ops = ()
     if indexed_output is not None:
@@ -355,7 +360,16 @@ def flex_gemm_epimod(
                     physical_span=local_reduce.physical_span,
                 )
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-    if fragmentwise:
+    if packed_transport is not None:
+        epimod = epilogue_module.gemm_epilogue(
+            outputs=aux_output_names,
+            ops=ops,
+            outs=sinks,
+            extra_ops=extra_ops,
+            mode=packed_transport.quack_mode,
+            vectorize=False,
+        )(epilogue_fn)
+    elif fragmentwise:
         epimod = epilogue_module.fragment_epilogue(
             outputs=outputs,
             ops=ops,
@@ -409,6 +423,8 @@ def gemm_epimod(
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
     fragmentwise: bool = False,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
+    packed_capture: torch.Tensor | None = None,
+    packed_transport: FlexGemmPackedTransport | None = None,
     tuned: bool = False,
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
@@ -430,6 +446,10 @@ def gemm_epimod(
             "chunked grouped main output requires column-major B storage"
         )
     quack_epilogue_args = tuple(quack_epilogue_arg(arg) for arg in epilogue_args)
+    if (packed_capture is None) != (packed_transport is None):
+        raise RuntimeError(
+            "packed FlexGEMM calls require both packed_capture and packed_transport"
+        )
     epimod = flex_gemm_epimod(
         epilogue_fn,
         quack_epilogue_args,
@@ -439,8 +459,13 @@ def gemm_epimod(
         local_reduce,
         fragmentwise,
         main_transform,
+        packed_transport,
     )
-    effective_C = normalize_c(C, tuple(out.shape), beta)
+    effective_C = (
+        packed_capture
+        if packed_transport is not None
+        else normalize_c(C, tuple(out.shape), beta)
+    )
     operands: dict[str, Any] = {}
     if "alpha" in epimod.operand_names:
         operands["alpha"] = alpha
@@ -497,19 +522,16 @@ def gemm_epimod(
     # pyrefly: ignore [missing-import]  # optional external backend
     from quack.cache import cache_dir_override
 
-    output_buffers = (
-        {"main": quack_epilogue_arg(out)}
-        if main_transform is not None
-        else {
-            "D": quack_epilogue_arg(out),
-            **dict(
-                zip(
-                    epimod.outputs,
-                    (quack_epilogue_arg(aux_out) for aux_out in aux_outs),
-                    strict=True,
-                )
-            ),
-        }
+    output_names = (
+        "main" if main_transform is not None else "D",
+        *(f"output{index}" for index in range(len(aux_outs))),
+    )
+    output_buffers = dict(
+        zip(
+            output_names,
+            (quack_epilogue_arg(out), *map(quack_epilogue_arg, aux_outs)),
+            strict=True,
+        )
     )
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
